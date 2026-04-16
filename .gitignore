@@ -1,0 +1,25 @@
+# Build outputs
+*.exe
+*.obj
+*.dll
+*.lib
+*.pdb
+
+# Debug/Release
+debug/
+release/
+
+# Temporary files
+*.log
+*.txt.bak
+*.bmp
+
+# IDE
+.vs/
+.vscode/
+*.suo
+*.user
+*.opensdf
+
+# OpenCV
+opencv_download/

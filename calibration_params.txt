@@ -1,0 +1,7 @@
+# Nine-Point Calibration Parameters
+ax=0.10009084
+bx=0.00040226
+cx=-50.16857529
+ay=-0.00050321
+by=-0.10080682
+cy=50.59418106
