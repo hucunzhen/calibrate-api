@@ -1,11 +1,13 @@
-# Calibration Result (Perfect Data Test)
+# Calibration Result
 # Image: calibration_9points.bmp
-ax=0.33333334
-bx=0.00000000
-cx=-33.33333206
-ay=0.00000000
-by=-0.50000000
-cy=250.00000000
+# Image size: 800 x 600
+ax=0.30251971
+bx=-0.05234465
+cx=-0.57775551
+ay=0.23202661
+by=-0.10584480
+cy=4.35049868
 
-avg_error=0.00001144
-max_error=0.00001526
+# Reprojection Statistics
+avg_error=78.25530328
+max_error=184.85182309
