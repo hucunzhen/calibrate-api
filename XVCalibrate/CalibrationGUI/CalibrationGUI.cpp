@@ -13,8 +13,9 @@
 #include <string.h>
 #include <algorithm>
 
-// Include BlobAnalysisPro header
+// Include headers
 #include "..\\..\\include\\BlobAnalysis.h"
+#include "..\\..\\include\\FitShape.h"
 
 // Detection method enum
 enum DetectMethod {
@@ -82,10 +83,12 @@ static int g_step = 0;
 static DetectMethod g_detectMethod = METHOD_SELF;
 
 // World points (physical coordinates in mm)
+// MUST match the circle positions in CreateCalibrationImage:
+// gridStartX=100, gridStartY=100, gridStepX=300, gridStepY=200
 static Point2D g_worldPts[9] = {
-    {0, 200}, {100, 200}, {200, 200},
-    {0, 100}, {100, 100}, {200, 100},
-    {0, 0},   {100, 0},   {200, 0}
+    {100, 100}, {400, 100}, {700, 100},
+    {100, 300}, {400, 300}, {700, 300},
+    {100, 500}, {400, 500}, {700, 500}
 };
 
 // Image points (detected)
@@ -779,7 +782,7 @@ void BlobDetectCircles(Image* img, Point2D* pts, int* count) {
     xvImage.pitch = ((img->width + 3) / 4) * 4;
     
     // Convert BGR to grayscale for XVImage
-    unsigned char* grayData = (unsigned char*)malloc(img->width * img->height);
+    unsigned char* grayData = (unsigned char*)malloc(img->width * img->height * 4);
     int rowSize = ((img->width * 3 + 3) / 4) * 4;
     for (int y = 0; y < img->height; y++) {
         for (int x = 0; x < img->width; x++) {
@@ -790,48 +793,80 @@ void BlobDetectCircles(Image* img, Point2D* pts, int* count) {
     }
     xvImage.data = grayData;
     
+    printf("=== Adaptive Blob Detection ===\n");
+    
+    // ========== Step 1: Analyze histogram to find brightest region ==========
+    int histogram[256] = {0};
+    int totalPixels = img->width * img->height;
+    
+    for (int i = 0; i < totalPixels; i++) {
+        histogram[grayData[i]]++;
+    }
+    
+    // Find the peak (most frequent) brightness level
+    int peakLevel = 128;
+    int maxCount = 0;
+    for (int i = 0; i < 256; i++) {
+        if (histogram[i] > maxCount) {
+            maxCount = histogram[i];
+            peakLevel = i;
+        }
+    }
+    printf("Histogram peak: %d (count=%d)\n", peakLevel, maxCount);
+    
+    // Adaptive threshold: Find brightest significant region
+    // Use percentile method - find brightness where top X% pixels exist
+    float brightPercentile = 0.70f;  // Target 70th percentile as "bright"
+    int cumulative = 0;
+    int brightThreshold = 128;
+    int targetPixels = (int)(totalPixels * (1.0f - brightPercentile));
+    
+    for (int i = 255; i >= 0; i--) {
+        cumulative += histogram[i];
+        if (cumulative >= targetPixels) {
+            brightThreshold = i;
+            break;
+        }
+    }
+    printf("Adaptive bright threshold: %d\n", brightThreshold);
+    
     // Define ROI for the whole image
     XVRegion fullRoi;
     fullRoi.optional = NUL;
     fullRoi.frameWidth = img->width;
     fullRoi.frameHeight = img->height;
     
-    // Step 1: Threshold to get bright regions (white calibration area)
+    // Step 2: Threshold to get bright regions
     XVThresholdImageToRegionMonoIn threshIn;
     threshIn.inImage = &xvImage;
     threshIn.inRegion = fullRoi;
-    threshIn.inMin = 140;  // Bright threshold
+    threshIn.inMin = (float)brightThreshold;
     threshIn.inMax = 255;
     
     XVThresholdImageToRegionMonoOut threshOut;
     int ret = XVThresholdImageToRegionMono(threshIn, threshOut);
     
     if (ret != 0) {
-        char msg[256];
-        sprintf_s(msg, sizeof(msg), "Threshold failed with code: %d", ret);
-        MessageBoxA(NULL, msg, "Blob Error", MB_OK);
+        printf("Threshold failed with code: %d\n", ret);
         free(grayData);
         return;
     }
     
-    // Get the thresholded region
-    XVRegion brightRegion = threshOut.outRegion;
-    
-    // Step 2: Split region into blobs
+    // Split region into blobs
     XVSplitRegionToBlobsIn splitIn;
-    splitIn.inRegion = brightRegion;
+    splitIn.inRegion = threshOut.outRegion;
     splitIn.inNeighborhood = 8;
     
     XVSplitRegionToBlobsOut splitOut;
     ret = XVSplitRegionToBlobs(splitIn, splitOut);
     
     if (ret != 0 || splitOut.outRegions.size() == 0) {
-        MessageBoxA(NULL, "No blobs found in bright region", "Blob Error", MB_OK);
+        printf("No blobs found in bright region\n");
         free(grayData);
         return;
     }
     
-    // Find the largest blob (calibration area)
+    // Find the largest blob (calibration area) by pixel count
     int maxArea = 0;
     int calibBlobIdx = 0;
     for (size_t i = 0; i < splitOut.outRegions.size(); i++) {
@@ -845,13 +880,68 @@ void BlobDetectCircles(Image* img, Point2D* pts, int* count) {
         }
     }
     
-    // Step 3: Within the calibration region, find black circles using inverted threshold
+    printf("Found %d bright blobs, largest area: %d pixels\n", 
+           (int)splitOut.outRegions.size(), maxArea);
+    
     XVRegion calibRegion = splitOut.outRegions[calibBlobIdx];
     
-    // Draw the detected region (green) on the image
+    // ========== Step 3: Within calibration region, analyze dark regions ==========
+    // Calculate histogram ONLY within calibRegion
+    int darkHist[256] = {0};
+    int calibPixels = 0;
+    
+    for (size_t i = 0; i < calibRegion.arrayPointRun.size(); i++) {
+        int rx = calibRegion.arrayPointRun[i].x;
+        int ry = calibRegion.arrayPointRun[i].y;
+        int len = calibRegion.arrayPointRun[i].length;
+        for (int x = rx; x < rx + len && x < img->width; x++) {
+            int pixel = grayData[ry * img->width + x];
+            darkHist[pixel]++;
+            calibPixels++;
+        }
+    }
+    
+    // Find dark threshold - find the valley between dark and bright in histogram
+    // Find first peak (dark) and second peak (bright background), use valley as threshold
+    
+    // Find dark peak (in lower half)
+    int darkPeak = 0;
+    int darkPeakVal = 0;
+    for (int i = 0; i < 150; i++) {
+        if (darkHist[i] > darkPeakVal) {
+            darkPeakVal = darkHist[i];
+            darkPeak = i;
+        }
+    }
+    
+    // Find bright peak (in upper half)
+    int brightPeak = 255;
+    int brightPeakVal = 0;
+    for (int i = 150; i < 256; i++) {
+        if (darkHist[i] > brightPeakVal) {
+            brightPeakVal = darkHist[i];
+            brightPeak = i;
+        }
+    }
+    
+    printf("Dark peak: %d, Bright peak: %d\n", darkPeak, brightPeak);
+    
+    // Find valley (minimum) between the two peaks
+    int darkThreshold = (darkPeak + brightPeak) / 2;
+    int minVal = darkHist[darkThreshold];
+    for (int i = darkPeak + 1; i < brightPeak; i++) {
+        if (darkHist[i] < minVal) {
+            minVal = darkHist[i];
+            darkThreshold = i;
+        }
+    }
+    
+    printf("Final dark threshold: %d\n", darkThreshold);
+    
+    // Draw the calibration region on image
     int dstRowSize = ((img->width * 3 + 3) / 4) * 4;
     
-    // Draw region boundary
+    // Calculate bounding box
     int minX = img->width, minY = img->height, maxX = 0, maxY = 0;
     for (size_t i = 0; i < calibRegion.arrayPointRun.size(); i++) {
         int rx = calibRegion.arrayPointRun[i].x;
@@ -863,7 +953,25 @@ void BlobDetectCircles(Image* img, Point2D* pts, int* count) {
         if (ry > maxY) maxY = ry;
     }
     
-    // Draw green rectangle around calibration area
+    // Draw filled calibRegion with semi-transparent blue
+    for (size_t i = 0; i < calibRegion.arrayPointRun.size(); i++) {
+        int rx = calibRegion.arrayPointRun[i].x;
+        int ry = calibRegion.arrayPointRun[i].y;
+        int len = calibRegion.arrayPointRun[i].length;
+        for (int x = rx; x < rx + len && x < img->width; x++) {
+            if (x >= 0 && ry >= 0 && ry < img->height) {
+                int off = ry * dstRowSize + x * 3;
+                unsigned char bgR = img->data[off + 2];
+                unsigned char bgG = img->data[off + 1];
+                unsigned char bgB = img->data[off];
+                img->data[off] = min(255, bgB + 100);
+                img->data[off + 1] = max(0, bgG - 50);
+                img->data[off + 2] = max(0, bgR - 50);
+            }
+        }
+    }
+    
+    // Draw thick green border
     for (int x = minX; x <= maxX; x++) {
         for (int t = -2; t <= 2; t++) {
             int y1 = minY + t;
@@ -897,78 +1005,206 @@ void BlobDetectCircles(Image* img, Point2D* pts, int* count) {
         }
     }
     
-    // Step 4: Threshold for dark regions (black circles inside white area)
+    printf("CalibRegion: area=%d, bbox=(%d,%d)-(%d,%d)\n", 
+           (int)calibRegion.arrayPointRun.size(), minX, minY, maxX, maxY);
+    
+    // ========== Step 4: Find holes (9 circles) inside calibRegion ==========
+    // Use threshold to get dark region within calibRegion
     XVThresholdImageToRegionMonoIn darkThreshIn;
     darkThreshIn.inImage = &xvImage;
     darkThreshIn.inRegion = calibRegion;
     darkThreshIn.inMin = 0;
-    darkThreshIn.inMax = 100;  // Dark threshold
+    darkThreshIn.inMax = 255;  // Get all pixels (we'll find holes in this)
     
     XVThresholdImageToRegionMonoOut darkThreshOut;
     ret = XVThresholdImageToRegionMono(darkThreshIn, darkThreshOut);
     
-    // Split dark regions into blobs (circles)
-    if (ret == 0) {
-        XVSplitRegionToBlobsIn darkSplitIn;
-        darkSplitIn.inRegion = darkThreshOut.outRegion;
-        darkSplitIn.inNeighborhood = 8;
+    if (ret != 0) {
+        printf("Threshold failed: %d\n", ret);
+        free(grayData);
+        return;
+    }
+    
+    // Now use XVRegionHoles to find holes inside the dark region
+    // The holes are the white circles inside the dark blob!
+    XVRegionHolesIn holesIn;
+    holesIn.inRegion = darkThreshOut.outRegion;
+    holesIn.inNeighborhood = 8;
+    holesIn.inMinHoleArea = 20;   // Minimum hole area
+    holesIn.inMaxHoleArea = 999999; // Maximum hole area
+    
+    XVRegionHolesOut holesOut;
+    ret = XVRegionHoles(holesIn, holesOut);
+    
+    printf("Found %d holes (circles) in dark region\n", (int)holesOut.outHoles.size());
+    
+    // ========== Step 5: Fit circles to hole edges for more accurate centers ==========
+    // Use edge-based circle fitting instead of centroid for higher accuracy
+    vector<Point2D> circleCenters;
+    
+    for (size_t i = 0; i < holesOut.outHoles.size(); i++) {
+        // Get bounding box of the hole for approximate radius
+        int holeMinX = img->width, holeMinY = img->height;
+        int holeMaxX = 0, holeMaxY = 0;
+        long long holePixelCount = 0;
         
-        XVSplitRegionToBlobsOut darkSplitOut;
-        ret = XVSplitRegionToBlobs(darkSplitIn, darkSplitOut);
+        for (size_t j = 0; j < holesOut.outHoles[i].arrayPointRun.size(); j++) {
+            int rx = holesOut.outHoles[i].arrayPointRun[j].x;
+            int ry = holesOut.outHoles[i].arrayPointRun[j].y;
+            int len = holesOut.outHoles[i].arrayPointRun[j].length;
+            
+            if (rx < holeMinX) holeMinX = rx;
+            if (ry < holeMinY) holeMinY = ry;
+            if (rx + len > holeMaxX) holeMaxX = rx + len;
+            if (ry > holeMaxY) holeMaxY = ry;
+            holePixelCount += len;
+        }
         
-        // Calculate centers of dark blobs
-        vector<Point2D> circleCenters;
-        for (size_t i = 0; i < darkSplitOut.outRegions.size(); i++) {
-            // Calculate centroid of the blob
-            long long sumX = 0, sumY = 0, count = 0;
-            for (size_t j = 0; j < darkSplitOut.outRegions[i].arrayPointRun.size(); j++) {
-                int rx = darkSplitOut.outRegions[i].arrayPointRun[j].x;
-                int ry = darkSplitOut.outRegions[i].arrayPointRun[j].y;
-                int len = darkSplitOut.outRegions[i].arrayPointRun[j].length;
-                for (int k = 0; k < len; k++) {
-                    sumX += rx + k;
-                    sumY += ry;
-                    count++;
+        // Calculate approximate center (centroid) for initial estimate
+        long long sumX = 0, sumY = 0;
+        for (size_t j = 0; j < holesOut.outHoles[i].arrayPointRun.size(); j++) {
+            int rx = holesOut.outHoles[i].arrayPointRun[j].x;
+            int ry = holesOut.outHoles[i].arrayPointRun[j].y;
+            int len = holesOut.outHoles[i].arrayPointRun[j].length;
+            for (int k = 0; k < len; k++) {
+                sumX += rx + k;
+                sumY += ry;
+            }
+        }
+        
+        if (holePixelCount <= 0) continue;
+        
+        float approxCenterX = (float)sumX / holePixelCount;
+        float approxCenterY = (float)sumY / holePixelCount;
+        float approxRadius = max(holeMaxX - holeMinX, holeMaxY - holeMinY) / 2.0f;
+        
+        // Extract edge points of the hole for circle fitting
+        vector<XVPoint2D> edgePoints;
+        
+        // Scan the perimeter of the hole to find edge points
+        int cx = (int)approxCenterX;
+        int cy = (int)approxCenterY;
+        int scanRadius = (int)(approxRadius * 1.2f);
+        int numAngles = 36;  // Sample 36 points around the circle
+        
+        for (int a = 0; a < numAngles; a++) {
+            float angle = (float)a * 2.0f * 3.14159f / numAngles;
+            
+            // Scan from center outward to find edge
+            for (int r = 0; r < scanRadius; r++) {
+                int ex = (int)(cx + r * cos(angle));
+                int ey = (int)(cy + r * sin(angle));
+                
+                if (ex < 0 || ex >= img->width || ey < 0 || ey >= img->height) break;
+                
+                int pixel = grayData[ey * img->width + ex];
+                
+                // Find transition from dark to bright (hole edge)
+                if (r > 2) {
+                    int prevEx = (int)(cx + (r-1) * cos(angle));
+                    int prevEy = (int)(cy + (r-1) * sin(angle));
+                    if (prevEx >= 0 && prevEx < img->width && prevEy >= 0 && prevEy < img->height) {
+                        int prevPixel = grayData[prevEy * img->width + prevEx];
+                        
+                        // Dark to bright transition (edge of hole)
+                        if (prevPixel < darkThreshold && pixel >= darkThreshold) {
+                            // Use subpixel interpolation for better accuracy
+                            if (r > 1) {
+                                int prevPrevEx = (int)(cx + (r-2) * cos(angle));
+                                int prevPrevEy = (int)(cy + (r-2) * sin(angle));
+                                if (prevPrevEx >= 0 && prevPrevEx < img->width && 
+                                    prevPrevEy >= 0 && prevPrevEy < img->height) {
+                                    int prevPrevPixel = grayData[prevPrevEy * img->width + prevPrevEx];
+                                    
+                                    // Linear interpolation for subpixel position
+                                    float delta = (float)(darkThreshold - prevPrevPixel);
+                                    float totalDelta = (float)(pixel - prevPrevPixel);
+                                    if (fabs(totalDelta) > 0.001f) {
+                                        float frac = delta / totalDelta;
+                                        float edgeR = r - 2 + frac;
+                                        XVPoint2D pt;
+                                        pt.x = cx + edgeR * cos(angle);
+                                        pt.y = cy + edgeR * sin(angle);
+                                        edgePoints.push_back(pt);
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
                 }
             }
-            if (count > 0) {
-                Point2D center;
-                center.x = (double)sumX / count;
-                center.y = (double)sumY / count;
-                circleCenters.push_back(center);
-            }
         }
         
-        // Sort by Y then X to get 3x3 grid order
-        sort(circleCenters.begin(), circleCenters.end(), [](const Point2D& a, const Point2D& b) {
-            if (fabs(a.y - b.y) > 20) return a.y < b.y;
-            return a.x < b.x;
-        });
+        Point2D finalCenter;
+        finalCenter.x = approxCenterX;
+        finalCenter.y = approxCenterY;
         
-        // Take up to 9 points, grouped into 3 rows
-        vector<Point2D> selectedPts;
-        for (size_t i = 0; i < circleCenters.size() && selectedPts.size() < 9; i++) {
-            // Check if we already have 3 points in this row
-            int rowCount = 0;
-            for (auto& p : selectedPts) {
-                if (fabs(p.y - circleCenters[i].y) < 30) rowCount++;
+        // If we have enough edge points, fit a circle for higher accuracy
+        if (edgePoints.size() >= 8) {
+            XVFitCircleToPointsIn fitIn;
+            fitIn.inPoints = edgePoints;
+            fitIn.inFlag = true;  // Local optimization
+            fitIn.inDistance = 3.0f;  // Distance threshold for outliers
+            fitIn.inIterations = 20;
+            fitIn.inOutlier.optional = NUL;  // Disable outlier suppression
+            
+            XVFitCircleToPointsOut fitOut;
+            int fitRet = XVFitCircleToPoints(fitIn, fitOut);
+            
+            if (fitRet == 0) {
+                finalCenter.x = fitOut.outCircle.center.x;
+                finalCenter.y = fitOut.outCircle.center.y;
+                printf("  Hole %d: fitted=(%.2f, %.2f), radius=%.1f, edgePoints=%d\n", 
+                       (int)i, finalCenter.x, finalCenter.y, fitOut.outCircle.radius, (int)edgePoints.size());
+            } else {
+                printf("  Hole %d: centroid=(%.1f, %.1f), radius=%.1f (fit failed)\n", 
+                       (int)i, finalCenter.x, finalCenter.y, approxRadius);
             }
-            if (rowCount < 3) {
-                selectedPts.push_back(circleCenters[i]);
-            }
+        } else {
+            printf("  Hole %d: centroid=(%.1f, %.1f), radius=%.1f (insufficient edge points: %d)\n", 
+                   (int)i, finalCenter.x, finalCenter.y, approxRadius, (int)edgePoints.size());
         }
         
-        *count = min(9, (int)selectedPts.size());
-        for (int i = 0; i < *count && i < 9; i++) {
-            pts[i] = selectedPts[i];
+        circleCenters.push_back(finalCenter);
+        
+        // ========== Draw hole (circle) on image ==========
+        for (size_t j = 0; j < holesOut.outHoles[i].arrayPointRun.size(); j++) {
+            int rx = holesOut.outHoles[i].arrayPointRun[j].x;
+            int ry = holesOut.outHoles[i].arrayPointRun[j].y;
+            int len = holesOut.outHoles[i].arrayPointRun[j].length;
+            for (int x = rx; x < rx + len && x < img->width; x++) {
+                if (x >= 0 && ry >= 0 && ry < img->height) {
+                    int off = ry * dstRowSize + x * 3;
+                    // Semi-transparent red overlay
+                    img->data[off] = (unsigned char)(img->data[off] * 0.5);
+                    img->data[off + 1] = (unsigned char)(img->data[off + 1] * 0.5);
+                    img->data[off + 2] = (unsigned char)(min(255, img->data[off + 2] + 128));
+                }
+            }
         }
+    }
+    
+    // Sort by Y then X
+    sort(circleCenters.begin(), circleCenters.end(), [](const Point2D& a, const Point2D& b) {
+        if (fabs(a.y - b.y) > 20) return a.y < b.y;
+        return a.x < b.x;
+    });
+    
+    // Take up to 9 points
+    *count = min(9, (int)circleCenters.size());
+    for (int i = 0; i < *count && i < 9; i++) {
+        pts[i] = circleCenters[i];
     }
     
     free(grayData);
     
+    printf("=== Detection Complete: %d points ===\n", *count);
+    
     // Show results
     char msg[512];
-    sprintf_s(msg, sizeof(msg), "Blob Detection found %d points:", *count);
+    sprintf_s(msg, sizeof(msg), "Adaptive Blob Detection found %d points:\nBright threshold: %d\nDark threshold: %d", 
+              *count, brightThreshold, darkThreshold);
     for (int i = 0; i < *count && i < 9; i++) {
         char line[64];
         sprintf_s(line, sizeof(line), "\n%d: (%.1f, %.1f)", i + 1, pts[i].x, pts[i].y);
