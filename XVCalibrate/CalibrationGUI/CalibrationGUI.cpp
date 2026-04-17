@@ -1241,58 +1241,83 @@ void DrawDetectedCircles(Image* img, Point2D* pts, int count, int r, int g, int 
 
 // ========== Calibration (Least Squares) ==========
 int CalibrateNinePoint(Point2D* imagePts, Point2D* worldPts, int n, AffineTransform* trans) {
-    if (n < 3) return 0;
-    
-    // Least squares with 6x6 matrix (using ALL points)
-    double ATA[6][6] = {0};
-    double ATB[6] = {0};
-    
+    if (n < 3) return 0;  // 至少需要3个点确定仿射变换
+
+    // 构建正规方程 ATA * X = ATB
+    double ATA[6][6] = { 0 };
+    double ATB[6] = { 0 };
+
     for (int i = 0; i < n; i++) {
         double xi = imagePts[i].x, yi = imagePts[i].y;
         double Xi = worldPts[i].x, Yi = worldPts[i].y;
-        
-        ATA[0][0] += xi*xi; ATA[0][1] += xi*yi; ATA[0][2] += xi;
-        ATA[1][0] += xi*yi; ATA[1][1] += yi*yi; ATA[1][2] += yi;
-        ATA[2][0] += xi; ATA[2][1] += yi; ATA[2][2] += n;
-        
-        ATA[3][3] += xi*xi; ATA[3][4] += xi*yi; ATA[3][5] += xi;
-        ATA[4][3] += xi*yi; ATA[4][4] += yi*yi; ATA[4][5] += yi;
-        ATA[5][3] += xi; ATA[5][4] += yi; ATA[5][5] += n;
-        
-        ATB[0] += Xi*xi; ATB[1] += Xi*yi; ATB[2] += Xi;
-        ATB[3] += Yi*xi; ATB[4] += Yi*yi; ATB[5] += Yi;
+
+        // 第一组方程（world.x）
+        ATA[0][0] += xi * xi;  ATA[0][1] += xi * yi;  ATA[0][2] += xi;
+        ATA[1][0] += xi * yi;  ATA[1][1] += yi * yi;  ATA[1][2] += yi;
+        ATA[2][0] += xi;       ATA[2][1] += yi;       ATA[2][2] += 1;  // 注意：应该是 1，不是 n
+
+        // 第二组方程（world.y）
+        ATA[3][3] += xi * xi;  ATA[3][4] += xi * yi;  ATA[3][5] += xi;
+        ATA[4][3] += xi * yi;  ATA[4][4] += yi * yi;  ATA[4][5] += yi;
+        ATA[5][3] += xi;       ATA[5][4] += yi;       ATA[5][5] += 1;  // 注意：应该是 1，不是 n
+
+        ATB[0] += Xi * xi;  ATB[1] += Xi * yi;  ATB[2] += Xi;
+        ATB[3] += Yi * xi;  ATB[4] += Yi * yi;  ATB[5] += Yi;
     }
-    
-    double X[6] = {0};
+
+    // 高斯消元（带部分主元选择）
+    double X[6] = { 0 };
+
     for (int k = 0; k < 6; k++) {
+        // 选主元
         int maxRow = k;
-        for (int i = k+1; i < 6; i++)
-            if (fabs(ATA[i][k]) > fabs(ATA[maxRow][k])) maxRow = i;
+        for (int i = k + 1; i < 6; i++) {
+            if (fabs(ATA[i][k]) > fabs(ATA[maxRow][k]))
+                maxRow = i;
+        }
+
+        // 交换行
         if (maxRow != k) {
             for (int j = 0; j < 6; j++) {
-                double tmp = ATA[k][j]; ATA[k][j] = ATA[maxRow][j]; ATA[maxRow][j] = tmp;
+                double tmp = ATA[k][j];
+                ATA[k][j] = ATA[maxRow][j];
+                ATA[maxRow][j] = tmp;
             }
-            double tmp = ATB[k]; ATB[k] = ATB[maxRow]; ATB[maxRow] = tmp;
+            double tmp = ATB[k];
+            ATB[k] = ATB[maxRow];
+            ATB[maxRow] = tmp;
         }
-        if (fabs(ATA[k][k]) < 1e-10) continue;
-        for (int i = k+1; i < 6; i++) {
+
+        // 检查主元
+        if (fabs(ATA[k][k]) < 1e-10) {
+            return 0;  // 矩阵奇异，标定失败
+        }
+
+        // 消元
+        for (int i = k + 1; i < 6; i++) {
             double factor = ATA[i][k] / ATA[k][k];
-            for (int j = k; j < 6; j++) ATA[i][j] -= factor * ATA[k][j];
+            for (int j = k; j < 6; j++) {
+                ATA[i][j] -= factor * ATA[k][j];
+            }
             ATB[i] -= factor * ATB[k];
         }
     }
-    
+
+    // 回代求解
     for (int i = 5; i >= 0; i--) {
-        if (fabs(ATA[i][i]) < 1e-10) { X[i] = 0; continue; }
         double sum = ATB[i];
-        for (int j = i+1; j < 6; j++) sum -= ATA[i][j] * X[j];
+        for (int j = i + 1; j < 6; j++) {
+            sum -= ATA[i][j] * X[j];
+        }
         X[i] = sum / ATA[i][i];
     }
-    
-    trans->a = X[0]; trans->b = X[1]; trans->c = X[2];
-    trans->d = X[3]; trans->e = X[4]; trans->f = X[5];
+
+    trans->a = X[0];  trans->b = X[1];  trans->c = X[2];
+    trans->d = X[3];  trans->e = X[4];  trans->f = X[5];
+
     return 1;
 }
+
 
 Point2D ImageToWorld(Point2D pixel, AffineTransform trans) {
     Point2D world;
