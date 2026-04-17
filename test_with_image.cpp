@@ -47,8 +47,8 @@ struct Circle {
 };
 
 bool loadBMP(const char* filename, int& width, int& height, unsigned char*& pixels) {
-    FILE* fp = fopen(filename, "rb");
-    if (!fp) return false;
+    FILE* fp;
+    if (fopen_s(&fp, filename, "rb") != 0) return false;
 
     BMPHeader header;
     BMPInfoHeader info;
@@ -224,7 +224,7 @@ int main() {
 
     if (!loadBMP("calibration_9points.bmp", width, height, pixels)) {
         printf("Error: Cannot load calibration_9points.bmp\n");
-        MessageBox(NULL, "Cannot load image!", "Error", MB_OK | MB_ICONERROR);
+        MessageBoxA(NULL, "Cannot load image!", "Error", MB_OK | MB_ICONERROR);
         return 1;
     }
 
@@ -322,7 +322,7 @@ int main() {
     printf("Calibration result saved to: calibration_result.txt\n");
 
     char msg[512];
-    sprintf(msg, "Calibration Complete!\n\n"
+    sprintf_s(msg, sizeof(msg), "Calibration Complete!\n\n"
                   "Image: calibration_9points.bmp\n"
                   "Detected: 9 circles\n\n"
                   "Average Error: %.4f mm\n"
@@ -330,7 +330,7 @@ int main() {
                   "Parameters saved to:\n"
                   "calibration_result.txt", sumE/9.0, maxE);
 
-    MessageBox(NULL, msg, "Success", MB_OK | MB_ICONINFORMATION);
+    MessageBoxA(NULL, msg, "Success", MB_OK | MB_ICONINFORMATION);
 
     return 0;
 }

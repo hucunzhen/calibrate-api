@@ -123,8 +123,8 @@ int main() {
         }
     }
 
-    FILE* fp = fopen("calibration_9points.bmp", "wb");
-    if (!fp) {
+    FILE* fp;
+    if (fopen_s(&fp, "calibration_9points.bmp", "wb") != 0) {
         printf("Cannot create file!\n");
         free(image);
         return 1;
@@ -145,7 +145,7 @@ int main() {
     printf("  (100,500) (400,500) (700,500)\n");
     printf("========================================\n");
 
-    MessageBox(NULL,
+    MessageBoxA(NULL,
         "Calibration image created!\n\n"
         "File: calibration_9points.bmp\n"
         "Size: 800 x 600 pixels\n\n"
