@@ -12,15 +12,68 @@
 #include <math.h>
 #include <string.h>
 #include <algorithm>
+#include <time.h>
+
+// OpenCV headers
+#include <opencv2/opencv.hpp>
+#include <opencv2/imgproc.hpp>
+using namespace cv;
 
 // Include headers
 #include "..\\..\\include\\BlobAnalysis.h"
 #include "..\\..\\include\\FitShape.h"
 
+// ========== Console Logger ==========
+static FILE* g_consoleFile = NULL;
+
+void InitConsole() {
+    // Allocate console window
+    if (AllocConsole()) {
+        // Redirect stdout to console
+        freopen_s(&g_consoleFile, "CONOUT$", "w", stdout);
+        freopen_s(&g_consoleFile, "CONIN$", "r", stdin);
+        
+        // Set console title
+        SetConsoleTitle(L"Calibration GUI - Debug Log");
+        
+        // Set console output to UTF-8
+        SetConsoleOutputCP(CP_UTF8);
+        
+        printf("=== Console Logger Initialized ===\n");
+        printf("Time: %s\n", __TIME__);
+        printf("==================================\n");
+    }
+}
+
+void CloseConsole() {
+    if (g_consoleFile) {
+        fclose(g_consoleFile);
+        g_consoleFile = NULL;
+    }
+}
+
+// Log macro with timestamp
+#define LOG(fmt, ...) do { \
+    time_t now = time(NULL); \
+    struct tm t; localtime_s(&t, &now); \
+    char timeStr[32]; \
+    strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &t); \
+    printf("[%s] " fmt "\n", timeStr, ##__VA_ARGS__); \
+    fflush(stdout); \
+} while(0)
+
+// Log function variants
+#define LOG_INFO(fmt, ...)   LOG("[INFO] " fmt, ##__VA_ARGS__)
+#define LOG_WARN(fmt, ...)    LOG("[WARN] " fmt, ##__VA_ARGS__)
+#define LOG_ERROR(fmt, ...)   LOG("[ERROR] " fmt, ##__VA_ARGS__)
+#define LOG_DEBUG(fmt, ...)   LOG("[DEBUG] " fmt, ##__VA_ARGS__)
+
 // Detection method enum
 enum DetectMethod {
-    METHOD_SELF = 0,    // Self-implemented algorithm
-    METHOD_BLOB = 1     // BlobAnalysisPro library
+    METHOD_SELF = 0,      // Self-implemented algorithm
+    METHOD_BLOB = 1,      // BlobAnalysisPro library
+    METHOD_FITSHAPE = 2,  // FitShape library
+    METHOD_OPENCV = 3     // OpenCV-based algorithm
 };
 
 // ========== Constants ==========
@@ -41,6 +94,7 @@ typedef struct {
 typedef struct {
     int width;
     int height;
+    int channels;  // 1=灰度, 3=彩色
     unsigned char* data;
 } Image;
 
@@ -69,11 +123,16 @@ typedef struct {
 #pragma pack(pop)
 
 // ========== Global Variables ==========
+static HINSTANCE g_hInstance;
 static HWND g_hwndMain;
 static HWND g_hwndImage;
 static HWND g_hwndStatus;
 static HWND g_hwndMethodSelect;
+static HWND g_hwndTraj = NULL;  // Trajectory display window
+static HWND g_hwndSobel = NULL;  // Sobel edge display window
 static Image g_image = {0};
+static Image g_trajImage = {0};  // Trajectory display image
+static Image g_sobelImage = {0};  // Sobel edge display image
 static Point2D g_detectedPts[9];
 static int g_detectedCount = 0;
 static AffineTransform g_transform = {0};
@@ -94,14 +153,22 @@ static Point2D g_worldPts[9] = {
 // Image points (detected)
 static Point2D g_imagePts[9];
 
+// Trajectory points
+static Point2D g_trajPixels[10000];
+static Point2D g_trajWorld[10000];
+static int g_trajCount = 0;
+
 // ========== Image Functions ==========
+// Create 8-bit grayscale calibration image
 int CreateCalibrationImage(Image* img, int width, int height) {
-    int rowSize = ((width * 3 + 3) / 4) * 4;
+    int rowSize = width;  // 8-bit: row size equals width
     img->width = width;
     img->height = height;
+    img->channels = 1;  // 灰度图
     img->data = (unsigned char*)malloc(rowSize * height);
     if (!img->data) return 0;
 
+    // Fill with white (255)
     memset(img->data, 255, rowSize * height);
 
     int gridStartX = 100, gridStartY = 100;
@@ -114,24 +181,24 @@ int CreateCalibrationImage(Image* img, int width, int height) {
             int cx = gridStartX + col * gridStepX;
             int cy = gridStartY + row * gridStepY;
 
+            // Draw black filled circle
             for (int y = cy - circleRadius; y <= cy + circleRadius; y++) {
                 for (int x = cx - circleRadius; x <= cx + circleRadius; x++) {
                     if (x < 0 || x >= width || y < 0 || y >= height) continue;
                     int dx = x - cx, dy = y - cy;
                     float dist = (float)sqrt((float)(dx*dx + dy*dy));
                     if (dist <= circleRadius) {
-                        int offset = y * rowSize + x * 3;
-                        img->data[offset] = img->data[offset+1] = img->data[offset+2] = 0;
+                        img->data[y * rowSize + x] = 0;  // Black
                     }
                 }
             }
 
+            // Draw crosshair (white on black circle)
             for (int x = cx - crossSize; x <= cx + crossSize; x++) {
                 for (int t = -crossThickness; t <= crossThickness; t++) {
                     int y = cy + t;
                     if (x >= 0 && x < width && y >= 0 && y < height) {
-                        int offset = y * rowSize + x * 3;
-                        img->data[offset] = img->data[offset+1] = img->data[offset+2] = 255;
+                        img->data[y * rowSize + x] = 255;  // White
                     }
                 }
             }
@@ -139,8 +206,7 @@ int CreateCalibrationImage(Image* img, int width, int height) {
                 for (int t = -crossThickness; t <= crossThickness; t++) {
                     int x = cx + t;
                     if (x >= 0 && x < width && y >= 0 && y < height) {
-                        int offset = y * rowSize + x * 3;
-                        img->data[offset] = img->data[offset+1] = img->data[offset+2] = 255;
+                        img->data[y * rowSize + x] = 255;  // White
                     }
                 }
             }
@@ -153,7 +219,9 @@ int SaveBMP(const char* filename, Image* img) {
     FILE* fp;
     if (fopen_s(&fp, filename, "wb") != 0) return 0;
 
-    int rowSize = ((img->width * 3 + 3) / 4) * 4;
+    // Save based on channels: 1=8-bit grayscale, 3=24-bit color
+    int bitCount = img->channels * 8;
+    int rowSize = ((img->width * img->channels + 3) / 4) * 4;  // With padding
     BMPHeader header = { 0 };
     header.type = 0x4D42;
     header.size = sizeof(BMPHeader) + sizeof(BMPInfoHeader) + rowSize * img->height;
@@ -164,18 +232,22 @@ int SaveBMP(const char* filename, Image* img) {
     info.width = img->width;
     info.height = img->height;
     info.planes = 1;
-    info.bitCount = 24;
+    info.bitCount = (unsigned short)bitCount;
     info.imageSize = rowSize * img->height;
 
     fwrite(&header, sizeof(header), 1, fp);
     fwrite(&info, sizeof(info), 1, fp);
+    
+    // Write pixel data
     fwrite(img->data, 1, rowSize * img->height, fp);
     fclose(fp);
     return 1;
 }
 int LoadBMP(const char* filename, Image* img) {
+    LOG_INFO("Loading BMP file: %s", filename);
     FILE* fp;
     if (fopen_s(&fp, filename, "rb") != 0) {
+        LOG_ERROR("Cannot open file: %s", filename);
         char buf[1024];
         sprintf_s(buf, sizeof(buf), "Cannot open file:\n%s", filename);
         MessageBoxA(NULL, buf, "File Open Error", MB_OK);
@@ -192,11 +264,37 @@ int LoadBMP(const char* filename, Image* img) {
         return 0;
     }
 
-    // Check BMP signature "BM"
+    // Check BMP signature "BM" (0x4D42)
     if (header.type != 0x4D42) {
-        char buf[256];
-        sprintf_s(buf, sizeof(buf), "Not a BMP file\nSignature: 0x%04X (expected 0x4D42)", header.type);
-        MessageBoxA(NULL, buf, "Format Error", MB_OK);
+        // Try to find "BM" signature in file
+        unsigned char buf[128];
+        fseek(fp, 0, SEEK_SET);
+        int bytesRead = fread(buf, 1, 128, fp);
+        
+        int foundOffset = -1;
+        for (int i = 0; i < bytesRead - 1; i++) {
+            if (buf[i] == 0x42 && buf[i+1] == 0x4D) {
+                foundOffset = i;
+                break;
+            }
+        }
+        
+        char buf2[512];
+        if (foundOffset >= 0) {
+            sprintf_s(buf2, sizeof(buf2), 
+                "BMP signature found at offset %d (expected at 0)\nFile may have extra header.\n\n"
+                "First bytes: 0x%02X 0x%02X 0x%02X 0x%02X...\n"
+                "Original signature: 0x%04X",
+                foundOffset, buf[0], buf[1], buf[2], buf[3], header.type);
+        } else {
+            sprintf_s(buf2, sizeof(buf2), 
+                "Not a BMP file\n"
+                "First 16 bytes: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\n"
+                "Expected 'BM' (0x4D42) at start",
+                buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
+                buf[8], buf[9], buf[10], buf[11], buf[12], buf[13], buf[14], buf[15]);
+        }
+        MessageBoxA(NULL, buf2, "Format Error", MB_OK);
         fclose(fp);
         return 0;
     }
@@ -256,25 +354,13 @@ int LoadBMP(const char* filename, Image* img) {
     
     img->width = width;
     img->height = abs(height);
-    int srcRowSize = ((img->width * bitCount / 8 + 3) / 4) * 4;  // Source row size
-    int dstRowSize = ((img->width * 3 + 3) / 4) * 4;              // Always output 24-bit
-    int imageSize = dstRowSize * img->height;
+    img->channels = bitCount / 8;  // 8位灰度=1通道, 24位彩色=3通道
+    LOG_DEBUG("BMP dimensions: %dx%d, bitCount: %d, channels: %d", width, abs(height), bitCount, img->channels);
     
-    // For 8-bit BMP, read palette (256 entries, 4 bytes each: B, G, R, Reserved)
-    unsigned char palette[256][4] = {0};
-    if (bitCount == 8) {
-        // Palette starts at byte 54 (14 + 40) in standard BMP
-        fseek(fp, 54, SEEK_SET);
-        if (fread(palette, 4, 256, fp) != 256) {
-            // Try reading from header.offset if palette is at different position
-            fseek(fp, header.offset, SEEK_SET);
-            if (fread(palette, 4, 256, fp) != 256) {
-                MessageBoxA(NULL, "Cannot read color palette", "Read Error", MB_OK);
-                fclose(fp);
-                return 0;
-            }
-        }
-    }
+    int srcRowSize = ((img->width * bitCount / 8 + 3) / 4) * 4;  // Source row size with padding
+    int dstRowSize = img->width * img->channels;                  // 原始格式：灰度=width, 彩色=width*3
+    int imageSize = dstRowSize * img->height;
+    LOG_DEBUG("Image size: %d bytes, rowSize: %d", imageSize, dstRowSize);
     
     img->data = (unsigned char*)malloc(imageSize);
     if (!img->data) {
@@ -377,19 +463,14 @@ int LoadBMP(const char* filename, Image* img) {
             if (x > img->width) x = img->width;
         }
         
-        // Convert indexed to RGB and write all rows
+        // Write grayscale rows directly
         for (int row = 0; row < img->height; row++) {
             unsigned char* dstRow = firstRow + row * dstRowStride;
-            for (int col = 0; col < img->width; col++) {
-                int paletteIdx = rowBuffer[col];
-                dstRow[col * 3 + 0] = palette[paletteIdx][0];  // B
-                dstRow[col * 3 + 1] = palette[paletteIdx][1];  // G
-                dstRow[col * 3 + 2] = palette[paletteIdx][2];  // R
-            }
+            memcpy(dstRow, rowBuffer, img->width);
         }
         free(rowBuffer);
     } else if (bitCount == 8 && compression == 0) {
-        // Uncompressed 8-bit
+        // Uncompressed 8-bit grayscale: direct copy
         unsigned char* srcRow = (unsigned char*)malloc(srcRowSize);
         if (!srcRow) {
             MessageBoxA(NULL, "Memory allocation failed", "Memory Error", MB_OK);
@@ -413,12 +494,8 @@ int LoadBMP(const char* filename, Image* img) {
                 fclose(fp);
                 return 0;
             }
-            for (int x = 0; x < img->width; x++) {
-                int paletteIdx = srcRow[x];
-                dstRow[x * 3 + 0] = palette[paletteIdx][0];
-                dstRow[x * 3 + 1] = palette[paletteIdx][1];
-                dstRow[x * 3 + 2] = palette[paletteIdx][2];
-            }
+            // Direct copy for grayscale (no palette conversion)
+            memcpy(dstRow, srcRow, img->width);
         }
         free(srcRow);
     }
@@ -427,6 +504,7 @@ int LoadBMP(const char* filename, Image* img) {
     
     // Save debug image to verify loading
     SaveBMP("debug_loaded.bmp", img);
+    LOG_INFO("BMP file loaded successfully: %dx%d", img->width, img->height);
     
     return 1;
 }
@@ -434,26 +512,44 @@ int LoadBMP(const char* filename, Image* img) {
 
 void DrawImageToHDC(HDC hdc, Image* img, int x, int y) {
     if (!img || !img->data) return;
-    int rowSize = ((img->width * 3 + 3) / 4) * 4;
-    BITMAPINFO bmi = {0};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = img->width;
-    bmi.bmiHeader.biHeight = -img->height;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 24;
-    bmi.bmiHeader.biCompression = BI_RGB;
-    SetDIBitsToDevice(hdc, x, y, img->width, img->height, 0, 0, 0, img->height, img->data, &bmi, DIB_RGB_COLORS);
+    int bitCount = img->channels * 8;  // 1通道=8位灰度, 3通道=24位彩色
+    
+    // BITMAPINFOHEADER(40) + 颜色表(256*4=1024)，总共1064字节
+    BITMAPINFO* pbmi = (BITMAPINFO*)malloc(sizeof(BITMAPINFOHEADER) + 256 * sizeof(RGBQUAD));
+    if (!pbmi) return;
+    memset(pbmi, 0, sizeof(BITMAPINFOHEADER) + 256 * sizeof(RGBQUAD));
+    
+    pbmi->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    pbmi->bmiHeader.biWidth = img->width;
+    pbmi->bmiHeader.biHeight = -img->height;
+    pbmi->bmiHeader.biPlanes = 1;
+    pbmi->bmiHeader.biBitCount = (unsigned short)bitCount;
+    pbmi->bmiHeader.biCompression = BI_RGB;
+    
+    // 8位灰度图需要颜色表
+    if (bitCount == 8) {
+        for (int i = 0; i < 256; i++) {
+            pbmi->bmiColors[i].rgbBlue = i;
+            pbmi->bmiColors[i].rgbGreen = i;
+            pbmi->bmiColors[i].rgbRed = i;
+            pbmi->bmiColors[i].rgbReserved = 0;
+        }
+    }
+    
+    SetDIBitsToDevice(hdc, x, y, img->width, img->height, 0, 0, 0, img->height, img->data, pbmi, DIB_RGB_COLORS);
+    free(pbmi);
 }
 
 // ========== Image Scaling ==========
 void ScaleImage(Image* src, Image* dst, int dstWidth, int dstHeight) {
     dst->width = dstWidth;
     dst->height = dstHeight;
-    int dstRowSize = ((dstWidth * 3 + 3) / 4) * 4;
+    dst->channels = src->channels;
+    int dstRowSize = ((dstWidth * dst->channels + 3) / 4) * 4;
     dst->data = (unsigned char*)malloc(dstRowSize * dstHeight);
     if (!dst->data) return;
     
-    int srcRowSize = ((src->width * 3 + 3) / 4) * 4;
+    int srcRowSize = ((src->width * src->channels + 3) / 4) * 4;
     double scaleX = (double)src->width / dstWidth;
     double scaleY = (double)src->height / dstHeight;
     
@@ -473,15 +569,15 @@ void ScaleImage(Image* src, Image* dst, int dstWidth, int dstHeight) {
             x0 = min(x0, src->width - 1);
             y0 = min(y0, src->height - 1);
             
-            unsigned char* p00 = src->data + y0 * srcRowSize + x0 * 3;
-            unsigned char* p10 = src->data + y0 * srcRowSize + x1 * 3;
-            unsigned char* p01 = src->data + y1 * srcRowSize + x0 * 3;
-            unsigned char* p11 = src->data + y1 * srcRowSize + x1 * 3;
+            unsigned char* p00 = src->data + y0 * srcRowSize + x0 * src->channels;
+            unsigned char* p10 = src->data + y0 * srcRowSize + x1 * src->channels;
+            unsigned char* p01 = src->data + y1 * srcRowSize + x0 * src->channels;
+            unsigned char* p11 = src->data + y1 * srcRowSize + x1 * src->channels;
             
-            unsigned char* pdst = dst->data + y * dstRowSize + x * 3;
-            for (int c = 0; c < 3; c++) {
+            unsigned char* pdst = dst->data + y * dstRowSize + x * dst->channels;
+            for (int c = 0; c < src->channels; c++) {
                 double val = (1-fx)*(1-fy)*p00[c] + fx*(1-fy)*p10[c] + (1-fx)*fy*p01[c] + fx*fy*p11[c];
-                pdst[c] = (unsigned char)max(0, min(255, val));
+                pdst[c] = cv::saturate_cast<unsigned char>(val);
             }
         }
     }
@@ -490,18 +586,30 @@ void ScaleImage(Image* src, Image* dst, int dstWidth, int dstHeight) {
 // ========== Circle Detection ==========
 // Image structure: dark background, white calibration region with black circles, white crosshairs at centers
 void DetectCircles(Image* img, Point2D* pts, int* count) {
-    int rowSize = ((img->width * 3 + 3) / 4) * 4;
+    LOG_INFO("=== Starting Circle Detection ===");
+    LOG_DEBUG("Input image: %dx%d, channels: %d", img->width, img->height, img->channels);
+    
+    int srcRowSize = ((img->width * img->channels + 3) / 4) * 4;
     *count = 0;
     
     // Save debug image
     SaveBMP("debug_detect.bmp", img);
     
+    // Helper lambda to get grayscale pixel value
+    auto getGray = [&](int x, int y) -> int {
+        int offset = y * srcRowSize + x * img->channels;
+        if (img->channels == 1) {
+            return img->data[offset];
+        } else {
+            return (img->data[offset] + img->data[offset+1] + img->data[offset+2]) / 3;
+        }
+    };
+    
     // Step 1: Calculate global statistics to find white calibration region
     int minBrightness = 255, maxBrightness = 0;
     for (int y = 0; y < img->height; y += 10) {
         for (int x = 0; x < img->width; x += 10) {
-            int offset = y * rowSize + x * 3;
-            int brightness = (img->data[offset] + img->data[offset+1] + img->data[offset+2]) / 3;
+            int brightness = getGray(x, y);
             if (brightness < minBrightness) minBrightness = brightness;
             if (brightness > maxBrightness) maxBrightness = brightness;
         }
@@ -518,8 +626,7 @@ void DetectCircles(Image* img, Point2D* pts, int* count) {
     
     for (int y = 0; y < img->height; y++) {
         for (int x = 0; x < img->width; x++) {
-            int offset = y * rowSize + x * 3;
-            int brightness = (img->data[offset] + img->data[offset+1] + img->data[offset+2]) / 3;
+            int brightness = getGray(x, y);
             if (brightness > brightThreshold) {
                 rowBrightCount[y]++;
                 colBrightCount[x]++;
@@ -576,35 +683,37 @@ void DetectCircles(Image* img, Point2D* pts, int* count) {
         return;
     }
     
-    // Draw the detected white region (green rectangle)
-    for (int x = whiteMinX; x <= whiteMaxX; x++) {
-        for (int t = -2; t <= 2; t++) {
-            int y1 = whiteMinY + t;
-            int y2 = whiteMaxY + t;
-            if (x >= 0 && x < img->width) {
-                if (y1 >= 0 && y1 < img->height) {
-                    int off = y1 * rowSize + x * 3;
-                    img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
-                }
-                if (y2 >= 0 && y2 < img->height) {
-                    int off = y2 * rowSize + x * 3;
-                    img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
+    // Draw the detected white region (green rectangle for color images)
+    if (img->channels == 3) {
+        for (int x = whiteMinX; x <= whiteMaxX; x++) {
+            for (int t = -2; t <= 2; t++) {
+                int y1 = whiteMinY + t;
+                int y2 = whiteMaxY + t;
+                if (x >= 0 && x < img->width) {
+                    if (y1 >= 0 && y1 < img->height) {
+                        int off = y1 * srcRowSize + x * 3;
+                        img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
+                    }
+                    if (y2 >= 0 && y2 < img->height) {
+                        int off = y2 * srcRowSize + x * 3;
+                        img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
+                    }
                 }
             }
         }
-    }
-    for (int y = whiteMinY; y <= whiteMaxY; y++) {
-        for (int t = -2; t <= 2; t++) {
-            int x1 = whiteMinX + t;
-            int x2 = whiteMaxX + t;
-            if (y >= 0 && y < img->height) {
-                if (x1 >= 0 && x1 < img->width) {
-                    int off = y * rowSize + x1 * 3;
-                    img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
-                }
-                if (x2 >= 0 && x2 < img->width) {
-                    int off = y * rowSize + x2 * 3;
-                    img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
+        for (int y = whiteMinY; y <= whiteMaxY; y++) {
+            for (int t = -2; t <= 2; t++) {
+                int x1 = whiteMinX + t;
+                int x2 = whiteMaxX + t;
+                if (y >= 0 && y < img->height) {
+                    if (x1 >= 0 && x1 < img->width) {
+                        int off = y * srcRowSize + x1 * 3;
+                        img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
+                    }
+                    if (x2 >= 0 && x2 < img->width) {
+                        int off = y * srcRowSize + x2 * 3;
+                        img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
+                    }
                 }
             }
         }
@@ -619,11 +728,10 @@ void DetectCircles(Image* img, Point2D* pts, int* count) {
     // Scan the white region for crosshair patterns
     for (int y = whiteMinY + 20; y < whiteMaxY - 20; y += 5) {
         for (int x = whiteMinX + 20; x < whiteMaxX - 20; x += 5) {
-            int offset = y * rowSize + x * 3;
-            int brightness = img->data[offset] + img->data[offset+1] + img->data[offset+2];
+            int brightness = getGray(x, y);
             
             // This might be a crosshair if it's bright
-            if (brightness > crosshairThreshold * 3) {
+            if (brightness > crosshairThreshold) {
                 // Check if surrounded by dark (black circle)
                 int darkCount = 0, brightCount = 0;
                 for (int dy = -20; dy <= 20; dy += 4) {
@@ -631,9 +739,8 @@ void DetectCircles(Image* img, Point2D* pts, int* count) {
                         if (abs(dx) <= 3 || abs(dy) <= 3) continue;  // Skip center cross
                         int nx = x + dx, ny = y + dy;
                         if (nx >= whiteMinX && nx < whiteMaxX && ny >= whiteMinY && ny < whiteMaxY) {
-                            int noff = ny * rowSize + nx * 3;
-                            int lb = img->data[noff] + img->data[noff+1] + img->data[noff+2];
-                            if (lb < crosshairThreshold * 2) darkCount++;
+                            int lb = getGray(nx, ny);
+                            if (lb < crosshairThreshold / 2) darkCount++;
                             else brightCount++;
                         }
                     }
@@ -754,6 +861,11 @@ void DetectCircles(Image* img, Point2D* pts, int* count) {
     
     *count = (foundCount > 9) ? 9 : foundCount;
     
+    LOG_INFO("Circle detection complete: %d points detected", *count);
+    for (int i = 0; i < *count; i++) {
+        LOG_DEBUG("  Point %d: (%.1f, %.1f)", i, pts[i].x, pts[i].y);
+    }
+    
     // Show results
     char msg[512];
     sprintf_s(msg, sizeof(msg), "Detected %d points:\n\nRow Y positions: %.0f, %.0f, %.0f\n\n",
@@ -771,24 +883,34 @@ void DetectCircles(Image* img, Point2D* pts, int* count) {
 void BlobDetectCircles(Image* img, Point2D* pts, int* count) {
     using namespace XVL;
     
+    LOG_INFO("=== Starting BlobAnalysisPro Detection ===");
+    LOG_DEBUG("Input image: %dx%d", img->width, img->height);
+    
     *count = 0;
     
     // Convert our Image to XVImage format
     XVImage xvImage;
+    memset(&xvImage, 0, sizeof(xvImage));
     xvImage.width = img->width;
     xvImage.height = img->height;
-    xvImage.type = XVL::UInt8;
+    xvImage.type = XVL::UInt8;  // 8位单通道灰度图
     xvImage.depth = 1;
-    xvImage.pitch = ((img->width + 3) / 4) * 4;
+    xvImage.pitch = img->width;  // 灰度图pitch=width，无额外填充
     
-    // Convert BGR to grayscale for XVImage
-    unsigned char* grayData = (unsigned char*)malloc(img->width * img->height * 4);
-    int rowSize = ((img->width * 3 + 3) / 4) * 4;
-    for (int y = 0; y < img->height; y++) {
-        for (int x = 0; x < img->width; x++) {
-            int srcOffset = y * rowSize + x * 3;
-            int dstOffset = y * img->width + x;
-            grayData[dstOffset] = (img->data[srcOffset] + img->data[srcOffset+1] + img->data[srcOffset+2]) / 3;
+    // Convert to grayscale for XVImage
+    unsigned char* grayData = (unsigned char*)malloc(img->width * img->height);
+    if (img->channels == 1) {
+        // Already grayscale, direct copy
+        memcpy(grayData, img->data, img->width * img->height);
+    } else {
+        // Convert BGR to grayscale
+        int srcRowSize = ((img->width * img->channels + 3) / 4) * 4;
+        for (int y = 0; y < img->height; y++) {
+            for (int x = 0; x < img->width; x++) {
+                int srcOffset = y * srcRowSize + x * img->channels;
+                int dstOffset = y * img->width + x;
+                grayData[dstOffset] = (img->data[srcOffset] + img->data[srcOffset+1] + img->data[srcOffset+2]) / 3;
+            }
         }
     }
     xvImage.data = grayData;
@@ -939,7 +1061,7 @@ void BlobDetectCircles(Image* img, Point2D* pts, int* count) {
     printf("Final dark threshold: %d\n", darkThreshold);
     
     // Draw the calibration region on image
-    int dstRowSize = ((img->width * 3 + 3) / 4) * 4;
+    int dstRowSize = ((img->width * img->channels + 3) / 4) * 4;
     
     // Calculate bounding box
     int minX = img->width, minY = img->height, maxX = 0, maxY = 0;
@@ -953,20 +1075,21 @@ void BlobDetectCircles(Image* img, Point2D* pts, int* count) {
         if (ry > maxY) maxY = ry;
     }
     
-    // Draw filled calibRegion with semi-transparent blue
+    // Draw filled calibRegion - semi-transparent overlay
     for (size_t i = 0; i < calibRegion.arrayPointRun.size(); i++) {
         int rx = calibRegion.arrayPointRun[i].x;
         int ry = calibRegion.arrayPointRun[i].y;
         int len = calibRegion.arrayPointRun[i].length;
         for (int x = rx; x < rx + len && x < img->width; x++) {
             if (x >= 0 && ry >= 0 && ry < img->height) {
-                int off = ry * dstRowSize + x * 3;
-                unsigned char bgR = img->data[off + 2];
-                unsigned char bgG = img->data[off + 1];
-                unsigned char bgB = img->data[off];
-                img->data[off] = min(255, bgB + 100);
-                img->data[off + 1] = max(0, bgG - 50);
-                img->data[off + 2] = max(0, bgR - 50);
+                int off = ry * dstRowSize + x * img->channels;
+                if (img->channels == 1) {
+                    img->data[off] = min(255, img->data[off] + 100);
+                } else {
+                    img->data[off] = min(255, img->data[off] + 100);      // B
+                    img->data[off + 1] = max(0, img->data[off + 1] - 50); // G
+                    img->data[off + 2] = max(0, img->data[off + 2] - 50);  // R
+                }
             }
         }
     }
@@ -978,12 +1101,20 @@ void BlobDetectCircles(Image* img, Point2D* pts, int* count) {
             int y2 = maxY + t;
             if (x >= 0 && x < img->width) {
                 if (y1 >= 0 && y1 < img->height) {
-                    int off = y1 * dstRowSize + x * 3;
-                    img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
+                    int off = y1 * dstRowSize + x * img->channels;
+                    if (img->channels == 1) {
+                        img->data[off] = 255;
+                    } else {
+                        img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
+                    }
                 }
                 if (y2 >= 0 && y2 < img->height) {
-                    int off = y2 * dstRowSize + x * 3;
-                    img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
+                    int off = y2 * dstRowSize + x * img->channels;
+                    if (img->channels == 1) {
+                        img->data[off] = 255;
+                    } else {
+                        img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
+                    }
                 }
             }
         }
@@ -994,12 +1125,20 @@ void BlobDetectCircles(Image* img, Point2D* pts, int* count) {
             int x2 = maxX + t;
             if (y >= 0 && y < img->height) {
                 if (x1 >= 0 && x1 < img->width) {
-                    int off = y * dstRowSize + x1 * 3;
-                    img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
+                    int off = y * dstRowSize + x1 * img->channels;
+                    if (img->channels == 1) {
+                        img->data[off] = 255;
+                    } else {
+                        img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
+                    }
                 }
                 if (x2 >= 0 && x2 < img->width) {
-                    int off = y * dstRowSize + x2 * 3;
-                    img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
+                    int off = y * dstRowSize + x2 * img->channels;
+                    if (img->channels == 1) {
+                        img->data[off] = 255;
+                    } else {
+                        img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
+                    }
                 }
             }
         }
@@ -1175,11 +1314,15 @@ void BlobDetectCircles(Image* img, Point2D* pts, int* count) {
             int len = holesOut.outHoles[i].arrayPointRun[j].length;
             for (int x = rx; x < rx + len && x < img->width; x++) {
                 if (x >= 0 && ry >= 0 && ry < img->height) {
-                    int off = ry * dstRowSize + x * 3;
-                    // Semi-transparent red overlay
-                    img->data[off] = (unsigned char)(img->data[off] * 0.5);
-                    img->data[off + 1] = (unsigned char)(img->data[off + 1] * 0.5);
-                    img->data[off + 2] = (unsigned char)(min(255, img->data[off + 2] + 128));
+                    int off = ry * dstRowSize + x * img->channels;
+                    if (img->channels == 1) {
+                        img->data[off] = (unsigned char)(img->data[off] * 0.5);
+                    } else {
+                        // Semi-transparent red overlay
+                        img->data[off] = (unsigned char)(img->data[off] * 0.5);
+                        img->data[off + 1] = (unsigned char)(img->data[off + 1] * 0.5);
+                        img->data[off + 2] = (unsigned char)(min(255, img->data[off + 2] + 128));
+                    }
                 }
             }
         }
@@ -1213,17 +1356,24 @@ void BlobDetectCircles(Image* img, Point2D* pts, int* count) {
     MessageBoxA(NULL, msg, "Blob Detection Results", MB_OK);
 }
 
-void DrawDetectedCircles(Image* img, Point2D* pts, int count, int r, int g, int b) {
+void DrawDetectedCircles(Image* img, Point2D* pts, int count, int gray) {
     if (!img || !img->data) return;
-    int rowSize = ((img->width * 3 + 3) / 4) * 4;
+    int rowSize = ((img->width * img->channels + 3) / 4) * 4;
     for (int i = 0; i < count; i++) {
         int cx = (int)pts[i].x, cy = (int)pts[i].y;
+        // Draw crosshair at detected point
         for (int x = cx - 15; x <= cx + 15; x++) {
             for (int t = -3; t <= 3; t++) {
                 int y = cy + t;
                 if (x >= 0 && x < img->width && y >= 0 && y < img->height) {
-                    int offset = y * rowSize + x * 3;
-                    img->data[offset] = b; img->data[offset+1] = g; img->data[offset+2] = r;
+                    int off = y * rowSize + x * img->channels;
+                    if (img->channels == 1) {
+                        img->data[off] = (unsigned char)gray;
+                    } else {
+                        img->data[off] = (unsigned char)gray;      // B
+                        img->data[off + 1] = (unsigned char)gray;  // G
+                        img->data[off + 2] = (unsigned char)gray;  // R
+                    }
                 }
             }
         }
@@ -1231,8 +1381,14 @@ void DrawDetectedCircles(Image* img, Point2D* pts, int count, int r, int g, int 
             for (int t = -3; t <= 3; t++) {
                 int x = cx + t;
                 if (x >= 0 && x < img->width && y >= 0 && y < img->height) {
-                    int offset = y * rowSize + x * 3;
-                    img->data[offset] = b; img->data[offset+1] = g; img->data[offset+2] = r;
+                    int off = y * rowSize + x * img->channels;
+                    if (img->channels == 1) {
+                        img->data[off] = (unsigned char)gray;
+                    } else {
+                        img->data[off] = (unsigned char)gray;      // B
+                        img->data[off + 1] = (unsigned char)gray;  // G
+                        img->data[off + 2] = (unsigned char)gray;  // R
+                    }
                 }
             }
         }
@@ -1241,7 +1397,19 @@ void DrawDetectedCircles(Image* img, Point2D* pts, int count, int r, int g, int 
 
 // ========== Calibration (Least Squares) ==========
 int CalibrateNinePoint(Point2D* imagePts, Point2D* worldPts, int n, AffineTransform* trans) {
-    if (n < 3) return 0;  // 至少需要3个点确定仿射变换
+    LOG_INFO("=== Starting 9-Point Calibration ===");
+    LOG_DEBUG("Number of points: %d", n);
+    
+    if (n < 3) {
+        LOG_ERROR("Insufficient points for calibration (need at least 3)");
+        return 0;  // 至少需要3个点确定仿射变换
+    }
+    
+    LOG_DEBUG("Image Points -> World Points:");
+    for (int i = 0; i < n; i++) {
+        LOG_DEBUG("  %d: (%.2f, %.2f) -> (%.2f, %.2f)", 
+            i, imagePts[i].x, imagePts[i].y, worldPts[i].x, worldPts[i].y);
+    }
 
     // 构建正规方程 ATA * X = ATB
     double ATA[6][6] = { 0 };
@@ -1315,8 +1483,14 @@ int CalibrateNinePoint(Point2D* imagePts, Point2D* worldPts, int n, AffineTransf
     trans->a = X[0];  trans->b = X[1];  trans->c = X[2];
     trans->d = X[3];  trans->e = X[4];  trans->f = X[5];
 
+    LOG_INFO("Calibration completed successfully!");
+    LOG_INFO("Transform parameters:");
+    LOG_INFO("  X = %.6f*x + %.6f*y + %.4f", trans->a, trans->b, trans->c);
+    LOG_INFO("  Y = %.6f*x + %.6f*y + %.4f", trans->d, trans->e, trans->f);
+
     return 1;
 }
+
 
 
 Point2D ImageToWorld(Point2D pixel, AffineTransform trans) {
@@ -1324,6 +1498,778 @@ Point2D ImageToWorld(Point2D pixel, AffineTransform trans) {
     world.x = trans.a * pixel.x + trans.b * pixel.y + trans.c;
     world.y = trans.d * pixel.x + trans.e * pixel.y + trans.f;
     return world;
+}
+
+// ========== Trajectory Window ==========
+void CreateTrajectoryWindow(HINSTANCE hInstance) {
+    if (g_hwndTraj) {
+        // Window already exists, just bring it to front and update
+        ShowWindow(g_hwndTraj, SW_SHOWNORMAL);
+        SetForegroundWindow(g_hwndTraj);
+        InvalidateRect(g_hwndTraj, NULL, FALSE);
+        return;
+    }
+
+    WNDCLASS wc = {0};
+    wc.lpfnWndProc = [](HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) -> LRESULT {
+        if (msg == WM_PAINT) {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+            if (g_trajImage.data) {
+                int bitCount = g_trajImage.channels * 8;
+                int rowSize = ((g_trajImage.width * g_trajImage.channels + 3) / 4) * 4;
+                BITMAPINFO bmi = {0};
+                bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+                bmi.bmiHeader.biWidth = g_trajImage.width;
+                bmi.bmiHeader.biHeight = -g_trajImage.height;
+                bmi.bmiHeader.biPlanes = 1;
+                bmi.bmiHeader.biBitCount = (unsigned short)bitCount;
+                bmi.bmiHeader.biCompression = BI_RGB;
+                SetDIBitsToDevice(hdc, 0, 0, g_trajImage.width, g_trajImage.height, 0, 0, 0, g_trajImage.height, g_trajImage.data, &bmi, DIB_RGB_COLORS);
+            } else {
+                RECT rc; GetClientRect(hwnd, &rc);
+                FillRect(hdc, &rc, (HBRUSH)(COLOR_WINDOW + 1));
+                SetBkMode(hdc, TRANSPARENT);
+                TextOutA(hdc, 10, 10, "No trajectory image", 19);
+            }
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+        else if (msg == WM_DESTROY) {
+            g_hwndTraj = NULL;
+            if (g_trajImage.data) {
+                free(g_trajImage.data);
+                g_trajImage.data = NULL;
+            }
+            return 0;
+        }
+        return DefWindowProc(hwnd, msg, wParam, lParam);
+    };
+    wc.hInstance = hInstance;
+    wc.lpszClassName = L"TrajectoryWindowClass";
+    RegisterClass(&wc);
+
+    g_hwndTraj = CreateWindowEx(0, L"TrajectoryWindowClass", L"Trajectory Display",
+        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+        CW_USEDEFAULT, CW_USEDEFAULT, 
+        g_trajImage.width > 0 ? g_trajImage.width + 100 : 640,
+        g_trajImage.height > 0 ? g_trajImage.height + 150 : 480,
+        NULL, NULL, hInstance, NULL);
+}
+
+// ========== Sobel Edge Display Window ==========
+void CreateSobelWindow(HINSTANCE hInstance) {
+    if (g_hwndSobel) {
+        ShowWindow(g_hwndSobel, SW_SHOWNORMAL);
+        SetForegroundWindow(g_hwndSobel);
+        InvalidateRect(g_hwndSobel, NULL, FALSE);
+        return;
+    }
+
+    WNDCLASS wc = {0};
+    wc.lpfnWndProc = [](HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) -> LRESULT {
+        if (msg == WM_PAINT) {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+            if (g_sobelImage.data) {
+                int bitCount = g_sobelImage.channels * 8;
+                int rowSize = ((g_sobelImage.width * g_sobelImage.channels + 3) / 4) * 4;
+                BITMAPINFO bmi = {0};
+                bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+                bmi.bmiHeader.biWidth = g_sobelImage.width;
+                bmi.bmiHeader.biHeight = -g_sobelImage.height;
+                bmi.bmiHeader.biPlanes = 1;
+                bmi.bmiHeader.biBitCount = (unsigned short)bitCount;
+                bmi.bmiHeader.biCompression = BI_RGB;
+                SetDIBitsToDevice(hdc, 0, 0, g_sobelImage.width, g_sobelImage.height, 0, 0, 0, g_sobelImage.height, g_sobelImage.data, &bmi, DIB_RGB_COLORS);
+            } else {
+                RECT rc; GetClientRect(hwnd, &rc);
+                FillRect(hdc, &rc, (HBRUSH)(COLOR_WINDOW + 1));
+                SetBkMode(hdc, TRANSPARENT);
+                TextOutA(hdc, 10, 10, "No Sobel image", 14);
+            }
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+        else if (msg == WM_DESTROY) {
+            g_hwndSobel = NULL;
+            if (g_sobelImage.data) {
+                free(g_sobelImage.data);
+                g_sobelImage.data = NULL;
+            }
+            return 0;
+        }
+        return DefWindowProc(hwnd, msg, wParam, lParam);
+    };
+    wc.hInstance = hInstance;
+    wc.lpszClassName = L"SobelWindowClass";
+    RegisterClass(&wc);
+
+    g_hwndSobel = CreateWindowEx(0, L"SobelWindowClass", L"Sobel Edge Detection",
+        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+        CW_USEDEFAULT, CW_USEDEFAULT, 
+        g_sobelImage.width > 0 ? g_sobelImage.width + 100 : 640,
+        g_sobelImage.height > 0 ? g_sobelImage.height + 150 : 480,
+        NULL, NULL, hInstance, NULL);
+}
+
+
+// Draw trajectory on image
+void DrawTrajectory(Image* img, Point2D* trajPixels, int count, int gray) {
+    if (!img || !img->data || count < 2) return;
+    int rowSize = ((img->width * img->channels + 3) / 4) * 4;
+
+    // Draw each point as a small square marker (3x3 pixels)
+    for (int i = 0; i < count; i++) {
+        int cx = (int)trajPixels[i].x;
+        int cy = (int)trajPixels[i].y;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                int x = cx + dx;
+                int y = cy + dy;
+                if (x >= 0 && x < img->width && y >= 0 && y < img->height) {
+                    int off = y * rowSize + x * img->channels;
+                    if (img->channels == 1) {
+                        img->data[off] = (unsigned char)gray;
+                    } else {
+                        img->data[off] = (unsigned char)gray;      // B
+                        img->data[off + 1] = (unsigned char)gray;  // G
+                        img->data[off + 2] = (unsigned char)gray;  // R
+                    }
+                }
+            }
+        }
+    }
+}
+
+void ShowTrajectoryImage(Image* src, Point2D* trajPixels, int trajCount) {
+    // Copy image data
+    int rowSize = ((src->width * src->channels + 3) / 4) * 4;
+    int imageSize = rowSize * src->height;
+    
+    if (g_trajImage.data) free(g_trajImage.data);
+    g_trajImage.width = src->width;
+    g_trajImage.height = src->height;
+    g_trajImage.channels = src->channels;
+    g_trajImage.data = (unsigned char*)malloc(imageSize);
+    memset(g_trajImage.data, 0, imageSize);  // Black background
+    
+    // Draw trajectory points
+    DrawTrajectory(&g_trajImage, trajPixels, trajCount, 255);  // White markers
+    
+    // Update window if exists, or create new
+    if (g_hwndTraj) {
+        InvalidateRect(g_hwndTraj, NULL, FALSE);
+        // Resize window to fit image (with extra margin)
+        SetWindowPos(g_hwndTraj, HWND_TOP, 0, 0, 
+            g_trajImage.width + 100, g_trajImage.height + 150, SWP_NOMOVE);
+    }
+}
+
+// ========== FitShape Library Trajectory Detection ==========
+using namespace XVL;
+
+void DetectTrajectoryFitShape(Image* img, Point2D* trajPixels, int* count) {
+    LOG_INFO("=== Starting FitShape Trajectory Detection (Stripe) ===");
+    LOG_DEBUG("Input image: %dx%d", img->width, img->height);
+    
+    if (!img || !img->data) {
+        LOG_ERROR("Invalid image data!");
+        *count = 0;
+        return;
+    }
+    
+    // Convert Image to XVImage format
+    XVImage xvImage;
+    memset(&xvImage, 0, sizeof(xvImage));
+    xvImage.depth = 1;
+    xvImage.width = img->width;
+    xvImage.height = img->height;
+    xvImage.pitch = img->width;  // grayscale: pitch = width (1 byte per pixel)
+    xvImage.type = XVL::UInt8;  // 关键：设置图像类型为8位单通道
+    
+    // Allocate grayscale buffer
+    int graySize = img->width * img->height;
+    unsigned char* grayData = (unsigned char*)malloc(graySize);
+    if (!grayData) {
+        LOG_ERROR("Failed to allocate grayscale buffer!");
+        *count = 0;
+        return;
+    }
+    
+    if (img->channels == 1) {
+        // Already grayscale, direct copy
+        memcpy(grayData, img->data, graySize);
+        xvImage.data = grayData;
+        LOG_DEBUG("Image is grayscale, direct copy: %dx%d", img->width, img->height);
+    } else {
+        // Convert BGR to grayscale
+        int srcRowSize = ((img->width * img->channels + 3) / 4) * 4;
+        for (int y = 0; y < img->height; y++) {
+            for (int x = 0; x < img->width; x++) {
+                int srcOff = y * srcRowSize + x * img->channels;
+                grayData[y * img->width + x] = (img->data[srcOff] + img->data[srcOff+1] + img->data[srcOff+2]) / 3;
+            }
+        }
+        xvImage.data = grayData;
+        LOG_DEBUG("Converted BGR to grayscale: %dx%d", img->width, img->height);
+    }
+    
+    LOG_DEBUG("Converted to grayscale: %dx%d, pitch=%d", xvImage.width, xvImage.height, xvImage.pitch);
+    
+    // Setup fitting field (use whole image with center vertical axis)
+    XVPathFittingField fitField;
+    memset(&fitField, 0, sizeof(fitField));
+    fitField.width = 100.0f;
+    XVPoint2D axisStart = { 0, (float)(img->height / 2) };  // 从图像中间开始
+    XVPoint2D axisEnd = { (float)img->width, (float)(img->height / 2) };  // 水平扫描
+    fitField.axis.arrayPoint2D.push_back(axisStart);
+    fitField.axis.arrayPoint2D.push_back(axisEnd);
+    
+    LOG_DEBUG("FittingField: axis from (%.1f,%.1f) to (%.1f,%.1f), width=%.1f",
+        axisStart.x, axisStart.y, axisEnd.x, axisEnd.y, fitField.width);
+    
+    // Setup alignment (NUL = no transformation)
+    XVCoordinateSystem2D alignment;
+    memset(&alignment, 0, sizeof(alignment));
+    alignment.optional = XVOptionalType::NUL;
+    
+    // Setup stripe scan parameters
+    XVStripeScanParams stripeParams;
+    memset(&stripeParams, 0, sizeof(stripeParams));
+    stripeParams.smoothStDev = 0.6f;
+    stripeParams.interMetnod = XVInterMethod::Parabola;
+    stripeParams.minMagnitude = 20.0f;  // 条带检测阈值
+    stripeParams.stripeType = XVStripeType::DARK;  // 检测暗条带（轨迹通常是暗线）
+    stripeParams.minStripeWidth = 1.0f;  // 最小条带宽度
+    stripeParams.maxStripeWidth = 50.0f;  // 最大条带宽度
+    
+    // Setup input for XVFitPathToStripe
+    XVFitPathToStripeIn in;
+    memset(&in, 0, sizeof(in));
+    in.inImage = &xvImage;
+    in.inFittingField = fitField;
+    in.inAlignment = alignment;
+    in.inScanStep = 3;  // scan every 3 pixels for more points
+    in.inScanWidth = 10;  // scan rectangle width
+    in.inStripeScanParams = stripeParams;
+    in.inStripeSelection = XVSelection::Best;
+    in.inMaxInCompleteness = 0.9f;
+    in.inFlag = true;
+    in.inMaxLeakPointsNumber = 20;
+    
+    // Execute
+    XVFitPathToStripeOut out;
+    memset(&out, 0, sizeof(out));
+    int result = XVFitPathToStripe(in, out);
+    
+    if (result == 0 && out.outStripePoints.size() > 0) {
+        *count = 0;
+        for (size_t i = 0; i < out.outStripePoints.size() && *count < 10000; i++) {
+            trajPixels[*count].x = out.outStripePoints[i].x;
+            trajPixels[*count].y = out.outStripePoints[i].y;
+            (*count)++;
+        }
+        
+        // Transform to world coordinates
+        for (int i = 0; i < *count; i++) {
+            g_trajWorld[i] = ImageToWorld(trajPixels[i], g_transform);
+        }
+        
+        LOG_INFO("FitShape Stripe trajectory detection complete: %d points", *count);
+        if (*count > 0) {
+            LOG_DEBUG("  First point: pixel(%.1f, %.1f) -> world(%.2f, %.2f)", 
+                trajPixels[0].x, trajPixels[0].y, g_trajWorld[0].x, g_trajWorld[0].y);
+            LOG_DEBUG("  Last point: pixel(%.1f, %.1f) -> world(%.2f, %.2f)", 
+                trajPixels[*count-1].x, trajPixels[*count-1].y, 
+                g_trajWorld[*count-1].x, g_trajWorld[*count-1].y);
+        }
+    } else {
+        *count = 0;
+        LOG_ERROR("FitShape Stripe detection failed with code: %d", result);
+        char buf[256];
+        sprintf_s(buf, sizeof(buf), "FitShape Stripe detection failed: %d", result);
+        MessageBoxA(NULL, buf, "Error", MB_OK);
+    }
+    
+    // Cleanup
+    free(grayData);
+}
+
+// ========== Trajectory Detection ==========
+// Detect trajectory edge points - improved continuous detection
+void DetectTrajectory(Image* img, Point2D* trajPixels, int* count) {
+    LOG_INFO("=== Starting Self Trajectory Detection ===");
+    LOG_DEBUG("Input image: %dx%d, channels: %d", img->width, img->height, img->channels);
+    
+    if (!img || !img->data) {
+        LOG_ERROR("Invalid image data!");
+        *count = 0;
+        return;
+    }
+    
+    int srcRowSize = ((img->width * img->channels + 3) / 4) * 4;
+    *count = 0;
+    
+    // Helper lambda to get grayscale pixel value
+    auto getGray = [&](int x, int y) -> int {
+        if (x < 0) x = 0; if (x >= img->width) x = img->width - 1;
+        if (y < 0) y = 0; if (y >= img->height) y = img->height - 1;
+        int off = y * srcRowSize + x * img->channels;
+        if (img->channels == 1) {
+            return img->data[off];
+        } else {
+            return (img->data[off] + img->data[off+1] + img->data[off+2]) / 3;
+        }
+    };
+    
+    int w = img->width, h = img->height;
+    float* gradMag = (float*)malloc(w * h * sizeof(float));
+    float* gradDirX = (float*)malloc(w * h * sizeof(float));
+    float* gradDirY = (float*)malloc(w * h * sizeof(float));
+    
+    if (!gradMag || !gradDirX || !gradDirY) {
+        LOG_ERROR("Failed to allocate gradient buffers!");
+        if (gradMag) free(gradMag);
+        if (gradDirX) free(gradDirX);
+        if (gradDirY) free(gradDirY);
+        *count = 0;
+        return;
+    }
+    
+    // Compute gradient for each pixel
+    float gradThreshold = 20.0f;
+    for (int y = 1; y < h - 1; y++) {
+        for (int x = 1; x < w - 1; x++) {
+            float gx = -getGray(x-1,y-1) + getGray(x+1,y-1)
+                      -2*getGray(x-1,y) + 2*getGray(x+1,y)
+                      -getGray(x-1,y+1) + getGray(x+1,y+1);
+            float gy = -getGray(x-1,y-1) - 2*getGray(x,y-1) - getGray(x+1,y-1)
+                      + getGray(x-1,y+1) + 2*getGray(x,y+1) + getGray(x+1,y+1);
+            
+            gradMag[y * w + x] = sqrtf(gx*gx + gy*gy);
+            if (gradMag[y * w + x] > 0.001f) {
+                gradDirX[y * w + x] = gx / gradMag[y * w + x];
+                gradDirY[y * w + x] = gy / gradMag[y * w + x];
+            } else {
+                gradDirX[y * w + x] = 0;
+                gradDirY[y * w + x] = 0;
+            }
+        }
+    }
+    
+    // ========== Display Sobel Edge Image ==========
+    // Find max gradient for normalization
+    float maxMag = 0;
+    for (int i = 0; i < w * h; i++) {
+        if (gradMag[i] > maxMag) maxMag = gradMag[i];
+    }
+    
+    // Create Sobel display image (24-bit)
+    int sobelRowSize = ((w * 3 + 3) / 4) * 4;
+    if (g_sobelImage.data) free(g_sobelImage.data);
+    g_sobelImage.width = w;
+    g_sobelImage.height = h;
+    g_sobelImage.channels = 3;  // 24-bit (3 channels)
+    g_sobelImage.data = (unsigned char*)malloc(sobelRowSize * h);
+    
+    // Normalize and convert to grayscale
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            unsigned char val = 0;
+            if (maxMag > 0) {
+                val = (unsigned char)(255.0f * gradMag[y * w + x] / maxMag);
+            }
+            int dstOff = y * sobelRowSize + x * 3;
+            g_sobelImage.data[dstOff] = val;      // B
+            g_sobelImage.data[dstOff + 1] = val; // G
+            g_sobelImage.data[dstOff + 2] = val; // R
+        }
+    }
+    
+    // Create and show Sobel window
+    extern HINSTANCE g_hInstance;
+    CreateSobelWindow(g_hInstance);
+    LOG_INFO("Sobel edge image created: %dx%d (max gradient: %.2f)", w, h, maxMag);
+    
+    // Threshold gradient to binary edge map
+    unsigned char* edgeMap = (unsigned char*)malloc(w * h);
+    for (int i = 0; i < w * h; i++) {
+        edgeMap[i] = (gradMag[i] > gradThreshold) ? 255 : 0;
+    }
+    
+    // Find starting point (leftmost high-gradient point)
+    int startY = -1, startX = -1;
+    for (int y = 1; y < h - 1 && startY < 0; y++) {
+        for (int x = 1; x < w - 1; x++) {
+            if (edgeMap[y * w + x]) {
+                startY = y;
+                startX = x;
+                break;
+            }
+        }
+    }
+    
+    if (startY < 0) {
+        LOG_WARN("No edge points found in image!");
+        free(gradMag); free(gradDirX); free(gradDirY); free(edgeMap);
+        *count = 0;
+        return;
+    }
+    
+    // Follow the edge path using gradient direction
+    bool* visited = (bool*)calloc(w * h, sizeof(bool));
+    int maxCount = 10000;
+    
+    int cx = startX, cy = startY;
+    while (cx >= 0 && cy >= 0 && cx < w && cy < h && *count < maxCount) {
+        // Mark current point
+        visited[cy * w + cx] = true;
+        trajPixels[*count].x = cx;
+        trajPixels[*count].y = cy;
+        (*count)++;
+        
+        // Move along gradient direction (perpendicular to edge)
+        float dx = gradDirX[cy * w + cx];
+        float dy = gradDirY[cy * w + cx];
+        
+        // Step size for continuous detection
+        int stepX = (fabs(dx) > 0.1f) ? (dx > 0 ? 1 : -1) : 0;
+        int stepY = (fabs(dy) > 0.1f) ? (dy > 0 ? 1 : -1) : 0;
+        
+        // If both components are small, use gradient magnitude to find next edge
+        if (stepX == 0 && stepY == 0) {
+            // Search in perpendicular direction
+            int nextX = -1, nextY = -1;
+            int bestMag = gradThreshold;
+            // Search perpendicular to gradient (along edge direction)
+            for (int off = -5; off <= 5; off++) {
+                int nx = cx + off;
+                if (nx >= 0 && nx < w && !visited[cy * w + nx] && edgeMap[cy * w + nx]) {
+                    if (gradMag[cy * w + nx] > bestMag) {
+                        bestMag = gradMag[cy * w + nx];
+                        nextX = nx;
+                        nextY = cy;
+                    }
+                }
+            }
+            
+            if (nextX < 0) {
+                // Try vertical direction
+                for (int off = -5; off <= 5; off++) {
+                    int ny = cy + off;
+                    if (ny >= 0 && ny < h && !visited[ny * w + cx] && edgeMap[ny * w + cx]) {
+                        if (gradMag[ny * w + cx] > bestMag) {
+                            bestMag = gradMag[ny * w + cx];
+                            nextX = cx;
+                            nextY = ny;
+                        }
+                    }
+                }
+            }
+            
+            if (nextX >= 0) {
+                cx = nextX;
+                cy = nextY;
+            } else {
+                break;  // End of path
+            }
+        } else {
+            // Move along the edge (follow the line)
+            int newX = cx + stepX;
+            int newY = cy + stepY;
+            
+            // Check if new point is valid and not visited
+            if (newX >= 0 && newX < w && newY >= 0 && newY < h && 
+                !visited[newY * w + newX] && edgeMap[newY * w + newX]) {
+                cx = newX;
+                cy = newY;
+            } else {
+                // Try just horizontal
+                if (newX >= 0 && newX < w && !visited[cy * w + newX] && edgeMap[cy * w + newX]) {
+                    cx = newX;
+                }
+                // Try just vertical
+                else if (newY >= 0 && newY < h && !visited[newY * w + cx] && edgeMap[newY * w + cx]) {
+                    cy = newY;
+                }
+                else {
+                    break;  // End of path
+                }
+            }
+        }
+    }
+    
+    free(visited);
+    free(gradMag);
+    free(gradDirX);
+    free(gradDirY);
+    free(edgeMap);
+    
+    // Transform pixel coordinates to world coordinates using calibration
+    for (int i = 0; i < *count; i++) {
+        g_trajWorld[i] = ImageToWorld(trajPixels[i], g_transform);
+    }
+    
+    LOG_INFO("Self trajectory detection complete: %d points", *count);
+    if (*count > 0) {
+        LOG_DEBUG("  First point: pixel(%.1f, %.1f) -> world(%.2f, %.2f)", 
+            trajPixels[0].x, trajPixels[0].y, g_trajWorld[0].x, g_trajWorld[0].y);
+        LOG_DEBUG("  Last point: pixel(%.1f, %.1f) -> world(%.2f, %.2f)", 
+            trajPixels[*count-1].x, trajPixels[*count-1].y, 
+            g_trajWorld[*count-1].x, g_trajWorld[*count-1].y);
+    }
+}
+
+// ========== Helper: Generate Stadium/Capsule Shape ==========
+// Stadium shape: rectangle with two semicircles at ends
+// Parameters:
+//   center: center point
+//   length: length of middle rectangle section
+//   width: width/diameter (same for both ends)
+//   angle: rotation angle in degrees
+//   pointCount: total points to generate
+//   outPoints: output vector for generated points
+static void GenerateStadiumShape(Point2f center, float length, float width, 
+                                  float angle, int pointCount, vector<Point>& outPoints) {
+    float radius = width / 2.0f;  // semicircle radius
+    float angleRad = angle * (float)CV_PI / 180.0f;
+    
+    // Calculate points per section
+    // Semicircle perimeter = PI * radius, rectangle sides = 2 * length
+    float totalPerimeter = 2.0f * (CV_PI * radius + length);
+    int circlePoints = (int)(pointCount * (CV_PI * radius) / totalPerimeter);
+    int linePoints = (int)(pointCount * length / totalPerimeter);
+    circlePoints = max(10, circlePoints / 2);  // Each end semicircle
+    
+    // Top semicircle (left end, from top to bottom)
+    for (int i = 0; i <= circlePoints; i++) {
+        float theta = CV_PI + (float)CV_PI * i / circlePoints;  // PI to 2*PI
+        float x = -length/2.0f - radius + radius * cos(theta);
+        float y = radius * sin(theta);
+        // Rotate
+        float xr = x * cos(angleRad) - y * sin(angleRad);
+        float yr = x * sin(angleRad) + y * cos(angleRad);
+        outPoints.push_back(Point((int)(center.x + xr), (int)(center.y + yr)));
+    }
+    
+    // Top line (left to right)
+    for (int i = 1; i <= linePoints; i++) {
+        float t = (float)i / linePoints;
+        float x = -length/2.0f + length * t;
+        float y = 0.0f;
+        float xr = x * cos(angleRad) - y * sin(angleRad);
+        float yr = x * sin(angleRad) + y * cos(angleRad);
+        outPoints.push_back(Point((int)(center.x + xr), (int)(center.y + yr)));
+    }
+    
+    // Bottom semicircle (right end, from bottom to top)
+    for (int i = 0; i <= circlePoints; i++) {
+        float theta = (float)CV_PI * i / circlePoints;  // 0 to PI
+        float x = length/2.0f + radius + radius * cos(theta);
+        float y = radius * sin(theta);
+        // Rotate
+        float xr = x * cos(angleRad) - y * sin(angleRad);
+        float yr = x * sin(angleRad) + y * cos(angleRad);
+        outPoints.push_back(Point((int)(center.x + xr), (int)(center.y + yr)));
+    }
+    
+    // Bottom line (right to left)
+    for (int i = 1; i < linePoints; i++) {
+        float t = 1.0f - (float)i / linePoints;
+        float x = -length/2.0f + length * t;
+        float y = 0.0f;
+        float xr = x * cos(angleRad) - y * sin(angleRad);
+        float yr = x * sin(angleRad) + y * cos(angleRad);
+        outPoints.push_back(Point((int)(center.x + xr), (int)(center.y + yr)));
+    }
+}
+
+// ========== OpenCV-based Trajectory Detection ==========
+void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count) {
+    LOG_INFO("=== Starting OpenCV Ellipse-Fit Trajectory Detection ===");
+    LOG_DEBUG("Input image: %dx%d, channels: %d", img->width, img->height, img->channels);
+    
+    if (!img || !img->data) {
+        LOG_ERROR("Invalid image data!");
+        *count = 0;
+        return;
+    }
+    
+    int w = img->width, h = img->height;
+    int srcRowSize = ((w * img->channels + 3) / 4) * 4;
+    
+    // Convert Image to OpenCV Mat (grayscale)
+    Mat grayMat(h, w, CV_8UC1);
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            int off = y * srcRowSize + x * img->channels;
+            if (img->channels == 1) {
+                grayMat.at<uchar>(y, x) = img->data[off];
+            } else {
+                grayMat.at<uchar>(y, x) = (img->data[off] + img->data[off+1] + img->data[off+2]) / 3;
+            }
+        }
+    }
+    
+    // Apply mild blur
+    Mat blurMat;
+    GaussianBlur(grayMat, blurMat, Size(3, 3), 0);
+    
+    // Canny edge detection
+    Mat edgeMap;
+    Canny(blurMat, edgeMap, 10, 30, 3);
+    
+    // Find all contours including nested ones
+    vector<vector<Point>> contours;
+    vector<Vec4i> hierarchy;
+    findContours(edgeMap, contours, hierarchy, RETR_TREE, CHAIN_APPROX_NONE);
+    
+    // Store all trajectory points (original + fitted shapes)
+    vector<Point> allPoints;
+    int ellipseFitted = 0;
+    int stadiumFitted = 0;
+    
+    // Process each contour
+    for (size_t i = 0; i < contours.size(); i++) {
+        const vector<Point>& contour = contours[i];
+        int ptCount = (int)contour.size();
+        
+        // Need at least 5 points for fitEllipse
+        if (ptCount < 5) continue;
+        
+        // Check if this is an internal contour (nested)
+        bool isInternal = (hierarchy[i][3] >= 0);
+        
+        // Use minAreaRect to get bounding rectangle with angle
+        if (ptCount >= 3) {
+            RotatedRect box = minAreaRect(contour);
+            
+            float width = box.size.width;
+            float height = box.size.height;
+            
+            // Ensure width >= height (long side is width)
+            if (height > width) {
+                swap(width, height);
+            }
+            
+            // Calculate aspect ratio
+            float aspectRatio = width / height;
+            
+            // If aspect ratio > 2.5, treat as stadium (long bar with rounded ends)
+            if (aspectRatio > 2.5f && height > 5.0f) {
+                // Stadium shape: length = width - height (center rectangle part)
+                // width param = height (diameter of semicircles)
+                float length = width - height;  // center rectangle length
+                float diam = height;             // diameter for semicircles
+                
+                // Calculate point count based on perimeter
+                int pointCount = max(50, (int)(2.0f * (CV_PI * diam / 2.0f + length) * 2.0f));
+                
+                vector<Point> stadiumPoints;
+                GenerateStadiumShape(box.center, length, diam, box.angle, pointCount, stadiumPoints);
+                
+                // Clamp points to image bounds and add
+                for (size_t k = 0; k < stadiumPoints.size(); k++) {
+                    int px = max(0, min(w-1, stadiumPoints[k].x));
+                    int py = max(0, min(h-1, stadiumPoints[k].y));
+                    allPoints.push_back(Point(px, py));
+                }
+                stadiumFitted++;
+            } else {
+                // Small shape or circular - use ellipse fitting
+                if (ptCount >= 6) {
+                    RotatedRect ellipse = fitEllipse(contour);
+                    
+                    Size2f axes = ellipse.size;
+                    float rx = axes.width / 2.0f;
+                    float ry = axes.height / 2.0f;
+                    if (ry > rx) swap(rx, ry);
+                    
+                    float perimeter = (float)(CV_PI * (3.0f * (rx + ry) - sqrt((3.0f * rx + ry) * (rx + 3.0f * ry))));
+                    int ellipsePointCount = max(30, (int)(perimeter * 0.5f));
+                    
+                    Point2f center = ellipse.center;
+                    float angleRad = ellipse.angle * (float)CV_PI / 180.0f;
+                    
+                    for (int k = 0; k < ellipsePointCount; k++) {
+                        float theta = 2.0f * (float)CV_PI * k / ellipsePointCount;
+                        float x = rx * cos(theta);
+                        float y = ry * sin(theta);
+                        float rx_rot = x * cos(angleRad) - y * sin(angleRad);
+                        float ry_rot = x * sin(angleRad) + y * cos(angleRad);
+                        
+                        int px = (int)(center.x + rx_rot);
+                        int py = (int)(center.y + ry_rot);
+                        
+                        if (px >= 0 && px < w && py >= 0 && py < h) {
+                            allPoints.push_back(Point(px, py));
+                        }
+                    }
+                    ellipseFitted++;
+                }
+            }
+        }
+        
+        // Also add original contour points (supplement)
+        int step = isInternal ? 1 : 2;
+        for (int j = 0; j < ptCount; j += step) {
+            allPoints.push_back(contour[j]);
+        }
+    }
+    
+    LOG_INFO("Shape fitting: %d ellipses, %d stadiums, %d contours processed", 
+             ellipseFitted, stadiumFitted, (int)contours.size());
+    
+    // Remove duplicate points (within 1-pixel radius)
+    vector<Point> uniquePoints;
+    vector<bool> kept(allPoints.size(), false);
+    for (size_t i = 0; i < allPoints.size(); i++) {
+        if (kept[i]) continue;
+        uniquePoints.push_back(allPoints[i]);
+        // Mark nearby points
+        int x1 = allPoints[i].x - 1, x2 = allPoints[i].x + 1;
+        int y1 = allPoints[i].y - 1, y2 = allPoints[i].y + 1;
+        for (size_t j = i + 1; j < allPoints.size(); j++) {
+            if (!kept[j]) {
+                int px = allPoints[j].x, py = allPoints[j].y;
+                if (px >= x1 && px <= x2 && py >= y1 && py <= y2) {
+                    kept[j] = true;
+                }
+            }
+        }
+    }
+    
+    // Sort by position (y first, then x)
+    if (uniquePoints.size() > 1) {
+        sort(uniquePoints.begin(), uniquePoints.end(), [](const Point& a, const Point& b) {
+            if (abs(a.y - b.y) > 2) return a.y < b.y;
+            return a.x < b.x;
+        });
+    }
+    
+    // Output all unique points (up to array capacity: 10000)
+    *count = min((int)uniquePoints.size(), 10000);
+    for (int i = 0; i < *count; i++) {
+        trajPixels[i].x = (float)uniquePoints[i].x;
+        trajPixels[i].y = (float)uniquePoints[i].y;
+    }
+    
+    LOG_INFO("Trajectory detection: raw=%d, unique=%d, output=%d points",
+             (int)allPoints.size(), (int)uniquePoints.size(), *count);
+    
+    // Transform to world coordinates
+    for (int i = 0; i < *count; i++) {
+        g_trajWorld[i] = ImageToWorld(trajPixels[i], g_transform);
+    }
+    
+    if (*count > 0) {
+        LOG_DEBUG("  First: pixel(%.1f, %.1f) -> world(%.2f, %.2f)", 
+            trajPixels[0].x, trajPixels[0].y, g_trajWorld[0].x, g_trajWorld[0].y);
+        LOG_DEBUG("  Last: pixel(%.1f, %.1f) -> world(%.2f, %.2f)", 
+            trajPixels[*count-1].x, trajPixels[*count-1].y, 
+            g_trajWorld[*count-1].x, g_trajWorld[*count-1].y);
+    }
 }
 
 void CalculateError(Point2D* imagePts, Point2D* worldPts, int n, AffineTransform trans, double* avgErr, double* maxErr) {
@@ -1390,6 +2336,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             CreateWindow(L"BUTTON", L"6. Test Transform",
                 WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
                 startX, btnY, btnW, btnH, hwnd, (HMENU)6, NULL, NULL);
+            startX += btnW + btnGap;
+            CreateWindow(L"BUTTON", L"7. TestImage",
+                WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
+                startX, btnY, btnW, btnH, hwnd, (HMENU)7, NULL, NULL);
 
             g_hwndImage = CreateWindow(L"STATIC", L"",
                 WS_CHILD | WS_VISIBLE | SS_BLACKFRAME,
@@ -1417,6 +2367,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             SendMessage(g_hwndMethodSelect, WM_SETFONT, (WPARAM)hFontText, TRUE);
             SendMessage(g_hwndMethodSelect, CB_ADDSTRING, 0, (LPARAM)L"Self-Algorithm");
             SendMessage(g_hwndMethodSelect, CB_ADDSTRING, 0, (LPARAM)L"BlobAnalysisPro");
+            SendMessage(g_hwndMethodSelect, CB_ADDSTRING, 0, (LPARAM)L"FitShape-Path");
+            SendMessage(g_hwndMethodSelect, CB_ADDSTRING, 0, (LPARAM)L"OpenCV-Contour");
             SendMessage(g_hwndMethodSelect, CB_SETCURSEL, 0, 0);
         }
         return 0;
@@ -1428,6 +2380,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
             switch (btnId) {
             case 1:  // Generate Image
+                LOG_INFO("Button 1: Generate Image clicked");
                 if (g_image.data) free(g_image.data);
                 g_image.data = NULL;
                 if (CreateCalibrationImage(&g_image, IMAGE_WIDTH, IMAGE_HEIGHT)) {
@@ -1435,10 +2388,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     strcpy_s(statusText, sizeof(statusText), "Step 1: Calibration image generated and saved");
                     g_step = 1;
                     InvalidateRect(g_hwndImage, NULL, FALSE);
+                    LOG_INFO("Calibration image generated: %dx%d", IMAGE_WIDTH, IMAGE_HEIGHT);
+                } else {
+                    LOG_ERROR("Failed to generate calibration image");
                 }
                 break;
 
             case 2: { // Load Image
+                LOG_INFO("Button 2: Load Image clicked");
                 OPENFILENAMEA ofn;
                 char filename[MAX_PATH] = "";
                 memset(&ofn, 0, sizeof(ofn));
@@ -1487,15 +2444,20 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
 
             case 3: { // Detect Circles
+                LOG_INFO("Button 3: Detect Circles clicked");
                 if (!g_image.data) {
                     strcpy_s(statusText, sizeof(statusText), "Error: No image loaded");
+                    LOG_WARN("Attempted detection without loaded image");
                     MessageBoxA(hwnd, "Please complete Step 1 or Step 2 to load an image first.", "No Image", MB_OK | MB_ICONWARNING);
                 } else {
                     // Get selected detection method
                     int sel = SendMessage(g_hwndMethodSelect, CB_GETCURSEL, 0, 0);
-                    g_detectMethod = (sel == 1) ? METHOD_BLOB : METHOD_SELF;
+                    g_detectMethod = (DetectMethod)sel;
                     
-                    const char* methodName = (g_detectMethod == METHOD_BLOB) ? "BlobAnalysisPro" : "Self-Algorithm";
+                    const char* methodName = (g_detectMethod == METHOD_BLOB) ? "BlobAnalysisPro" : 
+                                            (g_detectMethod == METHOD_FITSHAPE) ? "FitShape-Path" :
+                                            (g_detectMethod == METHOD_OPENCV) ? "OpenCV-Contour" : "Self-Algorithm";
+                    LOG_INFO("Selected detection method: %s (index: %d)", methodName, sel);
                     sprintf_s(msgBuf, sizeof(msgBuf), "Using detection method: %s", methodName);
                     MessageBoxA(hwnd, msgBuf, "Detection Method", MB_OK);
                     
@@ -1507,7 +2469,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     }
                     
                     for (int i = 0; i < g_detectedCount && i < 9; i++) g_imagePts[i] = g_detectedPts[i];
-                    DrawDetectedCircles(&g_image, g_detectedPts, g_detectedCount, 0, 255, 0);
+                    DrawDetectedCircles(&g_image, g_detectedPts, g_detectedCount, 0);  // 0=black
                     
                     if (g_detectedCount < 3) {
                         sprintf_s(msgBuf, sizeof(msgBuf), "Circle detection failed!\n\nDetected only %d circles.\nNeed at least 3 points for calibration.", g_detectedCount);
@@ -1540,8 +2502,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
 
             case 4: { // Calibrate
+                LOG_INFO("Button 4: Calibrate clicked");
                 if (g_step < 3) {
                     strcpy_s(statusText, sizeof(statusText), "Error: Detect circles first");
+                    LOG_WARN("Attempted calibration before circle detection");
                     MessageBoxA(hwnd, "Please complete Step 3 (Detect Circles) before calibration.", "Step Error", MB_OK | MB_ICONWARNING);
                 } else {
                     // Debug: Show input points before calibration
@@ -1572,7 +2536,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                         CalculateError(g_imagePts, g_worldPts, 9, g_transform, &g_avgError, &g_maxError);
                         sprintf_s(msgBuf, sizeof(msgBuf), "Calibration Complete!\n\nX = %.4f*x + %.4f*y + %.2f\nY = %.4f*x + %.4f*y + %.2f\n\nAvg Error: %.4f mm\nMax Error: %.4f mm",
                             g_transform.a, g_transform.b, g_transform.c, g_transform.d, g_transform.e, g_transform.f, g_avgError, g_maxError);
-                        DrawDetectedCircles(&g_image, g_detectedPts, g_detectedCount, 0, 200, 255);
+                        DrawDetectedCircles(&g_image, g_detectedPts, g_detectedCount, 128);  // Gray markers
                         strcpy_s(statusText, sizeof(statusText), "Step 4: Calibration complete!");
                         g_step = 4;
                         InvalidateRect(g_hwndImage, NULL, FALSE);
@@ -1602,7 +2566,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
 
             case 5:  // Save Results
-                if (g_image.data) SaveBMP("calibration_result.bmp", &g_image);
+                LOG_INFO("Button 5: Save Results clicked");
+                if (g_image.data) {
+                    SaveBMP("calibration_result.bmp", &g_image);
+                    LOG_DEBUG("Saved calibration_result.bmp");
+                }
                 {
                     FILE* fp;
                     if (fopen_s(&fp, "calibration_params.txt", "w") == 0) {
@@ -1612,6 +2580,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                         fprintf(fp, "# Average Error: %.6f mm\n", g_avgError);
                         fprintf(fp, "# Max Error: %.6f mm\n", g_maxError);
                         fclose(fp);
+                        LOG_DEBUG("Saved calibration_params.txt");
+                    } else {
+                        LOG_ERROR("Failed to save calibration_params.txt");
                     }
                 }
                 sprintf_s(msgBuf, sizeof(msgBuf), "Saved:\n- calibration_params.txt\n- calibration_result.bmp\n\nAvg Error: %.4f mm", g_avgError);
@@ -1619,21 +2590,106 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 MessageBoxA(hwnd, msgBuf, "Save Complete", MB_OK | MB_ICONINFORMATION);
                 break;
 
-            case 6:  // Test Transform
+            case 6: {  // Test Transform
+                LOG_INFO("Button 6: Test Transform clicked");
                 if (g_step < 4) {
                     strcpy_s(statusText, sizeof(statusText), "Error: Calibrate first");
+                    LOG_WARN("Attempted transform test before calibration");
                     break;
                 }
-                Point2D testPixel = {400, 300};
+                Point2D testPixel = { 400, 300 };
                 Point2D testWorld = ImageToWorld(testPixel, g_transform);
-                Point2D backPixel = {g_transform.a * testWorld.x + g_transform.b * testWorld.y + g_transform.c,
-                                     g_transform.d * testWorld.x + g_transform.e * testWorld.y + g_transform.f};
+                Point2D backPixel = { g_transform.a * testWorld.x + g_transform.b * testWorld.y + g_transform.c,
+                                     g_transform.d * testWorld.x + g_transform.e * testWorld.y + g_transform.f };
                 sprintf_s(msgBuf, sizeof(msgBuf), "Test Transform:\n\nInput pixel: (%.0f, %.0f)\nOutput world: (%.2f, %.2f) mm\n\nRound-trip:\nInput: (%.0f, %.0f)\nOutput: (%.2f, %.2f)",
                     testPixel.x, testPixel.y, testWorld.x, testWorld.y,
                     testWorld.x, testWorld.y, backPixel.x, backPixel.y);
                 strcpy_s(statusText, sizeof(statusText), "Transform test complete");
                 MessageBoxA(hwnd, msgBuf, "Transform Test", MB_OK);
                 break;
+            }
+                case 7: { // Load Image
+                    LOG_INFO("Button 7: TestImage clicked");
+                    OPENFILENAMEA ofn;
+                    char filename[MAX_PATH] = "";
+                    memset(&ofn, 0, sizeof(ofn));
+                    ofn.lStructSize = sizeof(ofn);
+                    ofn.hwndOwner = hwnd;
+                    ofn.lpstrFilter = "Image Files\0*.bmp;*.jpg;*.jpeg;*.png\0BMP Files\0*.bmp\0All Files\0*.*\0\0";
+                    ofn.lpstrFile = filename;
+                    ofn.nMaxFile = MAX_PATH;
+                    ofn.Flags = OFN_FILEMUSTEXIST;
+                    ofn.lpstrTitle = "Select Calibration Image";
+
+                    if (GetOpenFileNameA(&ofn)) {
+                        sprintf_s(msgBuf, sizeof(msgBuf), "Loading: %s", filename);
+                        MessageBoxA(hwnd, msgBuf, "Debug", MB_OK);
+
+                        Image loadedImg = { 0 };
+                        if (LoadBMP(filename, &loadedImg)) {
+                            // Check if scaling is needed
+                            if (loadedImg.width > IMAGE_WIDTH || loadedImg.height > IMAGE_HEIGHT) {
+                                sprintf_s(msgBuf, sizeof(msgBuf),
+                                    "Image is %dx%d\n\nAuto-scaling to %dx%d...",
+                                    loadedImg.width, loadedImg.height, IMAGE_WIDTH, IMAGE_HEIGHT);
+                                MessageBoxA(hwnd, msgBuf, "Scaling", MB_OK);
+
+                                Image scaledImg = { 0 };
+                                ScaleImage(&loadedImg, &scaledImg, IMAGE_WIDTH, IMAGE_HEIGHT);
+                                free(loadedImg.data);
+
+                                if (g_image.data) free(g_image.data);
+                                g_image = scaledImg;
+                            }
+                            else {
+                                if (g_image.data) free(g_image.data);
+                                g_image = loadedImg;
+                            }
+
+                            sprintf_s(statusText, sizeof(statusText), "Loaded: %s (%dx%d)", filename, g_image.width, g_image.height);
+                            LOG_INFO("Image loaded: %s (%dx%d)", filename, g_image.width, g_image.height);
+                            
+                            // Detect trajectory if calibration is available
+                            if (g_step >= 4) {
+                                LOG_INFO("Calibration available, starting trajectory detection...");
+                                int sel = SendMessage(g_hwndMethodSelect, CB_GETCURSEL, 0, 0);
+                                if (sel == METHOD_SELF || sel == METHOD_BLOB) {
+                                    DetectTrajectory(&g_image, g_trajPixels, &g_trajCount);
+                                } else if (sel == METHOD_FITSHAPE) {
+                                    DetectTrajectoryFitShape(&g_image, g_trajPixels, &g_trajCount);
+                                } else if (sel == METHOD_OPENCV) {
+                                    DetectTrajectoryOpenCV(&g_image, g_trajPixels, &g_trajCount);
+                                }
+                                LOG_INFO("Trajectory detection finished: %d points", g_trajCount);
+                                sprintf_s(msgBuf, sizeof(msgBuf), 
+                                    "Detected %d trajectory points\n\n"
+                                    "Trajectory coordinates (world):\n"
+                                    "Start: (%.2f, %.2f)\n"
+                                    "End: (%.2f, %.2f)",
+                                    g_trajCount,
+                                    g_trajCount > 0 ? g_trajWorld[0].x : 0,
+                                    g_trajCount > 0 ? g_trajWorld[0].y : 0,
+                                    g_trajCount > 0 ? g_trajWorld[g_trajCount-1].x : 0,
+                                    g_trajCount > 0 ? g_trajWorld[g_trajCount-1].y : 0);
+                                MessageBoxA(hwnd, msgBuf, "Trajectory Detected", MB_OK);
+                                
+                                // Show trajectory in a new window
+                                ShowTrajectoryImage(&g_image, g_trajPixels, g_trajCount);
+                                CreateTrajectoryWindow((HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE));
+                                strcat_s(statusText, sizeof(statusText), " | Trajectory in new window");
+                            }
+                            
+                            InvalidateRect(g_hwndImage, NULL, FALSE);
+                        }
+                        else {
+                            sprintf_s(msgBuf, sizeof(msgBuf), "Cannot load file:\n%s\n\nPlease select a valid 24-bit or 8-bit BMP image.", filename);
+                            MessageBoxA(hwnd, msgBuf, "Load Error", MB_OK | MB_ICONWARNING);
+                            strcpy_s(statusText, sizeof(statusText), "Error: Cannot load image");
+                        }
+                    }
+                    break;
+                }
+
             }
 
             SetWindowTextA(g_hwndStatus, statusText);
@@ -1727,6 +2783,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 infoY += 20;
                 sprintf_s(line, sizeof(line), "6. Test transform");
                 TextOutA(hdc, infoX, infoY, line, strlen(line));
+                infoY += 20;
+                sprintf_s(line, sizeof(line), "7. Load TestImage");
+                TextOutA(hdc, infoX, infoY, line, strlen(line));
             }
 
             SelectObject(hdc, hOld);
@@ -1743,6 +2802,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    // Save instance handle for later use
+    g_hInstance = hInstance;
+    
+    // Initialize console logger
+    InitConsole();
+    LOG_INFO("Application starting...");
+    LOG_INFO("Instance handle: %p", hInstance);
+    
     WNDCLASS wc = {0};
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = hInstance;
@@ -1750,20 +2817,30 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
 
+    LOG_DEBUG("Registering window class...");
     RegisterClass(&wc);
+    LOG_DEBUG("Window class registered successfully");
 
+    LOG_DEBUG("Creating main window...");
     HWND hwnd = CreateWindow(L"CalibrationGUI", L"9-Point Calibration GUI",
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT, 1300, 900,
         NULL, NULL, hInstance, NULL);
+    LOG_INFO("Main window created: %p", hwnd);
 
     ShowWindow(hwnd, SW_SHOWNORMAL);
     UpdateWindow(hwnd);
+    LOG_INFO("Main window shown");
 
     MSG msg;
+    LOG_INFO("Entering message loop...");
     while (GetMessage(&msg, NULL, 0, 0)) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
+    LOG_INFO("Application exiting...");
+    
+    // Cleanup
+    CloseConsole();
     return (int)msg.wParam;
 }
