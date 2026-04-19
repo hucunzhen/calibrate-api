@@ -36,6 +36,7 @@ typedef struct {
     unsigned char* data;
 } Image;
 
+#pragma pack(push, 1)
 typedef struct {
     unsigned short type;
     unsigned int size;
@@ -57,6 +58,7 @@ typedef struct {
     unsigned int colorsUsed;
     unsigned int colorsImportant;
 } BMPInfoHeader;
+#pragma pack(pop)
 
 // ========== 检测方法枚举 ==========
 

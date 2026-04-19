@@ -412,9 +412,12 @@ int LoadBMP(const char* filename, Image* img) {
         for (int y = 0; y < img->height; y++) {
             unsigned char* dstRow = firstRow + y * dstRowStride;
             int srcY = topDown ? y : (img->height - 1 - y);
-            fseek(fp, header.offset + srcY * srcRowSize, SEEK_SET);
-            if (fread(srcRow, 1, srcRowSize, fp) != (size_t)srcRowSize) {
-                LOG_ERROR("Failed to read row %d", y);
+            long seekPos = header.offset + srcY * srcRowSize;
+            fseek(fp, seekPos, SEEK_SET);
+            size_t bytesRead = fread(srcRow, 1, srcRowSize, fp);
+            if (bytesRead != (size_t)srcRowSize) {
+                LOG_ERROR("Failed to read row %d: seek=%ld, expected=%d, got=%zu, feof=%d, ferror=%d",
+                          y, seekPos, srcRowSize, bytesRead, feof(fp), ferror(fp));
                 free(srcRow);
                 free(img->data);
                 img->data = NULL;
