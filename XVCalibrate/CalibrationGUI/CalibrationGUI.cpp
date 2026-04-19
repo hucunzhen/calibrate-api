@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Calibration GUI Application
  * Full workflow visualization: generate calibration image -> load image -> detect circles -> calibrate -> show results
  */
@@ -19,12 +19,11 @@
 #include <opencv2/imgproc.hpp>
 using namespace cv;
 
-// Include headers
-#include "..\\..\\include\\BlobAnalysis.h"
-#include "..\\..\\include\\FitShape.h"
+// Include headers — proprietary libraries removed, using OpenCV only
 
 // ========== Console Logger ==========
 static FILE* g_consoleFile = NULL;
+static FILE* g_logFile = NULL;
 
 void InitConsole() {
     // Allocate console window
@@ -43,6 +42,9 @@ void InitConsole() {
         printf("Time: %s\n", __TIME__);
         printf("==================================\n");
     }
+    // 同时输出到日志文件，方便排查自动测试问题
+    g_logFile = fopen("D:\\work\\calibrate-api\\debug_autotest.log", "w");
+    if (g_logFile) fprintf(g_logFile, "=== Auto-test log started ===\n");
 }
 
 void CloseConsole() {
@@ -60,6 +62,7 @@ void CloseConsole() {
     strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &t); \
     printf("[%s] " fmt "\n", timeStr, ##__VA_ARGS__); \
     fflush(stdout); \
+    if (g_logFile) { fprintf(g_logFile, "[%s] " fmt "\n", timeStr, ##__VA_ARGS__); fflush(g_logFile); } \
 } while(0)
 
 // Log function variants
@@ -70,10 +73,8 @@ void CloseConsole() {
 
 // Detection method enum
 enum DetectMethod {
-    METHOD_SELF = 0,      // Self-implemented algorithm
-    METHOD_BLOB = 1,      // BlobAnalysisPro library
-    METHOD_FITSHAPE = 2,  // FitShape library
-    METHOD_OPENCV = 3     // OpenCV-based algorithm
+    METHOD_SELF = 0,      // Self-implemented algorithm (gradient-based)
+    METHOD_OPENCV = 1     // OpenCV-based algorithm (contour + shape fitting)
 };
 
 // ========== Constants ==========
@@ -94,7 +95,7 @@ typedef struct {
 typedef struct {
     int width;
     int height;
-    int channels;  // 1=�Ҷ�, 3=��ɫ
+    int channels;  // 1=�Ҷ�, 3=��ɫ
     unsigned char* data;
 } Image;
 
@@ -133,13 +134,30 @@ static HWND g_hwndSobel = NULL;  // Sobel edge display window
 static Image g_image = {0};
 static Image g_trajImage = {0};  // Trajectory display image
 static Image g_sobelImage = {0};  // Sobel edge display image
+
+// 网格展示的6步中间结果图（每步都是3通道BGR，避免调色板问题）
+#define STEP_COUNT 6
+static Image g_stepImages[STEP_COUNT] = {0};
+static const char* g_stepLabels[STEP_COUNT] = {
+    "1. Original Grayscale",     // 原始灰度图（缩放后）
+    "2. Gaussian+OTSU Binary",   // 高斯模糊 + OTSU 二值化
+    "3. Workpiece Mask",          // 形态学处理后的工件 mask
+    "4. Dark Bar Binary",         // 暗条二值化（阈值45反转）
+    "5. Morph Cleaned Bars",      // 形态学清理后的暗条
+    "6. Trajectory (colored)"     // 最终彩色轨迹
+};
+// 网格布局参数
+static const int GRID_COLS = 2;    // 2列，每个格子更宽，避免图片被压缩失真
+static const int GRID_ROWS = 3;    // 3行
+static const int LABEL_HEIGHT = 22;  // 每个格子顶部标签的高度
+static const int GRID_PADDING = 6;   // 格子之间的间距
 static Point2D g_detectedPts[9];
 static int g_detectedCount = 0;
 static AffineTransform g_transform = {0};
 static double g_avgError = 0;
 static double g_maxError = 0;
 static int g_step = 0;
-static DetectMethod g_detectMethod = METHOD_SELF;
+static DetectMethod g_detectMethod = METHOD_SELF;  // Default: Self-Algorithm
 
 // World points (physical coordinates in mm)
 // MUST match the circle positions in CreateCalibrationImage:
@@ -157,6 +175,7 @@ static Point2D g_imagePts[9];
 static Point2D g_trajPixels[10000];
 static Point2D g_trajWorld[10000];
 static int g_trajCount = 0;
+static int g_trajBarId[10000];  // bar index for each trajectory point
 
 // ========== Image Functions ==========
 // Create 8-bit grayscale calibration image
@@ -164,7 +183,7 @@ int CreateCalibrationImage(Image* img, int width, int height) {
     int rowSize = width;  // 8-bit: row size equals width
     img->width = width;
     img->height = height;
-    img->channels = 1;  // �Ҷ�ͼ
+    img->channels = 1;  // �Ҷ�ͼ
     img->data = (unsigned char*)malloc(rowSize * height);
     if (!img->data) return 0;
 
@@ -354,11 +373,11 @@ int LoadBMP(const char* filename, Image* img) {
     
     img->width = width;
     img->height = abs(height);
-    img->channels = bitCount / 8;  // 8λ�Ҷ�=1ͨ��, 24λ��ɫ=3ͨ��
+    img->channels = bitCount / 8;  // 8λ�Ҷ�=1ͨ��, 24λ��ɫ=3ͨ��
     LOG_DEBUG("BMP dimensions: %dx%d, bitCount: %d, channels: %d", width, abs(height), bitCount, img->channels);
     
     int srcRowSize = ((img->width * bitCount / 8 + 3) / 4) * 4;  // Source row size with padding
-    int dstRowSize = img->width * img->channels;                  // ԭʼ��ʽ���Ҷ�=width, ��ɫ=width*3
+    int dstRowSize = img->width * img->channels;                  // ԭʼ��ʽ���Ҷ�=width, ��ɫ=width*3
     int imageSize = dstRowSize * img->height;
     LOG_DEBUG("Image size: %d bytes, rowSize: %d", imageSize, dstRowSize);
     
@@ -470,7 +489,31 @@ int LoadBMP(const char* filename, Image* img) {
         }
         free(rowBuffer);
     } else if (bitCount == 8 && compression == 0) {
-        // Uncompressed 8-bit grayscale: direct copy
+        // Uncompressed 8-bit: read palette and convert to grayscale
+        // 8-bit BMP has a color table (256 entries x 4 bytes BGRA)
+        unsigned char palette[256];
+        {
+            // Read color table entries, extract green channel as grayscale value
+            // Color table starts after BMPHeader(14) + BMPInfoHeader(40) = 54 bytes
+            long colorTableOffset = sizeof(BMPHeader) + sizeof(BMPInfoHeader);
+            fseek(fp, colorTableOffset, SEEK_SET);
+            unsigned int colorsUsed = *(unsigned int*)&dibHeader[32];
+            int numColors = (colorsUsed > 0 && colorsUsed <= 256) ? (int)colorsUsed : 256;
+            for (int i = 0; i < numColors; i++) {
+                unsigned char bgra[4];
+                if (fread(bgra, 1, 4, fp) != 4) {
+                    palette[i] = i;  // fallback
+                } else {
+                    // Use luminance formula: 0.299*R + 0.587*G + 0.114*B
+                    palette[i] = (unsigned char)(0.299f * bgra[2] + 0.587f * bgra[1] + 0.114f * bgra[0] + 0.5f);
+                }
+            }
+            // Fill remaining entries if colorsUsed < 256
+            for (int i = numColors; i < 256; i++) {
+                palette[i] = i;
+            }
+        }
+
         unsigned char* srcRow = (unsigned char*)malloc(srcRowSize);
         if (!srcRow) {
             MessageBoxA(NULL, "Memory allocation failed", "Memory Error", MB_OK);
@@ -494,8 +537,10 @@ int LoadBMP(const char* filename, Image* img) {
                 fclose(fp);
                 return 0;
             }
-            // Direct copy for grayscale (no palette conversion)
-            memcpy(dstRow, srcRow, img->width);
+            // Apply palette mapping: index -> grayscale value
+            for (int x = 0; x < img->width; x++) {
+                dstRow[x] = palette[srcRow[x]];
+            }
         }
         free(srcRow);
     }
@@ -512,9 +557,9 @@ int LoadBMP(const char* filename, Image* img) {
 
 void DrawImageToHDC(HDC hdc, Image* img, int x, int y) {
     if (!img || !img->data) return;
-    int bitCount = img->channels * 8;  // 1ͨ��=8λ�Ҷ�, 3ͨ��=24λ��ɫ
+    int bitCount = img->channels * 8;  // 1ͨ��=8λ�Ҷ�, 3ͨ��=24λ��ɫ
     
-    // BITMAPINFOHEADER(40) + ��ɫ��(256*4=1024)���ܹ�1064�ֽ�
+    // BITMAPINFOHEADER(40) + ��ɫ��(256*4=1024)���ܹ�1064�ֽ�
     BITMAPINFO* pbmi = (BITMAPINFO*)malloc(sizeof(BITMAPINFOHEADER) + 256 * sizeof(RGBQUAD));
     if (!pbmi) return;
     memset(pbmi, 0, sizeof(BITMAPINFOHEADER) + 256 * sizeof(RGBQUAD));
@@ -526,7 +571,7 @@ void DrawImageToHDC(HDC hdc, Image* img, int x, int y) {
     pbmi->bmiHeader.biBitCount = (unsigned short)bitCount;
     pbmi->bmiHeader.biCompression = BI_RGB;
     
-    // 8λ�Ҷ�ͼ��Ҫ��ɫ��
+    // 8λ�Ҷ�ͼ��Ҫ��ɫ��
     if (bitCount == 8) {
         for (int i = 0; i < 256; i++) {
             pbmi->bmiColors[i].rgbBlue = i;
@@ -560,14 +605,14 @@ void ScaleImage(Image* src, Image* dst, int dstWidth, int dstHeight) {
             double srcY = y * scaleY;
             int x0 = (int)srcX;
             int y0 = (int)srcY;
-            int x1 = min(x0 + 1, src->width - 1);
-            int y1 = min(y0 + 1, src->height - 1);
+            int x1 = std::min(x0 + 1, src->width - 1);
+            int y1 = std::min(y0 + 1, src->height - 1);
             double fx = srcX - x0;
             double fy = srcY - y0;
             
             // Clamp source coordinates
-            x0 = min(x0, src->width - 1);
-            y0 = min(y0, src->height - 1);
+            x0 = std::min(x0, src->width - 1);
+            y0 = std::min(y0, src->height - 1);
             
             unsigned char* p00 = src->data + y0 * srcRowSize + x0 * src->channels;
             unsigned char* p10 = src->data + y0 * srcRowSize + x1 * src->channels;
@@ -583,771 +628,686 @@ void ScaleImage(Image* src, Image* dst, int dstWidth, int dstHeight) {
     }
 }
 
-// ========== Circle Detection ==========
-// Image structure: dark background, white calibration region with black circles, white crosshairs at centers
+// ========== Circle Detection (Contour + Crosshair Refinement) ==========
+// Step 1: OTSU find calib region, then find dark circle contours inside it
+// Step 2: Filter by circularity & radius consistency, select 9 best
+// Step 3: Crosshair refinement within each circle for sub-pixel center
 void DetectCircles(Image* img, Point2D* pts, int* count) {
-    LOG_INFO("=== Starting Circle Detection ===");
+    LOG_INFO("=== Starting Circle Detection (HoughCircles + Crosshair) ===");
     LOG_DEBUG("Input image: %dx%d, channels: %d", img->width, img->height, img->channels);
-    
-    int srcRowSize = ((img->width * img->channels + 3) / 4) * 4;
+
     *count = 0;
-    
-    // Save debug image
-    SaveBMP("debug_detect.bmp", img);
-    
-    // Helper lambda to get grayscale pixel value
-    auto getGray = [&](int x, int y) -> int {
-        int offset = y * srcRowSize + x * img->channels;
-        if (img->channels == 1) {
-            return img->data[offset];
-        } else {
-            return (img->data[offset] + img->data[offset+1] + img->data[offset+2]) / 3;
+    int w = img->width, h = img->height;
+
+    // Convert Image to cv::Mat (grayscale)
+    Mat grayMat;
+    if (img->channels == 1) {
+        int pitch = ((w + 3) / 4) * 4;
+        Mat tmp(h, w, CV_8UC1, img->data, pitch);
+        grayMat = tmp.clone();
+        tmp.release();
+    } else {
+        int srcRowSize = ((w * img->channels + 3) / 4) * 4;
+        Mat colorMat(h, w, CV_8UC3, img->data, srcRowSize);
+        cvtColor(colorMat, grayMat, COLOR_BGR2GRAY);
+        colorMat.release();
+    }
+
+    int dstRowSize = ((img->width * img->channels + 3) / 4) * 4;
+
+    // ---- Step 0: Find calibration region using OTSU ----
+    Mat blurred;
+    GaussianBlur(grayMat, blurred, Size(5, 5), 1.0);
+    Mat brightBinary;
+    threshold(blurred, brightBinary, 0, 255, THRESH_BINARY + THRESH_OTSU);
+
+    // Morphological cleanup
+    Mat kernel = getStructuringElement(MORPH_ELLIPSE, Size(7, 7));
+    morphologyEx(brightBinary, brightBinary, MORPH_CLOSE, kernel);
+    morphologyEx(brightBinary, brightBinary, MORPH_OPEN, kernel);
+
+    // Find the largest bright contour (calibration area)
+    std::vector<std::vector<Point>> brightContours;
+    findContours(brightBinary, brightContours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+
+    if (brightContours.empty()) {
+        MessageBoxA(NULL, "No calibration region found (OTSU)!", "Error", MB_OK);
+        LOG_ERROR("No bright calibration region found by OTSU");
+        return;
+    }
+
+    int maxIdx = 0;
+    double maxArea = 0;
+    for (size_t i = 0; i < brightContours.size(); i++) {
+        double a = contourArea(brightContours[i]);
+        if (a > maxArea) { maxArea = a; maxIdx = (int)i; }
+    }
+
+    Rect bbox = boundingRect(brightContours[maxIdx]);
+    LOG_INFO("Calibration region: (%d,%d)-(%d,%d), area=%.0f",
+             bbox.x, bbox.y, bbox.x + bbox.width, bbox.y + bbox.height, maxArea);
+
+    if (bbox.width < 100 || bbox.height < 100) {
+        MessageBoxA(NULL, "Calibration region too small!", "Error", MB_OK);
+        return;
+    }
+
+    // Draw green border on original image
+    for (int x = bbox.x; x <= bbox.x + bbox.width; x++) {
+        for (int t = -2; t <= 2; t++) {
+            int y1 = bbox.y + t, y2 = bbox.y + bbox.height + t;
+            if (x >= 0 && x < w) {
+                if (y1 >= 0 && y1 < h) {
+                    int off = y1 * dstRowSize + x * img->channels;
+                    if (img->channels == 1) img->data[off] = 255;
+                    else { img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0; }
+                }
+                if (y2 >= 0 && y2 < h) {
+                    int off = y2 * dstRowSize + x * img->channels;
+                    if (img->channels == 1) img->data[off] = 255;
+                    else { img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0; }
+                }
+            }
         }
+    }
+    for (int y = bbox.y; y <= bbox.y + bbox.height; y++) {
+        for (int t = -2; t <= 2; t++) {
+            int x1 = bbox.x + t, x2 = bbox.x + bbox.width + t;
+            if (y >= 0 && y < h) {
+                if (x1 >= 0 && x1 < w) {
+                    int off = y * dstRowSize + x1 * img->channels;
+                    if (img->channels == 1) img->data[off] = 255;
+                    else { img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0; }
+                }
+                if (x2 >= 0 && x2 < w) {
+                    int off = y * dstRowSize + x2 * img->channels;
+                    if (img->channels == 1) img->data[off] = 255;
+                    else { img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0; }
+                }
+            }
+        }
+    }
+
+    // Create mask from calibration region
+    Mat calibMask = Mat::zeros(h, w, CV_8UC1);
+    drawContours(calibMask, brightContours, maxIdx, Scalar(255), FILLED);
+
+    // ---- Step 1: Find dark circles using contour analysis within calib region ----
+    Mat innerGray = grayMat.clone();
+    innerGray.setTo(128, calibMask == 0);
+
+    // Small morphological cleanup kernel
+    Mat kernel2 = getStructuringElement(MORPH_ELLIPSE, Size(3, 3));
+
+    // Try OTSU first, then adaptive threshold as fallback
+    Mat darkBinary;
+    threshold(innerGray, darkBinary, 0, 255, THRESH_BINARY_INV + THRESH_OTSU);
+    darkBinary.setTo(0, calibMask == 0);
+    morphologyEx(darkBinary, darkBinary, MORPH_OPEN, kernel2);
+    morphologyEx(darkBinary, darkBinary, MORPH_CLOSE, kernel2);
+
+    std::vector<std::vector<Point>> darkContours;
+    findContours(darkBinary, darkContours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
+    printf("OTSU: Found %d dark regions\n", (int)darkContours.size());
+
+    // Also try adaptive threshold — compare which gives more circular candidates
+    Mat darkAdaptive;
+    adaptiveThreshold(innerGray, darkAdaptive, 255,
+                      ADAPTIVE_THRESH_GAUSSIAN_C, THRESH_BINARY_INV, 31, 10);
+    darkAdaptive.setTo(0, calibMask == 0);
+    morphologyEx(darkAdaptive, darkAdaptive, MORPH_OPEN, kernel2);
+    morphologyEx(darkAdaptive, darkAdaptive, MORPH_CLOSE, kernel2);
+
+    std::vector<std::vector<Point>> adaptiveContours;
+    findContours(darkAdaptive, adaptiveContours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
+    printf("Adaptive: Found %d dark regions\n", (int)adaptiveContours.size());
+
+    // Count circular candidates (circularity > 0.5, area > 50) for each method
+    auto countCircular = [](const std::vector<std::vector<Point>>& contours) -> int {
+        int count = 0;
+        for (size_t i = 0; i < contours.size(); i++) {
+            double area = contourArea(contours[i]);
+            if (area < 50) continue;
+            double perimeter = arcLength(contours[i], true);
+            double circularity = (perimeter > 0) ? (4.0 * CV_PI * area) / (perimeter * perimeter) : 0;
+            if (circularity > 0.5) count++;
+        }
+        return count;
     };
-    
-    // Step 1: Calculate global statistics to find white calibration region
-    int minBrightness = 255, maxBrightness = 0;
-    for (int y = 0; y < img->height; y += 10) {
-        for (int x = 0; x < img->width; x += 10) {
-            int brightness = getGray(x, y);
-            if (brightness < minBrightness) minBrightness = brightness;
-            if (brightness > maxBrightness) maxBrightness = brightness;
+
+    int otsuCircular = countCircular(darkContours);
+    int adaptiveCircular = countCircular(adaptiveContours);
+    printf("Circular candidates: OTSU=%d, Adaptive=%d\n", otsuCircular, adaptiveCircular);
+
+    // Use the method with more circular candidates
+    bool usedAdaptive = false;
+    if (adaptiveCircular > otsuCircular) {
+        darkContours = adaptiveContours;
+        usedAdaptive = true;
+    }
+    LOG_INFO("Dark contours: %d (used=%s, circular: OTSU=%d, Adaptive=%d)",
+             (int)darkContours.size(), usedAdaptive ? "adaptive" : "OTSU",
+             otsuCircular, adaptiveCircular);
+    LOG_INFO("Dark contours: %d", (int)darkContours.size());
+
+    // Filter and fit circles
+    struct CircleInfo {
+        Point2f center;
+        float radius;
+        float circularity;
+        double area;
+    };
+    std::vector<CircleInfo> circleCandidates;
+
+    for (size_t i = 0; i < darkContours.size(); i++) {
+        double area = contourArea(darkContours[i]);
+        if (area < 50) continue;
+
+        Point2f center;
+        float radius;
+        minEnclosingCircle(darkContours[i], center, radius);
+
+        double perimeter = arcLength(darkContours[i], true);
+        double circularity = (perimeter > 0) ? (4.0 * CV_PI * area) / (perimeter * perimeter) : 0;
+
+        CircleInfo info;
+        info.center = center;
+        info.radius = radius;
+        info.circularity = (float)circularity;
+        info.area = area;
+        circleCandidates.push_back(info);
+    }
+
+    // Select 9 circles: prefer high circularity with consistent radius
+    std::vector<CircleInfo> circularOnes;
+    for (size_t i = 0; i < circleCandidates.size(); i++) {
+        if (circleCandidates[i].circularity > 0.5f)
+            circularOnes.push_back(circleCandidates[i]);
+    }
+
+    std::vector<CircleInfo> selected;
+
+    if (circularOnes.size() >= 9) {
+        // Find median radius among circular candidates
+        std::sort(circularOnes.begin(), circularOnes.end(),
+            [](const CircleInfo& a, const CircleInfo& b) { return a.radius < b.radius; });
+        float medianR = circularOnes[circularOnes.size() / 2].radius;
+
+        // Take circles within 30% of median radius
+        for (size_t i = 0; i < circularOnes.size(); i++) {
+            if (fabs(circularOnes[i].radius - medianR) / medianR < 0.3f)
+                selected.push_back(circularOnes[i]);
+        }
+
+        if (selected.size() > 9) {
+            std::sort(selected.begin(), selected.end(),
+                [](const CircleInfo& a, const CircleInfo& b) { return a.circularity > b.circularity; });
+            selected.resize(9);
+        }
+        LOG_INFO("Selected %d from %d circular candidates (median R=%.1f)",
+                 (int)selected.size(), (int)circularOnes.size(), medianR);
+    }
+
+    // Fallback: if not enough from circular filter, try the other threshold method
+    if (selected.size() < 9 && !usedAdaptive) {
+        LOG_WARN("OTSU gave only %d selected, retrying with adaptive threshold...", (int)selected.size());
+        circleCandidates.clear();
+        circularOnes.clear();
+        selected.clear();
+
+        for (size_t i = 0; i < adaptiveContours.size(); i++) {
+            double area = contourArea(adaptiveContours[i]);
+            if (area < 50) continue;
+            Point2f center; float radius;
+            minEnclosingCircle(adaptiveContours[i], center, radius);
+            double perimeter = arcLength(adaptiveContours[i], true);
+            double circularity = (perimeter > 0) ? (4.0 * CV_PI * area) / (perimeter * perimeter) : 0;
+            CircleInfo info;
+            info.center = center; info.radius = radius;
+            info.circularity = (float)circularity; info.area = area;
+            circleCandidates.push_back(info);
+            if (circularity > 0.5f) circularOnes.push_back(info);
+        }
+        usedAdaptive = true;
+        LOG_INFO("Adaptive retry: %d candidates, %d circular", 
+                 (int)circleCandidates.size(), (int)circularOnes.size());
+
+        // Re-run circular selection on adaptive data
+        if (circularOnes.size() >= 9) {
+            std::sort(circularOnes.begin(), circularOnes.end(),
+                [](const CircleInfo& a, const CircleInfo& b) { return a.radius < b.radius; });
+            float medianR = circularOnes[circularOnes.size() / 2].radius;
+            for (size_t i = 0; i < circularOnes.size() && selected.size() < 9; i++) {
+                if (fabs(circularOnes[i].radius - medianR) / medianR < 0.3f)
+                    selected.push_back(circularOnes[i]);
+            }
+            if (selected.size() > 9) {
+                std::sort(selected.begin(), selected.end(),
+                    [](const CircleInfo& a, const CircleInfo& b) { return a.circularity > b.circularity; });
+                selected.resize(9);
+            }
+            LOG_INFO("Adaptive selected: %d circles (median R=%.1f)", (int)selected.size(), medianR);
         }
     }
-    
-    // Step 2: Find the white calibration region using row/column analysis
-    int whiteMinX = img->width, whiteMinY = img->height;
-    int whiteMaxX = 0, whiteMaxY = 0;
-    int brightThreshold = (minBrightness + maxBrightness * 3) / 4;
-    
-    // Count bright pixels per row and column
-    int* rowBrightCount = (int*)calloc(img->height, sizeof(int));
-    int* colBrightCount = (int*)calloc(img->width, sizeof(int));
-    
-    for (int y = 0; y < img->height; y++) {
-        for (int x = 0; x < img->width; x++) {
-            int brightness = getGray(x, y);
-            if (brightness > brightThreshold) {
-                rowBrightCount[y]++;
-                colBrightCount[x]++;
+
+    // If still not enough, relax criteria
+    if (selected.size() < 9) {
+        LOG_WARN("Only %d circles, trying relaxed filter...", (int)selected.size());
+
+        float targetR = 0;
+        if (!circularOnes.empty()) {
+            std::sort(circularOnes.begin(), circularOnes.end(),
+                [](const CircleInfo& a, const CircleInfo& b) { return a.radius < b.radius; });
+            targetR = circularOnes[circularOnes.size() / 2].radius;
+        }
+
+        std::sort(circleCandidates.begin(), circleCandidates.end(),
+            [](const CircleInfo& a, const CircleInfo& b) { return a.area > b.area; });
+
+        for (size_t i = 0; i < circleCandidates.size() && selected.size() < 9; i++) {
+            // Skip duplicates
+            bool dup = false;
+            for (size_t j = 0; j < selected.size(); j++) {
+                float d = norm(circleCandidates[i].center - selected[j].center);
+                if (d < (targetR > 0 ? targetR * 0.5f : 50)) { dup = true; break; }
+            }
+            if (dup) continue;
+
+            if (targetR > 0) {
+                float rRatio = fabs(circleCandidates[i].radius - targetR) / targetR;
+                if (rRatio < 0.3f || circleCandidates[i].circularity > 0.3f)
+                    selected.push_back(circleCandidates[i]);
+            } else {
+                selected.push_back(circleCandidates[i]);
             }
         }
+        LOG_INFO("After relaxed filter: %d circles", (int)selected.size());
     }
-    
-    // Find rows with significant bright content (calibration region rows)
-    int significantRows = 0;
-    int avgBrightPerRow = img->width / 10;  // Threshold for "significant" row
-    
-    // Find minY (first significant row)
-    for (int y = 0; y < img->height; y++) {
-        if (rowBrightCount[y] > avgBrightPerRow) {
-            whiteMinY = y;
-            break;
-        }
-    }
-    
-    // Find maxY (last significant row)
-    for (int y = img->height - 1; y >= 0; y--) {
-        if (rowBrightCount[y] > avgBrightPerRow) {
-            whiteMaxY = y;
-            break;
-        }
-    }
-    
-    // Find minX and maxX from columns
-    for (int x = 0; x < img->width; x++) {
-        if (colBrightCount[x] > avgBrightPerRow) {
-            if (x < whiteMinX) whiteMinX = x;
-            if (x > whiteMaxX) whiteMaxX = x;
-        }
-    }
-    
-    free(rowBrightCount);
-    free(colBrightCount);
-    
-    // Expand bounds slightly to ensure coverage
-    int expand = 5;
-    whiteMinX = max(0, whiteMinX - expand);
-    whiteMinY = max(0, whiteMinY - expand);
-    whiteMaxX = min(img->width - 1, whiteMaxX + expand);
-    whiteMaxY = min(img->height - 1, whiteMaxY + expand);
-    
-    // Debug: show the threshold values
-    char dbg_th[256];
-    sprintf_s(dbg_th, sizeof(dbg_th), "Thresholds - bright: %d, min: %d, max: %d\nRegion: (%d,%d) to (%d,%d)",
-        brightThreshold, minBrightness, maxBrightness, whiteMinX, whiteMinY, whiteMaxX, whiteMaxY);
-    MessageBoxA(NULL, dbg_th, "Debug", MB_OK);
-    
-    if (whiteMaxX - whiteMinX < 100 || whiteMaxY - whiteMinY < 100) {
-        MessageBoxA(NULL, "White calibration region not found!", "Error", MB_OK);
+
+    if (selected.size() < 3) {
+        MessageBoxA(NULL, "Not enough circles detected!", "Error", MB_OK);
         return;
     }
-    
-    // Draw the detected white region (green rectangle for color images)
-    if (img->channels == 3) {
-        for (int x = whiteMinX; x <= whiteMaxX; x++) {
-            for (int t = -2; t <= 2; t++) {
-                int y1 = whiteMinY + t;
-                int y2 = whiteMaxY + t;
-                if (x >= 0 && x < img->width) {
-                    if (y1 >= 0 && y1 < img->height) {
-                        int off = y1 * srcRowSize + x * 3;
-                        img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
-                    }
-                    if (y2 >= 0 && y2 < img->height) {
-                        int off = y2 * srcRowSize + x * 3;
-                        img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
-                    }
-                }
-            }
-        }
-        for (int y = whiteMinY; y <= whiteMaxY; y++) {
-            for (int t = -2; t <= 2; t++) {
-                int x1 = whiteMinX + t;
-                int x2 = whiteMaxX + t;
-                if (y >= 0 && y < img->height) {
-                    if (x1 >= 0 && x1 < img->width) {
-                        int off = y * srcRowSize + x1 * 3;
-                        img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
-                    }
-                    if (x2 >= 0 && x2 < img->width) {
-                        int off = y * srcRowSize + x2 * 3;
-                        img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
-                    }
-                }
-            }
-        }
-    }
-    
-    // Step 3: Within white region, find all white crosshair candidates
-    // Strategy: Find all bright spots surrounded by dark (crosshairs in black circles)
-    Point2D candidates[50];
-    int candCount = 0;
-    int crosshairThreshold = brightThreshold + 30;
-    
-    // Scan the white region for crosshair patterns
-    for (int y = whiteMinY + 20; y < whiteMaxY - 20; y += 5) {
-        for (int x = whiteMinX + 20; x < whiteMaxX - 20; x += 5) {
-            int brightness = getGray(x, y);
-            
-            // This might be a crosshair if it's bright
-            if (brightness > crosshairThreshold) {
-                // Check if surrounded by dark (black circle)
-                int darkCount = 0, brightCount = 0;
-                for (int dy = -20; dy <= 20; dy += 4) {
-                    for (int dx = -20; dx <= 20; dx += 4) {
-                        if (abs(dx) <= 3 || abs(dy) <= 3) continue;  // Skip center cross
-                        int nx = x + dx, ny = y + dy;
-                        if (nx >= whiteMinX && nx < whiteMaxX && ny >= whiteMinY && ny < whiteMaxY) {
-                            int lb = getGray(nx, ny);
-                            if (lb < crosshairThreshold / 2) darkCount++;
-                            else brightCount++;
-                        }
-                    }
-                }
-                
-                // Crosshair: bright center, mostly dark surroundings
-                if (darkCount > 15 && brightCount < 10 && candCount < 50) {
-                    candidates[candCount].x = x;
-                    candidates[candCount].y = y;
-                    candCount++;
-                }
-            }
-        }
-    }
-    
-    // Show candidate count
-    char dbg2[128];
-    sprintf_s(dbg2, sizeof(dbg2), "Found %d crosshair candidates", candCount);
-    MessageBoxA(NULL, dbg2, "Debug", MB_OK);
-    
-    if (candCount < 9) {
-        MessageBoxA(NULL, "Not enough crosshairs found!", "Error", MB_OK);
-        *count = 0;
-        return;
-    }
-    
-    // Remove duplicates (points too close together)
-    Point2D filtered[50];
-    int filteredCount = 0;
-    int minDist = (whiteMaxX - whiteMinX) / 6;  // Minimum distance between points
-    
-    for (int i = 0; i < candCount; i++) {
-        int isDup = 0;
-        for (int j = 0; j < filteredCount; j++) {
-            int dx = (int)(candidates[i].x - filtered[j].x);
-            int dy = (int)(candidates[i].y - filtered[j].y);
-            if (sqrt((double)dx*dx + dy*dy) < minDist) {
-                isDup = 1;
-                break;
-            }
-        }
-        if (!isDup) {
-            filtered[filteredCount++] = candidates[i];
-        }
-    }
-    
-    // Sort by Y to group into rows
-    for (int i = 0; i < filteredCount; i++) {
-        for (int j = i + 1; j < filteredCount; j++) {
-            if (filtered[j].y < filtered[i].y) {
-                Point2D tmp = filtered[i];
-                filtered[i] = filtered[j];
-                filtered[j] = tmp;
-            }
-        }
-    }
-    
-    // Group into 3 rows based on actual Y positions
-    // Find 3 Y clusters
-    int row1Y = filtered[0].y;
-    int row2Y = 0, row3Y = 0;
-    
-    for (int i = 1; i < filteredCount && i < 20; i++) {
-        if (row2Y == 0 && filtered[i].y - filtered[0].y > (whiteMaxY - whiteMinY) / 4) {
-            row2Y = filtered[i].y;
-        }
-        if (row2Y > 0 && row3Y == 0 && filtered[i].y - row2Y > (whiteMaxY - whiteMinY) / 4) {
-            row3Y = filtered[i].y;
-            break;
-        }
-    }
-    
-    // If we only found 2 rows, divide the height into 3 equal parts
-    if (row3Y == 0) {
-        row1Y = whiteMinY + (whiteMaxY - whiteMinY) / 6;
-        row2Y = whiteMinY + (whiteMaxY - whiteMinY) / 2;
-        row3Y = whiteMinY + (whiteMaxY - whiteMinY) * 5 / 6;
-    }
-    
-    // Select 9 points: 3 from each row
+
+    // ---- Step 2: Crosshair refinement within each circle ----
     int foundCount = 0;
-    for (int i = 0; i < filteredCount && foundCount < 9; i++) {
-        int row = 0;
-        double d1 = fabs(filtered[i].y - row1Y);
-        double d2 = fabs(filtered[i].y - row2Y);
-        double d3 = fabs(filtered[i].y - row3Y);
-        
-        if (d1 <= d2 && d1 <= d3) row = 0;
-        else if (d2 <= d1 && d2 <= d3) row = 1;
-        else row = 2;
-        
-        pts[foundCount] = filtered[i];
+    for (int i = 0; i < (int)selected.size() && foundCount < 9; i++) {
+        Point2f roughCenter = selected[i].center;
+        float radius = selected[i].radius;
+        int cx = (int)round(roughCenter.x);
+        int cy = (int)round(roughCenter.y);
+        int searchR = (int)(radius * 0.8);
+
+        LOG_DEBUG("Circle %d: rough=(%.1f, %.1f), r=%.1f",
+                  foundCount, roughCenter.x, roughCenter.y, radius);
+
+        int x0 = std::max(0, cx - searchR);
+        int y0 = std::max(0, cy - searchR);
+        int x1 = std::min(w - 1, cx + searchR);
+        int y1 = std::min(h - 1, cy + searchR);
+        if (x1 <= x0 || y1 <= y0) continue;
+
+        Mat roi = grayMat(Range(y0, y1 + 1), Range(x0, x1 + 1));
+        int roiCx = cx - x0, roiCy = cy - y0;
+
+        // Sample center vs ring to determine crosshair type
+        int centerVal = 0;
+        for (int dy = -2; dy <= 2; dy++) {
+            for (int dx = -2; dx <= 2; dx++) {
+                int nx = roiCx + dx, ny = roiCy + dy;
+                if (nx >= 0 && nx < roi.cols && ny >= 0 && ny < roi.rows)
+                    centerVal += roi.at<uchar>(ny, nx);
+            }
+        }
+        centerVal /= 25;
+
+        int ringVal = 0, samples = 0;
+        for (int dy = -searchR; dy <= searchR; dy += 3) {
+            for (int dx = -searchR; dx <= searchR; dx += 3) {
+                float dist = sqrt((float)(dx*dx + dy*dy));
+                if (dist > radius * 0.3f && dist < radius * 0.9f) {
+                    int nx = roiCx + dx, ny = roiCy + dy;
+                    if (nx >= 0 && nx < roi.cols && ny >= 0 && ny < roi.rows) {
+                        ringVal += roi.at<uchar>(ny, nx);
+                        samples++;
+                    }
+                }
+            }
+        }
+        if (samples > 0) ringVal /= samples;
+
+        bool brightCrosshair = (centerVal > ringVal);
+        LOG_DEBUG("  centerVal=%d, ringVal=%d, brightCrosshair=%d", centerVal, ringVal, brightCrosshair);
+
+        if (brightCrosshair) {
+            // Weighted centroid of bright pixels (crosshair lines)
+            float sumX = 0, sumW = 0;
+            for (int dx = -searchR; dx <= searchR; dx++) {
+                int nx = roiCx + dx;
+                if (nx < 0 || nx >= roi.cols) continue;
+                int val = 0;
+                for (int dy2 = -1; dy2 <= 1; dy2++) {
+                    int ny = roiCy + dy2;
+                    if (ny >= 0 && ny < roi.rows) val += roi.at<uchar>(ny, nx);
+                }
+                val /= 3;
+                if (val > ringVal) {
+                    sumX += nx * val;
+                    sumW += val;
+                }
+            }
+
+            float sumY = 0;
+            sumW = 0;
+            for (int dy = -searchR; dy <= searchR; dy++) {
+                int ny = roiCy + dy;
+                if (ny < 0 || ny >= roi.rows) continue;
+                int val = 0;
+                for (int dx2 = -1; dx2 <= 1; dx2++) {
+                    int nx = roiCx + dx2;
+                    if (nx >= 0 && nx < roi.cols) val += roi.at<uchar>(ny, nx);
+                }
+                val /= 3;
+                if (val > ringVal) {
+                    sumY += ny * val;
+                    sumW += val;
+                }
+            }
+
+            if (sumW > 0) {
+                pts[foundCount].x = sumX / sumW + x0;
+                pts[foundCount].y = sumY / sumW + y0;
+            } else {
+                pts[foundCount].x = roughCenter.x;
+                pts[foundCount].y = roughCenter.y;
+            }
+        } else {
+            // Dark circle on bright background: centroid of dark pixels
+            float thresh = (centerVal + ringVal) / 2.0f;
+            float sumX = 0, sumY = 0, sumW = 0;
+            for (int dy = -searchR; dy <= searchR; dy++) {
+                for (int dx = -searchR; dx <= searchR; dx++) {
+                    int nx = roiCx + dx, ny = roiCy + dy;
+                    if (nx < 0 || nx >= roi.cols || ny < 0 || ny >= roi.rows) continue;
+                    if (roi.at<uchar>(ny, nx) < thresh) {
+                        sumX += nx;
+                        sumY += ny;
+                        sumW += 1;
+                    }
+                }
+            }
+            if (sumW > 0) {
+                pts[foundCount].x = sumX / sumW + x0;
+                pts[foundCount].y = sumY / sumW + y0;
+            } else {
+                pts[foundCount].x = roughCenter.x;
+                pts[foundCount].y = roughCenter.y;
+            }
+        }
+        LOG_DEBUG("  Final: (%.1f, %.1f)", pts[foundCount].x, pts[foundCount].y);
         foundCount++;
-        
-        // Only take 3 per row
-        int countInRow = 0;
-        for (int j = 0; j < foundCount - 1; j++) {
-            double dj = fabs(pts[j].y - pts[foundCount-1].y);
-            if (dj < (whiteMaxY - whiteMinY) / 4) countInRow++;
-        }
-        if (countInRow >= 3) {
-            foundCount--;  // Remove this point, row is full
-        }
     }
-    
-    // Sort final points: first by row (Y), then by column (X)
+
+    // ---- Step 3: Sort into 3x3 grid (by Y rows, then X columns) ----
     for (int i = 0; i < foundCount; i++) {
         for (int j = i + 1; j < foundCount; j++) {
-            int rowI = (int)(pts[i].y / ((whiteMaxY - whiteMinY) / 3));
-            int rowJ = (int)(pts[j].y / ((whiteMaxY - whiteMinY) / 3));
-            if (rowI > rowJ || (rowI == rowJ && pts[j].x < pts[i].x)) {
-                Point2D tmp = pts[i];
-                pts[i] = pts[j];
-                pts[j] = tmp;
+            if (pts[j].y < pts[i].y) {
+                Point2D tmp = pts[i]; pts[i] = pts[j]; pts[j] = tmp;
             }
         }
     }
-    
-    *count = (foundCount > 9) ? 9 : foundCount;
-    
-    LOG_INFO("Circle detection complete: %d points detected", *count);
+
+    if (foundCount > 3) {
+        // Find the 2 largest Y gaps to split into 3 rows
+        float maxGap = 0, secondGap = 0;
+        int maxGapIdx = 0, secondGapIdx = -1;
+        for (int i = 0; i < foundCount - 1; i++) {
+            float gap = fabs(pts[i+1].y - pts[i].y);
+            if (gap > maxGap) {
+                secondGap = maxGap; secondGapIdx = maxGapIdx;
+                maxGap = gap; maxGapIdx = i;
+            } else if (gap > secondGap) {
+                secondGap = gap; secondGapIdx = i;
+            }
+        }
+
+        int split1 = std::min(maxGapIdx, secondGapIdx);
+        int split2 = std::max(maxGapIdx, secondGapIdx);
+
+        auto sortRow = [&](int start, int end) {
+            for (int i = start; i < end; i++) {
+                for (int j = i + 1; j < end; j++) {
+                    if (pts[j].x < pts[i].x) {
+                        Point2D tmp = pts[i]; pts[i] = pts[j]; pts[j] = tmp;
+                    }
+                }
+            }
+        };
+
+        sortRow(0, split1 + 1);
+        sortRow(split1 + 1, split2 + 1);
+        sortRow(split2 + 1, foundCount);
+    } else {
+        for (int i = 0; i < foundCount; i++) {
+            for (int j = i + 1; j < foundCount; j++) {
+                if (pts[j].x < pts[i].x) {
+                    Point2D tmp = pts[i]; pts[i] = pts[j]; pts[j] = tmp;
+                }
+            }
+        }
+    }
+
+    *count = std::min(9, foundCount);
+
+    LOG_INFO("Circle detection complete: %d points", *count);
     for (int i = 0; i < *count; i++) {
         LOG_DEBUG("  Point %d: (%.1f, %.1f)", i, pts[i].x, pts[i].y);
     }
-    
-    // Show results
+
     char msg[512];
-    sprintf_s(msg, sizeof(msg), "Detected %d points:\n\nRow Y positions: %.0f, %.0f, %.0f\n\n",
-        *count, row1Y, row2Y, row3Y);
+    sprintf_s(msg, sizeof(msg), "HoughCircles+Crosshair: %d/%d points\n", *count, foundCount);
     for (int i = 0; i < *count; i++) {
         char line[64];
-        sprintf_s(line, sizeof(line), "%d: (%.0f, %.0f)\n", i + 1, pts[i].x, pts[i].y);
+        sprintf_s(line, sizeof(line), "%d: (%.1f, %.1f)\n", i + 1, pts[i].x, pts[i].y);
         strcat_s(msg, sizeof(msg), line);
     }
     MessageBoxA(NULL, msg, "Detection Results", MB_OK);
 }
 
-// ========== BlobAnalysisPro Detection ==========
-// Use BlobAnalysisPro library to detect circle centers
+// ========== OpenCV-based Adaptive Blob Detection ==========
+// Replaces BlobAnalysisPro with pure OpenCV: adaptive threshold + contour + circle fitting
 void BlobDetectCircles(Image* img, Point2D* pts, int* count) {
-    using namespace XVL;
-    
-    LOG_INFO("=== Starting BlobAnalysisPro Detection ===");
-    LOG_DEBUG("Input image: %dx%d", img->width, img->height);
-    
+    LOG_INFO("=== Starting OpenCV Adaptive Blob Detection ===");
+    LOG_DEBUG("Input image: %dx%d, channels: %d", img->width, img->height, img->channels);
+
     *count = 0;
-    
-    // Convert our Image to XVImage format
-    XVImage xvImage;
-    memset(&xvImage, 0, sizeof(xvImage));
-    xvImage.width = img->width;
-    xvImage.height = img->height;
-    xvImage.type = XVL::UInt8;  // 8λ��ͨ���Ҷ�ͼ
-    xvImage.depth = 1;
-    xvImage.pitch = img->width;  // �Ҷ�ͼpitch=width���޶������
-    
-    // Convert to grayscale for XVImage
-    unsigned char* grayData = (unsigned char*)malloc(img->width * img->height);
+
+    int w = img->width, h = img->height;
+
+    // Convert Image to cv::Mat (grayscale)
+    Mat grayMat;
     if (img->channels == 1) {
-        // Already grayscale, direct copy
-        memcpy(grayData, img->data, img->width * img->height);
+        int pitch = ((w + 3) / 4) * 4;
+        Mat tmp(h, w, CV_8UC1, img->data, pitch);
+        grayMat = tmp.clone();
+        tmp.release();
     } else {
-        // Convert BGR to grayscale
-        int srcRowSize = ((img->width * img->channels + 3) / 4) * 4;
-        for (int y = 0; y < img->height; y++) {
-            for (int x = 0; x < img->width; x++) {
-                int srcOffset = y * srcRowSize + x * img->channels;
-                int dstOffset = y * img->width + x;
-                grayData[dstOffset] = (img->data[srcOffset] + img->data[srcOffset+1] + img->data[srcOffset+2]) / 3;
-            }
-        }
+        int srcRowSize = ((w * img->channels + 3) / 4) * 4;
+        Mat colorMat(h, w, CV_8UC3, img->data, srcRowSize);
+        cvtColor(colorMat, grayMat, COLOR_BGR2GRAY);
+        colorMat.release();
     }
-    xvImage.data = grayData;
-    
-    printf("=== Adaptive Blob Detection ===\n");
-    
-    // ========== Step 1: Analyze histogram to find brightest region ==========
-    int histogram[256] = {0};
-    int totalPixels = img->width * img->height;
-    
-    for (int i = 0; i < totalPixels; i++) {
-        histogram[grayData[i]]++;
-    }
-    
-    // Find the peak (most frequent) brightness level
-    int peakLevel = 128;
-    int maxCount = 0;
-    for (int i = 0; i < 256; i++) {
-        if (histogram[i] > maxCount) {
-            maxCount = histogram[i];
-            peakLevel = i;
-        }
-    }
-    printf("Histogram peak: %d (count=%d)\n", peakLevel, maxCount);
-    
-    // Adaptive threshold: Find brightest significant region
-    // Use percentile method - find brightness where top X% pixels exist
-    float brightPercentile = 0.70f;  // Target 70th percentile as "bright"
-    int cumulative = 0;
-    int brightThreshold = 128;
-    int targetPixels = (int)(totalPixels * (1.0f - brightPercentile));
-    
-    for (int i = 255; i >= 0; i--) {
-        cumulative += histogram[i];
-        if (cumulative >= targetPixels) {
-            brightThreshold = i;
-            break;
-        }
-    }
-    printf("Adaptive bright threshold: %d\n", brightThreshold);
-    
-    // Define ROI for the whole image
-    XVRegion fullRoi;
-    fullRoi.optional = NUL;
-    fullRoi.frameWidth = img->width;
-    fullRoi.frameHeight = img->height;
-    
-    // Step 2: Threshold to get bright regions
-    XVThresholdImageToRegionMonoIn threshIn;
-    threshIn.inImage = &xvImage;
-    threshIn.inRegion = fullRoi;
-    threshIn.inMin = (float)brightThreshold;
-    threshIn.inMax = 255;
-    
-    XVThresholdImageToRegionMonoOut threshOut;
-    int ret = XVThresholdImageToRegionMono(threshIn, threshOut);
-    
-    if (ret != 0) {
-        printf("Threshold failed with code: %d\n", ret);
-        free(grayData);
+
+    printf("=== Adaptive Blob Detection (OpenCV) ===\n");
+
+    // ========== Step 1: OTSU threshold to find bright calibration region ==========
+    Mat blurred;
+    GaussianBlur(grayMat, blurred, Size(5, 5), 1.0);
+
+    Mat brightBinary;
+    threshold(blurred, brightBinary, 0, 255, THRESH_BINARY + THRESH_OTSU);
+
+    // Morphological cleanup
+    Mat kernel = getStructuringElement(MORPH_ELLIPSE, Size(7, 7));
+    morphologyEx(brightBinary, brightBinary, MORPH_CLOSE, kernel);
+    morphologyEx(brightBinary, brightBinary, MORPH_OPEN, kernel);
+
+    // Find the largest bright contour (calibration area)
+    std::vector<std::vector<Point>> brightContours;
+    findContours(brightBinary, brightContours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+
+    if (brightContours.empty()) {
+        printf("No bright region found\n");
+        LOG_ERROR("No bright calibration region found");
         return;
     }
-    
-    // Split region into blobs
-    XVSplitRegionToBlobsIn splitIn;
-    splitIn.inRegion = threshOut.outRegion;
-    splitIn.inNeighborhood = 8;
-    
-    XVSplitRegionToBlobsOut splitOut;
-    ret = XVSplitRegionToBlobs(splitIn, splitOut);
-    
-    if (ret != 0 || splitOut.outRegions.size() == 0) {
-        printf("No blobs found in bright region\n");
-        free(grayData);
-        return;
+
+    int maxIdx = 0;
+    double maxArea = 0;
+    for (size_t i = 0; i < brightContours.size(); i++) {
+        double a = contourArea(brightContours[i]);
+        if (a > maxArea) { maxArea = a; maxIdx = (int)i; }
     }
-    
-    // Find the largest blob (calibration area) by pixel count
-    int maxArea = 0;
-    int calibBlobIdx = 0;
-    for (size_t i = 0; i < splitOut.outRegions.size(); i++) {
-        int area = 0;
-        for (size_t j = 0; j < splitOut.outRegions[i].arrayPointRun.size(); j++) {
-            area += splitOut.outRegions[i].arrayPointRun[j].length;
-        }
-        if (area > maxArea) {
-            maxArea = area;
-            calibBlobIdx = i;
-        }
-    }
-    
-    printf("Found %d bright blobs, largest area: %d pixels\n", 
-           (int)splitOut.outRegions.size(), maxArea);
-    
-    XVRegion calibRegion = splitOut.outRegions[calibBlobIdx];
-    
-    // ========== Step 3: Within calibration region, analyze dark regions ==========
-    // Calculate histogram ONLY within calibRegion
-    int darkHist[256] = {0};
-    int calibPixels = 0;
-    
-    for (size_t i = 0; i < calibRegion.arrayPointRun.size(); i++) {
-        int rx = calibRegion.arrayPointRun[i].x;
-        int ry = calibRegion.arrayPointRun[i].y;
-        int len = calibRegion.arrayPointRun[i].length;
-        for (int x = rx; x < rx + len && x < img->width; x++) {
-            int pixel = grayData[ry * img->width + x];
-            darkHist[pixel]++;
-            calibPixels++;
-        }
-    }
-    
-    // Find dark threshold - find the valley between dark and bright in histogram
-    // Find first peak (dark) and second peak (bright background), use valley as threshold
-    
-    // Find dark peak (in lower half)
-    int darkPeak = 0;
-    int darkPeakVal = 0;
-    for (int i = 0; i < 150; i++) {
-        if (darkHist[i] > darkPeakVal) {
-            darkPeakVal = darkHist[i];
-            darkPeak = i;
-        }
-    }
-    
-    // Find bright peak (in upper half)
-    int brightPeak = 255;
-    int brightPeakVal = 0;
-    for (int i = 150; i < 256; i++) {
-        if (darkHist[i] > brightPeakVal) {
-            brightPeakVal = darkHist[i];
-            brightPeak = i;
-        }
-    }
-    
-    printf("Dark peak: %d, Bright peak: %d\n", darkPeak, brightPeak);
-    
-    // Find valley (minimum) between the two peaks
-    int darkThreshold = (darkPeak + brightPeak) / 2;
-    int minVal = darkHist[darkThreshold];
-    for (int i = darkPeak + 1; i < brightPeak; i++) {
-        if (darkHist[i] < minVal) {
-            minVal = darkHist[i];
-            darkThreshold = i;
-        }
-    }
-    
-    printf("Final dark threshold: %d\n", darkThreshold);
-    
-    // Draw the calibration region on image
-    int dstRowSize = ((img->width * img->channels + 3) / 4) * 4;
-    
-    // Calculate bounding box
-    int minX = img->width, minY = img->height, maxX = 0, maxY = 0;
-    for (size_t i = 0; i < calibRegion.arrayPointRun.size(); i++) {
-        int rx = calibRegion.arrayPointRun[i].x;
-        int ry = calibRegion.arrayPointRun[i].y;
-        int len = calibRegion.arrayPointRun[i].length;
-        if (rx < minX) minX = rx;
-        if (ry < minY) minY = ry;
-        if (rx + len > maxX) maxX = rx + len;
-        if (ry > maxY) maxY = ry;
-    }
-    
-    // Draw filled calibRegion - semi-transparent overlay
-    for (size_t i = 0; i < calibRegion.arrayPointRun.size(); i++) {
-        int rx = calibRegion.arrayPointRun[i].x;
-        int ry = calibRegion.arrayPointRun[i].y;
-        int len = calibRegion.arrayPointRun[i].length;
-        for (int x = rx; x < rx + len && x < img->width; x++) {
-            if (x >= 0 && ry >= 0 && ry < img->height) {
-                int off = ry * dstRowSize + x * img->channels;
-                if (img->channels == 1) {
-                    img->data[off] = min(255, img->data[off] + 100);
-                } else {
-                    img->data[off] = min(255, img->data[off] + 100);      // B
-                    img->data[off + 1] = max(0, img->data[off + 1] - 50); // G
-                    img->data[off + 2] = max(0, img->data[off + 2] - 50);  // R
-                }
-            }
-        }
-    }
-    
-    // Draw thick green border
-    for (int x = minX; x <= maxX; x++) {
+    printf("Found %d bright blobs, largest area: %.0f pixels\n",
+           (int)brightContours.size(), maxArea);
+
+    // Create mask from the calibration region
+    Mat calibMask = Mat::zeros(h, w, CV_8UC1);
+    drawContours(calibMask, brightContours, maxIdx, Scalar(255), FILLED);
+
+    // Draw calib region border on original image
+    Rect bbox = boundingRect(brightContours[maxIdx]);
+    int dstRowSize = ((w * img->channels + 3) / 4) * 4;
+
+    // Green border on original image
+    for (int x = bbox.x; x <= bbox.x + bbox.width; x++) {
         for (int t = -2; t <= 2; t++) {
-            int y1 = minY + t;
-            int y2 = maxY + t;
-            if (x >= 0 && x < img->width) {
-                if (y1 >= 0 && y1 < img->height) {
+            int y1 = bbox.y + t, y2 = bbox.y + bbox.height + t;
+            if (x >= 0 && x < w) {
+                if (y1 >= 0 && y1 < h) {
                     int off = y1 * dstRowSize + x * img->channels;
-                    if (img->channels == 1) {
-                        img->data[off] = 255;
-                    } else {
-                        img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
-                    }
+                    if (img->channels == 1) img->data[off] = 255;
+                    else { img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0; }
                 }
-                if (y2 >= 0 && y2 < img->height) {
+                if (y2 >= 0 && y2 < h) {
                     int off = y2 * dstRowSize + x * img->channels;
-                    if (img->channels == 1) {
-                        img->data[off] = 255;
-                    } else {
-                        img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
-                    }
+                    if (img->channels == 1) img->data[off] = 255;
+                    else { img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0; }
                 }
             }
         }
     }
-    for (int y = minY; y <= maxY; y++) {
+    for (int y = bbox.y; y <= bbox.y + bbox.height; y++) {
         for (int t = -2; t <= 2; t++) {
-            int x1 = minX + t;
-            int x2 = maxX + t;
-            if (y >= 0 && y < img->height) {
-                if (x1 >= 0 && x1 < img->width) {
+            int x1 = bbox.x + t, x2 = bbox.x + bbox.width + t;
+            if (y >= 0 && y < h) {
+                if (x1 >= 0 && x1 < w) {
                     int off = y * dstRowSize + x1 * img->channels;
-                    if (img->channels == 1) {
-                        img->data[off] = 255;
-                    } else {
-                        img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
-                    }
+                    if (img->channels == 1) img->data[off] = 255;
+                    else { img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0; }
                 }
-                if (x2 >= 0 && x2 < img->width) {
+                if (x2 >= 0 && x2 < w) {
                     int off = y * dstRowSize + x2 * img->channels;
-                    if (img->channels == 1) {
-                        img->data[off] = 255;
-                    } else {
-                        img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0;
-                    }
+                    if (img->channels == 1) img->data[off] = 255;
+                    else { img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0; }
                 }
             }
         }
     }
-    
-    printf("CalibRegion: area=%d, bbox=(%d,%d)-(%d,%d)\n", 
-           (int)calibRegion.arrayPointRun.size(), minX, minY, maxX, maxY);
-    
-    // ========== Step 4: Find holes (9 circles) inside calibRegion ==========
-    // Use threshold to get dark region within calibRegion
-    XVThresholdImageToRegionMonoIn darkThreshIn;
-    darkThreshIn.inImage = &xvImage;
-    darkThreshIn.inRegion = calibRegion;
-    darkThreshIn.inMin = 0;
-    darkThreshIn.inMax = 255;  // Get all pixels (we'll find holes in this)
-    
-    XVThresholdImageToRegionMonoOut darkThreshOut;
-    ret = XVThresholdImageToRegionMono(darkThreshIn, darkThreshOut);
-    
-    if (ret != 0) {
-        printf("Threshold failed: %d\n", ret);
-        free(grayData);
-        return;
+
+    printf("CalibRegion: bbox=(%d,%d)-(%d,%d)\n", bbox.x, bbox.y, bbox.x+bbox.width, bbox.y+bbox.height);
+
+    // ========== Step 2: Find dark circles (holes) within calibration region ==========
+    // Mask grayMat to only keep pixels inside calib region
+    Mat innerGray = grayMat.clone();
+    innerGray.setTo(128, calibMask == 0);
+
+    // OTSU to find dark regions inside calib area
+    Mat darkBinary;
+    threshold(innerGray, darkBinary, 0, 255, THRESH_BINARY_INV + THRESH_OTSU);
+    darkBinary.setTo(0, calibMask == 0);
+
+    // Small morphological cleanup
+    Mat kernel2 = getStructuringElement(MORPH_ELLIPSE, Size(3, 3));
+    morphologyEx(darkBinary, darkBinary, MORPH_OPEN, kernel2);
+    morphologyEx(darkBinary, darkBinary, MORPH_CLOSE, kernel2);
+
+    // Find dark contours (holes/circles)
+    std::vector<std::vector<Point>> darkContours;
+    findContours(darkBinary, darkContours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
+
+    printf("Found %d dark regions (candidate holes)\n", (int)darkContours.size());
+
+    // ========== Step 3: Filter and fit circles ==========
+    std::vector<Point2D> circleCenters;
+
+    // Sort by area descending, take top candidates
+    std::vector<std::pair<double, int>> sortedHoles;
+    for (size_t i = 0; i < darkContours.size(); i++) {
+        double a = contourArea(darkContours[i]);
+        if (a > 20) sortedHoles.push_back(std::make_pair(a, (int)i));
     }
-    
-    // Now use XVRegionHoles to find holes inside the dark region
-    // The holes are the white circles inside the dark blob!
-    XVRegionHolesIn holesIn;
-    holesIn.inRegion = darkThreshOut.outRegion;
-    holesIn.inNeighborhood = 8;
-    holesIn.inMinHoleArea = 20;   // Minimum hole area
-    holesIn.inMaxHoleArea = 999999; // Maximum hole area
-    
-    XVRegionHolesOut holesOut;
-    ret = XVRegionHoles(holesIn, holesOut);
-    
-    printf("Found %d holes (circles) in dark region\n", (int)holesOut.outHoles.size());
-    
-    // ========== Step 5: Fit circles to hole edges for more accurate centers ==========
-    // Use edge-based circle fitting instead of centroid for higher accuracy
-    vector<Point2D> circleCenters;
-    
-    for (size_t i = 0; i < holesOut.outHoles.size(); i++) {
-        // Get bounding box of the hole for approximate radius
-        int holeMinX = img->width, holeMinY = img->height;
-        int holeMaxX = 0, holeMaxY = 0;
-        long long holePixelCount = 0;
-        
-        for (size_t j = 0; j < holesOut.outHoles[i].arrayPointRun.size(); j++) {
-            int rx = holesOut.outHoles[i].arrayPointRun[j].x;
-            int ry = holesOut.outHoles[i].arrayPointRun[j].y;
-            int len = holesOut.outHoles[i].arrayPointRun[j].length;
-            
-            if (rx < holeMinX) holeMinX = rx;
-            if (ry < holeMinY) holeMinY = ry;
-            if (rx + len > holeMaxX) holeMaxX = rx + len;
-            if (ry > holeMaxY) holeMaxY = ry;
-            holePixelCount += len;
-        }
-        
-        // Calculate approximate center (centroid) for initial estimate
-        long long sumX = 0, sumY = 0;
-        for (size_t j = 0; j < holesOut.outHoles[i].arrayPointRun.size(); j++) {
-            int rx = holesOut.outHoles[i].arrayPointRun[j].x;
-            int ry = holesOut.outHoles[i].arrayPointRun[j].y;
-            int len = holesOut.outHoles[i].arrayPointRun[j].length;
-            for (int k = 0; k < len; k++) {
-                sumX += rx + k;
-                sumY += ry;
-            }
-        }
-        
-        if (holePixelCount <= 0) continue;
-        
-        float approxCenterX = (float)sumX / holePixelCount;
-        float approxCenterY = (float)sumY / holePixelCount;
-        float approxRadius = max(holeMaxX - holeMinX, holeMaxY - holeMinY) / 2.0f;
-        
-        // Extract edge points of the hole for circle fitting
-        vector<XVPoint2D> edgePoints;
-        
-        // Scan the perimeter of the hole to find edge points
-        int cx = (int)approxCenterX;
-        int cy = (int)approxCenterY;
-        int scanRadius = (int)(approxRadius * 1.2f);
-        int numAngles = 36;  // Sample 36 points around the circle
-        
-        for (int a = 0; a < numAngles; a++) {
-            float angle = (float)a * 2.0f * 3.14159f / numAngles;
-            
-            // Scan from center outward to find edge
-            for (int r = 0; r < scanRadius; r++) {
-                int ex = (int)(cx + r * cos(angle));
-                int ey = (int)(cy + r * sin(angle));
-                
-                if (ex < 0 || ex >= img->width || ey < 0 || ey >= img->height) break;
-                
-                int pixel = grayData[ey * img->width + ex];
-                
-                // Find transition from dark to bright (hole edge)
-                if (r > 2) {
-                    int prevEx = (int)(cx + (r-1) * cos(angle));
-                    int prevEy = (int)(cy + (r-1) * sin(angle));
-                    if (prevEx >= 0 && prevEx < img->width && prevEy >= 0 && prevEy < img->height) {
-                        int prevPixel = grayData[prevEy * img->width + prevEx];
-                        
-                        // Dark to bright transition (edge of hole)
-                        if (prevPixel < darkThreshold && pixel >= darkThreshold) {
-                            // Use subpixel interpolation for better accuracy
-                            if (r > 1) {
-                                int prevPrevEx = (int)(cx + (r-2) * cos(angle));
-                                int prevPrevEy = (int)(cy + (r-2) * sin(angle));
-                                if (prevPrevEx >= 0 && prevPrevEx < img->width && 
-                                    prevPrevEy >= 0 && prevPrevEy < img->height) {
-                                    int prevPrevPixel = grayData[prevPrevEy * img->width + prevPrevEx];
-                                    
-                                    // Linear interpolation for subpixel position
-                                    float delta = (float)(darkThreshold - prevPrevPixel);
-                                    float totalDelta = (float)(pixel - prevPrevPixel);
-                                    if (fabs(totalDelta) > 0.001f) {
-                                        float frac = delta / totalDelta;
-                                        float edgeR = r - 2 + frac;
-                                        XVPoint2D pt;
-                                        pt.x = cx + edgeR * cos(angle);
-                                        pt.y = cy + edgeR * sin(angle);
-                                        edgePoints.push_back(pt);
-                                    }
-                                }
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        
-        Point2D finalCenter;
-        finalCenter.x = approxCenterX;
-        finalCenter.y = approxCenterY;
-        
-        // If we have enough edge points, fit a circle for higher accuracy
-        if (edgePoints.size() >= 8) {
-            XVFitCircleToPointsIn fitIn;
-            fitIn.inPoints = edgePoints;
-            fitIn.inFlag = true;  // Local optimization
-            fitIn.inDistance = 3.0f;  // Distance threshold for outliers
-            fitIn.inIterations = 20;
-            fitIn.inOutlier.optional = NUL;  // Disable outlier suppression
-            
-            XVFitCircleToPointsOut fitOut;
-            int fitRet = XVFitCircleToPoints(fitIn, fitOut);
-            
-            if (fitRet == 0) {
-                finalCenter.x = fitOut.outCircle.center.x;
-                finalCenter.y = fitOut.outCircle.center.y;
-                printf("  Hole %d: fitted=(%.2f, %.2f), radius=%.1f, edgePoints=%d\n", 
-                       (int)i, finalCenter.x, finalCenter.y, fitOut.outCircle.radius, (int)edgePoints.size());
-            } else {
-                printf("  Hole %d: centroid=(%.1f, %.1f), radius=%.1f (fit failed)\n", 
-                       (int)i, finalCenter.x, finalCenter.y, approxRadius);
-            }
-        } else {
-            printf("  Hole %d: centroid=(%.1f, %.1f), radius=%.1f (insufficient edge points: %d)\n", 
-                   (int)i, finalCenter.x, finalCenter.y, approxRadius, (int)edgePoints.size());
-        }
-        
-        circleCenters.push_back(finalCenter);
-        
-        // ========== Draw hole (circle) on image ==========
-        for (size_t j = 0; j < holesOut.outHoles[i].arrayPointRun.size(); j++) {
-            int rx = holesOut.outHoles[i].arrayPointRun[j].x;
-            int ry = holesOut.outHoles[i].arrayPointRun[j].y;
-            int len = holesOut.outHoles[i].arrayPointRun[j].length;
-            for (int x = rx; x < rx + len && x < img->width; x++) {
-                if (x >= 0 && ry >= 0 && ry < img->height) {
-                    int off = ry * dstRowSize + x * img->channels;
+    std::sort(sortedHoles.begin(), sortedHoles.end(),
+         [](const std::pair<double, int>& a, const std::pair<double, int>& b) { return a.first > b.first; });
+
+    for (size_t idx = 0; idx < sortedHoles.size() && circleCenters.size() < 9; idx++) {
+        const std::vector<Point>& contour = darkContours[sortedHoles[idx].second];
+        if ((int)contour.size() < 8) continue;
+
+        // Fit minimum enclosing circle for center
+        Point2f center;
+        float radius;
+        minEnclosingCircle(contour, center, radius);
+
+        // Filter by circularity (optional but helps reject noise)
+        double area = contourArea(contour);
+        double perimeter = arcLength(contour, true);
+        double circularity = (perimeter > 0) ? (4.0 * CV_PI * area) / (perimeter * perimeter) : 0;
+
+        // Accept if reasonably circular (circularity > 0.5) or just use all top candidates
+        Point2D pt;
+        pt.x = center.x;
+        pt.y = center.y;
+        circleCenters.push_back(pt);
+
+        printf("  Hole %d: center=(%.2f, %.2f), radius=%.1f, area=%.0f, circularity=%.2f\n",
+               (int)circleCenters.size(), center.x, center.y, radius, area, circularity);
+
+        // Draw hole overlay on original image
+        Rect holeRect = boundingRect(contour);
+        for (int y = holeRect.y; y < holeRect.y + holeRect.height && y < h; y++) {
+            for (int x = holeRect.x; x < holeRect.x + holeRect.width && x < w; x++) {
+                if (darkBinary.at<uchar>(y, x) > 0 && x >= 0 && y >= 0) {
+                    int off = y * dstRowSize + x * img->channels;
                     if (img->channels == 1) {
                         img->data[off] = (unsigned char)(img->data[off] * 0.5);
                     } else {
-                        // Semi-transparent red overlay
                         img->data[off] = (unsigned char)(img->data[off] * 0.5);
                         img->data[off + 1] = (unsigned char)(img->data[off + 1] * 0.5);
-                        img->data[off + 2] = (unsigned char)(min(255, img->data[off + 2] + 128));
+                        img->data[off + 2] = (unsigned char)(std::min(255, img->data[off + 2] + 128));
                     }
                 }
             }
         }
     }
-    
+
     // Sort by Y then X
-    sort(circleCenters.begin(), circleCenters.end(), [](const Point2D& a, const Point2D& b) {
+    std::sort(circleCenters.begin(), circleCenters.end(), [](const Point2D& a, const Point2D& b) {
         if (fabs(a.y - b.y) > 20) return a.y < b.y;
         return a.x < b.x;
     });
-    
+
     // Take up to 9 points
-    *count = min(9, (int)circleCenters.size());
+    *count = std::min(9, (int)circleCenters.size());
     for (int i = 0; i < *count && i < 9; i++) {
         pts[i] = circleCenters[i];
     }
-    
-    free(grayData);
-    
+
     printf("=== Detection Complete: %d points ===\n", *count);
-    
+
     // Show results
     char msg[512];
-    sprintf_s(msg, sizeof(msg), "Adaptive Blob Detection found %d points:\nBright threshold: %d\nDark threshold: %d", 
-              *count, brightThreshold, darkThreshold);
+    sprintf_s(msg, sizeof(msg), "OpenCV Adaptive Detection found %d points", *count);
     for (int i = 0; i < *count && i < 9; i++) {
         char line[64];
         sprintf_s(line, sizeof(line), "\n%d: (%.1f, %.1f)", i + 1, pts[i].x, pts[i].y);
@@ -1395,93 +1355,70 @@ void DrawDetectedCircles(Image* img, Point2D* pts, int count, int gray) {
     }
 }
 
-// ========== Calibration (Least Squares) ==========
+// ========== Calibration (Least Squares via OpenCV) ==========
 int CalibrateNinePoint(Point2D* imagePts, Point2D* worldPts, int n, AffineTransform* trans) {
-    LOG_INFO("=== Starting 9-Point Calibration ===");
+    LOG_INFO("=== Starting 9-Point Calibration (cv::solve) ===");
     LOG_DEBUG("Number of points: %d", n);
-    
+
     if (n < 3) {
         LOG_ERROR("Insufficient points for calibration (need at least 3)");
-        return 0;  // ������Ҫ3����ȷ������任
+        return 0;
     }
-    
+
     LOG_DEBUG("Image Points -> World Points:");
     for (int i = 0; i < n; i++) {
-        LOG_DEBUG("  %d: (%.2f, %.2f) -> (%.2f, %.2f)", 
+        LOG_DEBUG("  %d: (%.2f, %.2f) -> (%.2f, %.2f)",
             i, imagePts[i].x, imagePts[i].y, worldPts[i].x, worldPts[i].y);
     }
 
-    // �������淽�� ATA * X = ATB
-    double ATA[6][6] = { 0 };
-    double ATB[6] = { 0 };
+    // Build overdetermined system: A * X = B
+    // For each point i:
+    //   [xi, yi, 1,  0,  0, 0] [a]   [Xi]
+    //   [ 0,  0, 0, xi, yi, 1] [b] = [Yi]
+    //                           [c]
+    //                           [d]
+    //                           [e]
+    //                           [f]
+    Mat A(2 * n, 6, CV_64F);
+    Mat B(2 * n, 1, CV_64F);
 
     for (int i = 0; i < n; i++) {
         double xi = imagePts[i].x, yi = imagePts[i].y;
         double Xi = worldPts[i].x, Yi = worldPts[i].y;
 
-        // ��һ�鷽�̣�world.x��
-        ATA[0][0] += xi * xi;  ATA[0][1] += xi * yi;  ATA[0][2] += xi;
-        ATA[1][0] += xi * yi;  ATA[1][1] += yi * yi;  ATA[1][2] += yi;
-        ATA[2][0] += xi;       ATA[2][1] += yi;       ATA[2][2] += 1;  // ע�⣺Ӧ���� 1������ n
+        A.at<double>(2 * i,     0) = xi;
+        A.at<double>(2 * i,     1) = yi;
+        A.at<double>(2 * i,     2) = 1.0;
+        A.at<double>(2 * i,     3) = 0;
+        A.at<double>(2 * i,     4) = 0;
+        A.at<double>(2 * i,     5) = 0;
 
-        // �ڶ��鷽�̣�world.y��
-        ATA[3][3] += xi * xi;  ATA[3][4] += xi * yi;  ATA[3][5] += xi;
-        ATA[4][3] += xi * yi;  ATA[4][4] += yi * yi;  ATA[4][5] += yi;
-        ATA[5][3] += xi;       ATA[5][4] += yi;       ATA[5][5] += 1;  // ע�⣺Ӧ���� 1������ n
+        A.at<double>(2 * i + 1, 0) = 0;
+        A.at<double>(2 * i + 1, 1) = 0;
+        A.at<double>(2 * i + 1, 2) = 0;
+        A.at<double>(2 * i + 1, 3) = xi;
+        A.at<double>(2 * i + 1, 4) = yi;
+        A.at<double>(2 * i + 1, 5) = 1.0;
 
-        ATB[0] += Xi * xi;  ATB[1] += Xi * yi;  ATB[2] += Xi;
-        ATB[3] += Yi * xi;  ATB[4] += Yi * yi;  ATB[5] += Yi;
+        B.at<double>(2 * i,     0) = Xi;
+        B.at<double>(2 * i + 1, 0) = Yi;
     }
 
-    // ��˹��Ԫ����������Ԫѡ��
-    double X[6] = { 0 };
+    // Solve using SVD (DECOMP_SVD handles rank-deficient cases gracefully)
+    Mat X;
+    bool ok = cv::solve(A, B, X, DECOMP_SVD);
 
-    for (int k = 0; k < 6; k++) {
-        // ѡ��Ԫ
-        int maxRow = k;
-        for (int i = k + 1; i < 6; i++) {
-            if (fabs(ATA[i][k]) > fabs(ATA[maxRow][k]))
-                maxRow = i;
-        }
-
-        // ������
-        if (maxRow != k) {
-            for (int j = 0; j < 6; j++) {
-                double tmp = ATA[k][j];
-                ATA[k][j] = ATA[maxRow][j];
-                ATA[maxRow][j] = tmp;
-            }
-            double tmp = ATB[k];
-            ATB[k] = ATB[maxRow];
-            ATB[maxRow] = tmp;
-        }
-
-        // �����Ԫ
-        if (fabs(ATA[k][k]) < 1e-10) {
-            return 0;  // �������죬�궨ʧ��
-        }
-
-        // ��Ԫ
-        for (int i = k + 1; i < 6; i++) {
-            double factor = ATA[i][k] / ATA[k][k];
-            for (int j = k; j < 6; j++) {
-                ATA[i][j] -= factor * ATA[k][j];
-            }
-            ATB[i] -= factor * ATB[k];
-        }
+    if (!ok || X.empty()) {
+        LOG_ERROR("cv::solve failed - calibration failed");
+        return 0;
     }
 
-    // �ش����
-    for (int i = 5; i >= 0; i--) {
-        double sum = ATB[i];
-        for (int j = i + 1; j < 6; j++) {
-            sum -= ATA[i][j] * X[j];
-        }
-        X[i] = sum / ATA[i][i];
-    }
-
-    trans->a = X[0];  trans->b = X[1];  trans->c = X[2];
-    trans->d = X[3];  trans->e = X[4];  trans->f = X[5];
+    trans->a = X.at<double>(0);
+    trans->b = X.at<double>(1);
+    trans->c = X.at<double>(2);
+    trans->d = X.at<double>(3);
+    trans->e = X.at<double>(4);
+    trans->f = X.at<double>(5);
 
     LOG_INFO("Calibration completed successfully!");
     LOG_INFO("Transform parameters:");
@@ -1491,8 +1428,6 @@ int CalibrateNinePoint(Point2D* imagePts, Point2D* worldPts, int n, AffineTransf
     return 1;
 }
 
-
-
 Point2D ImageToWorld(Point2D pixel, AffineTransform trans) {
     Point2D world;
     world.x = trans.a * pixel.x + trans.b * pixel.y + trans.c;
@@ -1500,13 +1435,49 @@ Point2D ImageToWorld(Point2D pixel, AffineTransform trans) {
     return world;
 }
 
+// ========== 网格展示工具函数 ==========
+
+// 将 OpenCV Mat（单通道灰度或3通道BGR）转换为 Image（3通道BGR）
+// 用于网格展示，避免8位灰度在 SetDIBitsToDevice 中出现伪彩色
+static void MatToImageBGR(const Mat& src, Image* dst) {
+    Mat bgr;
+    if (src.channels() == 1) {
+        cvtColor(src, bgr, COLOR_GRAY2BGR);
+    } else {
+        bgr = src;
+    }
+    int w = bgr.cols, h = bgr.rows;
+    int rowSize = w * 3;
+    if (dst->data) free(dst->data);
+    dst->width = w;
+    dst->height = h;
+    dst->channels = 3;
+    dst->data = (unsigned char*)malloc(rowSize * h);
+    memcpy(dst->data, bgr.data, rowSize * h);
+}
+
+// 释放所有步骤图像
+static void FreeStepImages() {
+    for (int i = 0; i < STEP_COUNT; i++) {
+        if (g_stepImages[i].data) {
+            free(g_stepImages[i].data);
+            g_stepImages[i].data = NULL;
+        }
+    }
+}
+
 // ========== Trajectory Window ==========
+// ========== 创建轨迹网格调试窗口 ==========
+// 窗口 WM_PAINT 中渲染 g_trajImage（已合成网格大图）
+// 然后用 GDI TextOutA 在每个格子顶部绘制步骤标签
 void CreateTrajectoryWindow(HINSTANCE hInstance) {
+    LOG_INFO("CreateTrajectoryWindow: g_hwndTraj=%p, hInstance=%p", g_hwndTraj, hInstance);
     if (g_hwndTraj) {
-        // Window already exists, just bring it to front and update
+        // 窗口已存在，直接刷新
         ShowWindow(g_hwndTraj, SW_SHOWNORMAL);
         SetForegroundWindow(g_hwndTraj);
         InvalidateRect(g_hwndTraj, NULL, FALSE);
+        LOG_INFO("CreateTrajectoryWindow: existing window refreshed");
         return;
     }
 
@@ -1515,17 +1486,67 @@ void CreateTrajectoryWindow(HINSTANCE hInstance) {
         if (msg == WM_PAINT) {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);
+
             if (g_trajImage.data) {
-                int bitCount = g_trajImage.channels * 8;
-                int rowSize = ((g_trajImage.width * g_trajImage.channels + 3) / 4) * 4;
-                BITMAPINFO bmi = {0};
-                bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-                bmi.bmiHeader.biWidth = g_trajImage.width;
-                bmi.bmiHeader.biHeight = -g_trajImage.height;
-                bmi.bmiHeader.biPlanes = 1;
-                bmi.bmiHeader.biBitCount = (unsigned short)bitCount;
-                bmi.bmiHeader.biCompression = BI_RGB;
-                SetDIBitsToDevice(hdc, 0, 0, g_trajImage.width, g_trajImage.height, 0, 0, 0, g_trajImage.height, g_trajImage.data, &bmi, DIB_RGB_COLORS);
+                // ---- 1. 用 SetDIBitsToDevice 渲染网格大图（1通道灰度平面图）----
+                // 构造 BITMAPINFO：包含 256 色灰度调色板，避免伪彩色
+                BITMAPINFO* pbmi = (BITMAPINFO*)malloc(sizeof(BITMAPINFOHEADER) + 256 * sizeof(RGBQUAD));
+                memset(pbmi, 0, sizeof(BITMAPINFOHEADER) + 256 * sizeof(RGBQUAD));
+                pbmi->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+                pbmi->bmiHeader.biWidth = g_trajImage.width;
+                pbmi->bmiHeader.biHeight = -g_trajImage.height;  // 负值 = 自顶向下
+                pbmi->bmiHeader.biPlanes = 1;
+                pbmi->bmiHeader.biBitCount = 8;
+                pbmi->bmiHeader.biCompression = BI_RGB;
+                for (int i = 0; i < 256; i++) {
+                    pbmi->bmiColors[i].rgbBlue = (unsigned char)i;
+                    pbmi->bmiColors[i].rgbGreen = (unsigned char)i;
+                    pbmi->bmiColors[i].rgbRed = (unsigned char)i;
+                    pbmi->bmiColors[i].rgbReserved = 0;
+                }
+
+                // SetDIBitsToDevice 要求行步长 4 字节对齐，需临时转换
+                int rowSize = ((g_trajImage.width + 3) / 4) * 4;
+                int alignedSize = rowSize * g_trajImage.height;
+                unsigned char* alignedData = (unsigned char*)malloc(alignedSize);
+                memset(alignedData, 0, alignedSize);
+                for (int y = 0; y < g_trajImage.height; y++) {
+                    memcpy(alignedData + y * rowSize,
+                           g_trajImage.data + y * g_trajImage.width,
+                           g_trajImage.width);
+                }
+
+                SetDIBitsToDevice(hdc, 0, 0, g_trajImage.width, g_trajImage.height,
+                    0, 0, 0, g_trajImage.height, alignedData, pbmi, DIB_RGB_COLORS);
+
+                free(alignedData);
+                free(pbmi);
+
+                // ---- 2. 在每个格子顶部用 GDI 渲染步骤标签 ----
+                // 计算格子尺寸（与 ShowTrajectoryImage 中的布局一致）
+                int srcImgW = g_stepImages[0].width > 0 ? g_stepImages[0].width : 800;
+                int srcImgH = g_stepImages[0].height > 0 ? g_stepImages[0].height : 600;
+                int cellW = srcImgW / GRID_COLS;
+                int cellH = (int)(cellW * (double)srcImgH / srcImgW + 0.5);  // 保持原图长宽比
+                int cellTotalH = LABEL_HEIGHT + cellH;
+
+                SetBkMode(hdc, TRANSPARENT);
+                HFONT hFont = CreateFontA(14, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Consolas");
+                HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+                SetTextColor(hdc, RGB(255, 255, 0));  // 黄色标签
+
+                for (int s = 0; s < STEP_COUNT; s++) {
+                    int col = s % GRID_COLS;
+                    int row = s / GRID_COLS;
+                    int labelX = GRID_PADDING + col * (cellW + GRID_PADDING);
+                    int labelY = GRID_PADDING + row * (cellTotalH + GRID_PADDING);
+                    TextOutA(hdc, labelX + 4, labelY + 3, g_stepLabels[s], (int)strlen(g_stepLabels[s]));
+                }
+
+                SelectObject(hdc, hOldFont);
+                DeleteObject(hFont);
             } else {
                 RECT rc; GetClientRect(hwnd, &rc);
                 FillRect(hdc, &rc, (HBRUSH)(COLOR_WINDOW + 1));
@@ -1541,6 +1562,8 @@ void CreateTrajectoryWindow(HINSTANCE hInstance) {
                 free(g_trajImage.data);
                 g_trajImage.data = NULL;
             }
+            // 同时释放步骤图像
+            FreeStepImages();
             return 0;
         }
         return DefWindowProc(hwnd, msg, wParam, lParam);
@@ -1549,11 +1572,13 @@ void CreateTrajectoryWindow(HINSTANCE hInstance) {
     wc.lpszClassName = L"TrajectoryWindowClass";
     RegisterClass(&wc);
 
-    g_hwndTraj = CreateWindowEx(0, L"TrajectoryWindowClass", L"Trajectory Display",
+    // 计算窗口初始大小
+    int initW = g_trajImage.width > 0 ? g_trajImage.width + 20 : 640;
+    int initH = g_trajImage.height > 0 ? g_trajImage.height + 50 : 480;
+
+    g_hwndTraj = CreateWindowEx(0, L"TrajectoryWindowClass", L"Detection Steps (2x3 Grid)",
         WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-        CW_USEDEFAULT, CW_USEDEFAULT, 
-        g_trajImage.width > 0 ? g_trajImage.width + 100 : 640,
-        g_trajImage.height > 0 ? g_trajImage.height + 150 : 480,
+        CW_USEDEFAULT, CW_USEDEFAULT, initW, initH,
         NULL, NULL, hInstance, NULL);
 }
 
@@ -1615,12 +1640,34 @@ void CreateSobelWindow(HINSTANCE hInstance) {
 
 
 // Draw trajectory on image
-void DrawTrajectory(Image* img, Point2D* trajPixels, int count, int gray) {
+// 16 种高饱和度颜色（BGR格式），确保在黑底上醒目
+static const unsigned char BAR_COLORS[16][3] = {
+    {0,   0,   255},   // 0: 红
+    {0,   255, 0  },   // 1: 绿
+    {255, 0,   0  },   // 2: 蓝
+    {0,   255, 255},   // 3: 黄
+    {255, 0,   255},   // 4: 青
+    {255, 255, 0  },   // 5: 洋红
+    {0,   128, 255},   // 6: 橙
+    {255, 128, 0  },   // 7: 浅蓝
+    {0,   255, 128},   // 8: 春绿
+    {128, 0,   255},   // 9: 紫
+    {255, 0,   128},   // 10: 玫红
+    {0,   128, 128},   // 11: 橄榄
+    {128, 255, 0  },   // 12: 青柠
+    {128, 0,   0  },   // 13: 深红
+    {0,   0,   128},   // 14: 深绿
+    {128, 128, 255},   // 15: 粉
+};
+
+void DrawTrajectoryColored(Image* img, Point2D* trajPixels, int count, int* barIds) {
     if (!img || !img->data || count < 2) return;
+    if (img->channels < 3) return;  // Need 3-channel for color
     int rowSize = ((img->width * img->channels + 3) / 4) * 4;
 
-    // Draw each point as a small square marker (3x3 pixels)
     for (int i = 0; i < count; i++) {
+        int barIdx = barIds ? barIds[i] % 16 : 0;
+        const unsigned char* color = BAR_COLORS[barIdx];
         int cx = (int)trajPixels[i].x;
         int cy = (int)trajPixels[i].y;
         for (int dx = -1; dx <= 1; dx++) {
@@ -1629,47 +1676,129 @@ void DrawTrajectory(Image* img, Point2D* trajPixels, int count, int gray) {
                 int y = cy + dy;
                 if (x >= 0 && x < img->width && y >= 0 && y < img->height) {
                     int off = y * rowSize + x * img->channels;
-                    if (img->channels == 1) {
-                        img->data[off] = (unsigned char)gray;
-                    } else {
-                        img->data[off] = (unsigned char)gray;      // B
-                        img->data[off + 1] = (unsigned char)gray;  // G
-                        img->data[off + 2] = (unsigned char)gray;  // R
-                    }
+                    img->data[off]     = color[0];  // B
+                    img->data[off + 1] = color[1];  // G
+                    img->data[off + 2] = color[2];  // R
                 }
             }
         }
     }
 }
 
+// ========== 显示网格调试窗口 ==========
+
+// 将 ShowTrajectoryImage 改为：刷新网格窗口，窗口大小根据 g_stepImages 计算
+// 网格布局：GRID_COLS 列 × GRID_ROWS 行，每格保持原图长宽比
+// 注意：网格大图使用 1 通道灰度（平面图），不转 3 通道
 void ShowTrajectoryImage(Image* src, Point2D* trajPixels, int trajCount) {
-    // Copy image data
-    int rowSize = ((src->width * src->channels + 3) / 4) * 4;
-    int imageSize = rowSize * src->height;
-    
+    // 计算网格总尺寸
+    int imgW = src->width;
+    int imgH = src->height;
+    LOG_INFO("ShowTrajectoryImage: src=%dx%d, trajCount=%d", imgW, imgH, trajCount);
+    // 每个格子的图片区域尺寸：宽度 = 原图宽 / 列数，高度按原图比例计算
+    int cellW = imgW / GRID_COLS;
+    int cellH = (int)(cellW * (double)imgH / imgW + 0.5);  // 保持原图长宽比
+    LOG_INFO("ShowTrajectoryImage: cellW=%d, cellH=%d", cellW, cellH);
+    // 每格总高度 = 标签 + 图片
+    int cellTotalH = LABEL_HEIGHT + cellH;
+    // 网格总尺寸
+    int gridW = GRID_COLS * cellW + (GRID_COLS + 1) * GRID_PADDING;
+    int gridH = GRID_ROWS * cellTotalH + (GRID_ROWS + 1) * GRID_PADDING;
+    LOG_INFO("ShowTrajectoryImage: gridW=%d, gridH=%d", gridW, gridH);
+
+    // 生成合成的大图（1 通道灰度平面图）
+    int dstChannels = 1;
+    int dstRowSize = gridW;
+    int totalSize = dstRowSize * gridH;
+
     if (g_trajImage.data) free(g_trajImage.data);
-    g_trajImage.width = src->width;
-    g_trajImage.height = src->height;
-    g_trajImage.channels = src->channels;
-    g_trajImage.data = (unsigned char*)malloc(imageSize);
-    memset(g_trajImage.data, 0, imageSize);  // Black background
-    
-    // Draw trajectory points
-    DrawTrajectory(&g_trajImage, trajPixels, trajCount, 255);  // White markers
-    
-    // Update window if exists, or create new
+    g_trajImage.width = gridW;
+    g_trajImage.height = gridH;
+    g_trajImage.channels = dstChannels;
+    g_trajImage.data = (unsigned char*)malloc(totalSize);
+    LOG_INFO("ShowTrajectoryImage: malloc %d bytes at %p", totalSize, g_trajImage.data);
+    memset(g_trajImage.data, 0, totalSize);  // 黑色背景
+
+    // 将每步的 Image 缩放后绘制到对应网格位置
+    for (int s = 0; s < STEP_COUNT; s++) {
+        Image* stepImg = &g_stepImages[s];
+        LOG_INFO("  step[%d]: data=%p, %dx%d, ch=%d", s, stepImg->data, stepImg->width, stepImg->height, stepImg->channels);
+        if (!stepImg->data) continue;
+
+        // 计算该格在网格中的位置
+        int col = s % GRID_COLS;
+        int row = s / GRID_COLS;
+        int cellX = GRID_PADDING + col * (cellW + GRID_PADDING);
+        int cellY = GRID_PADDING + row * (cellTotalH + GRID_PADDING) + LABEL_HEIGHT;
+
+        // 将 stepImg 缩放绘制到格子区域（最近邻缩放）
+        int srcW = stepImg->width;
+        int srcH = stepImg->height;
+
+        for (int dy = 0; dy < cellH; dy++) {
+            int sy = dy * srcH / cellH;  // 映射到源图 y
+            for (int dx = 0; dx < cellW; dx++) {
+                int sx = dx * srcW / cellW;  // 映射到源图 x
+                int dstX = cellX + dx;
+                int dstY = cellY + dy;
+                if (dstX >= gridW || dstY >= gridH) continue;
+
+                unsigned char gray = 0;
+                if (stepImg->channels == 1) {
+                    // 1 通道：直接取灰度值
+                    gray = stepImg->data[sy * srcW + sx];
+                } else {
+                    // 3 通道（彩色轨迹）：转灰度 0.299R + 0.587G + 0.114B
+                    int srcOff = (sy * srcW + sx) * 3;
+                    unsigned char b = stepImg->data[srcOff];
+                    unsigned char g = stepImg->data[srcOff + 1];
+                    unsigned char r = stepImg->data[srcOff + 2];
+                    gray = (unsigned char)(0.299f * r + 0.587f * g + 0.114f * b + 0.5f);
+                }
+                g_trajImage.data[dstY * dstRowSize + dstX] = gray;
+            }
+        }
+
+        // 在格子底部画一条分割线（灰色，1像素）
+        int lineY = cellY + cellH;
+        if (lineY < gridH) {
+            for (int x = cellX; x < cellX + cellW && x < gridW; x++) {
+                g_trajImage.data[lineY * dstRowSize + x] = 80;
+            }
+        }
+    }
+
+    // 在标签区域写文字（用简单的点阵方式，避免依赖 GDI 在图片中渲染）
+    // 文字渲染由 WM_PAINT 中用 GDI TextOutA 完成
+
+    LOG_INFO("ShowTrajectoryImage: grid image complete, calling CreateTrajectoryWindow");
+
+    // 更新窗口
     if (g_hwndTraj) {
         InvalidateRect(g_hwndTraj, NULL, FALSE);
-        // Resize window to fit image (with extra margin)
-        SetWindowPos(g_hwndTraj, HWND_TOP, 0, 0, 
-            g_trajImage.width + 100, g_trajImage.height + 150, SWP_NOMOVE);
+        SetWindowPos(g_hwndTraj, HWND_TOP, 0, 0,
+            gridW + 20, gridH + 50, SWP_NOMOVE);
     }
+    LOG_INFO("ShowTrajectoryImage: done");
 }
 
-// ========== FitShape Library Trajectory Detection ==========
-using namespace XVL;
+// ========== Trajectory Detection (FitShape removed, delegate to OpenCV) ==========
+
+// Forward declaration — defined below in DetectTrajectoryOpenCV
+void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count);
 
 void DetectTrajectoryFitShape(Image* img, Point2D* trajPixels, int* count) {
+    LOG_INFO("=== FitShape Trajectory (deprecated, using OpenCV) ===");
+    DetectTrajectoryOpenCV(img, trajPixels, count);
+}
+
+// Legacy FitShape code removed — the following block is intentionally empty.
+// Original function used XVFitPathToStripe from FitShape library.
+// All FitShape types (XVImage, XVPathFittingField, XVStripeScanParams, etc.)
+// are no longer needed. If you need the old implementation, check git history.
+
+#if 0 // Disabled: original FitShape implementation
+void DetectTrajectoryFitShape_LEGACY(Image* img, Point2D* trajPixels, int* count) {
     LOG_INFO("=== Starting FitShape Trajectory Detection (Stripe) ===");
     LOG_DEBUG("Input image: %dx%d", img->width, img->height);
     
@@ -1686,7 +1815,7 @@ void DetectTrajectoryFitShape(Image* img, Point2D* trajPixels, int* count) {
     xvImage.width = img->width;
     xvImage.height = img->height;
     xvImage.pitch = img->width;  // grayscale: pitch = width (1 byte per pixel)
-    xvImage.type = XVL::UInt8;  // �ؼ�������ͼ������Ϊ8λ��ͨ��
+    xvImage.type = XVL::UInt8;  // �ؼ�������ͼ������Ϊ8λ��ͨ��
     
     // Allocate grayscale buffer
     int graySize = img->width * img->height;
@@ -1721,8 +1850,8 @@ void DetectTrajectoryFitShape(Image* img, Point2D* trajPixels, int* count) {
     XVPathFittingField fitField;
     memset(&fitField, 0, sizeof(fitField));
     fitField.width = 100.0f;
-    XVPoint2D axisStart = { 0, (float)(img->height / 2) };  // ��ͼ���м俪ʼ
-    XVPoint2D axisEnd = { (float)img->width, (float)(img->height / 2) };  // ˮƽɨ��
+    XVPoint2D axisStart = { 0, (float)(img->height / 2) };  // ��ͼ���м俪ʼ
+    XVPoint2D axisEnd = { (float)img->width, (float)(img->height / 2) };  // ˮƽɨ��
     fitField.axis.arrayPoint2D.push_back(axisStart);
     fitField.axis.arrayPoint2D.push_back(axisEnd);
     
@@ -1739,10 +1868,10 @@ void DetectTrajectoryFitShape(Image* img, Point2D* trajPixels, int* count) {
     memset(&stripeParams, 0, sizeof(stripeParams));
     stripeParams.smoothStDev = 0.6f;
     stripeParams.interMetnod = XVInterMethod::Parabola;
-    stripeParams.minMagnitude = 20.0f;  // ���������ֵ
-    stripeParams.stripeType = XVStripeType::DARK;  // ��ⰵ�������켣ͨ���ǰ��ߣ�
-    stripeParams.minStripeWidth = 1.0f;  // ��С��������
-    stripeParams.maxStripeWidth = 50.0f;  // �����������
+    stripeParams.minMagnitude = 20.0f;  // ���������ֵ
+    stripeParams.stripeType = XVStripeType::DARK;  // ��ⰵ�������켣ͨ���ǰ��ߣ�
+    stripeParams.minStripeWidth = 1.0f;  // ��С��������
+    stripeParams.maxStripeWidth = 50.0f;  // �����������
     
     // Setup input for XVFitPathToStripe
     XVFitPathToStripeIn in;
@@ -1795,6 +1924,7 @@ void DetectTrajectoryFitShape(Image* img, Point2D* trajPixels, int* count) {
     // Cleanup
     free(grayData);
 }
+#endif // End of disabled FitShape legacy code
 
 // ========== Trajectory Detection ==========
 // Detect trajectory edge points - improved continuous detection
@@ -2031,7 +2161,7 @@ void DetectTrajectory(Image* img, Point2D* trajPixels, int* count) {
 //   pointCount: total points to generate
 //   outPoints: output vector for generated points
 static void GenerateStadiumShape(Point2f center, float length, float width, 
-                                  float angle, int pointCount, vector<Point>& outPoints) {
+                                  float angle, int pointCount, std::vector<Point>& outPoints) {
     float radius = width / 2.0f;  // semicircle radius
     float angleRad = angle * (float)CV_PI / 180.0f;
     
@@ -2040,7 +2170,7 @@ static void GenerateStadiumShape(Point2f center, float length, float width,
     float totalPerimeter = 2.0f * (CV_PI * radius + length);
     int circlePoints = (int)(pointCount * (CV_PI * radius) / totalPerimeter);
     int linePoints = (int)(pointCount * length / totalPerimeter);
-    circlePoints = max(10, circlePoints / 2);  // Each end semicircle
+    circlePoints = std::max(10, circlePoints / 2);  // Each end semicircle
     
     // Top semicircle (left end, from top to bottom)
     for (int i = 0; i <= circlePoints; i++) {
@@ -2087,147 +2217,282 @@ static void GenerateStadiumShape(Point2f center, float length, float width,
 
 // ========== OpenCV-based Trajectory Detection ==========
 void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count) {
-    LOG_INFO("=== Starting OpenCV Ellipse-Fit Trajectory Detection ===");
+    LOG_INFO("=== Starting OpenCV 16-DarkBars Trajectory Detection ===");
     LOG_DEBUG("Input image: %dx%d, channels: %d", img->width, img->height, img->channels);
-    
+
     if (!img || !img->data) {
         LOG_ERROR("Invalid image data!");
         *count = 0;
         return;
     }
-    
+
+    // 释放之前的步骤图
+    FreeStepImages();
+
     int w = img->width, h = img->height;
     int srcRowSize = ((w * img->channels + 3) / 4) * 4;
-    
-    // Convert Image to OpenCV Mat (grayscale)
-    Mat grayMat(h, w, CV_8UC1);
-    for (int y = 0; y < h; y++) {
-        for (int x = 0; x < w; x++) {
-            int off = y * srcRowSize + x * img->channels;
-            if (img->channels == 1) {
-                grayMat.at<uchar>(y, x) = img->data[off];
-            } else {
-                grayMat.at<uchar>(y, x) = (img->data[off] + img->data[off+1] + img->data[off+2]) / 3;
-            }
+
+    // ---- 转换输入图像为 OpenCV Mat 灰度图 ----
+    // 注意：必须 clone() 得到紧凑步长的独立 Mat，不能零拷贝共享 img->data
+    // 因为 img->data 的行步长可能有 4 字节对齐 padding，与 Mat 默认步长不一致
+    Mat grayMat;
+    if (img->channels == 1) {
+        int pitch = ((w + 3) / 4) * 4;  // img->data 的实际行步长（4字节对齐）
+        Mat tmp(h, w, CV_8UC1, img->data, pitch);
+        grayMat = tmp.clone();
+        tmp.release();  // 防止析构时释放 img->data
+    } else {
+        int srcRowSize = ((w * img->channels + 3) / 4) * 4;
+        Mat colorMat(h, w, CV_8UC3, img->data, srcRowSize);
+        cvtColor(colorMat, grayMat, COLOR_BGR2GRAY);
+        colorMat.release();  // 防止析构时释放 img->data（非 Mat 分配的内存）
+    }
+
+    // ============================================================
+    // 网格步骤 1：保存原始灰度图（保持1通道，不转3通道）
+    // ============================================================
+    {
+        Mat& src = grayMat;
+        int sw = src.cols, sh = src.rows;
+        if (g_stepImages[0].data) free(g_stepImages[0].data);
+        g_stepImages[0].width = sw;
+        g_stepImages[0].height = sh;
+        g_stepImages[0].channels = 1;
+        g_stepImages[0].data = (unsigned char*)malloc(sw * sh);
+        memcpy(g_stepImages[0].data, src.data, sw * sh);
+    }
+
+    // ============================================================
+    // 网格步骤 2：高斯模糊 + OTSU 二值化
+    // 高斯模糊消除噪声，OTSU 自动选择阈值分割亮区（工件）和暗区（背景）
+    // ============================================================
+    Mat blurred;
+    GaussianBlur(grayMat, blurred, Size(7, 7), 1.5);
+
+    Mat binaryBright;
+    threshold(blurred, binaryBright, 0, 255, THRESH_BINARY + THRESH_OTSU);
+    // 网格步骤 2：高斯模糊 + OTSU 二值化（保持1通道）
+    {
+        Mat& src = binaryBright;
+        int sw = src.cols, sh = src.rows;
+        if (g_stepImages[1].data) free(g_stepImages[1].data);
+        g_stepImages[1].width = sw;
+        g_stepImages[1].height = sh;
+        g_stepImages[1].channels = 1;
+        g_stepImages[1].data = (unsigned char*)malloc(sw * sh);
+        memcpy(g_stepImages[1].data, src.data, sw * sh);
+    }
+
+    // ---- 形态学处理：闭运算填补工件内部空洞，开运算去除背景噪点 ----
+    Mat kernel = getStructuringElement(MORPH_ELLIPSE, Size(5, 5));
+    Mat morphed;
+    morphologyEx(binaryBright, morphed, MORPH_CLOSE, kernel);
+    morphologyEx(morphed, morphed, MORPH_OPEN, kernel);
+
+    // ---- 提取外轮廓 ----
+    std::vector<std::vector<Point>> outerContours;
+    findContours(morphed, outerContours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
+    if (outerContours.empty()) {
+        LOG_ERROR("No workpiece contour found!");
+        *count = 0;
+        return;
+    }
+
+    // 取面积最大的外轮廓作为工件边界
+    int maxOuterIdx = 0;
+    double maxOuterArea = 0.0;
+    for (size_t i = 0; i < outerContours.size(); i++) {
+        double a = contourArea(outerContours[i]);
+        if (a > maxOuterArea) {
+            maxOuterArea = a;
+            maxOuterIdx = (int)i;
         }
     }
-    
-    // Apply mild blur
-    Mat blurMat;
-    GaussianBlur(grayMat, blurMat, Size(3, 3), 0);
-    
-    // Canny edge detection
-    Mat edgeMap;
-    Canny(blurMat, edgeMap, 10, 30, 3);
-    
-    // Find all contours including nested ones
-    vector<vector<Point>> contours;
-    vector<Vec4i> hierarchy;
-    findContours(edgeMap, contours, hierarchy, RETR_TREE, CHAIN_APPROX_NONE);
-    
-    // Store all trajectory points (original + fitted shapes)
-    vector<Point> allPoints;
-    int ellipseFitted = 0;
-    int stadiumFitted = 0;
-    
-    // Process each contour
-    for (size_t i = 0; i < contours.size(); i++) {
-        const vector<Point>& contour = contours[i];
+    std::vector<Point>& outerContour = outerContours[maxOuterIdx];
+
+    // ---- 生成工件 mask（工件内部=255，外部=0）----
+    Mat mask = Mat::zeros(h, w, CV_8UC1);
+    drawContours(mask, outerContours, maxOuterIdx, Scalar(255), FILLED);
+
+    // ============================================================
+    // 网格步骤 3：工件 mask（保持1通道）
+    // ============================================================
+    {
+        Mat& src = mask;
+        int sw = src.cols, sh = src.rows;
+        if (g_stepImages[2].data) free(g_stepImages[2].data);
+        g_stepImages[2].width = sw;
+        g_stepImages[2].height = sh;
+        g_stepImages[2].channels = 1;
+        g_stepImages[2].data = (unsigned char*)malloc(sw * sh);
+        memcpy(g_stepImages[2].data, src.data, sw * sh);
+    }
+
+    // ============================================================
+    // 网格步骤 4：暗条二值化（保持1通道）
+    // 思路：将工件外部像素设为 255（白），然后用阈值 45 做反转二值化
+    // 灰度 < 45 的像素（暗条）变为白色(255)，其余变为黑色(0)
+    // ============================================================
+    Mat innerGray = grayMat.clone();
+    innerGray.setTo(255, mask == 0);  // 工件外部涂白，防止被误检为暗条
+
+    Mat darkBinary;
+    threshold(innerGray, darkBinary, 45, 255, THRESH_BINARY_INV);
+    darkBinary.setTo(0, mask == 0);  // 工件外部清零
+
+    // 保存形态学清理前的暗条二值图
+    Mat darkBinaryBeforeMorph = darkBinary.clone();
+    {
+        Mat& src = darkBinaryBeforeMorph;
+        int sw = src.cols, sh = src.rows;
+        if (g_stepImages[3].data) free(g_stepImages[3].data);
+        g_stepImages[3].width = sw;
+        g_stepImages[3].height = sh;
+        g_stepImages[3].channels = 1;
+        g_stepImages[3].data = (unsigned char*)malloc(sw * sh);
+        memcpy(g_stepImages[3].data, src.data, sw * sh);
+    }
+
+    // ============================================================
+    // 网格步骤 5：形态学清理后的暗条（保持1通道）
+    // 使用 3x3 椭圆核做闭运算（填补暗条内小孔）和开运算（去除孤立噪点）
+    // ============================================================
+    Mat kernel2 = getStructuringElement(MORPH_ELLIPSE, Size(3, 3));
+    morphologyEx(darkBinary, darkBinary, MORPH_CLOSE, kernel2);
+    morphologyEx(darkBinary, darkBinary, MORPH_OPEN, kernel2);
+    {
+        Mat& src = darkBinary;
+        int sw = src.cols, sh = src.rows;
+        if (g_stepImages[4].data) free(g_stepImages[4].data);
+        g_stepImages[4].width = sw;
+        g_stepImages[4].height = sh;
+        g_stepImages[4].channels = 1;
+        g_stepImages[4].data = (unsigned char*)malloc(sw * sh);
+        memcpy(g_stepImages[4].data, src.data, sw * sh);
+    }
+
+    // ---- 提取所有暗条轮廓 ----
+    std::vector<std::vector<Point>> darkContours;
+    findContours(darkBinary, darkContours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
+
+    // ---- 自适应面积阈值 ----
+    // 原始设计针对 2448×2048（面积约500万），固定阈值10000 ≈ 0.2%
+    // 缩放到 800×600（面积约48万），阈值按比例缩小
+    double areaThreshold = (double)(w * h) * 0.002;
+    if (areaThreshold < 500.0) areaThreshold = 500.0;  // 下限保护
+    LOG_INFO("Adaptive area threshold: %.0f (image %dx%d)", areaThreshold, w, h);
+
+    // ---- 过滤 + 排序：保留面积 > 阈值的暗条，按面积降序，取前16个 ----
+    std::vector<std::pair<double, int>> sortedBars; // (area, contour_index)
+    for (size_t i = 0; i < darkContours.size(); i++) {
+        double area = contourArea(darkContours[i]);
+        if (area > areaThreshold) {
+            sortedBars.push_back(std::make_pair(area, (int)i));
+        }
+    }
+    std::sort(sortedBars.begin(), sortedBars.end(),
+         [](const std::pair<double, int>& a, const std::pair<double, int>& b) {
+             return a.first > b.first;
+         });
+
+    int barCount = (int)sortedBars.size();
+    int targetBars = std::min(barCount, 16);
+    LOG_INFO("Dark bars found: %d (taking top %d)", barCount, targetBars);
+
+    // ============================================================
+    // Step 3: 对每个暗条进行形状拟合，生成轨迹点
+    // 同时记录每个点所属的暗条编号（用于网格步骤6的彩色显示）
+    // ============================================================
+    std::vector<Point> allPoints;
+    std::vector<int> allBarIds;
+
+    for (int b = 0; b < targetBars; b++) {
+        const std::vector<Point>& contour = darkContours[sortedBars[b].second];
         int ptCount = (int)contour.size();
-        
-        // Need at least 5 points for fitEllipse
         if (ptCount < 5) continue;
-        
-        // Check if this is an internal contour (nested)
-        bool isInternal = (hierarchy[i][3] >= 0);
-        
-        // Use minAreaRect to get bounding rectangle with angle
-        if (ptCount >= 3) {
-            RotatedRect box = minAreaRect(contour);
-            
-            float width = box.size.width;
-            float height = box.size.height;
-            
-            // Ensure width >= height (long side is width)
-            if (height > width) {
-                swap(width, height);
+
+        // 用 minAreaRect 获取最小外接旋转矩形
+        RotatedRect box = minAreaRect(contour);
+        float bw = box.size.width;
+        float bh = box.size.height;
+        if (bh > bw) swap(bw, bh);  // 确保 bw >= bh（长边在前）
+
+        float aspectRatio = bw / bh;
+
+        if (aspectRatio > 2.5f && bh > 5.0f) {
+            // ---- Stadium 形状（体育场形/胶囊形）：长条两端带半圆 ----
+            // length = 长边 - 短边（直线段长度），diam = 短边（端部半圆直径）
+            float length = bw - bh;
+            float diam = bh;
+
+            // 点数按周长自适应：保证每段轮廓都有足够的采样密度
+            int pointCount = std::max(50, (int)(2.0f * (CV_PI * diam / 2.0f + length) * 2.0f));
+            std::vector<Point> stadiumPoints;
+            GenerateStadiumShape(box.center, length, diam, box.angle, pointCount, stadiumPoints);
+
+            for (size_t k = 0; k < stadiumPoints.size(); k++) {
+                int px = std::max(0, std::min(w - 1, stadiumPoints[k].x));
+                int py = std::max(0, std::min(h - 1, stadiumPoints[k].y));
+                allPoints.push_back(Point(px, py));
+                allBarIds.push_back(b);
             }
-            
-            // Calculate aspect ratio
-            float aspectRatio = width / height;
-            
-            // If aspect ratio > 2.5, treat as stadium (long bar with rounded ends)
-            if (aspectRatio > 2.5f && height > 5.0f) {
-                // Stadium shape: length = width - height (center rectangle part)
-                // width param = height (diameter of semicircles)
-                float length = width - height;  // center rectangle length
-                float diam = height;             // diameter for semicircles
-                
-                // Calculate point count based on perimeter
-                int pointCount = max(50, (int)(2.0f * (CV_PI * diam / 2.0f + length) * 2.0f));
-                
-                vector<Point> stadiumPoints;
-                GenerateStadiumShape(box.center, length, diam, box.angle, pointCount, stadiumPoints);
-                
-                // Clamp points to image bounds and add
-                for (size_t k = 0; k < stadiumPoints.size(); k++) {
-                    int px = max(0, min(w-1, stadiumPoints[k].x));
-                    int py = max(0, min(h-1, stadiumPoints[k].y));
-                    allPoints.push_back(Point(px, py));
-                }
-                stadiumFitted++;
-            } else {
-                // Small shape or circular - use ellipse fitting
-                if (ptCount >= 6) {
-                    RotatedRect ellipse = fitEllipse(contour);
-                    
-                    Size2f axes = ellipse.size;
-                    float rx = axes.width / 2.0f;
-                    float ry = axes.height / 2.0f;
-                    if (ry > rx) swap(rx, ry);
-                    
-                    float perimeter = (float)(CV_PI * (3.0f * (rx + ry) - sqrt((3.0f * rx + ry) * (rx + 3.0f * ry))));
-                    int ellipsePointCount = max(30, (int)(perimeter * 0.5f));
-                    
-                    Point2f center = ellipse.center;
-                    float angleRad = ellipse.angle * (float)CV_PI / 180.0f;
-                    
-                    for (int k = 0; k < ellipsePointCount; k++) {
-                        float theta = 2.0f * (float)CV_PI * k / ellipsePointCount;
-                        float x = rx * cos(theta);
-                        float y = ry * sin(theta);
-                        float rx_rot = x * cos(angleRad) - y * sin(angleRad);
-                        float ry_rot = x * sin(angleRad) + y * cos(angleRad);
-                        
-                        int px = (int)(center.x + rx_rot);
-                        int py = (int)(center.y + ry_rot);
-                        
-                        if (px >= 0 && px < w && py >= 0 && py < h) {
-                            allPoints.push_back(Point(px, py));
-                        }
+        } else {
+            // ---- 椭圆拟合：适用于近似圆形或短胖形区域 ----
+            if (ptCount >= 6) {
+                RotatedRect ellipse = fitEllipse(contour);
+
+                Size2f axes = ellipse.size;
+                float rx = axes.width / 2.0f;
+                float ry = axes.height / 2.0f;
+                if (ry > rx) swap(rx, ry);  // rx = 长半轴
+
+                // Ramanujan 近似计算椭圆周长
+                float perimeter = (float)(CV_PI * (3.0f * (rx + ry) - sqrt((3.0f * rx + ry) * (rx + 3.0f * ry))));
+                int ellipsePointCount = std::max(30, (int)(perimeter * 0.5f));
+
+                Point2f center = ellipse.center;
+                float angleRad = ellipse.angle * (float)CV_PI / 180.0f;
+
+                for (int k = 0; k < ellipsePointCount; k++) {
+                    float theta = 2.0f * (float)CV_PI * k / ellipsePointCount;
+                    float x = rx * cos(theta);
+                    float y = ry * sin(theta);
+                    float rx_rot = x * cos(angleRad) - y * sin(angleRad);
+                    float ry_rot = x * sin(angleRad) + y * cos(angleRad);
+
+                    int px = (int)(center.x + rx_rot);
+                    int py = (int)(center.y + ry_rot);
+
+                    if (px >= 0 && px < w && py >= 0 && py < h) {
+                        allPoints.push_back(Point(px, py));
+                        allBarIds.push_back(b);
                     }
-                    ellipseFitted++;
                 }
             }
         }
-        
-        // Also add original contour points (supplement)
-        int step = isInternal ? 1 : 2;
-        for (int j = 0; j < ptCount; j += step) {
+
+        // 补充原始轮廓点（增加边缘采样密度）
+        for (int j = 0; j < ptCount; j++) {
             allPoints.push_back(contour[j]);
+            allBarIds.push_back(b);
         }
     }
-    
-    LOG_INFO("Shape fitting: %d ellipses, %d stadiums, %d contours processed", 
-             ellipseFitted, stadiumFitted, (int)contours.size());
-    
-    // Remove duplicate points (within 1-pixel radius)
-    vector<Point> uniquePoints;
-    vector<bool> kept(allPoints.size(), false);
+
+    LOG_INFO("Shape fitting: %d dark bars processed, raw points=%d",
+             targetBars, (int)allPoints.size());
+
+    // ============================================================
+    // Step 4: 去重 + 排序 + 输出（保留 bar id）
+    // ============================================================
+
+    // 去重：1像素半径内只保留第一个点，避免重复采样导致密集扎堆
+    std::vector<Point> uniquePoints;
+    std::vector<int> uniqueBarIds;
+    std::vector<bool> kept(allPoints.size(), false);
     for (size_t i = 0; i < allPoints.size(); i++) {
         if (kept[i]) continue;
         uniquePoints.push_back(allPoints[i]);
-        // Mark nearby points
+        uniqueBarIds.push_back(allBarIds[i]);
         int x1 = allPoints[i].x - 1, x2 = allPoints[i].x + 1;
         int y1 = allPoints[i].y - 1, y2 = allPoints[i].y + 1;
         for (size_t j = i + 1; j < allPoints.size(); j++) {
@@ -2239,38 +2504,122 @@ void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count) {
             }
         }
     }
-    
-    // Sort by position (y first, then x)
+
+    // 按位置排序（y优先、x次之），同步移动 bar id
     if (uniquePoints.size() > 1) {
-        sort(uniquePoints.begin(), uniquePoints.end(), [](const Point& a, const Point& b) {
-            if (abs(a.y - b.y) > 2) return a.y < b.y;
-            return a.x < b.x;
+        std::vector<size_t> indices(uniquePoints.size());
+        for (size_t i = 0; i < indices.size(); i++) indices[i] = i;
+        std::sort(indices.begin(), indices.end(), [&uniquePoints](size_t a, size_t b) {
+            if (abs(uniquePoints[a].y - uniquePoints[b].y) > 2) return uniquePoints[a].y < uniquePoints[b].y;
+            return uniquePoints[a].x < uniquePoints[b].x;
         });
+        std::vector<Point> sortedPts(uniquePoints.size());
+        std::vector<int> sortedIds(uniqueBarIds.size());
+        for (size_t i = 0; i < indices.size(); i++) {
+            sortedPts[i] = uniquePoints[indices[i]];
+            sortedIds[i] = uniqueBarIds[indices[i]];
+        }
+        uniquePoints = sortedPts;
+        uniqueBarIds = sortedIds;
     }
-    
-    // Output all unique points (up to array capacity: 10000)
-    *count = min((int)uniquePoints.size(), 10000);
+
+    // 输出结果到全局数组（上限 10000 个点）
+    *count = std::min((int)uniquePoints.size(), 10000);
     for (int i = 0; i < *count; i++) {
         trajPixels[i].x = (float)uniquePoints[i].x;
         trajPixels[i].y = (float)uniquePoints[i].y;
+        g_trajBarId[i] = uniqueBarIds[i];
     }
-    
+
     LOG_INFO("Trajectory detection: raw=%d, unique=%d, output=%d points",
              (int)allPoints.size(), (int)uniquePoints.size(), *count);
-    
-    // Transform to world coordinates
+
+    // 坐标变换到世界坐标（毫米）
     for (int i = 0; i < *count; i++) {
         g_trajWorld[i] = ImageToWorld(trajPixels[i], g_transform);
     }
-    
+
     if (*count > 0) {
-        LOG_DEBUG("  First: pixel(%.1f, %.1f) -> world(%.2f, %.2f)", 
+        LOG_DEBUG("  First: pixel(%.1f, %.1f) -> world(%.2f, %.2f)",
             trajPixels[0].x, trajPixels[0].y, g_trajWorld[0].x, g_trajWorld[0].y);
-        LOG_DEBUG("  Last: pixel(%.1f, %.1f) -> world(%.2f, %.2f)", 
-            trajPixels[*count-1].x, trajPixels[*count-1].y, 
-            g_trajWorld[*count-1].x, g_trajWorld[*count-1].y);
+        LOG_DEBUG("  Last: pixel(%.1f, %.1f) -> world(%.2f, %.2f)",
+            trajPixels[*count - 1].x, trajPixels[*count - 1].y,
+            g_trajWorld[*count - 1].x, g_trajWorld[*count - 1].y);
     }
+
+    // ============================================================
+    // 网格步骤 6：最终彩色轨迹（黑底 + 每个暗条不同颜色）
+    // ============================================================
+    LOG_INFO("Step 6: building color trajectory image, w=%d, h=%d, count=%d", w, h, *count);
+    {
+        int dstChannels = 3;
+        int dstRowSize = w * dstChannels;
+        int imageSize = dstRowSize * h;
+        g_stepImages[5].width = w;
+        g_stepImages[5].height = h;
+        g_stepImages[5].channels = dstChannels;
+        g_stepImages[5].data = (unsigned char*)malloc(imageSize);
+        memset(g_stepImages[5].data, 0, imageSize);  // 黑底
+
+        // 用 3×3 白色方块标记每个轨迹点，颜色由 bar id 决定
+        for (int i = 0; i < *count; i++) {
+            int barIdx = g_trajBarId[i] % 16;
+            const unsigned char* color = BAR_COLORS[barIdx];
+            int cx = (int)trajPixels[i].x;
+            int cy = (int)trajPixels[i].y;
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    int x = cx + dx;
+                    int y = cy + dy;
+                    if (x >= 0 && x < w && y >= 0 && y < h) {
+                        int off = y * dstRowSize + x * 3;
+                        g_stepImages[5].data[off]     = color[0];  // B
+                        g_stepImages[5].data[off + 1] = color[1];  // G
+                        g_stepImages[5].data[off + 2] = color[2];  // R
+                    }
+                }
+            }
+        }
+    }
+    LOG_INFO("Step 6: color trajectory image complete");
+
+    // ============================================================
+    // 手动释放所有 OpenCV Mat 局部变量
+    // 防止函数返回时自动析构链中因 CRT/堆不兼容导致崩溃
+    // ============================================================
+    LOG_INFO("Step 7: releasing OpenCV Mats...");
+    innerGray.release();
+    darkBinaryBeforeMorph.release();
+    darkBinary.release();
+    kernel2.release();
+    mask.release();
+    morphed.release();
+    kernel.release();
+    binaryBright.release();
+    blurred.release();
+    grayMat.release();
+    // 释放 std::vector（可能持有大量内存）
+    {
+        std::vector<std::vector<Point>> empty1;
+        darkContours.swap(empty1);
+        std::vector<std::vector<Point>> empty2;
+        outerContours.swap(empty2);
+        std::vector<std::pair<double, int>> empty3;
+        sortedBars.swap(empty3);
+        std::vector<Point> empty4;
+        allPoints.swap(empty4);
+        std::vector<int> empty5;
+        allBarIds.swap(empty5);
+        std::vector<Point> empty6;
+        uniquePoints.swap(empty6);
+        std::vector<int> empty7;
+        uniqueBarIds.swap(empty7);
+        std::vector<bool> empty8;
+        kept.swap(empty8);
+    }
+    LOG_INFO("Step 7: all OpenCV Mats released successfully");
 }
+
 
 void CalculateError(Point2D* imagePts, Point2D* worldPts, int n, AffineTransform trans, double* avgErr, double* maxErr) {
     double totalErr = 0;
@@ -2366,10 +2715,54 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 IMAGE_WIDTH + 150, 678, 200, 100, hwnd, (HMENU)100, NULL, NULL);
             SendMessage(g_hwndMethodSelect, WM_SETFONT, (WPARAM)hFontText, TRUE);
             SendMessage(g_hwndMethodSelect, CB_ADDSTRING, 0, (LPARAM)L"Self-Algorithm");
-            SendMessage(g_hwndMethodSelect, CB_ADDSTRING, 0, (LPARAM)L"BlobAnalysisPro");
-            SendMessage(g_hwndMethodSelect, CB_ADDSTRING, 0, (LPARAM)L"FitShape-Path");
             SendMessage(g_hwndMethodSelect, CB_ADDSTRING, 0, (LPARAM)L"OpenCV-Contour");
             SendMessage(g_hwndMethodSelect, CB_SETCURSEL, 0, 0);
+        }
+        return 0;
+
+    // ---- 自动测试：加载暗条图并执行检测，弹出网格窗口 ----
+    case WM_USER + 1:
+        {
+            LOG_INFO("=== Auto-test triggered ===");
+            char filename[MAX_PATH];
+            // 默认使用复制到英文路径的16暗条图（避免 fopen_s 中文编码问题）
+            const char* autoTestPath = "D:\\work\\calibrate-api\\test_auto.bmp";
+            strcpy_s(filename, sizeof(filename), autoTestPath);
+
+            Image loadedImg = {0};
+            if (LoadBMP(filename, &loadedImg)) {
+                LOG_INFO("Auto-test: loaded %s (%dx%d)", filename, loadedImg.width, loadedImg.height);
+
+                // 如果图片超过 IMAGE_WIDTH x IMAGE_HEIGHT 则缩放
+                if (loadedImg.width > IMAGE_WIDTH || loadedImg.height > IMAGE_HEIGHT) {
+                    Image scaledImg = {0};
+                    ScaleImage(&loadedImg, &scaledImg, IMAGE_WIDTH, IMAGE_HEIGHT);
+                    free(loadedImg.data);
+                    if (g_image.data) free(g_image.data);
+                    g_image = scaledImg;
+                    LOG_INFO("Auto-test: scaled to %dx%d", g_image.width, g_image.height);
+                } else {
+                    if (g_image.data) free(g_image.data);
+                    g_image = loadedImg;
+                }
+
+                g_step = 2;
+
+                // 直接调用 DetectTrajectoryOpenCV（无需标定，走暗条检测流程）
+                DetectTrajectoryOpenCV(&g_image, g_trajPixels, &g_trajCount);
+                LOG_INFO("Auto-test: detected %d trajectory points", g_trajCount);
+
+                // 显示网格调试窗口
+                ShowTrajectoryImage(&g_image, g_trajPixels, g_trajCount);
+                CreateTrajectoryWindow(g_hInstance);
+
+                sprintf_s(statusText, sizeof(statusText),
+                    "Auto-test: %s | %d points", filename, g_trajCount);
+                InvalidateRect(g_hwndImage, NULL, FALSE);
+            } else {
+                LOG_ERROR("Auto-test: failed to load %s", filename);
+                sprintf_s(statusText, sizeof(statusText), "Auto-test: failed to load %s", filename);
+            }
         }
         return 0;
 
@@ -2454,15 +2847,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     int sel = SendMessage(g_hwndMethodSelect, CB_GETCURSEL, 0, 0);
                     g_detectMethod = (DetectMethod)sel;
                     
-                    const char* methodName = (g_detectMethod == METHOD_BLOB) ? "BlobAnalysisPro" : 
-                                            (g_detectMethod == METHOD_FITSHAPE) ? "FitShape-Path" :
-                                            (g_detectMethod == METHOD_OPENCV) ? "OpenCV-Contour" : "Self-Algorithm";
+                    const char* methodName = (g_detectMethod == METHOD_OPENCV) ? "OpenCV-Contour" : "Self-Algorithm";
                     LOG_INFO("Selected detection method: %s (index: %d)", methodName, sel);
                     sprintf_s(msgBuf, sizeof(msgBuf), "Using detection method: %s", methodName);
                     MessageBoxA(hwnd, msgBuf, "Detection Method", MB_OK);
                     
                     // Call appropriate detection function
-                    if (g_detectMethod == METHOD_BLOB) {
+                    if (g_detectMethod == METHOD_OPENCV) {
                         BlobDetectCircles(&g_image, g_detectedPts, &g_detectedCount);
                     } else {
                         DetectCircles(&g_image, g_detectedPts, &g_detectedCount);
@@ -2653,10 +3044,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                             if (g_step >= 4) {
                                 LOG_INFO("Calibration available, starting trajectory detection...");
                                 int sel = SendMessage(g_hwndMethodSelect, CB_GETCURSEL, 0, 0);
-                                if (sel == METHOD_SELF || sel == METHOD_BLOB) {
+                                if (sel == METHOD_SELF) {
                                     DetectTrajectory(&g_image, g_trajPixels, &g_trajCount);
-                                } else if (sel == METHOD_FITSHAPE) {
-                                    DetectTrajectoryFitShape(&g_image, g_trajPixels, &g_trajCount);
                                 } else if (sel == METHOD_OPENCV) {
                                     DetectTrajectoryOpenCV(&g_image, g_trajPixels, &g_trajCount);
                                 }
@@ -2831,6 +3220,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     ShowWindow(hwnd, SW_SHOWNORMAL);
     UpdateWindow(hwnd);
     LOG_INFO("Main window shown");
+
+    // 启动后自动执行测试：加载图片 → 检测 → 显示网格窗口
+    PostMessage(hwnd, WM_USER + 1, 0, 0);
 
     MSG msg;
     LOG_INFO("Entering message loop...");

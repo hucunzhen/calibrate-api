@@ -1,3 +1,3 @@
 @echo off
-"C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\bin\Hostx64\x64\cl.exe" /EHsc "d:\work\算法API\calibrate_test_en.cpp" /Fe"d:\work\算法API\calibrate_test_en.exe" /I"C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include" /I"C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt" /W3
-pause
+call "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
+cl /EHsc /std:c++14 /utf-8 /DNOMINMAX /DWIN32_LEAN_AND_MEAN /I d:\work\calibrate-api\opencv\build\include test_detect_trajectory.cpp /Fe:test_detect_trajectory.exe /link /LIBPATH:d:\work\calibrate-api\opencv\build\x64\vc16\lib opencv_world4130.lib

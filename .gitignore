@@ -1,25 +1,78 @@
-# Build outputs
-*.exe
+# Build output
 *.obj
-*.dll
-*.lib
+*.exe
 *.pdb
+*.ilk
+*.exp
+*.idb
+*.recipe
+*.tlog
 
-# Debug/Release
-debug/
-release/
+# DLL (runtime binaries, not source)
+*.dll
 
-# Temporary files
+# OpenCV prebuilt (large binary)
+opencv/
+
+# Log/output files
 *.log
-*.txt.bak
-*.bmp
+debug_autotest.log
+*_log.txt
+*_output.txt
+build_output.txt
+build_log.txt
+compile_log.txt
+diagnostic_output.txt
+test_output.txt
+test_output2.txt
 
-# IDE
+# Test BMP images (data files)
+test_images/
+test_auto.bmp
+test_image.bmp
+calibration_9points.bmp
+Image_20260416162435404.bmp
+兴族图片/
+
+# Debug images
+debug_*.png
+debug_*.bmp
+
+# Archive
+*.rar
+*.zip
+
+# IDE files
 .vs/
-.vscode/
-*.suo
 *.user
-*.opensdf
+*.suo
+ipch/
 
-# OpenCV
-opencv_download/
+# Intermediate build dirs
+obj/
+x64/
+Debug/
+Release/
+IntDir/
+
+# Temporary test/build scripts
+build_diagnostic.bat
+build_minimal.bat
+build_opencv_minimal.bat
+build_standalone.bat
+run_calib_gui.bat
+test_run.bat
+
+# Temporary test source files
+test_detect_trajectory.cpp
+test_detect_trajectory.vcxproj
+test_diagnostic.cpp
+test_minimal.cpp
+test_opencv.cpp
+test_opencv.vcxproj
+test_opencv_minimal.cpp
+tiny_test.cpp
+
+# Third-party binary libs
+第三方库_调用算法需要/
+兴族图片.rar
