@@ -99,9 +99,6 @@ int LoadBMP(const char* filename, Image* img);
 // 支持 OTSU + adaptive fallback 策略
 void DetectCircles(Image* img, Point2D* pts, int* count);
 
-// OpenCV 自适应 Blob 检测
-void BlobDetectCircles(Image* img, Point2D* pts, int* count);
-
 // 在图像上绘制检测到的圆标记
 void DrawDetectedCircles(Image* img, Point2D* pts, int count, int gray);
 

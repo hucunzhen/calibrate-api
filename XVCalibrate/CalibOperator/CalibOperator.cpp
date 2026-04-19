@@ -591,6 +591,7 @@ void DetectCircles(Image* img, Point2D* pts, int* count) {
         float radius;
         float circularity;
         double area;
+        int contourIdx;    // 追踪原始轮廓索引，用于后续 fitEllipse
     };
     std::vector<CircleInfo> circleCandidates;
 
@@ -610,6 +611,7 @@ void DetectCircles(Image* img, Point2D* pts, int* count) {
         info.radius = radius;
         info.circularity = (float)circularity;
         info.area = area;
+        info.contourIdx = (int)i;
         circleCandidates.push_back(info);
     }
 
@@ -656,9 +658,13 @@ void DetectCircles(Image* img, Point2D* pts, int* count) {
             CircleInfo info;
             info.center = center; info.radius = radius;
             info.circularity = (float)circularity; info.area = area;
+            info.contourIdx = (int)i;
             circleCandidates.push_back(info);
             if (circularity > 0.5f) circularOnes.push_back(info);
         }
+        // fallback 路径：将 darkContours 切换为 adaptiveContours，
+        // 使后续精化步骤中 contourIdx 索引正确对应
+        darkContours = adaptiveContours;
         usedAdaptive = true;
 
         if (circularOnes.size() >= 9) {
@@ -713,114 +719,53 @@ void DetectCircles(Image* img, Point2D* pts, int* count) {
         return;
     }
 
-    // Step 2: Crosshair refinement
+    // Step 2: 亚像素圆心精化 (fitEllipse + moments)
     int foundCount = 0;
     for (int i = 0; i < (int)selected.size() && foundCount < 9; i++) {
         Point2f roughCenter = selected[i].center;
-        float radius = selected[i].radius;
-        int cx = (int)round(roughCenter.x);
-        int cy = (int)round(roughCenter.y);
-        int searchR = (int)(radius * 0.8);
 
-        int x0 = std::max(0, cx - searchR);
-        int y0 = std::max(0, cy - searchR);
-        int x1 = std::min(w - 1, cx + searchR);
-        int y1 = std::min(h - 1, cy + searchR);
-        if (x1 <= x0 || y1 <= y0) continue;
-
-        Mat roi = grayMat(Range(y0, y1 + 1), Range(x0, x1 + 1));
-        int roiCx = cx - x0, roiCy = cy - y0;
-
-        int centerVal = 0;
-        for (int dy = -2; dy <= 2; dy++) {
-            for (int dx = -2; dx <= 2; dx++) {
-                int nx = roiCx + dx, ny = roiCy + dy;
-                if (nx >= 0 && nx < roi.cols && ny >= 0 && ny < roi.rows)
-                    centerVal += roi.at<uchar>(ny, nx);
+        // --- 方法 1: cv::fitEllipse 椭圆拟合 (需要 >= 6 个轮廓点) ---
+        Point2f ellipseCenter = roughCenter;
+        bool hasEllipse = false;
+        int cidx = selected[i].contourIdx;
+        if (cidx >= 0 && cidx < (int)darkContours.size() &&
+            darkContours[cidx].size() >= 6) {
+            try {
+                RotatedRect rect = fitEllipse(darkContours[cidx]);
+                // 过滤明显不合理的拟合（尺寸偏离粗估计太多）
+                float fitR = (float)((rect.size.width + rect.size.height) / 4.0);
+                if (fitR > 0 && fitR < roughCenter.x * 0.5f) { // 半径合理性检查
+                    ellipseCenter = rect.center;
+                    hasEllipse = true;
+                }
+            } catch (...) {
+                // fitEllipse 可能抛异常（退化情况）
             }
         }
-        centerVal /= 25;
 
-        int ringVal = 0, samples = 0;
-        for (int dy = -searchR; dy <= searchR; dy += 3) {
-            for (int dx = -searchR; dx <= searchR; dx += 3) {
-                float dist = sqrt((float)(dx*dx + dy*dy));
-                if (dist > radius * 0.3f && dist < radius * 0.9f) {
-                    int nx = roiCx + dx, ny = roiCy + dy;
-                    if (nx >= 0 && nx < roi.cols && ny >= 0 && ny < roi.rows) {
-                        ringVal += roi.at<uchar>(ny, nx);
-                        samples++;
-                    }
-                }
+        // --- 方法 2: cv::moments 空间矩质心 ---
+        Point2f momentsCenter = roughCenter;
+        if (cidx >= 0 && cidx < (int)darkContours.size()) {
+            Moments m = moments(darkContours[cidx]);
+            if (m.m00 > 0) {
+                momentsCenter.x = (float)(m.m10 / m.m00);
+                momentsCenter.y = (float)(m.m01 / m.m00);
             }
         }
-        if (samples > 0) ringVal /= samples;
 
-        bool brightCrosshair = (centerVal > ringVal);
-
-        if (brightCrosshair) {
-            float sumX = 0, sumW = 0;
-            for (int dx = -searchR; dx <= searchR; dx++) {
-                int nx = roiCx + dx;
-                if (nx < 0 || nx >= roi.cols) continue;
-                int val = 0;
-                for (int dy2 = -1; dy2 <= 1; dy2++) {
-                    int ny = roiCy + dy2;
-                    if (ny >= 0 && ny < roi.rows) val += roi.at<uchar>(ny, nx);
-                }
-                val /= 3;
-                if (val > ringVal) {
-                    sumX += nx * val;
-                    sumW += val;
-                }
-            }
-
-            float sumY = 0;
-            sumW = 0;
-            for (int dy = -searchR; dy <= searchR; dy++) {
-                int ny = roiCy + dy;
-                if (ny < 0 || ny >= roi.rows) continue;
-                int val = 0;
-                for (int dx2 = -1; dx2 <= 1; dx2++) {
-                    int nx = roiCx + dx2;
-                    if (nx >= 0 && nx < roi.cols) val += roi.at<uchar>(ny, nx);
-                }
-                val /= 3;
-                if (val > ringVal) {
-                    sumY += ny * val;
-                    sumW += val;
-                }
-            }
-
-            if (sumW > 0) {
-                pts[foundCount].x = sumX / sumW + x0;
-                pts[foundCount].y = sumY / sumW + y0;
-            } else {
-                pts[foundCount].x = roughCenter.x;
-                pts[foundCount].y = roughCenter.y;
-            }
+        // --- 融合：取两者平均 (两者精度都在 0.1~0.2 像素，平均更稳健) ---
+        if (hasEllipse) {
+            pts[foundCount].x = (ellipseCenter.x + momentsCenter.x) / 2.0;
+            pts[foundCount].y = (ellipseCenter.y + momentsCenter.y) / 2.0;
         } else {
-            float thresh = (centerVal + ringVal) / 2.0f;
-            float sumX = 0, sumY = 0, sumW = 0;
-            for (int dy = -searchR; dy <= searchR; dy++) {
-                for (int dx = -searchR; dx <= searchR; dx++) {
-                    int nx = roiCx + dx, ny = roiCy + dy;
-                    if (nx < 0 || nx >= roi.cols || ny < 0 || ny >= roi.rows) continue;
-                    if (roi.at<uchar>(ny, nx) < thresh) {
-                        sumX += nx;
-                        sumY += ny;
-                        sumW += 1;
-                    }
-                }
-            }
-            if (sumW > 0) {
-                pts[foundCount].x = sumX / sumW + x0;
-                pts[foundCount].y = sumY / sumW + y0;
-            } else {
-                pts[foundCount].x = roughCenter.x;
-                pts[foundCount].y = roughCenter.y;
-            }
+            pts[foundCount].x = momentsCenter.x;
+            pts[foundCount].y = momentsCenter.y;
         }
+
+        LOG_DEBUG("  Hole %d: rough(%.1f,%.1f) -> refined(%.2f,%.2f)%s",
+                  foundCount, roughCenter.x, roughCenter.y,
+                  pts[foundCount].x, pts[foundCount].y,
+                  hasEllipse ? " [fitEllipse+moment]" : " [moment only]");
         foundCount++;
     }
 
@@ -878,165 +823,6 @@ void DetectCircles(Image* img, Point2D* pts, int* count) {
     for (int i = 0; i < *count; i++) {
         LOG_DEBUG("  Point %d: (%.1f, %.1f)", i, pts[i].x, pts[i].y);
     }
-}
-
-void BlobDetectCircles(Image* img, Point2D* pts, int* count) {
-    LOG_INFO("=== Starting OpenCV Adaptive Blob Detection ===");
-    LOG_DEBUG("Input image: %dx%d, channels: %d", img->width, img->height, img->channels);
-
-    *count = 0;
-
-    int w = img->width, h = img->height;
-
-    Mat grayMat;
-    if (img->channels == 1) {
-        int pitch = ((w + 3) / 4) * 4;
-        Mat tmp(h, w, CV_8UC1, img->data, pitch);
-        grayMat = tmp.clone();
-        tmp.release();
-    } else {
-        int srcRowSize = ((w * img->channels + 3) / 4) * 4;
-        Mat colorMat(h, w, CV_8UC3, img->data, srcRowSize);
-        cvtColor(colorMat, grayMat, COLOR_BGR2GRAY);
-        colorMat.release();
-    }
-
-    // Step 1: OTSU threshold to find bright calibration region
-    Mat blurred;
-    GaussianBlur(grayMat, blurred, Size(5, 5), 1.0);
-
-    Mat brightBinary;
-    threshold(blurred, brightBinary, 0, 255, THRESH_BINARY + THRESH_OTSU);
-
-    Mat kernel = getStructuringElement(MORPH_ELLIPSE, Size(7, 7));
-    morphologyEx(brightBinary, brightBinary, MORPH_CLOSE, kernel);
-    morphologyEx(brightBinary, brightBinary, MORPH_OPEN, kernel);
-
-    std::vector<std::vector<Point>> brightContours;
-    findContours(brightBinary, brightContours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
-
-    if (brightContours.empty()) {
-        LOG_ERROR("No bright calibration region found");
-        return;
-    }
-
-    int maxIdx = 0;
-    double maxArea = 0;
-    for (size_t i = 0; i < brightContours.size(); i++) {
-        double a = contourArea(brightContours[i]);
-        if (a > maxArea) { maxArea = a; maxIdx = (int)i; }
-    }
-
-    Mat calibMask = Mat::zeros(h, w, CV_8UC1);
-    drawContours(calibMask, brightContours, maxIdx, Scalar(255), FILLED);
-
-    // Draw calib region border on original image
-    Rect bbox = boundingRect(brightContours[maxIdx]);
-    int dstRowSize = ((w * img->channels + 3) / 4) * 4;
-
-    for (int x = bbox.x; x <= bbox.x + bbox.width; x++) {
-        for (int t = -2; t <= 2; t++) {
-            int y1 = bbox.y + t, y2 = bbox.y + bbox.height + t;
-            if (x >= 0 && x < w) {
-                if (y1 >= 0 && y1 < h) {
-                    int off = y1 * dstRowSize + x * img->channels;
-                    if (img->channels == 1) img->data[off] = 255;
-                    else { img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0; }
-                }
-                if (y2 >= 0 && y2 < h) {
-                    int off = y2 * dstRowSize + x * img->channels;
-                    if (img->channels == 1) img->data[off] = 255;
-                    else { img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0; }
-                }
-            }
-        }
-    }
-    for (int y = bbox.y; y <= bbox.y + bbox.height; y++) {
-        for (int t = -2; t <= 2; t++) {
-            int x1 = bbox.x + t, x2 = bbox.x + bbox.width + t;
-            if (y >= 0 && y < h) {
-                if (x1 >= 0 && x1 < w) {
-                    int off = y * dstRowSize + x1 * img->channels;
-                    if (img->channels == 1) img->data[off] = 255;
-                    else { img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0; }
-                }
-                if (x2 >= 0 && x2 < w) {
-                    int off = y * dstRowSize + x2 * img->channels;
-                    if (img->channels == 1) img->data[off] = 255;
-                    else { img->data[off] = 0; img->data[off+1] = 255; img->data[off+2] = 0; }
-                }
-            }
-        }
-    }
-
-    // Step 2: Find dark circles within calibration region
-    Mat innerGray = grayMat.clone();
-    innerGray.setTo(128, calibMask == 0);
-
-    Mat darkBinary;
-    threshold(innerGray, darkBinary, 0, 255, THRESH_BINARY_INV + THRESH_OTSU);
-    darkBinary.setTo(0, calibMask == 0);
-
-    Mat kernel2 = getStructuringElement(MORPH_ELLIPSE, Size(3, 3));
-    morphologyEx(darkBinary, darkBinary, MORPH_OPEN, kernel2);
-    morphologyEx(darkBinary, darkBinary, MORPH_CLOSE, kernel2);
-
-    std::vector<std::vector<Point>> darkContours;
-    findContours(darkBinary, darkContours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
-
-    // Step 3: Filter and fit circles
-    std::vector<Point2D> circleCenters;
-
-    std::vector<std::pair<double, int>> sortedHoles;
-    for (size_t i = 0; i < darkContours.size(); i++) {
-        double a = contourArea(darkContours[i]);
-        if (a > 20) sortedHoles.push_back(std::make_pair(a, (int)i));
-    }
-    std::sort(sortedHoles.begin(), sortedHoles.end(),
-         [](const std::pair<double, int>& a, const std::pair<double, int>& b) { return a.first > b.first; });
-
-    for (size_t idx = 0; idx < sortedHoles.size() && circleCenters.size() < 9; idx++) {
-        const std::vector<Point>& contour = darkContours[sortedHoles[idx].second];
-        if ((int)contour.size() < 8) continue;
-
-        Point2f center;
-        float radius;
-        minEnclosingCircle(contour, center, radius);
-
-        Point2D pt;
-        pt.x = center.x;
-        pt.y = center.y;
-        circleCenters.push_back(pt);
-
-        // Draw hole overlay on original image
-        Rect holeRect = boundingRect(contour);
-        for (int y = holeRect.y; y < holeRect.y + holeRect.height && y < h; y++) {
-            for (int x = holeRect.x; x < holeRect.x + holeRect.width && x < w; x++) {
-                if (darkBinary.at<uchar>(y, x) > 0 && x >= 0 && y >= 0) {
-                    int off = y * dstRowSize + x * img->channels;
-                    if (img->channels == 1) {
-                        img->data[off] = (unsigned char)(img->data[off] * 0.5);
-                    } else {
-                        img->data[off] = (unsigned char)(img->data[off] * 0.5);
-                        img->data[off + 1] = (unsigned char)(img->data[off + 1] * 0.5);
-                        img->data[off + 2] = (unsigned char)(std::min(255, img->data[off + 2] + 128));
-                    }
-                }
-            }
-        }
-    }
-
-    std::sort(circleCenters.begin(), circleCenters.end(), [](const Point2D& a, const Point2D& b) {
-        if (fabs(a.y - b.y) > 20) return a.y < b.y;
-        return a.x < b.x;
-    });
-
-    *count = std::min(9, (int)circleCenters.size());
-    for (int i = 0; i < *count && i < 9; i++) {
-        pts[i] = circleCenters[i];
-    }
-
-    LOG_INFO("Blob detection complete: %d points", *count);
 }
 
 void DrawDetectedCircles(Image* img, Point2D* pts, int count, int gray) {

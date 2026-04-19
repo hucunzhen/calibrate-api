@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
+#include <stdarg.h>
 #include <algorithm>
 #include <time.h>
 
@@ -20,9 +21,43 @@
 
 using namespace cv;
 
+// ========== 前置声明 ==========
+static FILE* g_logFile = NULL;
+
+// ========== CalibOperator 日志回调（写到文件） ==========
+static void OperatorLogCallback(int level, const char* fmt, ...) {
+    const char* prefix = "";
+    switch (level) {
+        case 0: prefix = "[INFO] "; break;
+        case 1: prefix = "[WARN] "; break;
+        case 2: prefix = "[ERROR]"; break;
+        case 3: prefix = "[DEBUG]"; break;
+        default: prefix = "[LOG] "; break;
+    }
+    time_t now = time(NULL);
+    struct tm t;
+    localtime_s(&t, &now);
+    char timeStr[32];
+    strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &t);
+
+    char buf[2048];
+    va_list args;
+    va_start(args, fmt);
+    int n = sprintf_s(buf, sizeof(buf), "[%s] %s ", timeStr, prefix);
+    vsnprintf_s(buf + n, sizeof(buf) - n, _TRUNCATE, fmt, args);
+    strcat_s(buf, sizeof(buf), "\n");
+    va_end(args);
+
+    printf("%s", buf);
+    fflush(stdout);
+    if (g_logFile) {
+        fprintf(g_logFile, "%s", buf);
+        fflush(g_logFile);
+    }
+}
+
 // ========== Console Logger ==========
 static FILE* g_consoleFile = NULL;
-static FILE* g_logFile = NULL;
 
 void InitConsole() {
     if (AllocConsole()) {
@@ -94,7 +129,7 @@ static AffineTransform g_transform = {0};
 static double g_avgError = 0;
 static double g_maxError = 0;
 static int g_step = 0;
-static DetectMethod g_detectMethod = METHOD_SELF;
+static DetectMethod g_detectMethod = METHOD_OPENCV;
 
 // World points (physical coordinates in mm)
 static Point2D g_worldPts[9] = {
@@ -515,41 +550,50 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                 CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Consolas");
 
-            int btnY = 700, btnW = 150, btnH = 32, btnGap = 10;
-            int startX = 20;
-
+            int btnW = 150, btnH = 32, btnGap = 10;
+            // 第一行：按钮 1-4
+            int btnY1 = 700, startX = 20;
             CreateWindow(L"BUTTON", L"1. Generate Image",
                 WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-                startX, btnY, btnW, btnH, hwnd, (HMENU)1, NULL, NULL);
+                startX, btnY1, btnW, btnH, hwnd, (HMENU)1, NULL, NULL);
             startX += btnW + btnGap;
 
             CreateWindow(L"BUTTON", L"2. Load Image",
                 WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-                startX, btnY, btnW, btnH, hwnd, (HMENU)2, NULL, NULL);
+                startX, btnY1, btnW, btnH, hwnd, (HMENU)2, NULL, NULL);
             startX += btnW + btnGap;
 
             CreateWindow(L"BUTTON", L"3. Detect Circles",
                 WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-                startX, btnY, btnW, btnH, hwnd, (HMENU)3, NULL, NULL);
+                startX, btnY1, btnW, btnH, hwnd, (HMENU)3, NULL, NULL);
             startX += btnW + btnGap;
 
             CreateWindow(L"BUTTON", L"4. Calibrate",
                 WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-                startX, btnY, btnW, btnH, hwnd, (HMENU)4, NULL, NULL);
-            startX += btnW + btnGap;
+                startX, btnY1, btnW, btnH, hwnd, (HMENU)4, NULL, NULL);
 
+            // 第二行：按钮 5-8
+            int btnY2 = btnY1 + btnH + 8;
+            startX = 20;
             CreateWindow(L"BUTTON", L"5. Save Results",
                 WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-                startX, btnY, btnW, btnH, hwnd, (HMENU)5, NULL, NULL);
+                startX, btnY2, btnW, btnH, hwnd, (HMENU)5, NULL, NULL);
             startX += btnW + btnGap;
 
             CreateWindow(L"BUTTON", L"6. Test Transform",
                 WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-                startX, btnY, btnW, btnH, hwnd, (HMENU)6, NULL, NULL);
+                startX, btnY2, btnW, btnH, hwnd, (HMENU)6, NULL, NULL);
             startX += btnW + btnGap;
+
             CreateWindow(L"BUTTON", L"7. TestImage",
                 WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-                startX, btnY, btnW, btnH, hwnd, (HMENU)7, NULL, NULL);
+                startX, btnY2, btnW, btnH, hwnd, (HMENU)7, NULL, NULL);
+            startX += btnW + btnGap;
+
+            // Button 8: 一键轨迹测试（使用 test_auto.bmp）
+            CreateWindow(L"BUTTON", L"8. AutoTrajTest",
+                WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
+                startX, btnY2, btnW, btnH, hwnd, (HMENU)8, NULL, NULL);
 
             g_hwndImage = CreateWindow(L"STATIC", L"",
                 WS_CHILD | WS_VISIBLE | SS_BLACKFRAME,
@@ -574,7 +618,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL,
                 CALIB_IMAGE_WIDTH + 150, 678, 200, 100, hwnd, (HMENU)100, NULL, NULL);
             SendMessage(g_hwndMethodSelect, WM_SETFONT, (WPARAM)hFontText, TRUE);
-            SendMessage(g_hwndMethodSelect, CB_ADDSTRING, 0, (LPARAM)L"Self-Algorithm");
             SendMessage(g_hwndMethodSelect, CB_ADDSTRING, 0, (LPARAM)L"OpenCV-Contour");
             SendMessage(g_hwndMethodSelect, CB_SETCURSEL, 0, 0);
         }
@@ -673,11 +716,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     int sel = SendMessage(g_hwndMethodSelect, CB_GETCURSEL, 0, 0);
                     g_detectMethod = (DetectMethod)sel;
 
-                    if (g_detectMethod == METHOD_OPENCV) {
-                        BlobDetectCircles(&g_image, g_detectedPts, &g_detectedCount);
-                    } else {
-                        DetectCircles(&g_image, g_detectedPts, &g_detectedCount);
-                    }
+                    DetectCircles(&g_image, g_detectedPts, &g_detectedCount);
 
                     for (int i = 0; i < g_detectedCount && i < 9; i++) g_imagePts[i] = g_detectedPts[i];
                     DrawDetectedCircles(&g_image, g_detectedPts, g_detectedCount, 0);
@@ -776,14 +815,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
                             if (g_step >= 4) {
                                 LOG_INFO("Calibration available, starting trajectory detection...");
-                                int sel = SendMessage(g_hwndMethodSelect, CB_GETCURSEL, 0, 0);
-                                if (sel == METHOD_SELF) {
-                                    DetectTrajectory(&g_image, g_trajPixels, &g_trajCount);
-                                } else if (sel == METHOD_OPENCV) {
-                                    FreeStepImages();
-                                    DetectTrajectoryOpenCV(&g_image, g_trajPixels, &g_trajCount,
-                                                          g_stepImages, g_trajBarId, STEP_COUNT);
-                                }
+                                FreeStepImages();
+                                DetectTrajectoryOpenCV(&g_image, g_trajPixels, &g_trajCount,
+                                                      g_stepImages, g_trajBarId, STEP_COUNT);
                                 LOG_INFO("Trajectory detection finished: %d points", g_trajCount);
                                 sprintf_s(msgBuf, sizeof(msgBuf),
                                     "Detected %d trajectory points\n\nStart: (%.2f, %.2f)\nEnd: (%.2f, %.2f)",
@@ -808,6 +842,38 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     }
                     break;
                 }
+
+            case 8: { // AutoTrajTest — 加载 test_auto.bmp 跑轨迹检测，展示6步结果
+                LOG_INFO("Button 8: AutoTrajTest clicked");
+                const char* trajTestPath = "D:\\work\\calibrate-api\\test_auto.bmp";
+                Image loadedImg = { 0 };
+                if (LoadBMP(trajTestPath, &loadedImg)) {
+                    if (g_image.data) free(g_image.data);
+                    g_image = loadedImg;
+                    LOG_INFO("AutoTrajTest: loaded %s (%dx%d)", trajTestPath, g_image.width, g_image.height);
+
+                    // 运行 OpenCV 16暗条轨迹检测，获取 6 步中间结果
+                    FreeStepImages();
+                    DetectTrajectoryOpenCV(&g_image, g_trajPixels, &g_trajCount,
+                                          g_stepImages, g_trajBarId, STEP_COUNT);
+                    LOG_INFO("AutoTrajTest: detected %d trajectory points", g_trajCount);
+
+                    // 在网格窗口中展示 6 步结果
+                    ShowTrajectoryImage(&g_image, g_trajPixels, g_trajCount);
+                    CreateTrajectoryWindow((HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE));
+
+                    sprintf_s(statusText, sizeof(statusText),
+                        "AutoTrajTest: %s | %d traj points", trajTestPath, g_trajCount);
+                    InvalidateRect(g_hwndImage, NULL, FALSE);
+                } else {
+                    LOG_ERROR("AutoTrajTest: failed to load %s", trajTestPath);
+                    sprintf_s(statusText, sizeof(statusText),
+                        "AutoTrajTest: failed to load test_auto.bmp");
+                    MessageBoxA(hwnd, "Cannot load test_auto.bmp\nPlease check file exists at D:\\work\\calibrate-api\\",
+                        "Load Error", MB_OK | MB_ICONWARNING);
+                }
+                break;
+            }
 
             }
 
@@ -904,6 +970,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 infoY += 20;
                 sprintf_s(line, sizeof(line), "7. Load TestImage");
                 TextOutA(hdc, infoX, infoY, line, strlen(line));
+                infoY += 20;
+                sprintf_s(line, sizeof(line), "8. AutoTrajTest (test_auto.bmp)");
+                TextOutA(hdc, infoX, infoY, line, strlen(line));
             }
 
             SelectObject(hdc, hOld);
@@ -925,8 +994,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     InitConsole();
     LOG_INFO("Application starting...");
 
-    // 设置算子层日志回调
-    CalibSetLogCallback(NULL);  // NULL = 使用默认 stdout 输出
+    // 设置算子层日志回调（写入文件 + 控制台）
+    CalibSetLogCallback(OperatorLogCallback);
 
     WNDCLASS wc = {0};
     wc.lpfnWndProc = WindowProc;
