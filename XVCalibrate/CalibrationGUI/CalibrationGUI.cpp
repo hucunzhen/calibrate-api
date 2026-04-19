@@ -78,8 +78,8 @@ enum DetectMethod {
 };
 
 // ========== Constants ==========
-#define IMAGE_WIDTH   800
-#define IMAGE_HEIGHT  600
+#define IMAGE_WIDTH   2448
+#define IMAGE_HEIGHT  2048
 
 // ========== Structures ==========
 typedef struct {
@@ -172,10 +172,10 @@ static Point2D g_worldPts[9] = {
 static Point2D g_imagePts[9];
 
 // Trajectory points
-static Point2D g_trajPixels[10000];
-static Point2D g_trajWorld[10000];
+static Point2D g_trajPixels[50000];
+static Point2D g_trajWorld[50000];
 static int g_trajCount = 0;
-static int g_trajBarId[10000];  // bar index for each trajectory point
+static int g_trajBarId[50000];  // bar index for each trajectory point
 
 // ========== Image Functions ==========
 // Create 8-bit grayscale calibration image
@@ -586,48 +586,6 @@ void DrawImageToHDC(HDC hdc, Image* img, int x, int y) {
 }
 
 // ========== Image Scaling ==========
-void ScaleImage(Image* src, Image* dst, int dstWidth, int dstHeight) {
-    dst->width = dstWidth;
-    dst->height = dstHeight;
-    dst->channels = src->channels;
-    int dstRowSize = ((dstWidth * dst->channels + 3) / 4) * 4;
-    dst->data = (unsigned char*)malloc(dstRowSize * dstHeight);
-    if (!dst->data) return;
-    
-    int srcRowSize = ((src->width * src->channels + 3) / 4) * 4;
-    double scaleX = (double)src->width / dstWidth;
-    double scaleY = (double)src->height / dstHeight;
-    
-    for (int y = 0; y < dstHeight; y++) {
-        for (int x = 0; x < dstWidth; x++) {
-            // Bilinear interpolation
-            double srcX = x * scaleX;
-            double srcY = y * scaleY;
-            int x0 = (int)srcX;
-            int y0 = (int)srcY;
-            int x1 = std::min(x0 + 1, src->width - 1);
-            int y1 = std::min(y0 + 1, src->height - 1);
-            double fx = srcX - x0;
-            double fy = srcY - y0;
-            
-            // Clamp source coordinates
-            x0 = std::min(x0, src->width - 1);
-            y0 = std::min(y0, src->height - 1);
-            
-            unsigned char* p00 = src->data + y0 * srcRowSize + x0 * src->channels;
-            unsigned char* p10 = src->data + y0 * srcRowSize + x1 * src->channels;
-            unsigned char* p01 = src->data + y1 * srcRowSize + x0 * src->channels;
-            unsigned char* p11 = src->data + y1 * srcRowSize + x1 * src->channels;
-            
-            unsigned char* pdst = dst->data + y * dstRowSize + x * dst->channels;
-            for (int c = 0; c < src->channels; c++) {
-                double val = (1-fx)*(1-fy)*p00[c] + fx*(1-fy)*p10[c] + (1-fx)*fy*p01[c] + fx*fy*p11[c];
-                pdst[c] = cv::saturate_cast<unsigned char>(val);
-            }
-        }
-    }
-}
-
 // ========== Circle Detection (Contour + Crosshair Refinement) ==========
 // Step 1: OTSU find calib region, then find dark circle contours inside it
 // Step 2: Filter by circularity & radius consistency, select 9 best
@@ -1483,11 +1441,116 @@ void CreateTrajectoryWindow(HINSTANCE hInstance) {
 
     WNDCLASS wc = {0};
     wc.lpfnWndProc = [](HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) -> LRESULT {
-        if (msg == WM_PAINT) {
+        static int g_scrollX = 0, g_scrollY = 0;
+
+        if (msg == WM_SIZE) {
+            // 客户区大小改变时更新滚动范围
+            RECT rc; GetClientRect(hwnd, &rc);
+            int clientW = rc.right;
+            int clientH = rc.bottom;
+            int contentW = g_trajImage.width > 0 ? g_trajImage.width : 640;
+            int contentH = g_trajImage.height > 0 ? g_trajImage.height : 480;
+
+            SCROLLINFO si = {0};
+            si.cbSize = sizeof(si);
+
+            // 水平滚动条
+            si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+            si.nMin = 0;
+            si.nMax = contentW - 1;
+            si.nPage = clientW;
+            SetScrollInfo(hwnd, SB_HORZ, &si, TRUE);
+
+            // 垂直滚动条
+            si.nMax = contentH - 1;
+            si.nPage = clientH;
+            SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
+
+            // 修正滚动位置不超过新范围
+            int maxScrollX = contentW - clientW;
+            int maxScrollY = contentH - clientH;
+            if (maxScrollX < 0) maxScrollX = 0;
+            if (maxScrollY < 0) maxScrollY = 0;
+            if (g_scrollX < 0) g_scrollX = 0;
+            if (g_scrollX > maxScrollX) g_scrollX = maxScrollX;
+            if (g_scrollY < 0) g_scrollY = 0;
+            if (g_scrollY > maxScrollY) g_scrollY = maxScrollY;
+
+            InvalidateRect(hwnd, NULL, FALSE);
+            return 0;
+        }
+        else if (msg == WM_HSCROLL || msg == WM_VSCROLL) {
+            int bar = (msg == WM_HSCROLL) ? SB_HORZ : SB_VERT;
+            SCROLLINFO si = {0};
+            si.cbSize = sizeof(si);
+            si.fMask = SIF_ALL;
+            GetScrollInfo(hwnd, bar, &si);
+
+            int delta = 0;
+            switch (LOWORD(wParam)) {
+                case SB_LINELEFT:   delta = -30;  break;
+                case SB_LINERIGHT:  delta = 30;   break;
+                case SB_PAGELEFT:   delta = -(int)si.nPage;  break;
+                case SB_PAGERIGHT:  delta = (int)si.nPage;   break;
+                case SB_THUMBTRACK: delta = si.nTrackPos - si.nPos; break;
+            }
+
+            RECT rc; GetClientRect(hwnd, &rc);
+            if (bar == SB_HORZ) {
+                g_scrollX += delta;
+                int contentW = g_trajImage.width > 0 ? g_trajImage.width : 640;
+                int maxScroll = contentW - rc.right;
+                if (maxScroll < 0) maxScroll = 0;
+                if (g_scrollX < 0) g_scrollX = 0;
+                if (g_scrollX > maxScroll) g_scrollX = maxScroll;
+                ScrollWindow(hwnd, -delta, 0, NULL, NULL);
+            } else {
+                g_scrollY += delta;
+                int contentH = g_trajImage.height > 0 ? g_trajImage.height : 480;
+                int maxScroll = contentH - rc.bottom;
+                if (maxScroll < 0) maxScroll = 0;
+                if (g_scrollY < 0) g_scrollY = 0;
+                if (g_scrollY > maxScroll) g_scrollY = maxScroll;
+                ScrollWindow(hwnd, 0, -delta, NULL, NULL);
+            }
+
+            si.fMask = SIF_POS;
+            si.nPos = (bar == SB_HORZ) ? g_scrollX : g_scrollY;
+            SetScrollInfo(hwnd, bar, &si, TRUE);
+            UpdateWindow(hwnd);
+            return 0;
+        }
+        else if (msg == WM_MOUSEWHEEL) {
+            // 鼠标滚轮 → 垂直滚动
+            int delta = -(short)HIWORD(wParam) / WHEEL_DELTA * 60;
+            SCROLLINFO si = {0};
+            si.cbSize = sizeof(si);
+            si.fMask = SIF_ALL;
+            GetScrollInfo(hwnd, SB_VERT, &si);
+
+            g_scrollY += delta;
+            RECT rc; GetClientRect(hwnd, &rc);
+            int contentH = g_trajImage.height > 0 ? g_trajImage.height : 480;
+            int maxScroll = contentH - rc.bottom;
+            if (maxScroll < 0) maxScroll = 0;
+            if (g_scrollY < 0) g_scrollY = 0;
+            if (g_scrollY > maxScroll) g_scrollY = maxScroll;
+
+            si.fMask = SIF_POS;
+            si.nPos = g_scrollY;
+            SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
+            ScrollWindow(hwnd, 0, -delta, NULL, NULL);
+            UpdateWindow(hwnd);
+            return 0;
+        }
+        else if (msg == WM_PAINT) {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);
 
             if (g_trajImage.data) {
+                // 设置滚动偏移
+                SetViewportOrgEx(hdc, -g_scrollX, -g_scrollY, NULL);
+
                 // ---- 1. 用 SetDIBitsToDevice 渲染网格大图（1通道灰度平面图）----
                 // 构造 BITMAPINFO：包含 256 色灰度调色板，避免伪彩色
                 BITMAPINFO* pbmi = (BITMAPINFO*)malloc(sizeof(BITMAPINFOHEADER) + 256 * sizeof(RGBQUAD));
@@ -1547,6 +1610,9 @@ void CreateTrajectoryWindow(HINSTANCE hInstance) {
 
                 SelectObject(hdc, hOldFont);
                 DeleteObject(hFont);
+
+                // 恢复视口原点
+                SetViewportOrgEx(hdc, 0, 0, NULL);
             } else {
                 RECT rc; GetClientRect(hwnd, &rc);
                 FillRect(hdc, &rc, (HBRUSH)(COLOR_WINDOW + 1));
@@ -1570,14 +1636,19 @@ void CreateTrajectoryWindow(HINSTANCE hInstance) {
     };
     wc.hInstance = hInstance;
     wc.lpszClassName = L"TrajectoryWindowClass";
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);  // 添加默认背景刷
     RegisterClass(&wc);
 
-    // 计算窗口初始大小
-    int initW = g_trajImage.width > 0 ? g_trajImage.width + 20 : 640;
-    int initH = g_trajImage.height > 0 ? g_trajImage.height + 50 : 480;
+    // 初始窗口大小限制为合理范围，内容超出时显示滚动条
+    int contentW = g_trajImage.width > 0 ? g_trajImage.width : 640;
+    int contentH = g_trajImage.height > 0 ? g_trajImage.height : 480;
+    int initW = contentW + 20;
+    int initH = contentH + 50;
+    if (initW > 1280) initW = 1280;
+    if (initH > 900) initH = 900;
 
     g_hwndTraj = CreateWindowEx(0, L"TrajectoryWindowClass", L"Detection Steps (2x3 Grid)",
-        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+        WS_OVERLAPPEDWINDOW | WS_VSCROLL | WS_HSCROLL | WS_VISIBLE,
         CW_USEDEFAULT, CW_USEDEFAULT, initW, initH,
         NULL, NULL, hInstance, NULL);
 }
@@ -1773,11 +1844,13 @@ void ShowTrajectoryImage(Image* src, Point2D* trajPixels, int trajCount) {
 
     LOG_INFO("ShowTrajectoryImage: grid image complete, calling CreateTrajectoryWindow");
 
-    // 更新窗口
+    // 更新窗口：不调整窗口大小，只刷新 + 更新滚动范围
     if (g_hwndTraj) {
         InvalidateRect(g_hwndTraj, NULL, FALSE);
-        SetWindowPos(g_hwndTraj, HWND_TOP, 0, 0,
-            gridW + 20, gridH + 50, SWP_NOMOVE);
+        // 触发 WM_SIZE 更新滚动条范围
+        RECT rc;
+        GetClientRect(g_hwndTraj, &rc);
+        SendMessage(g_hwndTraj, WM_SIZE, 0, MAKELPARAM(rc.right, rc.bottom));
     }
     LOG_INFO("ShowTrajectoryImage: done");
 }
@@ -1894,7 +1967,7 @@ void DetectTrajectoryFitShape_LEGACY(Image* img, Point2D* trajPixels, int* count
     
     if (result == 0 && out.outStripePoints.size() > 0) {
         *count = 0;
-        for (size_t i = 0; i < out.outStripePoints.size() && *count < 10000; i++) {
+        for (size_t i = 0; i < out.outStripePoints.size() && *count < 50000; i++) {
             trajPixels[*count].x = out.outStripePoints[i].x;
             trajPixels[*count].y = out.outStripePoints[i].y;
             (*count)++;
@@ -2049,7 +2122,7 @@ void DetectTrajectory(Image* img, Point2D* trajPixels, int* count) {
     
     // Follow the edge path using gradient direction
     bool* visited = (bool*)calloc(w * h, sizeof(bool));
-    int maxCount = 10000;
+    int maxCount = 50000;
     
     int cx = startX, cy = startY;
     while (cx >= 0 && cy >= 0 && cx < w && cy < h && *count < maxCount) {
@@ -2148,70 +2221,6 @@ void DetectTrajectory(Image* img, Point2D* trajPixels, int* count) {
         LOG_DEBUG("  Last point: pixel(%.1f, %.1f) -> world(%.2f, %.2f)", 
             trajPixels[*count-1].x, trajPixels[*count-1].y, 
             g_trajWorld[*count-1].x, g_trajWorld[*count-1].y);
-    }
-}
-
-// ========== Helper: Generate Stadium/Capsule Shape ==========
-// Stadium shape: rectangle with two semicircles at ends
-// Parameters:
-//   center: center point
-//   length: length of middle rectangle section
-//   width: width/diameter (same for both ends)
-//   angle: rotation angle in degrees
-//   pointCount: total points to generate
-//   outPoints: output vector for generated points
-static void GenerateStadiumShape(Point2f center, float length, float width, 
-                                  float angle, int pointCount, std::vector<Point>& outPoints) {
-    float radius = width / 2.0f;  // semicircle radius
-    float angleRad = angle * (float)CV_PI / 180.0f;
-    
-    // Calculate points per section
-    // Semicircle perimeter = PI * radius, rectangle sides = 2 * length
-    float totalPerimeter = 2.0f * (CV_PI * radius + length);
-    int circlePoints = (int)(pointCount * (CV_PI * radius) / totalPerimeter);
-    int linePoints = (int)(pointCount * length / totalPerimeter);
-    circlePoints = std::max(10, circlePoints / 2);  // Each end semicircle
-    
-    // Top semicircle (left end, from top to bottom)
-    for (int i = 0; i <= circlePoints; i++) {
-        float theta = CV_PI + (float)CV_PI * i / circlePoints;  // PI to 2*PI
-        float x = -length/2.0f - radius + radius * cos(theta);
-        float y = radius * sin(theta);
-        // Rotate
-        float xr = x * cos(angleRad) - y * sin(angleRad);
-        float yr = x * sin(angleRad) + y * cos(angleRad);
-        outPoints.push_back(Point((int)(center.x + xr), (int)(center.y + yr)));
-    }
-    
-    // Top line (left to right)
-    for (int i = 1; i <= linePoints; i++) {
-        float t = (float)i / linePoints;
-        float x = -length/2.0f + length * t;
-        float y = 0.0f;
-        float xr = x * cos(angleRad) - y * sin(angleRad);
-        float yr = x * sin(angleRad) + y * cos(angleRad);
-        outPoints.push_back(Point((int)(center.x + xr), (int)(center.y + yr)));
-    }
-    
-    // Bottom semicircle (right end, from bottom to top)
-    for (int i = 0; i <= circlePoints; i++) {
-        float theta = (float)CV_PI * i / circlePoints;  // 0 to PI
-        float x = length/2.0f + radius + radius * cos(theta);
-        float y = radius * sin(theta);
-        // Rotate
-        float xr = x * cos(angleRad) - y * sin(angleRad);
-        float yr = x * sin(angleRad) + y * cos(angleRad);
-        outPoints.push_back(Point((int)(center.x + xr), (int)(center.y + yr)));
-    }
-    
-    // Bottom line (right to left)
-    for (int i = 1; i < linePoints; i++) {
-        float t = 1.0f - (float)i / linePoints;
-        float x = -length/2.0f + length * t;
-        float y = 0.0f;
-        float xr = x * cos(angleRad) - y * sin(angleRad);
-        float yr = x * sin(angleRad) + y * cos(angleRad);
-        outPoints.push_back(Point((int)(center.x + xr), (int)(center.y + yr)));
     }
 }
 
@@ -2411,78 +2420,78 @@ void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count) {
         int ptCount = (int)contour.size();
         if (ptCount < 5) continue;
 
-        // 用 minAreaRect 获取最小外接旋转矩形
-        RotatedRect box = minAreaRect(contour);
-        float bw = box.size.width;
-        float bh = box.size.height;
-        if (bh > bw) swap(bw, bh);  // 确保 bw >= bh（长边在前）
-
-        float aspectRatio = bw / bh;
-
-        if (aspectRatio > 2.5f && bh > 5.0f) {
-            // ---- Stadium 形状（体育场形/胶囊形）：长条两端带半圆 ----
-            // length = 长边 - 短边（直线段长度），diam = 短边（端部半圆直径）
-            float length = bw - bh;
-            float diam = bh;
-
-            // 点数按周长自适应：保证每段轮廓都有足够的采样密度
-            int pointCount = std::max(50, (int)(2.0f * (CV_PI * diam / 2.0f + length) * 2.0f));
-            std::vector<Point> stadiumPoints;
-            GenerateStadiumShape(box.center, length, diam, box.angle, pointCount, stadiumPoints);
-
-            for (size_t k = 0; k < stadiumPoints.size(); k++) {
-                int px = std::max(0, std::min(w - 1, stadiumPoints[k].x));
-                int py = std::max(0, std::min(h - 1, stadiumPoints[k].y));
-                allPoints.push_back(Point(px, py));
-                allBarIds.push_back(b);
-            }
-        } else {
-            // ---- 椭圆拟合：适用于近似圆形或短胖形区域 ----
-            if (ptCount >= 6) {
-                RotatedRect ellipse = fitEllipse(contour);
-
-                Size2f axes = ellipse.size;
-                float rx = axes.width / 2.0f;
-                float ry = axes.height / 2.0f;
-                if (ry > rx) swap(rx, ry);  // rx = 长半轴
-
-                // Ramanujan 近似计算椭圆周长
-                float perimeter = (float)(CV_PI * (3.0f * (rx + ry) - sqrt((3.0f * rx + ry) * (rx + 3.0f * ry))));
-                int ellipsePointCount = std::max(30, (int)(perimeter * 0.5f));
-
-                Point2f center = ellipse.center;
-                float angleRad = ellipse.angle * (float)CV_PI / 180.0f;
-
-                for (int k = 0; k < ellipsePointCount; k++) {
-                    float theta = 2.0f * (float)CV_PI * k / ellipsePointCount;
-                    float x = rx * cos(theta);
-                    float y = ry * sin(theta);
-                    float rx_rot = x * cos(angleRad) - y * sin(angleRad);
-                    float ry_rot = x * sin(angleRad) + y * cos(angleRad);
-
-                    int px = (int)(center.x + rx_rot);
-                    int py = (int)(center.y + ry_rot);
-
-                    if (px >= 0 && px < w && py >= 0 && py < h) {
-                        allPoints.push_back(Point(px, py));
-                        allBarIds.push_back(b);
-                    }
-                }
-            }
-        }
-
-        // 补充原始轮廓点（增加边缘采样密度）
+        // 只使用原始轮廓点，不做形状拟合
+        // 轮廓点本身就是暗条的真实边界，不会有拟合溢出
         for (int j = 0; j < ptCount; j++) {
             allPoints.push_back(contour[j]);
             allBarIds.push_back(b);
         }
+
+        // 沿轮廓等间距重采样，补充均匀分布的点
+        // 计算轮廓周长
+        double perimeter = arcLength(contour, true);
+        // 目标间距：每 2 像素一个点
+        double spacing = 2.0;
+        int sampleCount = std::max(10, (int)(perimeter / spacing));
+
+        // 累积弧长表
+        std::vector<double> cumLen(ptCount, 0.0);
+        for (int j = 1; j < ptCount; j++) {
+            double dx = contour[j].x - contour[j-1].x;
+            double dy = contour[j].y - contour[j-1].y;
+            cumLen[j] = cumLen[j-1] + sqrt(dx*dx + dy*dy);
+        }
+
+        for (int s = 0; s < sampleCount; s++) {
+            double targetLen = perimeter * s / sampleCount;
+            // 二分查找对应的轮廓段
+            int lo = 0, hi = ptCount - 1;
+            while (lo < hi - 1) {
+                int mid = (lo + hi) / 2;
+                if (cumLen[mid] <= targetLen) lo = mid;
+                else hi = mid;
+            }
+            // 线性插值
+            double segLen = cumLen[hi] - cumLen[lo];
+            double t = (segLen > 0.001) ? (targetLen - cumLen[lo]) / segLen : 0.0;
+            int px = (int)(contour[lo].x + t * (contour[hi].x - contour[lo].x));
+            int py = (int)(contour[lo].y + t * (contour[hi].y - contour[lo].y));
+            if (px >= 0 && px < w && py >= 0 && py < h) {
+                allPoints.push_back(Point(px, py));
+                allBarIds.push_back(b);
+            }
+        }
     }
 
-    LOG_INFO("Shape fitting: %d dark bars processed, raw points=%d",
+    LOG_INFO("Contour sampling: %d dark bars processed, raw points=%d",
              targetBars, (int)allPoints.size());
 
     // ============================================================
-    // Step 4: 去重 + 排序 + 输出（保留 bar id）
+    // Step 4: 用 darkBinary 做 mask 验证，只保留落在暗条区域内的点
+    // ============================================================
+    {
+        int totalBefore = (int)allPoints.size();
+        int keptCount = 0;
+        for (size_t i = 0; i < allPoints.size(); i++) {
+            int px = allPoints[i].x;
+            int py = allPoints[i].y;
+            if (px >= 0 && px < w && py >= 0 && py < h) {
+                if (darkBinary.at<unsigned char>(py, px) != 0) {
+                    allPoints[keptCount] = allPoints[i];
+                    allBarIds[keptCount] = allBarIds[i];
+                    keptCount++;
+                }
+            }
+        }
+        int removed = totalBefore - keptCount;
+        allPoints.resize(keptCount);
+        allBarIds.resize(keptCount);
+        LOG_INFO("Mask verification: kept %d / %d points (%d outside dark bars removed)",
+                 keptCount, totalBefore, removed);
+    }
+
+    // ============================================================
+    // Step 5: 去重 + 排序 + 输出（保留 bar id）
     // ============================================================
 
     // 去重：1像素半径内只保留第一个点，避免重复采样导致密集扎堆
@@ -2523,8 +2532,8 @@ void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count) {
         uniqueBarIds = sortedIds;
     }
 
-    // 输出结果到全局数组（上限 10000 个点）
-    *count = std::min((int)uniquePoints.size(), 10000);
+    // 输出结果到全局数组（上限 50000 个点）
+    *count = std::min((int)uniquePoints.size(), 50000);
     for (int i = 0; i < *count; i++) {
         trajPixels[i].x = (float)uniquePoints[i].x;
         trajPixels[i].y = (float)uniquePoints[i].y;
@@ -2732,19 +2741,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             Image loadedImg = {0};
             if (LoadBMP(filename, &loadedImg)) {
                 LOG_INFO("Auto-test: loaded %s (%dx%d)", filename, loadedImg.width, loadedImg.height);
-
-                // 如果图片超过 IMAGE_WIDTH x IMAGE_HEIGHT 则缩放
-                if (loadedImg.width > IMAGE_WIDTH || loadedImg.height > IMAGE_HEIGHT) {
-                    Image scaledImg = {0};
-                    ScaleImage(&loadedImg, &scaledImg, IMAGE_WIDTH, IMAGE_HEIGHT);
-                    free(loadedImg.data);
-                    if (g_image.data) free(g_image.data);
-                    g_image = scaledImg;
-                    LOG_INFO("Auto-test: scaled to %dx%d", g_image.width, g_image.height);
-                } else {
-                    if (g_image.data) free(g_image.data);
-                    g_image = loadedImg;
-                }
+                if (g_image.data) free(g_image.data);
+                g_image = loadedImg;
 
                 g_step = 2;
 
@@ -2806,23 +2804,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     
                     Image loadedImg = {0};
                     if (LoadBMP(filename, &loadedImg)) {
-                        // Check if scaling is needed
-                        if (loadedImg.width > IMAGE_WIDTH || loadedImg.height > IMAGE_HEIGHT) {
-                            sprintf_s(msgBuf, sizeof(msgBuf), 
-                                "Image is %dx%d\n\nAuto-scaling to %dx%d...",
-                                loadedImg.width, loadedImg.height, IMAGE_WIDTH, IMAGE_HEIGHT);
-                            MessageBoxA(hwnd, msgBuf, "Scaling", MB_OK);
-                            
-                            Image scaledImg = {0};
-                            ScaleImage(&loadedImg, &scaledImg, IMAGE_WIDTH, IMAGE_HEIGHT);
-                            free(loadedImg.data);
-                            
-                            if (g_image.data) free(g_image.data);
-                            g_image = scaledImg;
-                        } else {
-                            if (g_image.data) free(g_image.data);
-                            g_image = loadedImg;
-                        }
+                        if (g_image.data) free(g_image.data);
+                        g_image = loadedImg;
                         
                         sprintf_s(statusText, sizeof(statusText), "Loaded: %s (%dx%d)", filename, g_image.width, g_image.height);
                         g_step = 2;
@@ -3018,24 +3001,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
                         Image loadedImg = { 0 };
                         if (LoadBMP(filename, &loadedImg)) {
-                            // Check if scaling is needed
-                            if (loadedImg.width > IMAGE_WIDTH || loadedImg.height > IMAGE_HEIGHT) {
-                                sprintf_s(msgBuf, sizeof(msgBuf),
-                                    "Image is %dx%d\n\nAuto-scaling to %dx%d...",
-                                    loadedImg.width, loadedImg.height, IMAGE_WIDTH, IMAGE_HEIGHT);
-                                MessageBoxA(hwnd, msgBuf, "Scaling", MB_OK);
-
-                                Image scaledImg = { 0 };
-                                ScaleImage(&loadedImg, &scaledImg, IMAGE_WIDTH, IMAGE_HEIGHT);
-                                free(loadedImg.data);
-
-                                if (g_image.data) free(g_image.data);
-                                g_image = scaledImg;
-                            }
-                            else {
-                                if (g_image.data) free(g_image.data);
-                                g_image = loadedImg;
-                            }
+                            if (g_image.data) free(g_image.data);
+                            g_image = loadedImg;
 
                             sprintf_s(statusText, sizeof(statusText), "Loaded: %s (%dx%d)", filename, g_image.width, g_image.height);
                             LOG_INFO("Image loaded: %s (%dx%d)", filename, g_image.width, g_image.height);
@@ -3213,7 +3180,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     LOG_DEBUG("Creating main window...");
     HWND hwnd = CreateWindow(L"CalibrationGUI", L"9-Point Calibration GUI",
         WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 1300, 900,
+        CW_USEDEFAULT, CW_USEDEFAULT, 2800, 2300,
         NULL, NULL, hInstance, NULL);
     LOG_INFO("Main window created: %p", hwnd);
 
