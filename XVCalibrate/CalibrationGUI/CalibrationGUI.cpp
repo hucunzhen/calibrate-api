@@ -56,6 +56,19 @@ static void OperatorLogCallback(int level, const char* fmt, ...) {
     }
 }
 
+// ========== 获取程序所在目录 ==========
+static void GetExeDir(char* outDir, int maxLen) {
+    char exePath[MAX_PATH];
+    GetModuleFileNameA(NULL, exePath, MAX_PATH);
+    char* lastSlash = strrchr(exePath, '\\');
+    if (lastSlash) {
+        *lastSlash = '\0';
+        strncpy_s(outDir, maxLen, exePath, maxLen - 1);
+    } else {
+        outDir[0] = '\0';
+    }
+}
+
 // ========== Console Logger ==========
 static FILE* g_consoleFile = NULL;
 
@@ -69,7 +82,11 @@ void InitConsole() {
         printf("Time: %s\n", __TIME__);
         printf("==================================\n");
     }
-    g_logFile = fopen("D:\\work\\calibrate-api\\debug_autotest.log", "w");
+    char exeDir[MAX_PATH];
+    GetExeDir(exeDir, MAX_PATH);
+    char logPath[MAX_PATH];
+    sprintf_s(logPath, sizeof(logPath), "%s\\debug_autotest.log", exeDir);
+    g_logFile = fopen(logPath, "w");
     if (g_logFile) fprintf(g_logFile, "=== Auto-test log started ===\n");
 }
 
@@ -627,9 +644,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_USER + 1:
         {
             LOG_INFO("=== Auto-test triggered ===");
+            char exeDir[MAX_PATH];
+            GetExeDir(exeDir, MAX_PATH);
             char filename[MAX_PATH];
-            const char* autoTestPath = "D:\\work\\calibrate-api\\test_auto.bmp";
-            strcpy_s(filename, sizeof(filename), autoTestPath);
+            sprintf_s(filename, sizeof(filename), "%s\\test_auto.bmp", exeDir);
 
             Image loadedImg = {0};
             if (LoadBMP(filename, &loadedImg)) {
@@ -845,7 +863,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
             case 8: { // AutoTrajTest — 加载 test_auto.bmp 跑轨迹检测，展示6步结果
                 LOG_INFO("Button 8: AutoTrajTest clicked");
-                const char* trajTestPath = "D:\\work\\calibrate-api\\test_auto.bmp";
+                char exeDir[MAX_PATH];
+                GetExeDir(exeDir, MAX_PATH);
+                char trajTestPath[MAX_PATH];
+                sprintf_s(trajTestPath, sizeof(trajTestPath), "%s\\test_auto.bmp", exeDir);
                 Image loadedImg = { 0 };
                 if (LoadBMP(trajTestPath, &loadedImg)) {
                     if (g_image.data) free(g_image.data);
@@ -869,7 +890,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     LOG_ERROR("AutoTrajTest: failed to load %s", trajTestPath);
                     sprintf_s(statusText, sizeof(statusText),
                         "AutoTrajTest: failed to load test_auto.bmp");
-                    MessageBoxA(hwnd, "Cannot load test_auto.bmp\nPlease check file exists at D:\\work\\calibrate-api\\",
+                    MessageBoxA(hwnd, "Cannot load test_auto.bmp\nPlease copy it to the exe directory.",
                         "Load Error", MB_OK | MB_ICONWARNING);
                 }
                 break;

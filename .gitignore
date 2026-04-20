@@ -26,14 +26,6 @@ diagnostic_output.txt
 test_output.txt
 test_output2.txt
 
-# Test BMP images (data files)
-test_images/
-test_auto.bmp
-test_image.bmp
-calibration_9points.bmp
-Image_20260416162435404.bmp
-兴族图片/
-
 # Debug images
 debug_*.png
 debug_*.bmp
