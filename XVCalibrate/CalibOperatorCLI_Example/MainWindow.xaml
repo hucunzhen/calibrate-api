@@ -84,11 +84,13 @@
             <ScrollViewer x:Name="ImageScrollViewer" 
                           HorizontalScrollBarVisibility="Auto" 
                           VerticalScrollBarVisibility="Auto"
-                          PreviewMouseWheel="ImageScrollViewer_PreviewMouseWheel">
+                          PreviewMouseWheel="ImageScrollViewer_PreviewMouseWheel"
+                          PreviewMouseDown="ImageScrollViewer_PreviewMouseDown"
+                          PreviewMouseMove="ImageScrollViewer_PreviewMouseMove"
+                          PreviewMouseUp="ImageScrollViewer_PreviewMouseUp">
                 <Image x:Name="ImageDisplay" 
                        Stretch="Uniform" 
-                       RenderOptions.BitmapScalingMode="HighQuality"
-                       LayoutTransform="{Binding ElementName=ImageDisplay, Path=Tag}">
+                       RenderOptions.BitmapScalingMode="HighQuality">
                     <Image.LayoutTransform>
                         <ScaleTransform x:Name="ImageScaleTransform" ScaleX="1" ScaleY="1"/>
                     </Image.LayoutTransform>

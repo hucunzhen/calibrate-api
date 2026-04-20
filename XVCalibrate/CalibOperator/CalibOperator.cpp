@@ -1242,6 +1242,11 @@ void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count,
     morphologyEx(darkBinary, darkBinary, MORPH_CLOSE, kernel2);
     morphologyEx(darkBinary, darkBinary, MORPH_OPEN, kernel2);
 
+    // 膨胀+腐蚀：先膨胀让暗条变粗融合小间隙，再腐蚀回来使轮廓光滑
+    Mat dilateKernel = getStructuringElement(MORPH_ELLIPSE, Size(5, 5));
+    dilate(darkBinary, darkBinary, dilateKernel);
+    erode(darkBinary, darkBinary, dilateKernel);
+
     if (stepImages && stepImageCount >= 5) {
         stepImages[4].width = darkBinary.cols;
         stepImages[4].height = darkBinary.rows;
@@ -1600,7 +1605,15 @@ void Step_MorphologyCleanup(cv::Mat* darkBinary, int kernelSize) {
     cv::Mat kernel = getStructuringElement(MORPH_ELLIPSE, cv::Size(kernelSize, kernelSize));
     morphologyEx(*darkBinary, *darkBinary, MORPH_CLOSE, kernel);
     morphologyEx(*darkBinary, *darkBinary, MORPH_OPEN, kernel);
+
+    // 膨胀+腐蚀：先膨胀让暗条变粗融合小间隙，再腐蚀回来使轮廓光滑
+    int dilateSize = kernelSize + 2;
+    cv::Mat dilateKernel = getStructuringElement(MORPH_ELLIPSE, cv::Size(dilateSize, dilateSize));
+    dilate(*darkBinary, *darkBinary, dilateKernel);
+    erode(*darkBinary, *darkBinary, dilateKernel);
+
     kernel.release();
+    dilateKernel.release();
 }
 
 // 6. 提取暗条轮廓并按面积排序

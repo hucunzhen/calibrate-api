@@ -28,6 +28,10 @@ namespace CalibOperatorCLI_Example
         private const double MAX_ZOOM = 5.0;
         private ScaleTransform _imageScaleTransform;
 
+        // 右键拖动相关
+        private bool _isDragging = false;
+        private System.Windows.Point _lastMousePos;
+
         private readonly Point2D[] _worldPoints = new[]
         {
             new Point2D(100, 100), new Point2D(400, 100), new Point2D(700, 100),
@@ -519,6 +523,12 @@ namespace CalibOperatorCLI_Example
                 DisplayImage(_currentImage);
                 UpdateStepButtonStates();
                 Log("[INFO] Trajectory detector initialized, ready for step-by-step processing");
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERROR] Failed to load image: {ex.Message}");
+                MessageBox.Show($"Failed to load image:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private void ResetZoom()
@@ -528,13 +538,6 @@ namespace CalibOperatorCLI_Example
             _imageScaleTransform.ScaleY = 1.0;
             ImageScrollViewer.ScrollToHorizontalOffset(0);
             ImageScrollViewer.ScrollToVerticalOffset(0);
-        }
-            }
-            catch (Exception ex)
-            {
-                Log($"[ERROR] Failed to load image: {ex.Message}");
-                MessageBox.Show($"Failed to load image:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
         }
 
         private void BtnStep1_Click(object sender, RoutedEventArgs e)
@@ -883,6 +886,43 @@ namespace CalibOperatorCLI_Example
             UpdateStatus($"Zoom: {_zoomLevel:F1}x");
 
             e.Handled = true;
+        }
+
+        // ==================== 右键拖动图像 ====================
+        private void ImageScrollViewer_PreviewMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (e.RightButton == System.Windows.Input.MouseButtonState.Pressed)
+            {
+                _isDragging = true;
+                _lastMousePos = e.GetPosition(ImageScrollViewer);
+                ImageScrollViewer.CaptureMouse();
+                ImageScrollViewer.Cursor = System.Windows.Input.Cursors.Hand;
+            }
+        }
+
+        private void ImageScrollViewer_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+        {
+            if (_isDragging && e.RightButton == System.Windows.Input.MouseButtonState.Pressed)
+            {
+                var currentPos = e.GetPosition(ImageScrollViewer);
+                double deltaX = _lastMousePos.X - currentPos.X;
+                double deltaY = _lastMousePos.Y - currentPos.Y;
+
+                ImageScrollViewer.ScrollToHorizontalOffset(ImageScrollViewer.HorizontalOffset + deltaX);
+                ImageScrollViewer.ScrollToVerticalOffset(ImageScrollViewer.VerticalOffset + deltaY);
+
+                _lastMousePos = currentPos;
+            }
+        }
+
+        private void ImageScrollViewer_PreviewMouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (_isDragging)
+            {
+                _isDragging = false;
+                ImageScrollViewer.ReleaseMouseCapture();
+                ImageScrollViewer.Cursor = System.Windows.Input.Cursors.Arrow;
+            }
         }
     }
 }
