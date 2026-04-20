@@ -135,6 +135,9 @@ void DetectTrajectoryFitShape(Image* img, Point2D* trajPixels, int* count);
 // 在 3 通道图像上绘制彩色轨迹
 void DrawTrajectoryColored(Image* img, Point2D* trajPixels, int count, int* barIds);
 
+// 在单通道图像上绘制灰度轨迹
+void DrawTrajectoryGrayscale(Image* img, Point2D* trajPixels, int count, int grayValue);
+
 // ========== 图像工具 ==========
 
 // OpenCV Mat 转 Image（1通道灰度或3通道BGR → 3通道BGR Image）

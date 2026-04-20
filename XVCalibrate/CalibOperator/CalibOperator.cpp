@@ -1487,9 +1487,32 @@ void DrawTrajectoryColored(Image* img, Point2D* trajPixels, int count, int* barI
                 int y = cy + dy;
                 if (x >= 0 && x < img->width && y >= 0 && y < img->height) {
                     int off = y * rowSize + x * img->channels;
-                    img->data[off]     = color[0];  // B
+img->data[off]     = color[0];  // B
                     img->data[off + 1] = color[1];  // G
                     img->data[off + 2] = color[2];  // R
+                }
+            }
+        }
+    }
+}
+
+void DrawTrajectoryGrayscale(Image* img, Point2D* trajPixels, int count, int grayValue) {
+    if (!img || !img->data || count < 1) return;
+    if (img->channels != 1) return;
+
+    int rowSize = ((img->width * img->channels + 3) / 4) * 4;
+    unsigned char gray = (unsigned char)(grayValue < 0 ? 0 : (grayValue > 255 ? 255 : grayValue));
+
+    for (int i = 0; i < count; i++) {
+        int cx = (int)trajPixels[i].x;
+        int cy = (int)trajPixels[i].y;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                int x = cx + dx;
+                int y = cy + dy;
+                if (x >= 0 && x < img->width && y >= 0 && y < img->height) {
+                    int off = y * rowSize + x;
+                    img->data[off] = gray;
                 }
             }
         }

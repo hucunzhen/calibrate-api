@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "CalibOperatorCLI_Example": {
+      "commandName": "Project",
+      "nativeDebugging": true
+    }
+  }
+}
