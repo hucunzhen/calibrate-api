@@ -2,11 +2,13 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Calibration GUI - 9-Point Calibration Tool"
-        Height="900" Width="900"
+        Height="950" Width="950"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanMinimize">
     <Grid Margin="10">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -26,22 +28,81 @@
         <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
             <Button x:Name="BtnSaveResults" Content="5. Save Results" Width="150" Height="32" Margin="0,0,10,0" Click="BtnSaveResults_Click"/>
             <Button x:Name="BtnTestTransform" Content="6. Test Transform" Width="150" Height="32" Margin="0,0,10,0" Click="BtnTestTransform_Click"/>
-            <Button x:Name="BtnTestImage" Content="7. TestImage" Width="150" Height="32" Margin="0,0,10,0" Click="BtnTestImage_Click"/>
-            <Button x:Name="BtnAutoTrajTest" Content="8. AutoTrajTest" Width="150" Height="32" Click="BtnAutoTrajTest_Click"/>
+            <Button x:Name="BtnAutoTrajTest" Content="7. AutoTrajTest" Width="150" Height="32" Margin="0,0,10,0" Click="BtnAutoTrajTest_Click"/>
         </StackPanel>
 
-        <!-- Row 2: Image display -->
-        <Border Grid.Row="2" BorderBrush="Black" BorderThickness="1" Background="Black" Margin="0,0,0,10">
-            <Image x:Name="ImageDisplay" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+        <!-- Row 2: Step-by-step trajectory buttons -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,10">
+            <Button x:Name="BtnLoadTrajImg" Content="1.Load" Width="72" Height="28" Margin="0,0,3,0" Click="BtnLoadTrajImg_Click"/>
+            <Button x:Name="BtnStep1" Content="2.Gray" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep1_Click"/>
+            <Button x:Name="BtnStep2" Content="3.Contour" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep2_Click"/>
+            <Button x:Name="BtnStep3" Content="4.Mask" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep3_Click"/>
+            <Button x:Name="BtnStep4" Content="5.Dark" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep4_Click"/>
+            <Button x:Name="BtnStep5" Content="6.Morph" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep5_Click"/>
+            <Button x:Name="BtnStep6" Content="7.Sort" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep6_Click"/>
+            <Button x:Name="BtnStep7" Content="8.Sample" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep7_Click"/>
+            <Button x:Name="BtnStep8" Content="9.Verify" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep8_Click"/>
+            <Button x:Name="BtnStep9" Content="10.Dedup" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep9_Click"/>
+            <Button x:Name="BtnStep10" Content="11.Out" Width="72" Height="28" Click="BtnStep10_Click"/>
+        </StackPanel>
+
+        <!-- Row 3: Step parameters panel -->
+        <Border Grid.Row="3" Background="#F5F5F5" BorderBrush="#CCCCCC" BorderThickness="1" Padding="10" Margin="0,0,0,10" CornerRadius="3">
+            <StackPanel>
+                <TextBlock x:Name="TxtParamsTitle" Text="Step Parameters:" FontWeight="Bold" Margin="0,0,0,5"/>
+                <WrapPanel>
+                    <!-- Step 3: Mask -->
+                    <StackPanel x:Name="SpStep3Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
+                        <TextBlock Text="Mask ContourIdx:" VerticalAlignment="Center" Width="100"/>
+                        <TextBox x:Name="TxtStep3ContourIdx" Text="0" Width="60" Height="24" VerticalContentAlignment="Center"/>
+                        <TextBlock Text=" (0=auto)" VerticalAlignment="Center" Foreground="Gray" Margin="5,0,0,0"/>
+                    </StackPanel>
+                    <!-- Step 4: DarkBars -->
+                    <StackPanel x:Name="SpStep4Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
+                        <TextBlock Text="Dark Threshold:" VerticalAlignment="Center" Width="100"/>
+                        <TextBox x:Name="TxtStep4Threshold" Text="45" Width="60" Height="24" VerticalContentAlignment="Center"/>
+                    </StackPanel>
+                    <!-- Step 5: Morph -->
+                    <StackPanel x:Name="SpStep5Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
+                        <TextBlock Text="Morph Kernel:" VerticalAlignment="Center" Width="100"/>
+                        <TextBox x:Name="TxtStep5Kernel" Text="3" Width="60" Height="24" VerticalContentAlignment="Center"/>
+                        <TextBlock Text=" (3,5,7)" VerticalAlignment="Center" Foreground="Gray" Margin="5,0,0,0"/>
+                    </StackPanel>
+                    <!-- Step 7: Sample -->
+                    <StackPanel x:Name="SpStep7Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
+                        <TextBlock Text="Sample Bars:" VerticalAlignment="Center" Width="100"/>
+                        <TextBox x:Name="TxtStep7Bars" Text="16" Width="60" Height="24" VerticalContentAlignment="Center"/>
+                        <TextBlock Text=" (8-32)" VerticalAlignment="Center" Foreground="Gray" Margin="5,0,0,0"/>
+                    </StackPanel>
+                </WrapPanel>
+            </StackPanel>
         </Border>
 
-        <!-- Row 3: Status bar -->
-        <Border Grid.Row="3" Background="#E0E0E0" Padding="5" Margin="0,0,0,10">
+        <!-- Row 4: Image display with zoom support -->
+        <Border Grid.Row="4" BorderBrush="Black" BorderThickness="1" Background="Black" Margin="0,0,0,10"
+                ClipToBounds="True">
+            <ScrollViewer x:Name="ImageScrollViewer" 
+                          HorizontalScrollBarVisibility="Auto" 
+                          VerticalScrollBarVisibility="Auto"
+                          PreviewMouseWheel="ImageScrollViewer_PreviewMouseWheel">
+                <Image x:Name="ImageDisplay" 
+                       Stretch="Uniform" 
+                       RenderOptions.BitmapScalingMode="HighQuality"
+                       LayoutTransform="{Binding ElementName=ImageDisplay, Path=Tag}">
+                    <Image.LayoutTransform>
+                        <ScaleTransform x:Name="ImageScaleTransform" ScaleX="1" ScaleY="1"/>
+                    </Image.LayoutTransform>
+                </Image>
+            </ScrollViewer>
+        </Border>
+
+        <!-- Row 5: Status bar -->
+        <Border Grid.Row="5" Background="#E0E0E0" Padding="5" Margin="0,0,0,10">
             <TextBlock x:Name="StatusText" Text="Ready - Click buttons to start" VerticalAlignment="Center"/>
         </Border>
 
-        <!-- Row 4: Log text box -->
-        <TextBox x:Name="LogTextBox" Grid.Row="4" 
+        <!-- Row 6: Log text box -->
+        <TextBox x:Name="LogTextBox" Grid.Row="6" 
                  IsReadOnly="True" 
                  FontFamily="Consolas" FontSize="11"
                  VerticalScrollBarVisibility="Auto"

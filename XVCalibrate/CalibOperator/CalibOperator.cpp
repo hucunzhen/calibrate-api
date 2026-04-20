@@ -1466,6 +1466,316 @@ void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count,
     LOG_INFO("OpenCV trajectory detection complete");
 }
 
+// ========== DetectTrajectoryOpenCV 分步骤接口实现 ==========
+
+// 1. 图像转灰度
+void Step_ConvertToGrayscale(Image* src, cv::Mat* dstGray) {
+    int w = src->width, h = src->height;
+    if (src->channels == 1) {
+        int pitch = ((w + 3) / 4) * 4;
+        cv::Mat tmp(h, w, CV_8UC1, src->data, pitch);
+        *dstGray = tmp.clone();
+        tmp.release();
+    } else {
+        int srcRS = ((w * src->channels + 3) / 4) * 4;
+        cv::Mat colorMat(h, w, CV_8UC3, src->data, srcRS);
+        cvtColor(colorMat, *dstGray, COLOR_BGR2GRAY);
+        colorMat.release();
+    }
+}
+
+// 2. 高斯模糊 + OTSU二值化 + 形态学处理 + 提取外轮廓
+void Step_PreprocessAndFindContours(cv::Mat* grayMat, cv::Mat* binaryBright,
+                                     cv::Mat* morphed, cv::Mat* mask, cv::Mat* coloredMask,
+                                     std::vector<std::vector<cv::Point>>* outerContours) {
+    if (!grayMat || grayMat->empty()) return;
+    int w = grayMat->cols, h = grayMat->rows;
+    
+    // 高斯模糊
+    cv::Mat blurred;
+    cv::GaussianBlur(*grayMat, blurred, cv::Size(7, 7), 1.5);
+    
+    // OTSU二值化
+    cv::threshold(blurred, *binaryBright, 0, 255, THRESH_BINARY + THRESH_OTSU);
+    
+    // 形态学处理
+    cv::Mat kernel = getStructuringElement(MORPH_ELLIPSE, cv::Size(5, 5));
+    morphologyEx(*binaryBright, *morphed, MORPH_CLOSE, kernel);
+    morphologyEx(*morphed, *morphed, MORPH_OPEN, kernel);
+    
+    // 提取外轮廓
+    findContours(*morphed, *outerContours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
+    LOG_INFO("Step_PreprocessAndFindContours: found %d outer contours", (int)outerContours->size());
+    
+    // 生成mask（二值）
+    *mask = cv::Mat::zeros(h, w, CV_8UC1);
+    
+    // 生成彩色mask
+    *coloredMask = cv::Mat::zeros(h, w, CV_8UC3);
+    
+    if (!outerContours->empty()) {
+        // 找最大轮廓
+        double maxArea = 0.0;
+        int maxIdx = 0;
+        for (size_t i = 0; i < outerContours->size(); i++) {
+            double a = contourArea((*outerContours)[i]);
+            if (a > maxArea) {
+                maxArea = a;
+                maxIdx = (int)i;
+            }
+        }
+        LOG_INFO("  Max contour: idx=%d, area=%.1f", maxIdx, maxArea);
+        
+        // 绘制最大轮廓（白色mask）
+        drawContours(*mask, *outerContours, maxIdx, cv::Scalar(255), FILLED);
+        
+        // 绘制所有轮廓（彩色）
+        for (size_t i = 0; i < outerContours->size(); i++) {
+            int colorIdx = i % 16;
+            const cv::Scalar color(BAR_COLORS[colorIdx][0], BAR_COLORS[colorIdx][1], BAR_COLORS[colorIdx][2]);
+            double a = contourArea((*outerContours)[i]);
+            if ((int)i == maxIdx) {
+                // 最大轮廓用绿色填充
+                drawContours(*coloredMask, *outerContours, (int)i, cv::Scalar(0, 255, 0), FILLED);
+                // 画边界线（白色粗线）
+                drawContours(*coloredMask, *outerContours, (int)i, cv::Scalar(255, 255, 255), 3);
+            } else {
+                // 其他轮廓用颜色填充并画边界
+                drawContours(*coloredMask, *outerContours, (int)i, color, FILLED);
+                drawContours(*coloredMask, *outerContours, (int)i, cv::Scalar(255, 255, 255), 2);
+            }
+        }
+    }
+    
+    blurred.release();
+    kernel.release();
+}
+
+// 3. 根据外轮廓生成工件mask
+void Step_CreateWorkpieceMask(std::vector<std::vector<cv::Point>>* outerContours,
+                               int maxIdx, int width, int height, cv::Mat* mask) {
+    *mask = cv::Mat::zeros(height, width, CV_8UC1);
+    LOG_INFO("Step_CreateWorkpieceMask: outerContours size=%d, maxIdx=%d, size=%dx%d",
+             (int)outerContours->size(), maxIdx, width, height);
+    if (!outerContours->empty()) {
+        // 如果 maxIdx <= 0，自动查找最大轮廓
+        int targetIdx = maxIdx;
+        if (targetIdx <= 0) {
+            double maxArea = 0.0;
+            targetIdx = 0;
+            for (size_t i = 0; i < outerContours->size(); i++) {
+                double a = contourArea((*outerContours)[i]);
+                if (a > maxArea) {
+                    maxArea = a;
+                    targetIdx = (int)i;
+                }
+            }
+            LOG_INFO("  Auto-selected max contour: idx=%d, area=%.1f", targetIdx, maxArea);
+        }
+        
+        if (targetIdx >= 0 && targetIdx < (int)outerContours->size()) {
+            double area = contourArea((*outerContours)[targetIdx]);
+            LOG_INFO("  Drawing contour %d with area %.1f", targetIdx, area);
+            drawContours(*mask, *outerContours, targetIdx, cv::Scalar(255), FILLED);
+        }
+    } else {
+        LOG_WARN("  Cannot draw contour: outerContours is empty!");
+    }
+}
+
+// 4. 暗条二值化
+void Step_DetectDarkBars(cv::Mat* grayMat, cv::Mat* mask, int threshold,
+                          cv::Mat* darkBinary) {
+    // 工件内部保留原灰度，外部设为255（白色）
+    *darkBinary = grayMat->clone();
+    darkBinary->setTo(255, *mask == 0);
+    
+    // 暗条：低于阈值为255
+    cv::threshold(*darkBinary, *darkBinary, threshold, 255, THRESH_BINARY_INV);
+    darkBinary->setTo(0, *mask == 0);
+}
+
+// 5. 形态学清理
+void Step_MorphologyCleanup(cv::Mat* darkBinary, int kernelSize) {
+    cv::Mat kernel = getStructuringElement(MORPH_ELLIPSE, cv::Size(kernelSize, kernelSize));
+    morphologyEx(*darkBinary, *darkBinary, MORPH_CLOSE, kernel);
+    morphologyEx(*darkBinary, *darkBinary, MORPH_OPEN, kernel);
+    kernel.release();
+}
+
+// 6. 提取暗条轮廓并按面积排序
+int Step_FindAndSortDarkContours(cv::Mat* darkBinary, int width, int height,
+                                   std::vector<std::pair<double, int>>* sortedBars,
+                                   std::vector<std::vector<cv::Point>>* darkContours) {
+    // 提取所有暗条轮廓
+    findContours(*darkBinary, *darkContours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
+    
+    // 自适应面积阈值
+    double areaThreshold = (double)(width * height) * 0.002;
+    if (areaThreshold < 500.0) areaThreshold = 500.0;
+    
+    for (size_t i = 0; i < darkContours->size(); i++) {
+        double area = contourArea((*darkContours)[i]);
+        if (area > areaThreshold) {
+            sortedBars->push_back(std::make_pair(area, (int)i));
+        }
+    }
+    std::sort(sortedBars->begin(), sortedBars->end(),
+         [](const std::pair<double, int>& a, const std::pair<double, int>& b) {
+             return a.first > b.first;
+         });
+    return (int)sortedBars->size();
+}
+
+// 7. 等间距轮廓采样
+void Step_SampleContoursEquidistant(std::vector<std::vector<cv::Point>>* darkContours,
+                                     std::vector<std::pair<double, int>>* sortedBars,
+                                     int targetBars, int width, int height,
+                                     std::vector<cv::Point>* allPoints,
+                                     std::vector<int>* allBarIds) {
+    for (int b = 0; b < targetBars && b < (int)sortedBars->size(); b++) {
+        const std::vector<cv::Point>& contour = (*darkContours)[(*sortedBars)[b].second];
+        int ptCount = (int)contour.size();
+        if (ptCount < 5) continue;
+        
+        // 添加原始轮廓点
+        for (int j = 0; j < ptCount; j++) {
+            allPoints->push_back(contour[j]);
+            allBarIds->push_back(b);
+        }
+        
+        // 等间距采样
+        double perimeter = arcLength(contour, true);
+        double spacing = 2.0;
+        int sampleCount = std::max(10, (int)(perimeter / spacing));
+        
+        std::vector<double> cumLen(ptCount, 0.0);
+        for (int j = 1; j < ptCount; j++) {
+            double dx = contour[j].x - contour[j-1].x;
+            double dy = contour[j].y - contour[j-1].y;
+            cumLen[j] = cumLen[j-1] + sqrt(dx*dx + dy*dy);
+        }
+        
+        for (int s = 0; s < sampleCount; s++) {
+            double targetLen = perimeter * s / sampleCount;
+            int lo = 0, hi = ptCount - 1;
+            while (lo < hi - 1) {
+                int mid = (lo + hi) / 2;
+                if (cumLen[mid] <= targetLen) lo = mid;
+                else hi = mid;
+            }
+            double segLen = cumLen[hi] - cumLen[lo];
+            double t = (segLen > 0.001) ? (targetLen - cumLen[lo]) / segLen : 0.0;
+            int px = (int)(contour[lo].x + t * (contour[hi].x - contour[lo].x));
+            int py = (int)(contour[lo].y + t * (contour[hi].y - contour[lo].y));
+            if (px >= 0 && px < width && py >= 0 && py < height) {
+                allPoints->push_back(cv::Point(px, py));
+                allBarIds->push_back(b);
+            }
+        }
+    }
+}
+
+// 8. Mask验证采样点
+void Step_VerifyByMask(std::vector<cv::Point>* allPoints, std::vector<int>* allBarIds,
+                       cv::Mat* darkBinary, int width, int height) {
+    int keptCount = 0;
+    for (size_t i = 0; i < allPoints->size(); i++) {
+        int px = (*allPoints)[i].x;
+        int py = (*allPoints)[i].y;
+        if (px >= 0 && px < width && py >= 0 && py < height) {
+            if (darkBinary->at<unsigned char>(py, px) != 0) {
+                (*allPoints)[keptCount] = (*allPoints)[i];
+                (*allBarIds)[keptCount] = (*allBarIds)[i];
+                keptCount++;
+            }
+        }
+    }
+    allPoints->resize(keptCount);
+    allBarIds->resize(keptCount);
+}
+
+// 9. 去重 + 按Y/X排序
+void Step_DeduplicateAndSort(std::vector<cv::Point>* points, std::vector<int>* barIds) {
+    std::vector<cv::Point> uniquePoints;
+    std::vector<int> uniqueBarIds;
+    std::vector<bool> kept(points->size(), false);
+    
+    for (size_t i = 0; i < points->size(); i++) {
+        if (kept[i]) continue;
+        uniquePoints.push_back((*points)[i]);
+        uniqueBarIds.push_back((*barIds)[i]);
+        int x1 = (*points)[i].x - 1, x2 = (*points)[i].x + 1;
+        int y1 = (*points)[i].y - 1, y2 = (*points)[i].y + 1;
+        for (size_t j = i + 1; j < points->size(); j++) {
+            if (!kept[j]) {
+                int px = (*points)[j].x, py = (*points)[j].y;
+                if (px >= x1 && px <= x2 && py >= y1 && py <= y2) {
+                    kept[j] = true;
+                }
+            }
+        }
+    }
+    
+    if (uniquePoints.size() > 1) {
+        std::vector<size_t> indices(uniquePoints.size());
+        for (size_t i = 0; i < indices.size(); i++) indices[i] = i;
+        std::sort(indices.begin(), indices.end(), [&uniquePoints](size_t a, size_t b) {
+            if (abs(uniquePoints[a].y - uniquePoints[b].y) > 2) return uniquePoints[a].y < uniquePoints[b].y;
+            return uniquePoints[a].x < uniquePoints[b].x;
+        });
+        std::vector<cv::Point> sortedPts(uniquePoints.size());
+        std::vector<int> sortedIds(uniqueBarIds.size());
+        for (size_t i = 0; i < indices.size(); i++) {
+            sortedPts[i] = uniquePoints[indices[i]];
+            sortedIds[i] = uniqueBarIds[indices[i]];
+        }
+        uniquePoints = sortedPts;
+        uniqueBarIds = sortedIds;
+    }
+    
+    *points = uniquePoints;
+    *barIds = uniqueBarIds;
+}
+
+// 10. 转换为轨迹点输出
+void Step_ConvertToOutput(std::vector<cv::Point>* uniquePoints, 
+                          std::vector<int>* uniqueBarIds,
+                          Point2D* trajPixels, int* count, int* stepBarIds) {
+    *count = std::min((int)uniquePoints->size(), CALIB_MAX_TRAJ_POINTS);
+    for (int i = 0; i < *count; i++) {
+        trajPixels[i].x = (float)(*uniquePoints)[i].x;
+        trajPixels[i].y = (float)(*uniquePoints)[i].y;
+        if (stepBarIds) stepBarIds[i] = (*uniqueBarIds)[i];
+    }
+}
+
+// 11. 绘制彩色轨迹
+void Step_DrawColoredTrajectory(Point2D* trajPixels, int count, int* stepBarIds,
+                                 int width, int height, unsigned char* outputData) {
+    int dstRowSize = width * 3;
+    memset(outputData, 0, dstRowSize * height);
+    
+    for (int i = 0; i < count; i++) {
+        int barIdx = stepBarIds ? stepBarIds[i] % 16 : 0;
+        const unsigned char* color = BAR_COLORS[barIdx];
+        int cx = (int)trajPixels[i].x;
+        int cy = (int)trajPixels[i].y;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                int x = cx + dx;
+                int y = cy + dy;
+                if (x >= 0 && x < width && y >= 0 && y < height) {
+                    int off = y * dstRowSize + x * 3;
+                    outputData[off]     = color[0];  // B
+                    outputData[off + 1] = color[1];  // G
+                    outputData[off + 2] = color[2];  // R
+                }
+            }
+        }
+    }
+}
+
 void DetectTrajectoryFitShape(Image* img, Point2D* trajPixels, int* count) {
     LOG_INFO("=== FitShape Trajectory (deprecated, using OpenCV) ===");
     DetectTrajectoryOpenCV(img, trajPixels, count, NULL, NULL, 0);

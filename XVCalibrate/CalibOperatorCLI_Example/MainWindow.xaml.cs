@@ -14,10 +14,19 @@ namespace CalibOperatorCLI_Example
         private Point2D[]? _detectedPoints;
         private CalibrationResult? _calibrationResult;
         private int _currentStep = 0;
+        private int _trajStep = 0;  // 轨迹检测当前步骤
         private StreamWriter? _logWriter;
+        private TrajectoryStepDetector? _trajDetector;
 
         private const int IMAGE_WIDTH = 2448;
         private const int IMAGE_HEIGHT = 2048;
+
+        // 缩放相关
+        private double _zoomLevel = 1.0;
+        private const double ZOOM_STEP = 0.1;
+        private const double MIN_ZOOM = 0.1;
+        private const double MAX_ZOOM = 5.0;
+        private ScaleTransform _imageScaleTransform;
 
         private readonly Point2D[] _worldPoints = new[]
         {
@@ -29,6 +38,7 @@ namespace CalibOperatorCLI_Example
         public MainWindow()
         {
             InitializeComponent();
+            _imageScaleTransform = ImageScaleTransform;  // 初始化缩放变换引用
             InitLogging();
             Log("========================================");
             Log("Calibration GUI Started");
@@ -77,7 +87,56 @@ namespace CalibOperatorCLI_Example
             BtnCalibrate.IsEnabled = _detectedPoints != null && _detectedPoints.Length >= 4;
             BtnSaveResults.IsEnabled = _calibrationResult != null && _calibrationResult.Success;
             BtnTestTransform.IsEnabled = _calibrationResult != null && _calibrationResult.Success;
-            BtnAutoTrajTest.IsEnabled = _calibrationResult != null && _calibrationResult.Success;
+            BtnAutoTrajTest.IsEnabled = true; // 始终可用，不需要先标定
+            UpdateStepButtonStates();
+        }
+
+        private void UpdateStepButtonStates()
+        {
+            // 加载图像按钮始终可用
+            BtnLoadTrajImg.IsEnabled = true;
+
+            // 步骤按钮状态：只有前一步完成后才能执行下一步
+            bool detectorReady = _trajDetector != null && _currentImage != null;
+            BtnStep1.IsEnabled = detectorReady && _trajStep >= 0;
+            BtnStep2.IsEnabled = detectorReady && _trajStep >= 1;
+            BtnStep3.IsEnabled = detectorReady && _trajStep >= 2;
+            BtnStep4.IsEnabled = detectorReady && _trajStep >= 3;
+            BtnStep5.IsEnabled = detectorReady && _trajStep >= 4;
+            BtnStep6.IsEnabled = detectorReady && _trajStep >= 5;
+            BtnStep7.IsEnabled = detectorReady && _trajStep >= 6;
+            BtnStep8.IsEnabled = detectorReady && _trajStep >= 7;
+            BtnStep9.IsEnabled = detectorReady && _trajStep >= 8;
+            BtnStep10.IsEnabled = detectorReady && _trajStep >= 9;
+
+            // 根据当前步骤显示对应参数面板
+            UpdateStepParameterVisibility();
+        }
+
+        private void UpdateStepParameterVisibility()
+        {
+            // 隐藏所有参数行
+            SpStep3Params.Visibility = Visibility.Collapsed;
+            SpStep4Params.Visibility = Visibility.Collapsed;
+            SpStep5Params.Visibility = Visibility.Collapsed;
+            SpStep7Params.Visibility = Visibility.Collapsed;
+
+            // 只显示当前步骤的参数（下一步才能修改的参数）
+            switch (_trajStep)
+            {
+                case 0:  // Step1完成后，显示Step3参数
+                    SpStep3Params.Visibility = Visibility.Visible;
+                    break;
+                case 2:  // Step3完成后，显示Step4参数
+                    SpStep4Params.Visibility = Visibility.Visible;
+                    break;
+                case 3:  // Step4完成后，显示Step5参数
+                    SpStep5Params.Visibility = Visibility.Visible;
+                    break;
+                case 5:  // Step6完成后，显示Step7参数
+                    SpStep7Params.Visibility = Visibility.Visible;
+                    break;
+            }
         }
 
         private void DisplayImage(CalibImage img)
@@ -94,6 +153,10 @@ namespace CalibOperatorCLI_Example
                         BitmapSizeOptions.FromEmptyOptions());
                     bitmap.Freeze();
                     Dispatcher.Invoke(() => ImageDisplay.Source = bitmap);
+                }
+                else
+                {
+                    Log("[WARN] DisplayImage: ToBitmap returned null");
                 }
             }
             catch (Exception ex)
@@ -359,39 +422,11 @@ namespace CalibOperatorCLI_Example
             }
         }
 
-        private void BtnTestImage_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                Log("[INFO] Button 7: Test Image - START");
-
-                var dlg = new OpenFileDialog
-                {
-                    Filter = "BMP Files (*.bmp)|*.bmp|All Files (*.*)|*.*",
-                    Title = "Select Test Image"
-                };
-
-                if (dlg.ShowDialog() == true)
-                {
-                    _currentImage?.Dispose();
-                    _currentImage = CalibAPI.LoadImage(dlg.FileName);
-
-                    Log($"[INFO] Test image loaded: {_currentImage.Width}x{_currentImage.Height}");
-                    DisplayImage(_currentImage);
-                }
-            }
-            catch (Exception ex)
-            {
-                Log($"[ERROR] Failed to load test image: {ex.Message}");
-                MessageBox.Show($"Failed to load test image:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
         private void BtnAutoTrajTest_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                Log("[INFO] Button 8: Auto Trajectory Test - START");
+                Log("[INFO] Button 7: Auto Trajectory Test - START");
 
                 var dlg = new OpenFileDialog
                 {
@@ -409,12 +444,6 @@ namespace CalibOperatorCLI_Example
                 _currentImage = CalibAPI.LoadImage(dlg.FileName);
                 Log($"[INFO] Image loaded: {_currentImage.Width}x{_currentImage.Height}");
                 DisplayImage(_currentImage);
-
-                if (_calibrationResult == null || !_calibrationResult.Success)
-                {
-                    Log("[ERROR] Calibration required before trajectory detection");
-                    return;
-                }
 
                 Log("[INFO] Detecting trajectory...");
                 var result = CalibAPI.DetectTrajectoryOpenCV(_currentImage);
@@ -453,7 +482,407 @@ namespace CalibOperatorCLI_Example
             base.OnClosing(e);
             Log("[INFO] Application closing...");
             _currentImage?.Dispose();
+            _trajDetector?.Dispose();
             _logWriter?.Close();
+        }
+
+        // ================================================================
+        // 分步骤轨迹检测
+        // ================================================================
+
+        private void BtnLoadTrajImg_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var dlg = new OpenFileDialog
+                {
+                    Filter = "BMP Files (*.bmp)|*.bmp|All Files (*.*)|*.*",
+                    Title = "Select Image for Trajectory Detection"
+                };
+
+                if (dlg.ShowDialog() != true)
+                {
+                    Log("[INFO] File dialog cancelled");
+                    return;
+                }
+
+                _currentImage?.Dispose();
+                _currentImage = CalibAPI.LoadImage(dlg.FileName);
+                Log($"[INFO] Image loaded: {_currentImage.Width}x{_currentImage.Height}");
+
+                // 释放旧的detector，创建新的
+                _trajDetector?.Dispose();
+                _trajDetector = new TrajectoryStepDetector();
+                _trajStep = 0;  // 重置步骤计数器
+                ResetZoom();    // 重置缩放
+
+                DisplayImage(_currentImage);
+                UpdateStepButtonStates();
+                Log("[INFO] Trajectory detector initialized, ready for step-by-step processing");
+        }
+
+        private void ResetZoom()
+        {
+            _zoomLevel = 1.0;
+            _imageScaleTransform.ScaleX = 1.0;
+            _imageScaleTransform.ScaleY = 1.0;
+            ImageScrollViewer.ScrollToHorizontalOffset(0);
+            ImageScrollViewer.ScrollToVerticalOffset(0);
+        }
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERROR] Failed to load image: {ex.Message}");
+                MessageBox.Show($"Failed to load image:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void BtnStep1_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_trajDetector == null || _currentImage == null) return;
+
+                Log("[STEP 1] Convert to grayscale...");
+                _trajDetector.ConvertToGrayscale(_currentImage);
+                Log($"[STEP 1] Grayscale converted, size: {_currentImage.Width}x{_currentImage.Height}");
+
+                var stepImg = _trajDetector.GetStepImage(1);
+                if (stepImg != null)
+                {
+                    Log($"[STEP 1] Got step image: {stepImg.Width}x{stepImg.Height}, channels: {stepImg.Channels}");
+                    DisplayImage(stepImg);
+                    Log("[STEP 1] Image displayed");
+                    stepImg.Dispose();
+                }
+                else
+                {
+                    Log("[WARN] Step 1: GetStepImage returned null");
+                }
+                _trajStep = 1;  // Step1完成，启用Step2
+                UpdateStepButtonStates();
+                Log("[STEP 1] Done");
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERROR] Step 1 failed: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine(ex.ToString());
+            }
+        }
+
+        private void BtnStep2_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_trajDetector == null || _currentImage == null) return;
+
+                Log("[STEP 2] Preprocess and find contours...");
+                _trajDetector.PreprocessAndFindContours();
+                Log("[STEP 2] Contour detection complete");
+
+                // 步骤2显示的是二值化图像，不是mask
+                var stepImg = _trajDetector.GetStepImage(2);
+                if (stepImg != null)
+                {
+                    Log($"[STEP 2] Got binary image: {stepImg.Width}x{stepImg.Height}, channels: {stepImg.Channels}");
+                    DisplayImage(stepImg);
+                    stepImg.Dispose();
+                    Log("[STEP 2] Image displayed");
+                }
+                else
+                {
+                    Log("[WARN] Step 2: GetStepImage(2) returned null");
+                }
+                _trajStep = 2;  // Step2完成，启用Step3
+                UpdateStepButtonStates();
+                Log("[STEP 2] Done");
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERROR] Step 2 failed: {ex.Message}");
+            }
+        }
+
+        private void BtnStep3_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_trajDetector == null || _currentImage == null) return;
+
+                // 读取参数
+                int contourIdx = 0;
+                if (!int.TryParse(TxtStep3ContourIdx.Text, out contourIdx))
+                {
+                    Log("[WARN] Invalid ContourIdx, using 0 (auto)");
+                    contourIdx = 0;
+                }
+
+                Log($"[STEP 3] Create workpiece mask (ContourIdx={contourIdx})...");
+                _trajDetector.CreateWorkpieceMask(contourIdx);
+                Log("[STEP 3] Mask created");
+
+                var stepImg = _trajDetector.GetStepImage(3);
+                if (stepImg != null)
+                {
+                    Log($"[STEP 3] Got mask image: {stepImg.Width}x{stepImg.Height}, channels: {stepImg.Channels}");
+                    DisplayImage(stepImg);
+                    stepImg.Dispose();
+                    Log("[STEP 3] Mask displayed");
+                }
+                else
+                {
+                    Log("[WARN] Step 3: GetStepImage(3) returned null - mask may be empty");
+                }
+                _trajStep = 3;  // Step3完成，启用Step4
+                UpdateStepButtonStates();
+                Log("[STEP 3] Done");
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERROR] Step 3 failed: {ex.Message}");
+            }
+        }
+
+        private void BtnStep4_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_trajDetector == null || _currentImage == null) return;
+
+                // 读取参数
+                int threshold = 45;
+                if (!int.TryParse(TxtStep4Threshold.Text, out threshold))
+                {
+                    Log("[WARN] Invalid threshold, using 45");
+                    threshold = 45;
+                }
+
+                Log($"[STEP 4] Detect dark bars (threshold={threshold})...");
+                _trajDetector.DetectDarkBars(threshold);
+
+                var stepImg = _trajDetector.GetStepImage(4);
+                if (stepImg != null)
+                {
+                    DisplayImage(stepImg);
+                    stepImg.Dispose();
+                }
+                _trajStep = 4;  // Step4完成，启用Step5
+                UpdateStepButtonStates();
+                Log("[STEP 4] Done");
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERROR] Step 4 failed: {ex.Message}");
+            }
+        }
+
+        private void BtnStep5_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_trajDetector == null || _currentImage == null) return;
+
+                // 读取参数
+                int kernelSize = 3;
+                if (!int.TryParse(TxtStep5Kernel.Text, out kernelSize))
+                {
+                    Log("[WARN] Invalid kernel size, using 3");
+                    kernelSize = 3;
+                }
+                // 确保kernelSize是奇数
+                if (kernelSize % 2 == 0) kernelSize++;
+
+                Log($"[STEP 5] Morphology cleanup (kernel={kernelSize})...");
+                _trajDetector.MorphologyCleanup(kernelSize);
+
+                // 显示morphed图像（复用step 4的darkBinary结果）
+                var stepImg = _trajDetector.GetStepImage(4);
+                if (stepImg != null)
+                {
+                    DisplayImage(stepImg);
+                    stepImg.Dispose();
+                }
+                _trajStep = 5;  // Step5完成，启用Step6
+                UpdateStepButtonStates();
+                Log("[STEP 5] Done");
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERROR] Step 5 failed: {ex.Message}");
+            }
+        }
+
+        private void BtnStep6_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_trajDetector == null || _currentImage == null) return;
+
+                Log("[STEP 6] Find and sort dark contours...");
+                int barCount = _trajDetector.FindAndSortDarkContours();
+                Log($"[INFO] Dark bars found: {barCount}");
+
+                var stepImg = _trajDetector.GetStepImage(4);
+                if (stepImg != null)
+                {
+                    DisplayImage(stepImg);
+                    stepImg.Dispose();
+                }
+                _trajStep = 6;  // Step6完成，启用Step7
+                UpdateStepButtonStates();
+                Log("[STEP 6] Done");
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERROR] Step 6 failed: {ex.Message}");
+            }
+        }
+
+        private void BtnStep7_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_trajDetector == null || _currentImage == null) return;
+
+                // 读取参数
+                int targetBars = 16;
+                if (!int.TryParse(TxtStep7Bars.Text, out targetBars))
+                {
+                    Log("[WARN] Invalid target bars, using 16");
+                    targetBars = 16;
+                }
+
+                Log($"[STEP 7] Sample contours equidistantly (bars={targetBars})...");
+                _trajDetector.SampleContours(targetBars);
+                Log($"[INFO] Points after sampling: {_trajDetector.GetPointCount()}");
+
+                _trajStep = 7;  // Step7完成，启用Step8
+                UpdateStepButtonStates();
+                Log("[STEP 7] Done");
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERROR] Step 7 failed: {ex.Message}");
+            }
+        }
+
+        private void BtnStep8_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_trajDetector == null || _currentImage == null) return;
+
+                Log("[STEP 8] Verify by mask...");
+                _trajDetector.VerifyByMask();
+                Log($"[INFO] Points after mask verification: {_trajDetector.GetPointCount()}");
+
+                _trajStep = 8;  // Step8完成，启用Step9
+                UpdateStepButtonStates();
+                Log("[STEP 8] Done");
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERROR] Step 8 failed: {ex.Message}");
+            }
+        }
+
+        private void BtnStep9_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_trajDetector == null || _currentImage == null) return;
+
+                Log("[STEP 9] Deduplicate and sort...");
+                _trajDetector.DeduplicateAndSort();
+                Log($"[INFO] Points after dedup: {_trajDetector.GetPointCount()}");
+
+                _trajStep = 9;  // Step9完成，启用Step10
+                UpdateStepButtonStates();
+                Log("[STEP 9] Done");
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERROR] Step 9 failed: {ex.Message}");
+            }
+        }
+
+        private void BtnStep10_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_trajDetector == null || _currentImage == null) return;
+
+                Log("[STEP 10] Convert to output...");
+                var result = _trajDetector.ConvertToOutput();
+
+                if (result.Success && result.Count > 0)
+                {
+                    Log($"[INFO] Step-by-step detection SUCCESS! Found {result.Count} trajectory points");
+
+                    // 绘制彩色轨迹
+                    var coloredTraj = _trajDetector.DrawColoredTrajectory(_currentImage.Width, _currentImage.Height);
+                    DisplayImage(coloredTraj);
+
+                    string savePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "trajectory_step_result.bmp");
+                    CalibAPI.SaveImage(savePath, coloredTraj);
+                    Log($"[INFO] Step-by-step trajectory image saved to: {savePath}");
+
+                    coloredTraj.Dispose();
+                    _trajStep = 10;  // Step10完成
+                }
+                else
+                {
+                    Log($"[WARN] Detection failed: {result.ErrorMessage ?? "No trajectory found"}");
+                    MessageBox.Show($"Detection result:\n{result.ErrorMessage ?? "No trajectory found"}",
+                        "Trajectory Detection", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                UpdateStepButtonStates();
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERROR] Step 10 failed: {ex.Message}");
+                MessageBox.Show($"Step 10 failed:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        // ==================== 鼠标滚轮缩放图像 ====================
+        private void ImageScrollViewer_PreviewMouseWheel(object sender, System.Windows.Input.MouseWheelEventArgs e)
+        {
+            // 获取鼠标位置（相对于Image）
+            var mousePos = e.GetPosition(ImageDisplay);
+
+            // 计算缩放前鼠标在图像上的相对位置
+            double relativeX = mousePos.X / ImageDisplay.ActualWidth;
+            double relativeY = mousePos.Y / ImageDisplay.ActualHeight;
+
+            // 根据滚轮方向调整缩放级别
+            if (e.Delta > 0)
+            {
+                _zoomLevel = Math.Min(_zoomLevel + ZOOM_STEP, MAX_ZOOM);
+            }
+            else
+            {
+                _zoomLevel = Math.Max(_zoomLevel - ZOOM_STEP, MIN_ZOOM);
+            }
+
+            // 应用缩放变换
+            _imageScaleTransform.ScaleX = _zoomLevel;
+            _imageScaleTransform.ScaleY = _zoomLevel;
+
+            // 调整滚动位置，使鼠标位置保持不变（缩放中心跟随鼠标）
+            if (ImageDisplay.ActualWidth > 0 && ImageDisplay.ActualHeight > 0)
+            {
+                double newWidth = ImageScrollViewer.ExtentWidth * _zoomLevel;
+                double newHeight = ImageScrollViewer.ExtentHeight * _zoomLevel;
+
+                ImageScrollViewer.ScrollToHorizontalOffset(relativeX * newWidth - mousePos.X);
+                ImageScrollViewer.ScrollToVerticalOffset(relativeY * newHeight - mousePos.Y);
+            }
+
+            // 更新状态栏显示
+            UpdateStatus($"Zoom: {_zoomLevel:F1}x");
+
+            e.Handled = true;
         }
     }
 }

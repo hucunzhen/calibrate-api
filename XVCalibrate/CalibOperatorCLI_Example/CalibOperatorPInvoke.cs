@@ -205,6 +205,55 @@ namespace CalibOperatorPInvoke
         // Bar colors
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern void CALIB_GetBarColors(byte[] colors);
+
+        // Trajectory step-by-step API
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr CALIB_TrajStep_Create();
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void CALIB_TrajStep_Free(IntPtr ctx);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_1_ConvertToGrayscale(IntPtr ctx, IntPtr src);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_2_PreprocessAndFindContours(IntPtr ctx);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_3_CreateWorkpieceMask(IntPtr ctx, int maxContourIdx);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_4_DetectDarkBars(IntPtr ctx, int threshold);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_5_MorphologyCleanup(IntPtr ctx, int kernelSize);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_6_FindAndSortDarkContours(IntPtr ctx);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_7_SampleContours(IntPtr ctx, int targetBars);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_8_VerifyByMask(IntPtr ctx);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_9_DeduplicateAndSort(IntPtr ctx);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_10_ConvertToOutput(IntPtr ctx, IntPtr trajPixels, IntPtr count, IntPtr stepBarIds);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_11_DrawColoredTrajectory(IntPtr ctx, IntPtr outputData, int width, int height);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_GetStepImage(IntPtr ctx, int step, IntPtr outImage);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_GetPointCount(IntPtr ctx);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_GetPoints(IntPtr ctx, IntPtr points, IntPtr barIds, int maxCount);
     }
 
     // ================================================================
@@ -219,9 +268,9 @@ namespace CalibOperatorPInvoke
         private IntPtr _nativePtr;
         private bool _disposed = false;
 
-        public int Width { get; private set; }
-        public int Height { get; private set; }
-        public int Channels { get; private set; }
+        public int Width { get; set; }
+        public int Height { get; set; }
+        public int Channels { get; set; }
 
         internal IntPtr NativePtr => _nativePtr;
 
@@ -665,10 +714,6 @@ namespace CalibOperatorPInvoke
             }
         }
 
-        // ================================================================
-        // Bar Colors
-        // ================================================================
-
         /// <summary>
         /// 获取轨迹条颜色 (BGR format)
         /// </summary>
@@ -687,6 +732,268 @@ namespace CalibOperatorPInvoke
                 );
             }
             return colors;
+        }
+    }
+
+    // ================================================================
+    // Trajectory Step-by-Step API
+    // ================================================================
+
+    /// <summary>
+    /// 分步骤轨迹检测器
+    /// </summary>
+    public class TrajectoryStepDetector : IDisposable
+    {
+        private const int MaxPoints = 50000;
+        
+        private IntPtr _context;
+        private bool _disposed;
+
+        public int DarkBarCount { get; private set; }
+        public int PointCount { get; private set; }
+
+        public TrajectoryStepDetector()
+        {
+            _context = NativeAPI.CALIB_TrajStep_Create();
+            if (_context == IntPtr.Zero)
+                throw new OutOfMemoryException("Failed to create trajectory step context");
+        }
+
+        ~TrajectoryStepDetector()
+        {
+            Dispose(false);
+        }
+
+        private void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                if (_context != IntPtr.Zero)
+                {
+                    NativeAPI.CALIB_TrajStep_Free(_context);
+                    _context = IntPtr.Zero;
+                }
+                _disposed = true;
+            }
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        /// <summary>
+        /// Step 1: 图像转灰度
+        /// </summary>
+        public void ConvertToGrayscale(CalibImage src)
+        {
+            CheckDisposed();
+            NativeAPI.CALIB_TrajStep_1_ConvertToGrayscale(_context, src.NativePtr);
+        }
+
+        /// <summary>
+        /// Step 2: 预处理 + 找外轮廓
+        /// </summary>
+        public void PreprocessAndFindContours()
+        {
+            CheckDisposed();
+            NativeAPI.CALIB_TrajStep_2_PreprocessAndFindContours(_context);
+        }
+
+        /// <summary>
+        /// Step 3: 创建工件mask
+        /// </summary>
+        public void CreateWorkpieceMask(int maxContourIdx = 0)
+        {
+            CheckDisposed();
+            NativeAPI.CALIB_TrajStep_3_CreateWorkpieceMask(_context, maxContourIdx);
+        }
+
+        /// <summary>
+        /// Step 4: 暗条二值化
+        /// </summary>
+        public void DetectDarkBars(int threshold = 45)
+        {
+            CheckDisposed();
+            NativeAPI.CALIB_TrajStep_4_DetectDarkBars(_context, threshold);
+        }
+
+        /// <summary>
+        /// Step 5: 形态学清理
+        /// </summary>
+        public void MorphologyCleanup(int kernelSize = 3)
+        {
+            CheckDisposed();
+            NativeAPI.CALIB_TrajStep_5_MorphologyCleanup(_context, kernelSize);
+        }
+
+        /// <summary>
+        /// Step 6: 找暗条轮廓并排序
+        /// </summary>
+        public int FindAndSortDarkContours()
+        {
+            CheckDisposed();
+            DarkBarCount = NativeAPI.CALIB_TrajStep_6_FindAndSortDarkContours(_context);
+            return DarkBarCount;
+        }
+
+        /// <summary>
+        /// Step 7: 等间距采样
+        /// </summary>
+        public void SampleContours(int targetBars = 16)
+        {
+            CheckDisposed();
+            NativeAPI.CALIB_TrajStep_7_SampleContours(_context, targetBars);
+        }
+
+        /// <summary>
+        /// Step 8: Mask验证
+        /// </summary>
+        public void VerifyByMask()
+        {
+            CheckDisposed();
+            NativeAPI.CALIB_TrajStep_8_VerifyByMask(_context);
+        }
+
+        /// <summary>
+        /// Step 9: 去重 + 排序
+        /// </summary>
+        public void DeduplicateAndSort()
+        {
+            CheckDisposed();
+            NativeAPI.CALIB_TrajStep_9_DeduplicateAndSort(_context);
+        }
+
+        /// <summary>
+        /// Step 10: 转换为输出格式
+        /// </summary>
+        public TrajectoryResult ConvertToOutput()
+        {
+            CheckDisposed();
+            TrajectoryResult result = new TrajectoryResult();
+            
+            IntPtr countPtr = Marshal.AllocHGlobal(sizeof(int));
+            IntPtr ptsPtr = Marshal.AllocHGlobal(Marshal.SizeOf<NativePoint2D>() * MaxPoints);
+            
+            try
+            {
+                int detected = NativeAPI.CALIB_TrajStep_10_ConvertToOutput(_context, ptsPtr, countPtr, IntPtr.Zero);
+                
+                if (detected > 0)
+                {
+                    result.Points = new Point2D[detected];
+                    for (int i = 0; i < detected; i++)
+                    {
+                        IntPtr elementPtr = IntPtr.Add(ptsPtr, i * Marshal.SizeOf<NativePoint2D>());
+                        NativePoint2D nativePt = Marshal.PtrToStructure<NativePoint2D>(elementPtr);
+                        result.Points[i] = Point2D.FromNative(nativePt);
+                    }
+                    result.Count = detected;
+                    result.Success = true;
+                }
+                PointCount = detected;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(countPtr);
+                Marshal.FreeHGlobal(ptsPtr);
+            }
+            
+            return result;
+        }
+
+        /// <summary>
+        /// Step 11: 绘制彩色轨迹
+        /// </summary>
+        public CalibImage DrawColoredTrajectory(int width, int height)
+        {
+            CheckDisposed();
+            CalibImage output = new CalibImage(width, height, 3);
+            NativeAPI.CALIB_TrajStep_11_DrawColoredTrajectory(_context, output.GetNativeStruct().data, width, height);
+            return output;
+        }
+
+        /// <summary>
+        /// 获取当前点数
+        /// </summary>
+        public int GetPointCount()
+        {
+            CheckDisposed();
+            return NativeAPI.CALIB_TrajStep_GetPointCount(_context);
+        }
+
+        /// <summary>
+        /// 获取中间结果图像
+        /// </summary>
+        /// <param name="step">步骤号 (1-6)</param>
+        /// <returns>中间结果图像，失败返回null</returns>
+        public CalibImage GetStepImage(int step)
+        {
+            CheckDisposed();
+            CalibImage output = new CalibImage();
+            int result = NativeAPI.CALIB_TrajStep_GetStepImage(_context, step, output.NativePtr);
+            if (result != 0)
+            {
+                output.Dispose();
+                return null;
+            }
+            var native = output.GetNativeStruct();
+            output.Width = native.width;
+            output.Height = native.height;
+            output.Channels = native.channels;
+            return output;
+        }
+
+        /// <summary>
+        /// 获取当前点
+        /// </summary>
+        public Point2D[] GetPoints()
+        {
+            CheckDisposed();
+            int count = NativeAPI.CALIB_TrajStep_GetPointCount(_context);
+            if (count == 0) return new Point2D[0];
+            
+            IntPtr ptsPtr = Marshal.AllocHGlobal(Marshal.SizeOf<NativePoint2D>() * count);
+            try
+            {
+                int actual = NativeAPI.CALIB_TrajStep_GetPoints(_context, ptsPtr, IntPtr.Zero, count);
+                Point2D[] result = new Point2D[actual];
+                for (int i = 0; i < actual; i++)
+                {
+                    IntPtr elementPtr = IntPtr.Add(ptsPtr, i * Marshal.SizeOf<NativePoint2D>());
+                    NativePoint2D nativePt = Marshal.PtrToStructure<NativePoint2D>(elementPtr);
+                    result[i] = Point2D.FromNative(nativePt);
+                }
+                return result;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(ptsPtr);
+            }
+        }
+
+        /// <summary>
+        /// 一键检测（执行所有步骤）
+        /// </summary>
+        public TrajectoryResult Detect(CalibImage img)
+        {
+            ConvertToGrayscale(img);
+            PreprocessAndFindContours();
+            CreateWorkpieceMask();
+            DetectDarkBars();
+            MorphologyCleanup();
+            FindAndSortDarkContours();
+            SampleContours();
+            VerifyByMask();
+            DeduplicateAndSort();
+            return ConvertToOutput();
+        }
+
+        private void CheckDisposed()
+        {
+            if (_disposed || _context == IntPtr.Zero)
+                throw new ObjectDisposedException("TrajectoryStepDetector");
         }
     }
 }

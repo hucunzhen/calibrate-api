@@ -127,6 +127,55 @@ void DetectTrajectory(Image* img, Point2D* trajPixels, int* count);
 void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count,
                             Image* stepImages, int* stepBarIds, int stepImageCount);
 
+// ========== DetectTrajectoryOpenCV 分步骤接口 ==========
+
+// 1. 图像转灰度
+void Step_ConvertToGrayscale(Image* src, cv::Mat* dstGray);
+
+// 2. 高斯模糊 + OTSU二值化 + 形态学处理 + 提取外轮廓
+void Step_PreprocessAndFindContours(cv::Mat* grayMat, cv::Mat* binaryBright, 
+                                     cv::Mat* morphed, cv::Mat* mask, cv::Mat* coloredMask,
+                                     std::vector<std::vector<cv::Point>>* outerContours);
+
+// 3. 根据外轮廓生成工件mask
+void Step_CreateWorkpieceMask(std::vector<std::vector<cv::Point>>* outerContours,
+                               int maxIdx, int width, int height, cv::Mat* mask);
+
+// 4. 暗条二值化
+void Step_DetectDarkBars(cv::Mat* grayMat, cv::Mat* mask, int threshold,
+                          cv::Mat* darkBinary);
+
+// 5. 形态学清理
+void Step_MorphologyCleanup(cv::Mat* darkBinary, int kernelSize);
+
+// 6. 提取暗条轮廓并按面积排序，返回找到的暗条数量
+int Step_FindAndSortDarkContours(cv::Mat* darkBinary, int width, int height,
+                                   std::vector<std::pair<double, int>>* sortedBars,
+                                   std::vector<std::vector<cv::Point>>* darkContours);
+
+// 7. 等间距轮廓采样
+void Step_SampleContoursEquidistant(std::vector<std::vector<cv::Point>>* darkContours,
+                                     std::vector<std::pair<double, int>>* sortedBars,
+                                     int targetBars, int width, int height,
+                                     std::vector<cv::Point>* allPoints,
+                                     std::vector<int>* allBarIds);
+
+// 8. Mask验证采样点
+void Step_VerifyByMask(std::vector<cv::Point>* allPoints, std::vector<int>* allBarIds,
+                       cv::Mat* darkBinary, int width, int height);
+
+// 9. 去重 + 按Y/X排序
+void Step_DeduplicateAndSort(std::vector<cv::Point>* points, std::vector<int>* barIds);
+
+// 10. 转换为轨迹点输出
+void Step_ConvertToOutput(std::vector<cv::Point>* uniquePoints, 
+                          std::vector<int>* uniqueBarIds,
+                          Point2D* trajPixels, int* count, int* stepBarIds);
+
+// 11. 绘制彩色轨迹
+void Step_DrawColoredTrajectory(Point2D* trajPixels, int count, int* stepBarIds,
+                                 int width, int height, unsigned char* outputData);
+
 // 委托接口（兼容旧代码）
 void DetectTrajectoryFitShape(Image* img, Point2D* trajPixels, int* count);
 

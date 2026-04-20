@@ -124,6 +124,201 @@ CALIB_API void CALIB_DrawTrajectoryGrayscale(Image* img, Point2D* trajPixels, in
 }
 
 // ================================================================
+// Trajectory Step-by-Step Context Implementation
+// ================================================================
+
+struct TrajStepContextImpl {
+    cv::Mat grayMat;
+    cv::Mat binaryBright;
+    cv::Mat morphed;
+    cv::Mat mask;
+    cv::Mat darkBinary;
+    cv::Mat coloredMask;  // 彩色mask，用于显示
+    
+    std::vector<std::vector<cv::Point>> outerContours;
+    std::vector<std::vector<cv::Point>> darkContours;
+    std::vector<std::pair<double, int>> sortedBars;
+    
+    std::vector<cv::Point> allPoints;
+    std::vector<int> allBarIds;
+    
+    int width;
+    int height;
+    int darkBarCount;
+};
+
+CALIB_API TrajStepContext CALIB_TrajStep_Create() {
+    return new TrajStepContextImpl();
+}
+
+CALIB_API void CALIB_TrajStep_Free(TrajStepContext ctx) {
+    if (ctx) {
+        TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+        impl->grayMat.release();
+        impl->binaryBright.release();
+        impl->morphed.release();
+        impl->mask.release();
+        impl->darkBinary.release();
+        impl->coloredMask.release();
+        impl->outerContours.clear();
+        impl->darkContours.clear();
+        impl->sortedBars.clear();
+        impl->allPoints.clear();
+        impl->allBarIds.clear();
+        delete impl;
+    }
+}
+
+CALIB_API int CALIB_TrajStep_1_ConvertToGrayscale(TrajStepContext ctx, Image* src) {
+    if (!ctx || !src) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    impl->width = src->width;
+    impl->height = src->height;
+    Step_ConvertToGrayscale(src, &impl->grayMat);
+    return 0;
+}
+
+CALIB_API int CALIB_TrajStep_2_PreprocessAndFindContours(TrajStepContext ctx) {
+    if (!ctx) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    Step_PreprocessAndFindContours(&impl->grayMat, &impl->binaryBright, 
+                                    &impl->morphed, &impl->mask, &impl->coloredMask, 
+                                    &impl->outerContours);
+    return 0;
+}
+
+CALIB_API int CALIB_TrajStep_3_CreateWorkpieceMask(TrajStepContext ctx, int maxContourIdx) {
+    if (!ctx) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    impl->mask.release();
+    Step_CreateWorkpieceMask(&impl->outerContours, maxContourIdx, impl->width, impl->height, &impl->mask);
+    return 0;
+}
+
+CALIB_API int CALIB_TrajStep_4_DetectDarkBars(TrajStepContext ctx, int threshold) {
+    if (!ctx) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    Step_DetectDarkBars(&impl->grayMat, &impl->mask, threshold, &impl->darkBinary);
+    return 0;
+}
+
+CALIB_API int CALIB_TrajStep_5_MorphologyCleanup(TrajStepContext ctx, int kernelSize) {
+    if (!ctx) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    Step_MorphologyCleanup(&impl->darkBinary, kernelSize);
+    return 0;
+}
+
+CALIB_API int CALIB_TrajStep_6_FindAndSortDarkContours(TrajStepContext ctx) {
+    if (!ctx) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    impl->darkBarCount = Step_FindAndSortDarkContours(&impl->darkBinary, impl->width, impl->height,
+                                                       &impl->sortedBars, &impl->darkContours);
+    return impl->darkBarCount;
+}
+
+CALIB_API int CALIB_TrajStep_7_SampleContours(TrajStepContext ctx, int targetBars) {
+    if (!ctx) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    Step_SampleContoursEquidistant(&impl->darkContours, &impl->sortedBars, targetBars,
+                                    impl->width, impl->height, &impl->allPoints, &impl->allBarIds);
+    return 0;
+}
+
+CALIB_API int CALIB_TrajStep_8_VerifyByMask(TrajStepContext ctx) {
+    if (!ctx) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    Step_VerifyByMask(&impl->allPoints, &impl->allBarIds, &impl->darkBinary, impl->width, impl->height);
+    return 0;
+}
+
+CALIB_API int CALIB_TrajStep_9_DeduplicateAndSort(TrajStepContext ctx) {
+    if (!ctx) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    Step_DeduplicateAndSort(&impl->allPoints, &impl->allBarIds);
+    return 0;
+}
+
+CALIB_API int CALIB_TrajStep_10_ConvertToOutput(TrajStepContext ctx, Point2D* trajPixels, int* count, int* stepBarIds) {
+    if (!ctx || !trajPixels) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    Step_ConvertToOutput(&impl->allPoints, &impl->allBarIds, trajPixels, count, stepBarIds);
+    return *count;
+}
+
+CALIB_API int CALIB_TrajStep_11_DrawColoredTrajectory(TrajStepContext ctx, unsigned char* outputData, int width, int height) {
+    if (!ctx) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    
+    // Convert allPoints to Point2D array
+    std::vector<Point2D> trajPixelsVec(impl->allPoints.size());
+    for (size_t i = 0; i < impl->allPoints.size(); i++) {
+        trajPixelsVec[i].x = impl->allPoints[i].x;
+        trajPixelsVec[i].y = impl->allPoints[i].y;
+    }
+    
+    int count = (int)trajPixelsVec.size();
+    int* barIdsPtr = impl->allBarIds.empty() ? NULL : impl->allBarIds.data();
+    
+    Step_DrawColoredTrajectory(trajPixelsVec.data(), count, barIdsPtr, width, height, outputData);
+    return 0;
+}
+
+CALIB_API int CALIB_TrajStep_GetStepImage(TrajStepContext ctx, int step, Image* outImage) {
+    if (!ctx || !outImage) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    
+    cv::Mat* srcMat = NULL;
+    int dstChannels = 1;
+    
+    switch (step) {
+        case 1: srcMat = &impl->grayMat; break;
+        case 2: srcMat = &impl->binaryBright; break;
+        case 3: 
+            // 步骤3返回彩色mask
+            if (!impl->coloredMask.empty()) {
+                srcMat = &impl->coloredMask;
+                dstChannels = 3;
+            } else {
+                srcMat = &impl->mask;  // fallback
+            }
+            break;
+        case 4: srcMat = &impl->darkBinary; break;
+        default: return -1;
+    }
+    
+    if (srcMat && !srcMat->empty()) {
+        if (outImage->data) free(outImage->data);
+        outImage->width = srcMat->cols;
+        outImage->height = srcMat->rows;
+        outImage->channels = dstChannels;
+        int dataSize = srcMat->cols * srcMat->rows * srcMat->channels();
+        outImage->data = (unsigned char*)malloc(dataSize);
+        memcpy(outImage->data, srcMat->data, dataSize);
+        return 0;
+    }
+    return -1;
+}
+
+CALIB_API int CALIB_TrajStep_GetPointCount(TrajStepContext ctx) {
+    if (!ctx) return 0;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    return (int)impl->allPoints.size();
+}
+
+CALIB_API int CALIB_TrajStep_GetPoints(TrajStepContext ctx, Point2D* points, int* barIds, int maxCount) {
+    if (!ctx || !points) return 0;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    int count = std::min((int)impl->allPoints.size(), maxCount);
+    for (int i = 0; i < count; i++) {
+        points[i].x = impl->allPoints[i].x;
+        points[i].y = impl->allPoints[i].y;
+        if (barIds) barIds[i] = impl->allBarIds[i];
+    }
+    return count;
+}
+
+// ================================================================
 // Bar Colors
 // ================================================================
 

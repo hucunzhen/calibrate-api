@@ -1136,8 +1136,7 @@ void ShowTrajectoryImage(Image* src, Point2D* trajPixels, int trajCount) {
  *   4  - Calibrate         执行标定
  *   5  - Save Results      保存结果
  *   6  - Test Transform    测试变换
- *   7  - TestImage         加载测试图像
- *   8  - AutoTrajTest      自动轨迹测试
+ *   7  - AutoTrajTest      自动轨迹测试
  */
 
 /**
@@ -1246,18 +1245,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             startX += btnW + btnGap;
             LOG_DEBUG("WindowProc: Button 6 (Test Transform) created");
 
-            // 按钮7: 加载测试图像
-            CreateWindow(L"BUTTON", L"7. TestImage",
+            // 按钮7: 自动轨迹测试
+            CreateWindow(L"BUTTON", L"7. AutoTrajTest",
                 WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
                 startX, btnY2, btnW, btnH, hwnd, (HMENU)7, NULL, NULL);
-            startX += btnW + btnGap;
-            LOG_DEBUG("WindowProc: Button 7 (TestImage) created");
-
-            // 按钮8: 自动轨迹测试
-            CreateWindow(L"BUTTON", L"8. AutoTrajTest",
-                WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-                startX, btnY2, btnW, btnH, hwnd, (HMENU)8, NULL, NULL);
-            LOG_DEBUG("WindowProc: Button 8 (AutoTrajTest) created");
+            LOG_DEBUG("WindowProc: Button 7 (AutoTrajTest) created");
 
             // ==================== 创建图像显示区域 ====================
             g_hwndImage = CreateWindow(L"STATIC", L"",
@@ -1592,105 +1584,22 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             
             // =============================================================
-            // 按钮7: 加载测试图像
-            // 功能: 加载任意图像，如已完成标定则执行轨迹检测
-            // =============================================================
-            case 7: { // TestImage
-                    LOG_INFO("Button 7: TestImage - START");
-                    OPENFILENAMEA ofn;
-                    char filename[MAX_PATH] = "";
-                    memset(&ofn, 0, sizeof(ofn));
-                    ofn.lStructSize = sizeof(ofn);
-                    ofn.hwndOwner = hwnd;
-                    ofn.lpstrFilter = "Image Files\0*.bmp;*.jpg;*.jpeg;*.png\0BMP Files\0*.bmp\0All Files\0*.*\0\0";
-                    ofn.lpstrFile = filename;
-                    ofn.nMaxFile = MAX_PATH;
-                    ofn.Flags = OFN_FILEMUSTEXIST;
-                    ofn.lpstrTitle = "Select Calibration Image";
-
-                    if (GetOpenFileNameA(&ofn)) {
-                        LOG_INFO("Button 7: File selected: %s", filename);
-                        Image loadedImg = { 0 };
-                        if (LoadBMP(filename, &loadedImg)) {
-                            LOG_INFO("Button 7: Image loaded (%dx%d)", 
-                                    loadedImg.width, loadedImg.height);
-                            if (g_image.data) free(g_image.data);
-                            g_image = loadedImg;
-
-                            sprintf_s(statusText, sizeof(statusText), 
-                                    "Loaded: %s (%dx%d)", filename, g_image.width, g_image.height);
-
-                            // 如果已完成标定，自动执行轨迹检测
-                            if (g_step >= 4) {
-                                LOG_INFO("Button 7: Calibration available, starting trajectory detection...");
-                                FreeStepImages();
-                                DetectTrajectoryOpenCV(&g_image, g_trajPixels, &g_trajCount,
-                                                      g_stepImages, g_trajBarId, STEP_COUNT);
-                                LOG_INFO("Button 7: Trajectory detection complete, found %d points", 
-                                        g_trajCount);
-                                
-                                // 统计各暗条的点数量
-                                int barCount[20] = {0};
-                                for (int i = 0; i < g_trajCount && i < 50000; i++) {
-                                    if (g_trajBarId[i] >= 0 && g_trajBarId[i] < 20) {
-                                        barCount[g_trajBarId[i]]++;
-                                    }
-                                }
-                                LOG_INFO("Button 7: Points per bar:");
-                                for (int i = 0; i < 16; i++) {
-                                    if (barCount[i] > 0) {
-                                        LOG_INFO("  Bar %d: %d points", i, barCount[i]);
-                                    }
-                                }
-                                
-                                sprintf_s(msgBuf, sizeof(msgBuf),
-                                    "Detected %d trajectory points\n\n"
-                                    "Start: (%.2f, %.2f)\n"
-                                    "End: (%.2f, %.2f)",
-                                    g_trajCount,
-                                    g_trajCount > 0 ? g_trajWorld[0].x : 0,
-                                    g_trajCount > 0 ? g_trajWorld[0].y : 0,
-                                    g_trajCount > 0 ? g_trajWorld[g_trajCount-1].x : 0,
-                                    g_trajCount > 0 ? g_trajWorld[g_trajCount-1].y : 0);
-                                MessageBoxA(hwnd, msgBuf, "Trajectory Detected", MB_OK);
-
-                                ShowTrajectoryImage(&g_image, g_trajPixels, g_trajCount);
-                                CreateTrajectoryWindow((HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE));
-                                strcat_s(statusText, sizeof(statusText), " | Trajectory in new window");
-                            } else {
-                                LOG_INFO("Button 7: Calibration not done, skipping trajectory detection");
-                            }
-
-                            InvalidateRect(g_hwndImage, NULL, FALSE);
-                        } else {
-                            LOG_ERROR("Button 7: Failed to load image: %s", filename);
-                            sprintf_s(msgBuf, sizeof(msgBuf), "Cannot load file:\n%s", filename);
-                            MessageBoxA(hwnd, msgBuf, "Load Error", MB_OK | MB_ICONWARNING);
-                            strcpy_s(statusText, sizeof(statusText), "Error: Cannot load image");
-                        }
-                    } else {
-                        LOG_INFO("Button 7: File dialog cancelled by user");
-                    }
-                    break;
-                }
-
-            // =============================================================
-            // 按钮8: 自动轨迹测试
+            // 按钮7: 自动轨迹测试
             // 功能: 自动加载test_auto.bmp，执行16暗条轨迹检测，展示6步中间结果
             // =============================================================
-            case 8: { // AutoTrajTest
-                LOG_INFO("Button 8: AutoTrajTest - START");
+            case 7: { // AutoTrajTest
+                LOG_INFO("Button 7: AutoTrajTest - START");
                 // 获取exe所在目录
                 char exeDir[MAX_PATH];
                 GetExeDir(exeDir, MAX_PATH);
                 char trajTestPath[MAX_PATH];
                 sprintf_s(trajTestPath, sizeof(trajTestPath), "%s\\test_auto.bmp", exeDir);
-                LOG_DEBUG("Button 8: Looking for test image: %s", trajTestPath);
+                LOG_DEBUG("Button 7: Looking for test image: %s", trajTestPath);
                 
                 Image loadedImg = { 0 };
                 if (LoadBMP(trajTestPath, &loadedImg)) {
-                    LOG_INFO("Button 8: Image loaded successfully");
-                    LOG_DEBUG("Button 8: Image info - %dx%d, channels=%d", 
+                    LOG_INFO("Button 7: Image loaded successfully");
+                    LOG_DEBUG("Button 7: Image info - %dx%d, channels=%d", 
                              loadedImg.width, loadedImg.height, loadedImg.channels);
                     
                     if (g_image.data) free(g_image.data);
@@ -1700,10 +1609,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     FreeStepImages();
                     
                     // 执行OpenCV轨迹检测（包含6步中间结果）
-                    LOG_INFO("Button 8: Starting OpenCV trajectory detection...");
+                    LOG_INFO("Button 7: Starting OpenCV trajectory detection...");
                     DetectTrajectoryOpenCV(&g_image, g_trajPixels, &g_trajCount,
                                           g_stepImages, g_trajBarId, STEP_COUNT);
-                    LOG_INFO("Button 8: Detection complete, found %d trajectory points", g_trajCount);
+                    LOG_INFO("Button 7: Detection complete, found %d trajectory points", g_trajCount);
 
                     // 统计各暗条的点数量
                     int barCount[20] = {0};
@@ -1712,7 +1621,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                             barCount[g_trajBarId[i]]++;
                         }
                     }
-                    LOG_INFO("Button 8: Detection results by bar:");
+                    LOG_INFO("Button 7: Detection results by bar:");
                     for (int i = 0; i < 20; i++) {
                         if (barCount[i] > 0) {
                             LOG_INFO("  Bar %d: %d points", i, barCount[i]);
@@ -1725,10 +1634,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
                     sprintf_s(statusText, sizeof(statusText),
                         "AutoTrajTest: %s | %d traj points", trajTestPath, g_trajCount);
-                    LOG_INFO("Button 8: Status updated - %s", statusText);
+                    LOG_INFO("Button 7: Status updated - %s", statusText);
                     InvalidateRect(g_hwndImage, NULL, FALSE);
                 } else {
-                    LOG_ERROR("Button 8: Failed to load %s", trajTestPath);
+                    LOG_ERROR("Button 7: Failed to load %s", trajTestPath);
                     sprintf_s(statusText, sizeof(statusText),
                         "AutoTrajTest: failed to load test_auto.bmp");
                     MessageBoxA(hwnd, 
@@ -1844,10 +1753,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 sprintf_s(line, sizeof(line), "6. Test transform");
                 TextOutA(hdc, infoX, infoY, line, strlen(line));
                 infoY += 20;
-                sprintf_s(line, sizeof(line), "7. Load TestImage");
-                TextOutA(hdc, infoX, infoY, line, strlen(line));
-                infoY += 20;
-                sprintf_s(line, sizeof(line), "8. AutoTrajTest (test_auto.bmp)");
+                sprintf_s(line, sizeof(line), "7. AutoTrajTest (test_auto.bmp)");
                 TextOutA(hdc, infoX, infoY, line, strlen(line));
             }
 
