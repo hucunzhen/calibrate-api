@@ -31,6 +31,7 @@ namespace CalibOperatorCLI_Example
         // 右键拖动相关
         private bool _isDragging = false;
         private System.Windows.Point _lastMousePos;
+        private System.Windows.Input.MouseButton _dragButton;
 
         private readonly Point2D[] _worldPoints = new[]
         {
@@ -120,6 +121,7 @@ namespace CalibOperatorCLI_Example
         private void UpdateStepParameterVisibility()
         {
             // 隐藏所有参数行
+            SpStep2Params.Visibility = Visibility.Collapsed;
             SpStep3Params.Visibility = Visibility.Collapsed;
             SpStep4Params.Visibility = Visibility.Collapsed;
             SpStep5Params.Visibility = Visibility.Collapsed;
@@ -128,16 +130,19 @@ namespace CalibOperatorCLI_Example
             // 只显示当前步骤的参数（下一步才能修改的参数）
             switch (_trajStep)
             {
-                case 0:  // Step1完成后，显示Step3参数
+                case 1:  // Step1完成后，显示Step2参数（高斯模糊+morph）
+                    SpStep2Params.Visibility = Visibility.Visible;
+                    break;
+                case 2:  // Step2完成后，显示Step3参数
                     SpStep3Params.Visibility = Visibility.Visible;
                     break;
-                case 2:  // Step3完成后，显示Step4参数
+                case 3:  // Step3完成后，显示Step4参数
                     SpStep4Params.Visibility = Visibility.Visible;
                     break;
-                case 3:  // Step4完成后，显示Step5参数
+                case 4:  // Step4完成后，显示Step5参数(morph+blur)
                     SpStep5Params.Visibility = Visibility.Visible;
                     break;
-                case 5:  // Step6完成后，显示Step7参数
+                case 5:  // Step5完成后，显示Step7参数
                     SpStep7Params.Visibility = Visibility.Visible;
                     break;
             }
@@ -579,8 +584,24 @@ namespace CalibOperatorCLI_Example
             {
                 if (_trajDetector == null || _currentImage == null) return;
 
-                Log("[STEP 2] Preprocess and find contours...");
-                _trajDetector.PreprocessAndFindContours();
+                // 读取参数
+                int blurKsize = 7;
+                if (!int.TryParse(TxtStep2Blur.Text, out blurKsize))
+                {
+                    Log("[WARN] Invalid blur kernel, using 7");
+                    blurKsize = 7;
+                }
+                int morphKernelSize = 5;
+                if (!int.TryParse(TxtStep2Morph.Text, out morphKernelSize))
+                {
+                    Log("[WARN] Invalid morph kernel, using 5");
+                    morphKernelSize = 5;
+                }
+                if (blurKsize % 2 == 0) blurKsize++;
+                if (morphKernelSize % 2 == 0) morphKernelSize++;
+
+                Log($"[STEP 2] Preprocess (blur={blurKsize}, morph={morphKernelSize})...");
+                _trajDetector.PreprocessAndFindContours(blurKsize, morphKernelSize);
                 Log("[STEP 2] Contour detection complete");
 
                 // 步骤2显示的是二值化图像，不是mask
@@ -695,8 +716,26 @@ namespace CalibOperatorCLI_Example
                 // 确保kernelSize是奇数
                 if (kernelSize % 2 == 0) kernelSize++;
 
-                Log($"[STEP 5] Morphology cleanup (kernel={kernelSize})...");
-                _trajDetector.MorphologyCleanup(kernelSize);
+                // 读取模糊核大小
+                int blurKsize = 5;
+                if (!int.TryParse(TxtStep5Blur.Text, out blurKsize))
+                {
+                    Log("[WARN] Invalid blur size, using 5");
+                    blurKsize = 5;
+                }
+                // 确保blurKsize是奇数
+                if (blurKsize % 2 == 0) blurKsize++;
+
+                Log($"[STEP 5] Morphology cleanup (kernel={kernelSize}, blur={blurKsize})...");
+                double blurSigma = 1.0;
+                if (!double.TryParse(TxtStep5BlurSigma.Text, out blurSigma))
+                {
+                    Log("[WARN] Invalid blur sigma, using 1.0");
+                    blurSigma = 1.0;
+                }
+
+                Log($"[STEP 5] Morphology cleanup (kernel={kernelSize}, blur={blurKsize}, sigma={blurSigma:F1})...");
+                _trajDetector.MorphologyCleanup(kernelSize, blurKsize, blurSigma);
 
                 // 显示morphed图像（复用step 4的darkBinary结果）
                 var stepImg = _trajDetector.GetStepImage(4);
@@ -894,6 +933,7 @@ namespace CalibOperatorCLI_Example
             if (e.RightButton == System.Windows.Input.MouseButtonState.Pressed)
             {
                 _isDragging = true;
+                _dragButton = System.Windows.Input.MouseButton.Right;
                 _lastMousePos = e.GetPosition(ImageScrollViewer);
                 ImageScrollViewer.CaptureMouse();
                 ImageScrollViewer.Cursor = System.Windows.Input.Cursors.Hand;
@@ -902,7 +942,7 @@ namespace CalibOperatorCLI_Example
 
         private void ImageScrollViewer_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
         {
-            if (_isDragging && e.RightButton == System.Windows.Input.MouseButtonState.Pressed)
+            if (_isDragging && _dragButton == System.Windows.Input.MouseButton.Right)
             {
                 var currentPos = e.GetPosition(ImageScrollViewer);
                 double deltaX = _lastMousePos.X - currentPos.X;
@@ -917,11 +957,59 @@ namespace CalibOperatorCLI_Example
 
         private void ImageScrollViewer_PreviewMouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
         {
-            if (_isDragging)
+            if (_isDragging && e.ChangedButton == _dragButton)
             {
                 _isDragging = false;
                 ImageScrollViewer.ReleaseMouseCapture();
                 ImageScrollViewer.Cursor = System.Windows.Input.Cursors.Arrow;
+            }
+        }
+
+        private void ImageScrollViewer_PreviewMouseRightButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            // 右键抬起不处理拖动结束，由PreviewMouseUp处理
+        }
+
+        private void SaveImage_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var dlg = new SaveFileDialog
+                {
+                    Filter = "BMP Files (*.bmp)|*.bmp|PNG Files (*.png)|*.png|JPEG Files (*.jpg)|*.jpg",
+                    Title = "保存图片",
+                    FileName = $"saved_image_{DateTime.Now:yyyyMMdd_HHmmss}.bmp"
+                };
+
+                if (dlg.ShowDialog() == true)
+                {
+                    // 获取当前显示的Bitmap
+                    if (ImageDisplay.Source is System.Windows.Media.Imaging.BitmapSource bitmapSource)
+                    {
+                        BitmapEncoder encoder;
+                        string ext = System.IO.Path.GetExtension(dlg.FileName).ToLower();
+                        if (ext == ".png")
+                            encoder = new PngBitmapEncoder();
+                        else if (ext == ".jpg" || ext == ".jpeg")
+                            encoder = new JpegBitmapEncoder();
+                        else
+                            encoder = new BmpBitmapEncoder();
+
+                        encoder.Frames.Add(BitmapFrame.Create(bitmapSource));
+                        using var stream = System.IO.File.Create(dlg.FileName);
+                        encoder.Save(stream);
+                        Log($"[INFO] 图片已保存: {dlg.FileName}");
+                    }
+                    else
+                    {
+                        Log("[WARN] 无法获取当前图片");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERROR] 保存图片失败: {ex.Message}");
+                MessageBox.Show($"保存图片失败:\n{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
     }

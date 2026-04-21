@@ -52,6 +52,12 @@
                 <TextBlock x:Name="TxtParamsTitle" Text="Step Parameters:" FontWeight="Bold" Margin="0,0,0,5"/>
                 <WrapPanel>
                     <!-- Step 3: Mask -->
+                    <StackPanel x:Name="SpStep2Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
+                        <TextBlock Text="Blur Kernel:" VerticalAlignment="Center" Width="100"/>
+                        <TextBox x:Name="TxtStep2Blur" Text="7" Width="50" Height="24" VerticalContentAlignment="Center"/>
+                        <TextBlock Text="Morph Kernel:" VerticalAlignment="Center" Margin="15,0,0,0"/>
+                        <TextBox x:Name="TxtStep2Morph" Text="5" Width="50" Height="24" VerticalContentAlignment="Center" Margin="5,0,0,0"/>
+                    </StackPanel>
                     <StackPanel x:Name="SpStep3Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
                         <TextBlock Text="Mask ContourIdx:" VerticalAlignment="Center" Width="100"/>
                         <TextBox x:Name="TxtStep3ContourIdx" Text="0" Width="60" Height="24" VerticalContentAlignment="Center"/>
@@ -65,8 +71,11 @@
                     <!-- Step 5: Morph -->
                     <StackPanel x:Name="SpStep5Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
                         <TextBlock Text="Morph Kernel:" VerticalAlignment="Center" Width="100"/>
-                        <TextBox x:Name="TxtStep5Kernel" Text="3" Width="60" Height="24" VerticalContentAlignment="Center"/>
-                        <TextBlock Text=" (3,5,7)" VerticalAlignment="Center" Foreground="Gray" Margin="5,0,0,0"/>
+                        <TextBox x:Name="TxtStep5Kernel" Text="3" Width="50" Height="24" VerticalContentAlignment="Center"/>
+                        <TextBlock Text="Blur Kernel:" VerticalAlignment="Center" Margin="15,0,0,0"/>
+                        <TextBox x:Name="TxtStep5Blur" Text="5" Width="50" Height="24" VerticalContentAlignment="Center" Margin="5,0,0,0"/>
+                        <TextBlock Text="Blur Sigma:" VerticalAlignment="Center" Margin="15,0,0,0"/>
+                        <TextBox x:Name="TxtStep5BlurSigma" Text="1.0" Width="50" Height="24" VerticalContentAlignment="Center" Margin="5,0,0,0"/>
                     </StackPanel>
                     <!-- Step 7: Sample -->
                     <StackPanel x:Name="SpStep7Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
@@ -87,10 +96,16 @@
                           PreviewMouseWheel="ImageScrollViewer_PreviewMouseWheel"
                           PreviewMouseDown="ImageScrollViewer_PreviewMouseDown"
                           PreviewMouseMove="ImageScrollViewer_PreviewMouseMove"
-                          PreviewMouseUp="ImageScrollViewer_PreviewMouseUp">
+                          PreviewMouseUp="ImageScrollViewer_PreviewMouseUp"
+                          PreviewMouseRightButtonUp="ImageScrollViewer_PreviewMouseRightButtonUp">
                 <Image x:Name="ImageDisplay" 
                        Stretch="Uniform" 
                        RenderOptions.BitmapScalingMode="HighQuality">
+                    <Image.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="保存图片" Click="SaveImage_Click"/>
+                        </ContextMenu>
+                    </Image.ContextMenu>
                     <Image.LayoutTransform>
                         <ScaleTransform x:Name="ImageScaleTransform" ScaleX="1" ScaleY="1"/>
                     </Image.LayoutTransform>

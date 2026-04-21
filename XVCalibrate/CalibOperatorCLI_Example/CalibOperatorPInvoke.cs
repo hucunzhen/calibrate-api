@@ -217,7 +217,7 @@ namespace CalibOperatorPInvoke
         public static extern int CALIB_TrajStep_1_ConvertToGrayscale(IntPtr ctx, IntPtr src);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern int CALIB_TrajStep_2_PreprocessAndFindContours(IntPtr ctx);
+        public static extern int CALIB_TrajStep_2_PreprocessAndFindContours(IntPtr ctx, int blurKsize, int morphKernelSize);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int CALIB_TrajStep_3_CreateWorkpieceMask(IntPtr ctx, int maxContourIdx);
@@ -226,7 +226,7 @@ namespace CalibOperatorPInvoke
         public static extern int CALIB_TrajStep_4_DetectDarkBars(IntPtr ctx, int threshold);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern int CALIB_TrajStep_5_MorphologyCleanup(IntPtr ctx, int kernelSize);
+        public static extern int CALIB_TrajStep_5_MorphologyCleanup(IntPtr ctx, int kernelSize, int blurKsize, double blurSigma);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int CALIB_TrajStep_6_FindAndSortDarkContours(IntPtr ctx);
@@ -795,10 +795,10 @@ namespace CalibOperatorPInvoke
         /// <summary>
         /// Step 2: 预处理 + 找外轮廓
         /// </summary>
-        public void PreprocessAndFindContours()
+        public void PreprocessAndFindContours(int blurKsize = 7, int morphKernelSize = 5)
         {
             CheckDisposed();
-            NativeAPI.CALIB_TrajStep_2_PreprocessAndFindContours(_context);
+            NativeAPI.CALIB_TrajStep_2_PreprocessAndFindContours(_context, blurKsize, morphKernelSize);
         }
 
         /// <summary>
@@ -822,10 +822,10 @@ namespace CalibOperatorPInvoke
         /// <summary>
         /// Step 5: 形态学清理
         /// </summary>
-        public void MorphologyCleanup(int kernelSize = 3)
+        public void MorphologyCleanup(int kernelSize = 3, int blurKsize = 5, double blurSigma = 1.0)
         {
             CheckDisposed();
-            NativeAPI.CALIB_TrajStep_5_MorphologyCleanup(_context, kernelSize);
+            NativeAPI.CALIB_TrajStep_5_MorphologyCleanup(_context, kernelSize, blurKsize, blurSigma);
         }
 
         /// <summary>
@@ -982,7 +982,7 @@ namespace CalibOperatorPInvoke
             PreprocessAndFindContours();
             CreateWorkpieceMask();
             DetectDarkBars();
-            MorphologyCleanup();
+            MorphologyCleanup(3, 5, 1.0);
             FindAndSortDarkContours();
             SampleContours();
             VerifyByMask();

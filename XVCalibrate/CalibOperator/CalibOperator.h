@@ -135,7 +135,8 @@ void Step_ConvertToGrayscale(Image* src, cv::Mat* dstGray);
 // 2. 高斯模糊 + OTSU二值化 + 形态学处理 + 提取外轮廓
 void Step_PreprocessAndFindContours(cv::Mat* grayMat, cv::Mat* binaryBright, 
                                      cv::Mat* morphed, cv::Mat* mask, cv::Mat* coloredMask,
-                                     std::vector<std::vector<cv::Point>>* outerContours);
+                                     std::vector<std::vector<cv::Point>>* outerContours,
+                                     int blurKsize, int morphKernelSize);
 
 // 3. 根据外轮廓生成工件mask
 void Step_CreateWorkpieceMask(std::vector<std::vector<cv::Point>>* outerContours,
@@ -146,7 +147,7 @@ void Step_DetectDarkBars(cv::Mat* grayMat, cv::Mat* mask, int threshold,
                           cv::Mat* darkBinary);
 
 // 5. 形态学清理
-void Step_MorphologyCleanup(cv::Mat* darkBinary, int kernelSize);
+void Step_MorphologyCleanup(cv::Mat* darkBinary, int kernelSize, int blurKsize, double blurSigma);
 
 // 6. 提取暗条轮廓并按面积排序，返回找到的暗条数量
 int Step_FindAndSortDarkContours(cv::Mat* darkBinary, int width, int height,

@@ -178,12 +178,12 @@ CALIB_API int CALIB_TrajStep_1_ConvertToGrayscale(TrajStepContext ctx, Image* sr
     return 0;
 }
 
-CALIB_API int CALIB_TrajStep_2_PreprocessAndFindContours(TrajStepContext ctx) {
+CALIB_API int CALIB_TrajStep_2_PreprocessAndFindContours(TrajStepContext ctx, int blurKsize, int morphKernelSize) {
     if (!ctx) return -1;
     TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
     Step_PreprocessAndFindContours(&impl->grayMat, &impl->binaryBright, 
                                     &impl->morphed, &impl->mask, &impl->coloredMask, 
-                                    &impl->outerContours);
+                                    &impl->outerContours, blurKsize, morphKernelSize);
     return 0;
 }
 
@@ -202,10 +202,12 @@ CALIB_API int CALIB_TrajStep_4_DetectDarkBars(TrajStepContext ctx, int threshold
     return 0;
 }
 
-CALIB_API int CALIB_TrajStep_5_MorphologyCleanup(TrajStepContext ctx, int kernelSize) {
+CALIB_API int CALIB_TrajStep_5_MorphologyCleanup(TrajStepContext ctx, int kernelSize, int blurKsize, double blurSigma) {
+
     if (!ctx) return -1;
     TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
-    Step_MorphologyCleanup(&impl->darkBinary, kernelSize);
+    Step_MorphologyCleanup(&impl->darkBinary, kernelSize, blurKsize, blurSigma);
+
     return 0;
 }
 

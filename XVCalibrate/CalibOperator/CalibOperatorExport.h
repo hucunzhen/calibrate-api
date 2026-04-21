@@ -167,9 +167,11 @@ CALIB_API int CALIB_TrajStep_1_ConvertToGrayscale(TrajStepContext ctx, Image* sr
 
 /**
  * Step 2: Preprocess and find outer contours
+ * blurKsize: Gaussian blur kernel size (default: 7)
+ * morphKernelSize: Morphology kernel size (default: 5)
  * Returns: 0 on success
  */
-CALIB_API int CALIB_TrajStep_2_PreprocessAndFindContours(TrajStepContext ctx);
+CALIB_API int CALIB_TrajStep_2_PreprocessAndFindContours(TrajStepContext ctx, int blurKsize, int morphKernelSize);
 
 /**
  * Step 3: Create workpiece mask from contours
@@ -188,9 +190,11 @@ CALIB_API int CALIB_TrajStep_4_DetectDarkBars(TrajStepContext ctx, int threshold
 /**
  * Step 5: Morphology cleanup
  * kernelSize: Morphology kernel size (default: 3)
+ * blurKsize: Gaussian blur kernel size (default: 5)
+ * blurSigma: Gaussian blur sigma (default: 1.0)
  * Returns: 0 on success
  */
-CALIB_API int CALIB_TrajStep_5_MorphologyCleanup(TrajStepContext ctx, int kernelSize);
+CALIB_API int CALIB_TrajStep_5_MorphologyCleanup(TrajStepContext ctx, int kernelSize, int blurKsize, double blurSigma);
 
 /**
  * Step 6: Find and sort dark contours by area

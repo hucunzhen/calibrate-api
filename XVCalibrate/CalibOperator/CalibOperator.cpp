@@ -1118,6 +1118,267 @@ void DetectTrajectory(Image* img, Point2D* trajPixels, int* count) {
     LOG_INFO("Self trajectory detection complete: %d points", *count);
 }
 
+
+// ========== 形状拟合辅助函数 ==========
+
+// 最小二乘拟合圆: (x-a)^2 + (y-b)^2 = r^2
+// 返回 (cx, cy, r) 或 (-1,-1,-1) 如果失败
+static cv::Vec3d fitCircleLeastSquares(const std::vector<cv::Point2d>& pts) {
+    int n = (int)pts.size();
+    if (n < 3) return cv::Vec3d(-1, -1, -1);
+
+    double sumX = 0, sumY = 0;
+    for (int i = 0; i < n; i++) { sumX += pts[i].x; sumY += pts[i].y; }
+    double meanX = sumX / n, meanY = sumY / n;
+
+    cv::Mat A(n, 3, CV_64F);
+    cv::Mat B(n, 1, CV_64F);
+    for (int i = 0; i < n; i++) {
+        A.at<double>(i, 0) = pts[i].x - meanX;
+        A.at<double>(i, 1) = pts[i].y - meanY;
+        A.at<double>(i, 2) = 1.0;
+        double x2y2 = pts[i].x * pts[i].x + pts[i].y * pts[i].y;
+        B.at<double>(i, 0) = x2y2 - (meanX * meanX + meanY * meanY);
+    }
+
+    cv::Mat X;
+    bool ok = cv::solve(A, B, X, cv::DECOMP_SVD);
+    if (!ok || X.empty()) return cv::Vec3d(-1, -1, -1);
+
+    double a = X.at<double>(0);
+    double b = X.at<double>(1);
+    double c = X.at<double>(2);
+
+    double cx = -a / 2.0 + meanX;
+    double cy = -b / 2.0 + meanY;
+    double rSq = cx * cx + cy * cy - c;
+    if (rSq < 0) rSq = 0;
+    double r = sqrt(rSq);
+
+    return cv::Vec3d(cx, cy, r);
+}
+
+// 对一组采样点进行分段形状拟合
+// angleThreshold: 转角阈值(弧度), 默认 0.05 (~3度)
+// minSegPoints: 段内最少点数, 默认 5
+static std::vector<cv::Point2d> fitSegmentsShape(
+    const std::vector<cv::Point2d>& pts)
+{
+    // PCA + 转角检测 + 直线/圆弧拟合：
+    // 1. PCA 求主方向和法线方向
+    // 2. 沿法线投影 d，用中位数分成正半和负半
+    // 3. 每半按主方向 t 排序，计算转角
+    // 4. 转角小的段→直线拟合，转角大的段→最小二乘圆拟合
+    // 5. 合并短段，保证连续闭合
+    // 适用于任意方向的暗条
+
+    int n = (int)pts.size();
+    if (n < 6) return pts;
+
+    // PCA
+    double cx = 0, cy = 0;
+    for (int i = 0; i < n; i++) { cx += pts[i].x; cy += pts[i].y; }
+    cx /= n; cy /= n;
+
+    double Cxx = 0, Cxy = 0, Cyy = 0;
+    for (int i = 0; i < n; i++) {
+        double dx = pts[i].x - cx, dy = pts[i].y - cy;
+        Cxx += dx * dx; Cxy += dx * dy; Cyy += dy * dy;
+    }
+    Cxx /= n; Cxy /= n; Cyy /= n;
+
+    double trace = Cxx + Cyy;
+    double det = Cxx * Cyy - Cxy * Cxy;
+    double disc = sqrt(std::max(0.0, trace * trace / 4.0 - det));
+    double lambda1 = trace / 2.0 + disc;
+
+    double vx, vy;
+    if (fabs(Cxy) > 1e-10) { vx = lambda1 - Cyy; vy = Cxy; }
+    else { vx = (Cxx >= Cyy) ? 1 : 0; vy = (Cxx >= Cyy) ? 0 : 1; }
+    double vlen = sqrt(vx * vx + vy * vy);
+    if (vlen < 1e-10) return pts;
+    vx /= vlen; vy /= vlen;
+    double nx = -vy, ny = vx;
+
+    // 法线投影 d
+    std::vector<double> dVals(n);
+    for (int i = 0; i < n; i++) {
+        double dx = pts[i].x - cx, dy = pts[i].y - cy;
+        dVals[i] = dx * nx + dy * ny;
+    }
+    std::vector<double> dSorted = dVals;
+    std::nth_element(dSorted.begin(), dSorted.begin() + n / 2, dSorted.end());
+    double medianD = dSorted[n / 2];
+
+    // 分正半和负半
+    std::vector<int> posIdx, negIdx;
+    for (int i = 0; i < n; i++) {
+        if (dVals[i] >= medianD) posIdx.push_back(i);
+        else negIdx.push_back(i);
+    }
+
+    // 对每半做直线+圆弧拟合
+    std::vector<cv::Point2d> result(n);
+    for (int i = 0; i < n; i++) result[i] = pts[i];
+
+    auto fitHalf = [&](const std::vector<int>& indices) {
+        int nh = (int)indices.size();
+        if (nh < 6) return;
+
+        // 按 t 排序
+        std::vector<std::pair<double, int>> tOrder(nh);
+        for (int i = 0; i < nh; i++) {
+            int idx = indices[i];
+            double dx = pts[idx].x - cx, dy = pts[idx].y - cy;
+            tOrder[i] = std::make_pair(dx * vx + dy * vy, idx);
+        }
+        std::sort(tOrder.begin(), tOrder.end());
+
+        std::vector<int> sortedOrigIdx(nh);
+        std::vector<cv::Point2d> sortedPts(nh);
+        for (int i = 0; i < nh; i++) {
+            sortedOrigIdx[i] = tOrder[i].second;
+            sortedPts[i] = pts[tOrder[i].second];
+        }
+
+        // 计算转角
+        std::vector<double> angles(nh, 0.0);
+        for (int i = 1; i < nh - 1; i++) {
+            double dx1 = sortedPts[i].x - sortedPts[i-1].x;
+            double dy1 = sortedPts[i].y - sortedPts[i-1].y;
+            double dx2 = sortedPts[i+1].x - sortedPts[i].x;
+            double dy2 = sortedPts[i+1].y - sortedPts[i].y;
+            double len1 = sqrt(dx1*dx1 + dy1*dy1);
+            double len2 = sqrt(dx2*dx2 + dy2*dy2);
+            if (len1 < 0.001 || len2 < 0.001) { angles[i] = 0; continue; }
+            double cross = dx1*dy2 - dy1*dx2;
+            double dot = dx1*dx2 + dy1*dy2;
+            angles[i] = fabs(atan2(cross, dot));
+        }
+
+        // 分段：arc 段 vs line 段
+        double angleThresh = 0.10;  // ~5.7 degrees
+        int minSegLen = 4;
+
+        std::vector<bool> isArc(nh, false);
+        for (int i = 0; i < nh; i++)
+            isArc[i] = (angles[i] > angleThresh);
+
+        // 合并短段
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            int i = 0;
+            while (i < nh) {
+                int j = i;
+                while (j < nh && isArc[j] == isArc[i]) j++;
+                if (j - i < minSegLen) {
+                    bool leftType = (i > 0) ? isArc[i-1] : !isArc[i];
+                    bool rightType = (j < nh) ? isArc[j] : !isArc[i];
+                    int leftLen = i;
+                    int rightLen = nh - j;
+                    bool mergeType = (leftLen >= rightLen) ? leftType : rightType;
+                    for (int k = i; k < j; k++) isArc[k] = mergeType;
+                    changed = true;
+                }
+                i = j;
+            }
+        }
+
+        // 构建最终段列表
+        struct Seg { int start; int end; bool arc; };
+        std::vector<Seg> segments;
+        int segStart = 0;
+        for (int i = 1; i < nh; i++) {
+            if (isArc[i] != isArc[segStart]) {
+                segments.push_back({segStart, i, isArc[segStart]});
+                segStart = i;
+            }
+        }
+        segments.push_back({segStart, nh, isArc[segStart]});
+
+        // 对每段做拟合
+        for (size_t s = 0; s < segments.size(); s++) {
+            int si = segments[s].start;
+            int ei = segments[s].end;
+            int segLen = ei - si;
+
+            if (segLen < 2) continue;
+
+            if (!segments[s].arc) {
+                // 直线拟合
+                std::vector<cv::Point2f> segPts(segLen);
+                for (int k = 0; k < segLen; k++)
+                    segPts[k] = cv::Point2f((float)sortedPts[si+k].x, (float)sortedPts[si+k].y);
+
+                cv::Vec4f lp;
+                cv::fitLine(segPts, lp, cv::DIST_L2, 0, 0.01, 0.01);
+                double fvx = lp[0], fvy = lp[1], fx0 = lp[2], fy0 = lp[3];
+
+                for (int k = 0; k < segLen; k++) {
+                    int origIdx = sortedOrigIdx[si + k];
+                    double t = (pts[origIdx].x - fx0) * fvx + (pts[origIdx].y - fy0) * fvy;
+                    result[origIdx] = cv::Point2d(fx0 + t * fvx, fy0 + t * fvy);
+                }
+            } else {
+                // 圆弧拟合（用 fitCircleLeastSquares）
+                std::vector<cv::Point2d> arcPts(segLen);
+                for (int k = 0; k < segLen; k++)
+                    arcPts[k] = sortedPts[si + k];
+
+                cv::Vec3d circle = fitCircleLeastSquares(arcPts);
+                double ccx = circle[0], ccy = circle[1], cr = circle[2];
+
+                if (cr > 0.5 && cr < 100000) {
+                    // 检查拟合误差
+                    double totalErr = 0;
+                    for (int k = 0; k < segLen; k++) {
+                        double d = sqrt((arcPts[k].x-ccx)*(arcPts[k].x-ccx) +
+                                        (arcPts[k].y-ccy)*(arcPts[k].y-ccy));
+                        totalErr += fabs(d - cr);
+                    }
+                    double avgErr = totalErr / segLen;
+
+                    if (avgErr < cr * 0.3) {
+                        // 用圆弧替换
+                        double startA = atan2(arcPts[0].y - ccy, arcPts[0].x - ccx);
+                        double endA = atan2(arcPts[segLen-1].y - ccy, arcPts[segLen-1].x - ccx);
+                        double delta = endA - startA;
+                        if (delta > CV_PI) delta -= 2 * CV_PI;
+                        if (delta < -CV_PI) delta += 2 * CV_PI;
+
+                        for (int k = 0; k < segLen; k++) {
+                            int origIdx = sortedOrigIdx[si + k];
+                            double a = startA + delta * k / (segLen - 1);
+                            result[origIdx] = cv::Point2d(ccx + cr * cos(a), ccy + cr * sin(a));
+                        }
+                    } else {
+                        // 圆拟合误差太大，退化为直线
+                        std::vector<cv::Point2f> segPts(segLen);
+                        for (int k = 0; k < segLen; k++)
+                            segPts[k] = cv::Point2f((float)arcPts[k].x, (float)arcPts[k].y);
+                        cv::Vec4f lp;
+                        cv::fitLine(segPts, lp, cv::DIST_L2, 0, 0.01, 0.01);
+                        double fvx = lp[0], fvy = lp[1], fx0 = lp[2], fy0 = lp[3];
+                        for (int k = 0; k < segLen; k++) {
+                            int origIdx = sortedOrigIdx[si + k];
+                            double t = (pts[origIdx].x - fx0) * fvx + (pts[origIdx].y - fy0) * fvy;
+                            result[origIdx] = cv::Point2d(fx0 + t * fvx, fy0 + t * fvy);
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    fitHalf(posIdx);
+    fitHalf(negIdx);
+
+    return result;
+}
+
+
+
 // ========== OpenCV 16 暗条轨迹检测 ==========
 
 void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count,
@@ -1255,6 +1516,12 @@ void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count,
         memcpy(stepImages[4].data, darkBinary.data, darkBinary.cols * darkBinary.rows);
     }
 
+    // 高斯模糊 + 重二值化：让暗条轮廓更光滑
+    Mat blurredDark;
+    GaussianBlur(darkBinary, blurredDark, Size(5, 5), 1.0);
+    threshold(blurredDark, darkBinary, 128, 255, THRESH_BINARY);
+    blurredDark.release();
+
     // 提取所有暗条轮廓
     std::vector<std::vector<Point>> darkContours;
     findContours(darkBinary, darkContours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
@@ -1288,12 +1555,6 @@ void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count,
         const std::vector<Point>& contour = darkContours[sortedBars[b].second];
         int ptCount = (int)contour.size();
         if (ptCount < 5) continue;
-
-        for (int j = 0; j < ptCount; j++) {
-            allPoints.push_back(contour[j]);
-            allBarIds.push_back(b);
-        }
-
         double perimeter = arcLength(contour, true);
         double spacing = 2.0;
         int sampleCount = std::max(10, (int)(perimeter / spacing));
@@ -1305,6 +1566,8 @@ void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count,
             cumLen[j] = cumLen[j-1] + sqrt(dx*dx + dy*dy);
         }
 
+        // 等间距采样 + 形状拟合
+        std::vector<cv::Point2d> sampledPts;
         for (int s = 0; s < sampleCount; s++) {
             double targetLen = perimeter * s / sampleCount;
             int lo = 0, hi = ptCount - 1;
@@ -1317,6 +1580,16 @@ void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count,
             double t = (segLen > 0.001) ? (targetLen - cumLen[lo]) / segLen : 0.0;
             int px = (int)(contour[lo].x + t * (contour[hi].x - contour[lo].x));
             int py = (int)(contour[lo].y + t * (contour[hi].y - contour[lo].y));
+            if (px >= 0 && px < w && py >= 0 && py < h) {
+                sampledPts.push_back(cv::Point2d((double)px, (double)py));
+            }
+        }
+
+        // 分段形状拟合: 直线拟合到直线, 圆弧拟合到圆弧
+        std::vector<cv::Point2d> fittedPts = fitSegmentsShape(sampledPts);
+        for (size_t fi = 0; fi < fittedPts.size(); fi++) {
+            int px = (int)std::round(fittedPts[fi].x);
+            int py = (int)std::round(fittedPts[fi].y);
             if (px >= 0 && px < w && py >= 0 && py < h) {
                 allPoints.push_back(Point(px, py));
                 allBarIds.push_back(b);
@@ -1492,7 +1765,10 @@ void Step_ConvertToGrayscale(Image* src, cv::Mat* dstGray) {
 // 2. 高斯模糊 + OTSU二值化 + 形态学处理 + 提取外轮廓
 void Step_PreprocessAndFindContours(cv::Mat* grayMat, cv::Mat* binaryBright,
                                      cv::Mat* morphed, cv::Mat* mask, cv::Mat* coloredMask,
-                                     std::vector<std::vector<cv::Point>>* outerContours) {
+                                     std::vector<std::vector<cv::Point>>* outerContours,
+
+                                     int blurKsize, int morphKernelSize) {
+
     if (!grayMat || grayMat->empty()) return;
     int w = grayMat->cols, h = grayMat->rows;
     
@@ -1601,7 +1877,9 @@ void Step_DetectDarkBars(cv::Mat* grayMat, cv::Mat* mask, int threshold,
 }
 
 // 5. 形态学清理
-void Step_MorphologyCleanup(cv::Mat* darkBinary, int kernelSize) {
+void Step_MorphologyCleanup(cv::Mat* darkBinary, int kernelSize, int blurKsize, double blurSigma) {
+
+
     cv::Mat kernel = getStructuringElement(MORPH_ELLIPSE, cv::Size(kernelSize, kernelSize));
     morphologyEx(*darkBinary, *darkBinary, MORPH_CLOSE, kernel);
     morphologyEx(*darkBinary, *darkBinary, MORPH_OPEN, kernel);
@@ -1611,6 +1889,13 @@ void Step_MorphologyCleanup(cv::Mat* darkBinary, int kernelSize) {
     cv::Mat dilateKernel = getStructuringElement(MORPH_ELLIPSE, cv::Size(dilateSize, dilateSize));
     dilate(*darkBinary, *darkBinary, dilateKernel);
     erode(*darkBinary, *darkBinary, dilateKernel);
+
+    // 高斯模糊 + 重二值化：让暗条轮廓更光滑
+    cv::Mat blurredDark;
+    cv::GaussianBlur(*darkBinary, blurredDark, cv::Size(blurKsize, blurKsize), blurSigma);
+
+    cv::threshold(blurredDark, *darkBinary, 128, 255, cv::THRESH_BINARY);
+    blurredDark.release();
 
     kernel.release();
     dilateKernel.release();
@@ -1651,12 +1936,6 @@ void Step_SampleContoursEquidistant(std::vector<std::vector<cv::Point>>* darkCon
         int ptCount = (int)contour.size();
         if (ptCount < 5) continue;
         
-        // 添加原始轮廓点
-        for (int j = 0; j < ptCount; j++) {
-            allPoints->push_back(contour[j]);
-            allBarIds->push_back(b);
-        }
-        
         // 等间距采样
         double perimeter = arcLength(contour, true);
         double spacing = 2.0;
@@ -1669,6 +1948,8 @@ void Step_SampleContoursEquidistant(std::vector<std::vector<cv::Point>>* darkCon
             cumLen[j] = cumLen[j-1] + sqrt(dx*dx + dy*dy);
         }
         
+        // 等间距采样 + 形状拟合
+        std::vector<cv::Point2d> sampledPts;
         for (int s = 0; s < sampleCount; s++) {
             double targetLen = perimeter * s / sampleCount;
             int lo = 0, hi = ptCount - 1;
@@ -1681,6 +1962,16 @@ void Step_SampleContoursEquidistant(std::vector<std::vector<cv::Point>>* darkCon
             double t = (segLen > 0.001) ? (targetLen - cumLen[lo]) / segLen : 0.0;
             int px = (int)(contour[lo].x + t * (contour[hi].x - contour[lo].x));
             int py = (int)(contour[lo].y + t * (contour[hi].y - contour[lo].y));
+            if (px >= 0 && px < width && py >= 0 && py < height) {
+                sampledPts.push_back(cv::Point2d((double)px, (double)py));
+            }
+        }
+
+        // 分段形状拟合: 直线拟合到直线, 圆弧拟合到圆弧
+        std::vector<cv::Point2d> fittedPts = fitSegmentsShape(sampledPts);
+        for (size_t fi = 0; fi < fittedPts.size(); fi++) {
+            int px = (int)std::round(fittedPts[fi].x);
+            int py = (int)std::round(fittedPts[fi].y);
             if (px >= 0 && px < width && py >= 0 && py < height) {
                 allPoints->push_back(cv::Point(px, py));
                 allBarIds->push_back(b);
