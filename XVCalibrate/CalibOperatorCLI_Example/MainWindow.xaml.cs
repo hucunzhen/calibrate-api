@@ -793,11 +793,27 @@ namespace CalibOperatorCLI_Example
                     Log("[WARN] Invalid target bars, using 16");
                     targetBars = 16;
                 }
+                int bandWidth = 5;
+                if (!int.TryParse(TxtStep7BandWidth.Text, out bandWidth))
+                {
+                    Log("[WARN] Invalid band width, using 5");
+                    bandWidth = 5;
+                }
 
-                Log($"[STEP 7] Sample contours equidistantly (bars={targetBars})...");
-                _trajDetector.SampleContours(targetBars);
+                Log($"[STEP 7] Sample contours equidistantly (bars={targetBars}, bandWidth={bandWidth})...");
+                _trajDetector.SampleContours(targetBars, bandWidth);
                 int ptCount = _trajDetector.GetPointCount();
                 Log($"[INFO] Points after sampling: {ptCount}");
+
+                // 显示窄带可视化图（暗条=白，窄带=灰，背景=黑）
+                if (bandWidth > 0) {
+                    var bandImg = _trajDetector.GetStepImage(5);
+                    if (bandImg != null) {
+                        DisplayImage(bandImg);
+                        bandImg.Dispose();
+                        Log("[STEP 7] Band visualization displayed (white=bars, gray=band, black=bg)");
+                    }
+                }
 
                 // 绘制彩色轨迹显示
                 if (ptCount > 0) {

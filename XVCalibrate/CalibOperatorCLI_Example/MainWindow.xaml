@@ -82,7 +82,9 @@
                     <StackPanel x:Name="SpStep7Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
                         <TextBlock Text="Sample Bars:" VerticalAlignment="Center" Width="100"/>
                         <TextBox x:Name="TxtStep7Bars" Text="16" Width="60" Height="24" VerticalContentAlignment="Center"/>
-                        <TextBlock Text=" (8-32)" VerticalAlignment="Center" Foreground="Gray" Margin="5,0,0,0"/>
+                        <TextBlock Text="Band Width:" VerticalAlignment="Center" Margin="15,0,0,0"/>
+                        <TextBox x:Name="TxtStep7BandWidth" Text="5" Width="50" Height="24" VerticalContentAlignment="Center" Margin="5,0,0,0"/>
+                        <TextBlock Text="(0=off)" VerticalAlignment="Center" Foreground="Gray" Margin="5,0,0,0"/>
                     </StackPanel>
                 </WrapPanel>
             </StackPanel>

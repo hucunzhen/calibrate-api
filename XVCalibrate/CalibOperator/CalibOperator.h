@@ -158,11 +158,15 @@ int Step_FindAndSortDarkContours(cv::Mat* darkBinary, int width, int height,
                                    std::vector<std::vector<cv::Point>>* darkContours);
 
 // 7. 等间距轮廓采样
+// bandWidth: 窄带宽度(像素)，0 = 原始轮廓采样（兼容旧行为），>0 = 暗条外侧窄带采样
+// workMask: 工件 mask（窄带模式必须非空），原始模式可传 NULL
 void Step_SampleContoursEquidistant(std::vector<std::vector<cv::Point>>* darkContours,
                                      std::vector<std::pair<double, int>>* sortedBars,
                                      int targetBars, int width, int height,
                                      std::vector<cv::Point>* allPoints,
-                                     std::vector<int>* allBarIds);
+                                     std::vector<int>* allBarIds,
+                                     int bandWidth = 0,
+                                     const cv::Mat* workMask = NULL);
 
 // 7.5 形状拟合: 按barId分组，对每条暗条的采样点做分段形状拟合
 void Step_FitShape(std::vector<cv::Point>* allPoints, std::vector<int>* allBarIds,

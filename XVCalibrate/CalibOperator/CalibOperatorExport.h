@@ -214,9 +214,10 @@ CALIB_API int CALIB_TrajStep_6_FindAndSortDarkContours(TrajStepContext ctx);
 /**
  * Step 7: Sample contours equidistantly
  * targetBars: Number of bars to sample (default: 16)
+ * bandWidth: Narrow band width in pixels (0 = original contour sampling, >0 = narrow band sampling)
  * Returns: 0 on success
  */
-CALIB_API int CALIB_TrajStep_7_SampleContours(TrajStepContext ctx, int targetBars);
+CALIB_API int CALIB_TrajStep_7_SampleContours(TrajStepContext ctx, int targetBars, int bandWidth);
 
 /**
  * Step 7.5: Fit shape for sampled points

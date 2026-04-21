@@ -359,7 +359,7 @@ static const char* g_stepLabels[STEP_COUNT] = {
     "2. Gaussian+OTSU Binary",      // 高斯模糊 + OTSU自动二值化
     "3. Workpiece Mask",            // 工件区域掩码
     "4. Dark Bar Binary",          // 暗条二值化
-    "5. Morph Cleaned Bars",       // 形态学清理后的暗条
+    "5. Bars + Narrow Band",      // 暗条 + 窄带区域
     "6. Trajectory (colored)"      // 轨迹点（彩色显示）
 };
 

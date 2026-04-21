@@ -146,6 +146,8 @@ struct TrajStepContextImpl {
     int width;
     int height;
     int darkBarCount;
+    int bandWidth;  // 窄带模式标记（0=原始轮廓采样，>0=窄带宽度）
+    cv::Mat bandMask;  // 窄带区域可视化图（暗条=255，窄带=128，背景=0）
 };
 
 CALIB_API TrajStepContext CALIB_TrajStep_Create() {
@@ -160,6 +162,7 @@ CALIB_API void CALIB_TrajStep_Free(TrajStepContext ctx) {
         impl->morphed.release();
         impl->mask.release();
         impl->darkBinary.release();
+        impl->bandMask.release();
         impl->coloredMask.release();
         impl->outerContours.clear();
         impl->darkContours.clear();
@@ -231,11 +234,31 @@ CALIB_API int CALIB_TrajStep_6_FindAndSortDarkContours(TrajStepContext ctx) {
     return impl->darkBarCount;
 }
 
-CALIB_API int CALIB_TrajStep_7_SampleContours(TrajStepContext ctx, int targetBars) {
+CALIB_API int CALIB_TrajStep_7_SampleContours(TrajStepContext ctx, int targetBars, int bandWidth) {
     if (!ctx) return -1;
     TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    impl->bandWidth = bandWidth;
+    const cv::Mat* workMask = (bandWidth > 0) ? &impl->mask : NULL;
     Step_SampleContoursEquidistant(&impl->darkContours, &impl->sortedBars, targetBars,
-                                    impl->width, impl->height, &impl->allPoints, &impl->allBarIds);
+                                    impl->width, impl->height, &impl->allPoints, &impl->allBarIds,
+                                    bandWidth, workMask);
+
+    // 计算窄带可视化图：暗条=255，窄带=128，背景=0
+    impl->bandMask.release();
+    if (bandWidth > 0 && !impl->darkBinary.empty()) {
+        impl->bandMask = cv::Mat::zeros(impl->height, impl->width, CV_8UC1);
+        impl->bandMask.setTo(255, impl->darkBinary);
+        int kw = 2 * bandWidth + 1;
+        cv::Mat bandKernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(kw, kw));
+        cv::Mat dilated;
+        cv::dilate(impl->darkBinary, dilated, bandKernel);
+        bandKernel.release();
+        cv::Mat band = dilated - impl->darkBinary;
+        dilated.release();
+        band.setTo(0, impl->mask == 0);
+        impl->bandMask.setTo(128, band);
+        band.release();
+    }
     return 0;
 }
 
@@ -249,7 +272,25 @@ CALIB_API int CALIB_TrajStep_7_5_FitShape(TrajStepContext ctx) {
 CALIB_API int CALIB_TrajStep_8_VerifyByMask(TrajStepContext ctx) {
     if (!ctx) return -1;
     TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
-    Step_VerifyByMask(&impl->allPoints, &impl->allBarIds, &impl->darkBinary, impl->width, impl->height);
+    // 窄带模式: 验证点在工件 mask 内; 原始模式: 验证点在暗条区域内
+    if (impl->bandWidth > 0) {
+        int keptCount = 0;
+        for (size_t i = 0; i < impl->allPoints.size(); i++) {
+            int px = impl->allPoints[i].x;
+            int py = impl->allPoints[i].y;
+            if (px >= 0 && px < impl->width && py >= 0 && py < impl->height) {
+                if (impl->mask.at<unsigned char>(py, px) != 0) {
+                    impl->allPoints[keptCount] = impl->allPoints[i];
+                    impl->allBarIds[keptCount] = impl->allBarIds[i];
+                    keptCount++;
+                }
+            }
+        }
+        impl->allPoints.resize(keptCount);
+        impl->allBarIds.resize(keptCount);
+    } else {
+        Step_VerifyByMask(&impl->allPoints, &impl->allBarIds, &impl->darkBinary, impl->width, impl->height);
+    }
     return 0;
 }
 
@@ -305,6 +346,14 @@ CALIB_API int CALIB_TrajStep_GetStepImage(TrajStepContext ctx, int step, Image* 
             }
             break;
         case 4: srcMat = &impl->darkBinary; break;
+        case 5:
+            // 步骤5返回窄带可视化图（暗条=255，窄带=128，背景=0）
+            if (!impl->bandMask.empty()) {
+                srcMat = &impl->bandMask;
+            } else {
+                srcMat = &impl->darkBinary;  // fallback
+            }
+            break;
         default: return -1;
     }
     

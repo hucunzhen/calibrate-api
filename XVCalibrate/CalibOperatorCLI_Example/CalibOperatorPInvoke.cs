@@ -236,7 +236,7 @@ namespace CalibOperatorPInvoke
         public static extern int CALIB_TrajStep_6_FindAndSortDarkContours(IntPtr ctx);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern int CALIB_TrajStep_7_SampleContours(IntPtr ctx, int targetBars);
+        public static extern int CALIB_TrajStep_7_SampleContours(IntPtr ctx, int targetBars, int bandWidth);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int CALIB_TrajStep_7_5_FitShape(IntPtr ctx);
@@ -857,10 +857,12 @@ namespace CalibOperatorPInvoke
         /// <summary>
         /// Step 7: 等间距采样
         /// </summary>
-        public void SampleContours(int targetBars = 16)
+        /// <param name="targetBars">目标暗条数量</param>
+        /// <param name="bandWidth">窄带宽度(像素)，0=原始轮廓采样，>0=窄带采样</param>
+        public void SampleContours(int targetBars = 16, int bandWidth = 0)
         {
             CheckDisposed();
-            NativeAPI.CALIB_TrajStep_7_SampleContours(_context, targetBars);
+            NativeAPI.CALIB_TrajStep_7_SampleContours(_context, targetBars, bandWidth);
         }
 
         /// <summary>
@@ -1004,7 +1006,8 @@ namespace CalibOperatorPInvoke
         /// <param name="doFit">是否执行形状拟合</param>
         /// <param name="doVerify">是否执行Mask验证</param>
         /// <param name="doDedup">是否执行去重排序</param>
-        public TrajectoryResult Detect(CalibImage img, bool doFit = true, bool doVerify = true, bool doDedup = true)
+        /// <param name="bandWidth">窄带宽度(像素)，0=原始轮廓采样，>0=窄带采样</param>
+        public TrajectoryResult Detect(CalibImage img, bool doFit = true, bool doVerify = true, bool doDedup = true, int bandWidth = 5)
         {
             ConvertToGrayscale(img);
             PreprocessAndFindContours();
@@ -1012,7 +1015,7 @@ namespace CalibOperatorPInvoke
             DetectDarkBars();
             MorphologyCleanup(3, 5, 1.0);
             FindAndSortDarkContours();
-            SampleContours();
+            SampleContours(16, bandWidth);
             if (doFit) FitShape();
             if (doVerify) VerifyByMask();
             if (doDedup) DeduplicateAndSort();
