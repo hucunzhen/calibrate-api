@@ -1534,14 +1534,18 @@ static std::vector<cv::Point2d> generateStadiumCurve(
     // Starting at side1, delta=-PI -> end at side1-PI = side2. Correct.
 
     // === Segment 1: Arc A (semicircle at A) ===
-    // From side2 around to side1 (away from B), include endpoint
-    for (int i = 0; i <= nA; i++) {
+    // From side2 around to side1 (away from B), exclude endpoint
+    int nA = std::max(2, pointsPerSegment);
+    for (int i = 0; i < nA; i++) {
         double t = (double)i / nA;
         double a = side2AngleFromA + arcADelta * t;
         curve.push_back(cv::Point2d(acx + ar * cos(a), acy + ar * sin(a)));
     }
 
-    // === Segment 2: Line 1 (side1, from A to B), exclude endpoints ===
+    // === Segment 2: Line 1 (side1, from A to B), exclude both endpoints ===
+    int nL = std::max(2, pointsPerSegment);
+    double aEndX = acx + ar * cos(side1AngleFromA);
+    double aEndY = acy + ar * sin(side1AngleFromA);
     double bStartX = bcx + br * cos(side1AngleFromB);
     double bStartY = bcy + br * sin(side1AngleFromB);
     for (int i = 1; i < nL; i++) {
@@ -1552,22 +1556,26 @@ static std::vector<cv::Point2d> generateStadiumCurve(
     }
 
     // === Segment 3: Arc B (semicircle at B) ===
-    // From side1 around to side2 (away from A), include endpoint
-    for (int i = 0; i <= nB; i++) {
+    // From side1 around to side2 (away from A), exclude endpoint
+    int nB = std::max(2, pointsPerSegment);
+    for (int i = 0; i < nB; i++) {
         double t = (double)i / nB;
         double a = side1AngleFromB + arcADelta * t;
         curve.push_back(cv::Point2d(bcx + br * cos(a), bcy + br * sin(a)));
     }
 
-    // === Segment 4: Line 2 (side2, from B back to A), exclude endpoints ===
+    // === Segment 4: Line 2 (side2, from B back to A), include endpoint ===
+    double bEndX = bcx + br * cos(side2AngleFromB);
+    double bEndY = bcy + br * sin(side2AngleFromB);
     double aStartX = acx + ar * cos(side2AngleFromA);
     double aStartY = acy + ar * sin(side2AngleFromA);
-    for (int i = 1; i < nL; i++) {
+    for (int i = 1; i <= nL; i++) {
         double t = (double)i / nL;
         curve.push_back(cv::Point2d(
             bEndX + t * (aStartX - bEndX),
             bEndY + t * (aStartY - bEndY)));
     }
+    // Line 2 endpoint = aStartX,aStartY = Arc A start point. Curve is closed.
 
     return curve;
 }
@@ -1751,6 +1759,7 @@ static std::vector<cv::Point2d> fitStadiumShape(const std::vector<cv::Point2d>& 
 void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count,
                             Image* stepImages, int* stepBarIds, int stepImageCount) {
     LOG_INFO("=== Starting OpenCV 16-DarkBars Trajectory Detection ===");
+    const bool kEnableWatershedBeforeStep2 = false;  // 可选开关：在步骤2前启用分水岭预分割
 
     if (!img || !img->data) {
         LOG_ERROR("Invalid image data!");
@@ -1794,9 +1803,56 @@ void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count,
         memcpy(stepImages[0].data, grayMat.data, grayMat.cols * grayMat.rows);
     }
 
+    // ---- 步骤 1.5（可选）：分水岭预分割 ----
+    // 目的：在复杂背景下先分离主要工件区域，再进入步骤2的 OTSU 二值化。
+    Mat step2Input = grayMat;
+    if (kEnableWatershedBeforeStep2) {
+        Mat wsBlurred;
+        GaussianBlur(grayMat, wsBlurred, Size(5, 5), 1.0);
+
+        Mat wsBinary;
+        threshold(wsBlurred, wsBinary, 0, 255, THRESH_BINARY + THRESH_OTSU);
+
+        Mat wsKernel = getStructuringElement(MORPH_ELLIPSE, Size(3, 3));
+        Mat sureBg;
+        morphologyEx(wsBinary, sureBg, MORPH_DILATE, wsKernel, Point(-1, -1), 2);
+
+        Mat dist;
+        distanceTransform(wsBinary, dist, DIST_L2, 5);
+        normalize(dist, dist, 0.0, 1.0, NORM_MINMAX);
+
+        Mat sureFg;
+        threshold(dist, sureFg, 0.35, 1.0, THRESH_BINARY);
+        sureFg.convertTo(sureFg, CV_8U, 255);
+
+        Mat unknown;
+        subtract(sureBg, sureFg, unknown);
+
+        Mat markers;
+        connectedComponents(sureFg, markers);
+        markers += 1;
+        markers.setTo(0, unknown == 255);
+
+        Mat wsColor;
+        cvtColor(grayMat, wsColor, COLOR_GRAY2BGR);
+        watershed(wsColor, markers);
+
+        Mat wsMask = markers > 1;  // 忽略背景(1)与边界(-1)
+        step2Input = Mat::zeros(grayMat.size(), grayMat.type());
+        grayMat.copyTo(step2Input, wsMask);
+
+        int wsPixels = countNonZero(wsMask);
+        if (wsPixels <= 0) {
+            LOG_WARN("Watershed mask empty, fallback to original gray image.");
+            step2Input = grayMat;
+        } else {
+            LOG_INFO("Watershed enabled before Step 2, kept pixels: %d", wsPixels);
+        }
+    }
+
     // ---- 步骤 2：高斯模糊 + OTSU 二值化 ----
     Mat blurred;
-    GaussianBlur(grayMat, blurred, Size(7, 7), 1.5);
+    GaussianBlur(step2Input, blurred, Size(7, 7), 1.5);
 
     Mat binaryBright;
     threshold(blurred, binaryBright, 0, 255, THRESH_BINARY + THRESH_OTSU);
@@ -2128,19 +2184,78 @@ void Step_ConvertToGrayscale(Image* src, cv::Mat* dstGray) {
     }
 }
 
+// 1.5（可选）. 分水岭预分割
+// 在复杂背景下先分离主要工件区域，返回过滤后的灰度图。
+// 若分水岭结果为空，则回退到原始 grayMat。
+void Step_WatershedPresegment(const cv::Mat& grayMat, cv::Mat* step2Output, bool enableWatershed) {
+    if (!enableWatershed) {
+        *step2Output = grayMat.clone();
+        return;
+    }
+
+    LOG_INFO("Step_WatershedPresegment: enabled");
+
+    cv::Mat wsBlurred;
+    cv::GaussianBlur(grayMat, wsBlurred, cv::Size(5, 5), 1.0);
+
+    cv::Mat wsBinary;
+    cv::threshold(wsBlurred, wsBinary, 0, 255, cv::THRESH_BINARY + cv::THRESH_OTSU);
+
+    cv::Mat wsKernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
+    cv::Mat sureBg;
+    cv::morphologyEx(wsBinary, sureBg, cv::MORPH_DILATE, wsKernel, cv::Point(-1, -1), 2);
+
+    cv::Mat dist;
+    cv::distanceTransform(wsBinary, dist, cv::DIST_L2, 5);
+    cv::normalize(dist, dist, 0.0, 1.0, cv::NORM_MINMAX);
+
+    cv::Mat sureFg;
+    cv::threshold(dist, sureFg, 0.35, 1.0, cv::THRESH_BINARY);
+    sureFg.convertTo(sureFg, CV_8U, 255);
+
+    cv::Mat unknown;
+    cv::subtract(sureBg, sureFg, unknown);
+
+    cv::Mat markers;
+    cv::connectedComponents(sureFg, markers);
+    markers += 1;
+    markers.setTo(0, unknown == 255);
+
+    cv::Mat wsColor;
+    cv::cvtColor(grayMat, wsColor, cv::COLOR_GRAY2BGR);
+    cv::watershed(wsColor, markers);
+
+    cv::Mat wsMask = markers > 1;  // 忽略背景(1)与边界(-1)
+    int wsPixels = cv::countNonZero(wsMask);
+
+    if (wsPixels <= 0) {
+        LOG_WARN("Step_WatershedPresegment: watershed mask empty, fallback to original gray image.");
+        *step2Output = grayMat.clone();
+    } else {
+        *step2Output = cv::Mat::zeros(grayMat.size(), grayMat.type());
+        grayMat.copyTo(*step2Output, wsMask);
+        LOG_INFO("Step_WatershedPresegment: kept pixels: %d", wsPixels);
+    }
+}
+
 // 2. 高斯模糊 + OTSU二值化 + 形态学处理 + 提取外轮廓
 void Step_PreprocessAndFindContours(cv::Mat* grayMat, cv::Mat* binaryBright,
                                      cv::Mat* morphed, cv::Mat* mask, cv::Mat* coloredMask,
                                      std::vector<std::vector<cv::Point>>* outerContours,
 
-                                     int blurKsize, int morphKernelSize) {
+                                     int blurKsize, int morphKernelSize,
+                                     bool enableWatershed) {
 
     if (!grayMat || grayMat->empty()) return;
     int w = grayMat->cols, h = grayMat->rows;
+
+    // 步骤 1.5（可选）：分水岭预分割
+    cv::Mat step2Input;
+    Step_WatershedPresegment(*grayMat, &step2Input, enableWatershed);
     
     // 高斯模糊
     cv::Mat blurred;
-    cv::GaussianBlur(*grayMat, blurred, cv::Size(7, 7), 1.5);
+    cv::GaussianBlur(step2Input, blurred, cv::Size(7, 7), 1.5);
     
     // OTSU二值化
     cv::threshold(blurred, *binaryBright, 0, 255, THRESH_BINARY + THRESH_OTSU);

@@ -166,12 +166,21 @@ CALIB_API void CALIB_TrajStep_Free(TrajStepContext ctx);
 CALIB_API int CALIB_TrajStep_1_ConvertToGrayscale(TrajStepContext ctx, Image* src);
 
 /**
+ * Step 1.5 (optional): Watershed pre-segmentation
+ * Separates main workpiece region from complex background before Step 2.
+ * When enable is false, grayMat remains unchanged.
+ * Returns: 0 on success
+ */
+CALIB_API int CALIB_TrajStep_1_5_WatershedPresegment(TrajStepContext ctx, bool enable);
+
+/**
  * Step 2: Preprocess and find outer contours
  * blurKsize: Gaussian blur kernel size (default: 7)
  * morphKernelSize: Morphology kernel size (default: 5)
+ * enableWatershed: Enable watershed pre-segmentation before Step 2 (default: false)
  * Returns: 0 on success
  */
-CALIB_API int CALIB_TrajStep_2_PreprocessAndFindContours(TrajStepContext ctx, int blurKsize, int morphKernelSize);
+CALIB_API int CALIB_TrajStep_2_PreprocessAndFindContours(TrajStepContext ctx, int blurKsize, int morphKernelSize, bool enableWatershed);
 
 /**
  * Step 3: Create workpiece mask from contours

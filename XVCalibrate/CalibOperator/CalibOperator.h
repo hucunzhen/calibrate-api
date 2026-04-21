@@ -1,4 +1,4 @@
-/**
+﻿/**
  * CalibOperator - 工业视觉标定算子库
  * 纯算法层，不依赖 Windows GUI (无 HWND/HDC/WM_*)
  * 依赖：OpenCV 4.x, C 标准库
@@ -132,11 +132,14 @@ void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count,
 // 1. 图像转灰度
 void Step_ConvertToGrayscale(Image* src, cv::Mat* dstGray);
 
+// 1.5（可选）. 分水岭预分割
+void Step_WatershedPresegment(const cv::Mat& grayMat, cv::Mat* step2Output, bool enableWatershed);
+
 // 2. 高斯模糊 + OTSU二值化 + 形态学处理 + 提取外轮廓
 void Step_PreprocessAndFindContours(cv::Mat* grayMat, cv::Mat* binaryBright, 
                                      cv::Mat* morphed, cv::Mat* mask, cv::Mat* coloredMask,
                                      std::vector<std::vector<cv::Point>>* outerContours,
-                                     int blurKsize, int morphKernelSize);
+                                     int blurKsize, int morphKernelSize, bool enableWatershed = false);
 
 // 3. 根据外轮廓生成工件mask
 void Step_CreateWorkpieceMask(std::vector<std::vector<cv::Point>>* outerContours,

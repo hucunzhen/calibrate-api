@@ -217,7 +217,11 @@ namespace CalibOperatorPInvoke
         public static extern int CALIB_TrajStep_1_ConvertToGrayscale(IntPtr ctx, IntPtr src);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern int CALIB_TrajStep_2_PreprocessAndFindContours(IntPtr ctx, int blurKsize, int morphKernelSize);
+        [return: MarshalAs(UnmanagedType.I1)]
+        public static extern int CALIB_TrajStep_1_5_WatershedPresegment(IntPtr ctx, [MarshalAs(UnmanagedType.I1)] bool enable);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_2_PreprocessAndFindContours(IntPtr ctx, int blurKsize, int morphKernelSize, [MarshalAs(UnmanagedType.I1)] bool enableWatershed);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int CALIB_TrajStep_3_CreateWorkpieceMask(IntPtr ctx, int maxContourIdx);
@@ -796,12 +800,21 @@ namespace CalibOperatorPInvoke
         }
 
         /// <summary>
-        /// Step 2: 预处理 + 找外轮廓
+        /// Step 1.5（可选）: 分水岭预分割，分离主要工件区域
         /// </summary>
-        public void PreprocessAndFindContours(int blurKsize = 7, int morphKernelSize = 5)
+        public void WatershedPresegment(bool enable = false)
         {
             CheckDisposed();
-            NativeAPI.CALIB_TrajStep_2_PreprocessAndFindContours(_context, blurKsize, morphKernelSize);
+            NativeAPI.CALIB_TrajStep_1_5_WatershedPresegment(_context, enable);
+        }
+
+        /// <summary>
+        /// Step 2: 预处理 + 找外轮廓
+        /// </summary>
+        public void PreprocessAndFindContours(int blurKsize = 7, int morphKernelSize = 5, bool enableWatershed = false)
+        {
+            CheckDisposed();
+            NativeAPI.CALIB_TrajStep_2_PreprocessAndFindContours(_context, blurKsize, morphKernelSize, enableWatershed);
         }
 
         /// <summary>

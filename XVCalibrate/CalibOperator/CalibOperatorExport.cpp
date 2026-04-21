@@ -134,6 +134,7 @@ struct TrajStepContextImpl {
     cv::Mat mask;
     cv::Mat darkBinary;
     cv::Mat coloredMask;  // 彩色mask，用于显示
+    cv::Mat watershedOutput;  // 分水岭预分割输出（步骤1.5）
     
     std::vector<std::vector<cv::Point>> outerContours;
     std::vector<std::vector<cv::Point>> darkContours;
@@ -178,12 +179,23 @@ CALIB_API int CALIB_TrajStep_1_ConvertToGrayscale(TrajStepContext ctx, Image* sr
     return 0;
 }
 
-CALIB_API int CALIB_TrajStep_2_PreprocessAndFindContours(TrajStepContext ctx, int blurKsize, int morphKernelSize) {
+CALIB_API int CALIB_TrajStep_1_5_WatershedPresegment(TrajStepContext ctx, bool enable) {
+    if (!ctx) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    Step_WatershedPresegment(impl->grayMat, &impl->watershedOutput, enable);
+    if (enable) {
+        impl->grayMat = impl->watershedOutput.clone();
+    }
+    return 0;
+}
+
+CALIB_API int CALIB_TrajStep_2_PreprocessAndFindContours(TrajStepContext ctx, int blurKsize, int morphKernelSize, bool enableWatershed) {
     if (!ctx) return -1;
     TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
     Step_PreprocessAndFindContours(&impl->grayMat, &impl->binaryBright, 
                                     &impl->morphed, &impl->mask, &impl->coloredMask, 
-                                    &impl->outerContours, blurKsize, morphKernelSize);
+                                    &impl->outerContours, blurKsize, morphKernelSize,
+                                    enableWatershed);
     return 0;
 }
 
