@@ -161,6 +161,10 @@ void Step_SampleContoursEquidistant(std::vector<std::vector<cv::Point>>* darkCon
                                      std::vector<cv::Point>* allPoints,
                                      std::vector<int>* allBarIds);
 
+// 7.5 形状拟合: 按barId分组，对每条暗条的采样点做分段形状拟合
+void Step_FitShape(std::vector<cv::Point>* allPoints, std::vector<int>* allBarIds,
+                   int width, int height);
+
 // 8. Mask验证采样点
 void Step_VerifyByMask(std::vector<cv::Point>* allPoints, std::vector<int>* allBarIds,
                        cv::Mat* darkBinary, int width, int height);

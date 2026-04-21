@@ -235,6 +235,9 @@ namespace CalibOperatorPInvoke
         public static extern int CALIB_TrajStep_7_SampleContours(IntPtr ctx, int targetBars);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_7_5_FitShape(IntPtr ctx);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int CALIB_TrajStep_8_VerifyByMask(IntPtr ctx);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
@@ -848,6 +851,15 @@ namespace CalibOperatorPInvoke
         }
 
         /// <summary>
+        /// Step 7.5: 形状拟合
+        /// </summary>
+        public void FitShape()
+        {
+            CheckDisposed();
+            NativeAPI.CALIB_TrajStep_7_5_FitShape(_context);
+        }
+
+        /// <summary>
         /// Step 8: Mask验证
         /// </summary>
         public void VerifyByMask()
@@ -976,7 +988,10 @@ namespace CalibOperatorPInvoke
         /// <summary>
         /// 一键检测（执行所有步骤）
         /// </summary>
-        public TrajectoryResult Detect(CalibImage img)
+        /// <param name="doFit">是否执行形状拟合</param>
+        /// <param name="doVerify">是否执行Mask验证</param>
+        /// <param name="doDedup">是否执行去重排序</param>
+        public TrajectoryResult Detect(CalibImage img, bool doFit = true, bool doVerify = true, bool doDedup = true)
         {
             ConvertToGrayscale(img);
             PreprocessAndFindContours();
@@ -985,8 +1000,9 @@ namespace CalibOperatorPInvoke
             MorphologyCleanup(3, 5, 1.0);
             FindAndSortDarkContours();
             SampleContours();
-            VerifyByMask();
-            DeduplicateAndSort();
+            if (doFit) FitShape();
+            if (doVerify) VerifyByMask();
+            if (doDedup) DeduplicateAndSort();
             return ConvertToOutput();
         }
 

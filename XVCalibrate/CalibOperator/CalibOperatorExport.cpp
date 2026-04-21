@@ -227,6 +227,13 @@ CALIB_API int CALIB_TrajStep_7_SampleContours(TrajStepContext ctx, int targetBar
     return 0;
 }
 
+CALIB_API int CALIB_TrajStep_7_5_FitShape(TrajStepContext ctx) {
+    if (!ctx) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    Step_FitShape(&impl->allPoints, &impl->allBarIds, impl->width, impl->height);
+    return 0;
+}
+
 CALIB_API int CALIB_TrajStep_8_VerifyByMask(TrajStepContext ctx) {
     if (!ctx) return -1;
     TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;

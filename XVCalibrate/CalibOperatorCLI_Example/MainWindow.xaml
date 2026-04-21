@@ -41,6 +41,7 @@
             <Button x:Name="BtnStep5" Content="6.Morph" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep5_Click"/>
             <Button x:Name="BtnStep6" Content="7.Sort" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep6_Click"/>
             <Button x:Name="BtnStep7" Content="8.Sample" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep7_Click"/>
+            <Button x:Name="BtnFit" Content="8.5 Fit" Width="60" Height="28" Margin="0,0,3,0" Click="BtnFit_Click"/>
             <Button x:Name="BtnStep8" Content="9.Verify" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep8_Click"/>
             <Button x:Name="BtnStep9" Content="10.Dedup" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep9_Click"/>
             <Button x:Name="BtnStep10" Content="11.Out" Width="72" Height="28" Click="BtnStep10_Click"/>

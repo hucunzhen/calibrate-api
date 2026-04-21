@@ -1377,6 +1377,373 @@ static std::vector<cv::Point2d> fitSegmentsShape(
     return result;
 }
 
+// ---- Stadium (capsule) shape fitting helpers ----
+
+static cv::Vec4d ransacFitCircle(const std::vector<cv::Point2d>& pts,
+                                  int maxIter, double thresh) {
+    int n = (int)pts.size();
+    if (n < 3) return cv::Vec4d(0, 0, 0, 0);
+    cv::RNG rng(42);
+    cv::Vec4d best(0, 0, 0, 0);
+    for (int iter = 0; iter < maxIter; iter++) {
+        int i1 = rng.uniform(0, n);
+        int i2 = rng.uniform(0, n);
+        int i3 = rng.uniform(0, n);
+        if (i1 == i2 || i2 == i3 || i1 == i3) continue;
+        double ax = pts[i1].x, ay = pts[i1].y;
+        double bx = pts[i2].x, by = pts[i2].y;
+        double cx_ = pts[i3].x, cy_ = pts[i3].y;
+        double D = 2.0 * (ax * (by - cy_) + bx * (cy_ - ay) + cx_ * (ay - by));
+        if (fabs(D) < 1e-10) continue;
+        double ux = ((ax*ax + ay*ay) * (by - cy_) + (bx*bx + by*by) * (cy_ - ay) + (cx_*cx_ + cy_*cy_) * (ay - by)) / D;
+        double uy = ((ax*ax + ay*ay) * (cx_ - bx) + (bx*bx + by*by) * (ax - cx_) + (cx_*cx_ + cy_*cy_) * (bx - ax)) / D;
+        double r = sqrt((ax - ux)*(ax - ux) + (ay - uy)*(ay - uy));
+        int inliers = 0;
+        for (int j = 0; j < n; j++) {
+            double dist = fabs(sqrt((pts[j].x - ux)*(pts[j].x - ux) +
+                                   (pts[j].y - uy)*(pts[j].y - uy)) - r);
+            if (dist < thresh) inliers++;
+        }
+        if (inliers > best[3]) best = cv::Vec4d(ux, uy, r, (double)inliers);
+    }
+    return best;
+}
+
+static cv::Vec<double, 5> ransacFitLine(const std::vector<cv::Point2d>& pts,
+                                         int maxIter, double thresh) {
+    int n = (int)pts.size();
+    if (n < 2) return cv::Vec<double, 5>(0, 0, 0, 0, 0);
+    cv::RNG rng(0);
+    cv::Vec<double, 5> best(0, 0, 0, 0, 0);
+    for (int iter = 0; iter < maxIter; iter++) {
+        int i1 = rng.uniform(0, n);
+        int i2 = rng.uniform(0, n);
+        if (i1 == i2) i2 = (i2 + 1) % n;
+        double dx = pts[i2].x - pts[i1].x;
+        double dy = pts[i2].y - pts[i1].y;
+        double len = sqrt(dx * dx + dy * dy);
+        if (len < 1e-10) continue;
+        double vx = dx / len, vy = dy / len;
+        double x0 = pts[i1].x, y0 = pts[i1].y;
+        int inliers = 0;
+        for (int j = 0; j < n; j++) {
+            double dist = fabs((pts[j].x - x0) * vy - (pts[j].y - y0) * vx);
+            if (dist < thresh) inliers++;
+        }
+        if (inliers > best[4]) {
+            std::vector<cv::Point2f> inPts;
+            for (int j = 0; j < n; j++) {
+                double dist = fabs((pts[j].x - x0) * vy - (pts[j].y - y0) * vx);
+                if (dist < thresh)
+                    inPts.push_back(cv::Point2f((float)pts[j].x, (float)pts[j].y));
+            }
+            if ((int)inPts.size() >= 2) {
+                cv::Vec4f lp;
+                cv::fitLine(inPts, lp, cv::DIST_L2, 0, 0.01, 0.01);
+                best = cv::Vec<double, 5>(lp[0], lp[1], lp[2], lp[3], (double)inliers);
+            }
+        }
+    }
+    return best;
+}
+
+static std::vector<cv::Point2d> resampleByArcLength(
+    const std::vector<cv::Point2d>& dense, int targetCount) {
+    int N = (int)dense.size();
+    if (N < 2 || targetCount < 2) return dense;
+    std::vector<double> cumLen(N + 1, 0.0);
+    for (int i = 1; i <= N; i++) {
+        double dx = dense[i % N].x - dense[(i - 1) % N].x;
+        double dy = dense[i % N].y - dense[(i - 1) % N].y;
+        cumLen[i] = cumLen[i - 1] + sqrt(dx * dx + dy * dy);
+    }
+    double totalLen = cumLen[N];
+    if (totalLen < 1e-10) return dense;
+    std::vector<cv::Point2d> result(targetCount);
+    for (int i = 0; i < targetCount; i++) {
+        double targetLen = totalLen * i / targetCount;
+        int lo = 0, hi = N;
+        while (lo < hi - 1) {
+            int mid = (lo + hi) / 2;
+            if (cumLen[mid] <= targetLen) lo = mid;
+            else hi = mid;
+        }
+        double segLen = cumLen[hi] - cumLen[lo];
+        double t = (segLen > 1e-10) ? (targetLen - cumLen[lo]) / segLen : 0.0;
+        result[i] = cv::Point2d(
+            dense[lo % N].x + t * (dense[hi % N].x - dense[lo % N].x),
+            dense[lo % N].y + t * (dense[hi % N].y - dense[lo % N].y)
+        );
+    }
+    return result;
+}
+
+static std::vector<cv::Point2d> generateStadiumCurve(
+    double acx, double acy, double ar,
+    double bcx, double bcy, double br,
+    double lvx, double lvy, double lx0, double ly0,
+    double rvx, double rvy, double rx0, double ry0,
+    int pointsPerSegment) {
+    // Stadium shape: 4 segments — Arc A (semicircle) | Line 1 | Arc B (semicircle) | Line 2
+    // Both semicircles sweep in the SAME rotational direction (true mirror).
+    // Arc angles are determined by the center-to-center direction.
+    std::vector<cv::Point2d> curve;
+    curve.reserve(pointsPerSegment * 4);
+
+    // Center-to-center direction (A -> B)
+    double linkDx = bcx - acx, linkDy = bcy - acy;
+    double linkLen = sqrt(linkDx * linkDx + linkDy * linkDy);
+    if (linkLen < 1.0) return curve;
+    double linkAngle = atan2(linkDy, linkDx);  // direction A->B
+
+    // Perpendicular (normal) to link: rotate linkAngle by -90 deg
+    double perpAngle = linkAngle - CV_PI / 2.0;
+    // Normal vector (perpendicular)
+    double perpX = cos(perpAngle);
+    double perpY = sin(perpAngle);
+
+    // Determine which line is on which side using line1 ref point
+    // Project (lx0-acy, ly0-acy) onto the perpendicular direction
+    double l1RelX = lx0 - acx, l1RelY = ly0 - acy;
+    double l1Proj = l1RelX * perpX + l1RelY * perpY;
+
+    // side1 = the side where line1 is
+    // side1 direction from center A = perpAngle if l1Proj > 0, else perpAngle+PI
+    double side1AngleFromA;
+    if (l1Proj >= 0) {
+        side1AngleFromA = perpAngle;
+    } else {
+        side1AngleFromA = perpAngle + CV_PI;
+    }
+    double side2AngleFromA = side1AngleFromA + CV_PI;  // opposite side
+
+    // Arc A: semicircle from side2 to side1, sweeping through (linkAngle + PI)
+    // i.e., going the "away from B" direction
+    // delta: we need to go from side2AngleFromA to side1AngleFromA
+    //       by sweeping away from B (through linkAngle + PI)
+    double arcADelta = -CV_PI;  // always sweep -180 deg (CW in standard coords)
+    // Verify: starting from side2, sweeping -PI should reach side1
+    // side1AngleFromA = side2AngleFromA - PI? Yes! Because side2 = side1 + PI
+    // So starting at side2, delta=-PI -> end at side2-PI = side1. Correct.
+
+    // Arc B: same sweep direction as Arc A (mirrored)
+    // From B's perspective, side1 is in the same rotational direction
+    double side1AngleFromB = side1AngleFromA;  // same absolute angle (parallel sides)
+    double side2AngleFromB = side2AngleFromA;  // same absolute angle
+    // Arc B goes from side1AngleFromB to side2AngleFromB, sweeping through (linkAngle)
+    // Starting at side1, delta=-PI -> end at side1-PI = side2. Correct.
+
+    // === Segment 1: Arc A (semicircle at A) ===
+    // From side2 around to side1 (away from B), include endpoint
+    for (int i = 0; i <= nA; i++) {
+        double t = (double)i / nA;
+        double a = side2AngleFromA + arcADelta * t;
+        curve.push_back(cv::Point2d(acx + ar * cos(a), acy + ar * sin(a)));
+    }
+
+    // === Segment 2: Line 1 (side1, from A to B), exclude endpoints ===
+    double bStartX = bcx + br * cos(side1AngleFromB);
+    double bStartY = bcy + br * sin(side1AngleFromB);
+    for (int i = 1; i < nL; i++) {
+        double t = (double)i / nL;
+        curve.push_back(cv::Point2d(
+            aEndX + t * (bStartX - aEndX),
+            aEndY + t * (bStartY - aEndY)));
+    }
+
+    // === Segment 3: Arc B (semicircle at B) ===
+    // From side1 around to side2 (away from A), include endpoint
+    for (int i = 0; i <= nB; i++) {
+        double t = (double)i / nB;
+        double a = side1AngleFromB + arcADelta * t;
+        curve.push_back(cv::Point2d(bcx + br * cos(a), bcy + br * sin(a)));
+    }
+
+    // === Segment 4: Line 2 (side2, from B back to A), exclude endpoints ===
+    double aStartX = acx + ar * cos(side2AngleFromA);
+    double aStartY = acy + ar * sin(side2AngleFromA);
+    for (int i = 1; i < nL; i++) {
+        double t = (double)i / nL;
+        curve.push_back(cv::Point2d(
+            bEndX + t * (aStartX - bEndX),
+            bEndY + t * (aStartY - bEndY)));
+    }
+
+    return curve;
+}
+
+/**
+ * fitStadiumShape - 跑道形(stadium)轨迹拟合
+ * 
+ * 【适用场景】
+ *   工件上的暗条轨迹呈"跑道形"——两端是半圆弧，中间是两条平行直线。
+ *   例如: [   半圆A   ]====直线1====[   半圆B   ]====直线2====[回到半圆A]
+ * 
+ * 【算法流程】
+ *   Step 1: PCA主成分分析 → 求得主方向(vx,vy)和法线方向(nx,ny)
+ *   Step 2: 沿主方向投影所有点到t轴，用t的中位数将点分成两侧
+ *   Step 3: 用t值筛选出两端点(endAPts, endBPts)和中间点(midPts)
+ *   Step 4: 对两端点用RANSAC拟合圆 → 得到两个半圆的圆心(acx,acy)和半径(r)
+ *   Step 5: 对中间点按法线方向分成两组 → 分别用RANSAC拟合两条直线
+ *   Step 6: 生成密集的跑道曲线 → 等弧长重采样为n个点
+ *   Step 7: 如果RANSAC失败，fallback为椭圆拟合
+ * 
+ * 【参数】
+ *   pts: 输入的采样点序列（按原始顺序排列）
+ *   返回: 拟合后的点序列（点数与输入相同）
+ */
+static std::vector<cv::Point2d> fitStadiumShape(const std::vector<cv::Point2d>& pts) {
+    const int n = (int)pts.size();
+    if (n < 8) return pts;  // 跑道形至少需要8个点
+    
+    // === Step 1: PCA主成分分析 ===
+    // 计算所有点的中心(cx, cy)
+    double cx = 0, cy = 0;
+    for (int i = 0; i < n; i++) { cx += pts[i].x; cy += pts[i].y; }
+    cx /= n; cy /= n;
+    
+    // 计算协方差矩阵
+    // Cxx = E[(x-cx)²], Cxy = E[(x-cx)(y-cy)], Cyy = E[(y-cy)²]
+    double Cxx = 0, Cxy = 0, Cyy = 0;
+    for (int i = 0; i < n; i++) {
+        double dx = pts[i].x - cx, dy = pts[i].y - cy;
+        Cxx += dx * dx; Cxy += dx * dy; Cyy += dy * dy;
+    }
+    Cxx /= n; Cxy /= n; Cyy /= n;
+    
+    // 求协方差矩阵的特征值和特征向量
+    // 协方差矩阵: [Cxx Cxy; Cxy Cyy]
+    // 特征值 λ = (trace ± sqrt(trace² - 4*det)) / 2
+    double tr = Cxx + Cyy;
+    double det = Cxx * Cyy - Cxy * Cxy;
+    double disc = sqrt(std::max(0.0, tr * tr / 4.0 - det));
+    double lambda1 = tr / 2.0 + disc;  // 最大特征值对应主方向
+    
+    // 计算主方向特征向量 (vx, vy)
+    // (Cxx-λ, Cxy) · (vx, vy) = 0  =>  vx = λ-Cyy, vy = Cxy
+    double vx, vy;
+    if (fabs(Cxy) > 1e-10) { vx = lambda1 - Cyy; vy = Cxy; }
+    else { vx = (Cxx >= Cyy) ? 1.0 : 0.0; vy = (Cxx >= Cyy) ? 0.0 : 1.0; }
+    
+    // 归一化主方向向量
+    double vlen = sqrt(vx * vx + vy * vy);
+    if (vlen < 1e-10) return pts;
+    vx /= vlen; vy /= vlen;
+    
+    // 法线方向 = 主方向旋转90° (nx, ny)
+    double nx = -vy, ny = vx;
+    
+    // === Step 2: 沿主方向投影到t轴 ===
+    // 将每个点投影到主方向上，得到标量坐标t
+    // t = (p - center) · (vx, vy) = (px-cx)*vx + (py-cy)*vy
+    std::vector<std::pair<double, int>> tProj(n);
+    for (int i = 0; i < n; i++) {
+        double dx = pts[i].x - cx, dy = pts[i].y - cy;
+        tProj[i] = std::make_pair(dx * vx + dy * vy, i);
+    }
+    std::sort(tProj.begin(), tProj.end());  // 按t值排序
+    
+    // 计算t的极值范围
+    double tMin = tProj[0].first;
+    double tMax = tProj[n - 1].first;
+    double tRange = tMax - tMin;
+    if (tRange < 2.0) return pts;  // 范围太小，不是有效的跑道形
+    
+    // === Step 3: 筛选端部点和中间点 ===
+    // 用20%和80%阈值分割点:
+    //   t ∈ [tMin, tThresh1]  → 端部A的点 (endAPts)
+    //   t ∈ [tThresh1, tThresh2] → 中间部分的点 (midPts)
+    //   t ∈ [tThresh2, tMax]  → 端部B的点 (endBPts)
+    //
+    // 示意图:
+    //   |----20%----|--------60%--------|----20%----|
+    //   tMin     tThresh1            tThresh2      tMax
+    //   └─endAPts─┘   └─────midPts─────┘───endBPts─┘
+    double tThresh1 = tMin + tRange * 0.20;
+    double tThresh2 = tMax - tRange * 0.20;
+    
+    std::vector<cv::Point2d> endAPts, endBPts, midPts;
+    for (int i = 0; i < n; i++) {
+        double t = tProj[i].first;
+        if (t <= tThresh1) endAPts.push_back(pts[tProj[i].second]);  // 左端部
+        else if (t >= tThresh2) endBPts.push_back(pts[tProj[i].second]);  // 右端部
+        else midPts.push_back(pts[tProj[i].second]);  // 中间部分
+    }
+    
+    // === Step 4: RANSAC圆弧拟合 ===
+    // 对两端点分别用RANSAC算法拟合圆
+    // 圆参数: Vec4d(centerX, centerY, radius, inlierCount)
+    double ransacT = tRange * 0.05;  // 距离阈值: 5%的t范围
+    if (ransacT < 1.0) ransacT = 1.0;
+    
+    cv::Vec4d circleA = ransacFitCircle(endAPts, 300, ransacT);
+    cv::Vec4d circleB = ransacFitCircle(endBPts, 300, ransacT);
+    
+    // === Step 5: RANSAC直线拟合 ===
+    // 将中间点按法线方向分成两组 (直线1侧和直线2侧)
+    // 点在法线正侧 → side1; 点在法线负侧 → side2
+    //
+    //      法线方向 (nx, ny)
+    //           ↑
+    //    side1 ←------→ side2 (两条平行线)
+    std::vector<cv::Point2d> side1, side2;
+    for (size_t i = 0; i < midPts.size(); i++) {
+        double dx = midPts[i].x - cx, dy = midPts[i].y - cy;
+        // 投影到法线: d = (p-center) · (nx, ny)
+        if (dx * nx + dy * ny >= 0) side1.push_back(midPts[i]);
+        else side2.push_back(midPts[i]);
+    }
+    
+    // 对两侧分别用RANSAC拟合直线
+    // 直线参数: Vec<double,5>(vx, vy, x0, y0, inlierCount)
+    cv::Vec<double, 5> line1 = ransacFitLine(side1, 300, ransacT);
+    cv::Vec<double, 5> line2 = ransacFitLine(side2, 300, ransacT);
+    
+    // === Step 6: 检查拟合质量 ===
+    // 如果RANSAC内点数太少，说明拟合失败
+    // circleA[3], circleB[3] 是内点计数
+    // line1[4], line2[4] 是内点计数
+    if (circleA[3] < 3 || circleB[3] < 3 || line1[4] < 3 || line2[4] < 3) {
+        // RANSAC失败，fallback为椭圆拟合
+        std::vector<cv::Point2f> fpts;
+        for (int i = 0; i < n; i++) fpts.push_back(cv::Point2f((float)pts[i].x, (float)pts[i].y));
+        if ((int)fpts.size() >= 5) {
+            cv::RotatedRect ell = cv::fitEllipse(fpts);
+            std::vector<cv::Point2d> result(n);
+            for (int i = 0; i < n; i++) {
+                // 在椭圆上均匀采样n个点
+                double angle = 2.0 * CV_PI * i / n;
+                double a = ell.angle * CV_PI / 180.0;
+                double ex = ell.size.width / 2.0, ey = ell.size.height / 2.0;
+                // 旋转椭圆的参数方程
+                result[i] = cv::Point2d(
+                    ell.center.x + ex * cos(angle) * cos(a) - ey * sin(angle) * sin(a),
+                    ell.center.y + ex * cos(angle) * sin(a) + ey * sin(angle) * cos(a));
+            }
+            return result;
+        }
+        return pts;  // 无法拟合，返回原始点
+    }
+    
+    // === Step 7: 生成跑道曲线 + 等弧长重采样 ===
+    // 根据拟合的圆心和直线参数生成密集的跑道形曲线
+    // 曲线顺序: 圆A弧 → 直线1 → 圆B弧 → 圆B另一弧 → 直线2 → 圆A另一弧 (闭合)
+    std::vector<cv::Point2d> dense = generateStadiumCurve(
+        circleA[0], circleA[1], circleA[2],   // 圆A: (圆心x, 圆心y, 半径)
+        circleB[0], circleB[1], circleB[2],      // 圆B: (圆心x, 圆心y, 半径)
+        line1[0], line1[1], line1[2], line1[3],   // 直线1: (方向vx, vy, 点x0, y0)
+        line2[0], line2[1], line2[2], line2[3],   // 直线2: (方向vx, vy, 点x0, y0)
+        200);  // 生成200个密集点
+    
+    if ((int)dense.size() < 10) return pts;  // 生成失败，返回原始点
+    
+    // 等弧长重采样: 将密集曲线均匀重采样为n个点
+    // 这样每个相邻点之间的弧长都相等
+    return resampleByArcLength(dense, n);
+}
+
+
+
 
 
 // ========== OpenCV 16 暗条轨迹检测 ==========
@@ -1585,11 +1952,9 @@ void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count,
             }
         }
 
-        // 分段形状拟合: 直线拟合到直线, 圆弧拟合到圆弧
-        std::vector<cv::Point2d> fittedPts = fitSegmentsShape(sampledPts);
-        for (size_t fi = 0; fi < fittedPts.size(); fi++) {
-            int px = (int)std::round(fittedPts[fi].x);
-            int py = (int)std::round(fittedPts[fi].y);
+        for (size_t fi = 0; fi < sampledPts.size(); fi++) {
+            int px = (int)std::round(sampledPts[fi].x);
+            int py = (int)std::round(sampledPts[fi].y);
             if (px >= 0 && px < w && py >= 0 && py < h) {
                 allPoints.push_back(Point(px, py));
                 allBarIds.push_back(b);
@@ -1599,6 +1964,7 @@ void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count,
 
     LOG_INFO("Contour sampling: %d dark bars processed, raw points=%d",
              targetBars, (int)allPoints.size());
+    Step_FitShape(&allPoints, &allBarIds, w, h);
 
     // Mask 验证
     {
@@ -1948,7 +2314,7 @@ void Step_SampleContoursEquidistant(std::vector<std::vector<cv::Point>>* darkCon
             cumLen[j] = cumLen[j-1] + sqrt(dx*dx + dy*dy);
         }
         
-        // 等间距采样 + 形状拟合
+        // Pure equidistant sampling (no fitting)
         std::vector<cv::Point2d> sampledPts;
         for (int s = 0; s < sampleCount; s++) {
             double targetLen = perimeter * s / sampleCount;
@@ -1967,17 +2333,60 @@ void Step_SampleContoursEquidistant(std::vector<std::vector<cv::Point>>* darkCon
             }
         }
 
-        // 分段形状拟合: 直线拟合到直线, 圆弧拟合到圆弧
-        std::vector<cv::Point2d> fittedPts = fitSegmentsShape(sampledPts);
-        for (size_t fi = 0; fi < fittedPts.size(); fi++) {
-            int px = (int)std::round(fittedPts[fi].x);
-            int py = (int)std::round(fittedPts[fi].y);
+        // Push sampled points directly (fitting done in Step_FitShape)
+        for (size_t fi = 0; fi < sampledPts.size(); fi++) {
+            int px = (int)std::round(sampledPts[fi].x);
+            int py = (int)std::round(sampledPts[fi].y);
             if (px >= 0 && px < width && py >= 0 && py < height) {
                 allPoints->push_back(cv::Point(px, py));
                 allBarIds->push_back(b);
             }
         }
     }
+}
+
+
+// 7.5 Shape fitting: group by barId, fit each bar with stadium shape
+void Step_FitShape(std::vector<cv::Point>* allPoints, std::vector<int>* allBarIds,
+                   int width, int height) {
+    if (allPoints->empty() || allBarIds->size() != allPoints->size()) return;
+    int maxBarId = 0;
+    for (size_t i = 0; i < allBarIds->size(); i++) {
+        if ((*allBarIds)[i] > maxBarId) maxBarId = (*allBarIds)[i];
+    }
+    std::vector<std::vector<int>> barGroups(maxBarId + 1);
+    for (size_t i = 0; i < allBarIds->size(); i++) {
+        barGroups[(*allBarIds)[i]].push_back((int)i);
+    }
+    int fittedBars = 0;
+    for (int b = 0; b <= maxBarId; b++) {
+        if ((int)barGroups[b].size() < 8) continue;
+        std::vector<cv::Point2d> barPts(barGroups[b].size());
+        for (size_t k = 0; k < barGroups[b].size(); k++) {
+            int idx = barGroups[b][k];
+            barPts[k] = cv::Point2d((double)(*allPoints)[idx].x,
+                                     (double)(*allPoints)[idx].y);
+        }
+        std::vector<cv::Point2d> fittedPts = fitStadiumShape(barPts);
+        if ((int)fittedPts.size() != (int)barPts.size()) {
+            LOG_WARN("Step_FitShape: bar %d size mismatch (%d vs %d), skipped",
+                     b, (int)fittedPts.size(), (int)barPts.size());
+            continue;
+        }
+        for (size_t k = 0; k < fittedPts.size(); k++) {
+            int idx = barGroups[b][k];
+            int px = (int)std::round(fittedPts[k].x);
+            int py = (int)std::round(fittedPts[k].y);
+            if (px < 0) px = 0;
+            if (px >= width) px = width - 1;
+            if (py < 0) py = 0;
+            if (py >= height) py = height - 1;
+            (*allPoints)[idx] = cv::Point(px, py);
+        }
+        fittedBars++;
+    }
+    LOG_INFO("Step_FitShape: fitted %d / %d bars (%d total points)",
+             fittedBars, maxBarId + 1, (int)allPoints->size());
 }
 
 // 8. Mask验证采样点

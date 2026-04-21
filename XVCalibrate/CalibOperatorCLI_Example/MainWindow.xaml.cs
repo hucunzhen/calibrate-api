@@ -796,7 +796,15 @@ namespace CalibOperatorCLI_Example
 
                 Log($"[STEP 7] Sample contours equidistantly (bars={targetBars})...");
                 _trajDetector.SampleContours(targetBars);
-                Log($"[INFO] Points after sampling: {_trajDetector.GetPointCount()}");
+                int ptCount = _trajDetector.GetPointCount();
+                Log($"[INFO] Points after sampling: {ptCount}");
+
+                // 绘制彩色轨迹显示
+                if (ptCount > 0) {
+                    var coloredTraj = _trajDetector.DrawColoredTrajectory(_currentImage.Width, _currentImage.Height);
+                    DisplayImage(coloredTraj);
+                    coloredTraj.Dispose();
+                }
 
                 _trajStep = 7;  // Step7完成，启用Step8
                 UpdateStepButtonStates();
@@ -808,6 +816,34 @@ namespace CalibOperatorCLI_Example
             }
         }
 
+        private void BtnFit_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_trajDetector == null || _currentImage == null) return;
+
+                Log("[STEP 7.5] Fit shape...");
+                _trajDetector.FitShape();
+                int ptCount = _trajDetector.GetPointCount();
+                Log($"[INFO] Points after fitting: {ptCount}");
+
+                // 绘制彩色轨迹显示
+                if (ptCount > 0) {
+                    var coloredTraj = _trajDetector.DrawColoredTrajectory(_currentImage.Width, _currentImage.Height);
+                    DisplayImage(coloredTraj);
+                    coloredTraj.Dispose();
+                }
+
+                _trajStep = 7;  // 保持Step7完成状态，可选Fit后可继续Step8
+                UpdateStepButtonStates();
+                Log("[STEP 7.5] Done");
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERROR] Step 7.5 failed: {ex.Message}");
+            }
+        }
+
         private void BtnStep8_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -816,7 +852,15 @@ namespace CalibOperatorCLI_Example
 
                 Log("[STEP 8] Verify by mask...");
                 _trajDetector.VerifyByMask();
-                Log($"[INFO] Points after mask verification: {_trajDetector.GetPointCount()}");
+                int ptCount = _trajDetector.GetPointCount();
+                Log($"[INFO] Points after mask verification: {ptCount}");
+
+                // 绘制彩色轨迹显示
+                if (ptCount > 0) {
+                    var coloredTraj = _trajDetector.DrawColoredTrajectory(_currentImage.Width, _currentImage.Height);
+                    DisplayImage(coloredTraj);
+                    coloredTraj.Dispose();
+                }
 
                 _trajStep = 8;  // Step8完成，启用Step9
                 UpdateStepButtonStates();
@@ -836,7 +880,15 @@ namespace CalibOperatorCLI_Example
 
                 Log("[STEP 9] Deduplicate and sort...");
                 _trajDetector.DeduplicateAndSort();
-                Log($"[INFO] Points after dedup: {_trajDetector.GetPointCount()}");
+                int ptCount = _trajDetector.GetPointCount();
+                Log($"[INFO] Points after dedup: {ptCount}");
+
+                // 绘制彩色轨迹显示
+                if (ptCount > 0) {
+                    var coloredTraj = _trajDetector.DrawColoredTrajectory(_currentImage.Width, _currentImage.Height);
+                    DisplayImage(coloredTraj);
+                    coloredTraj.Dispose();
+                }
 
                 _trajStep = 9;  // Step9完成，启用Step10
                 UpdateStepButtonStates();

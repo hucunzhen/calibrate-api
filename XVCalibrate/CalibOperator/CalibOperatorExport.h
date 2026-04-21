@@ -210,6 +210,12 @@ CALIB_API int CALIB_TrajStep_6_FindAndSortDarkContours(TrajStepContext ctx);
 CALIB_API int CALIB_TrajStep_7_SampleContours(TrajStepContext ctx, int targetBars);
 
 /**
+ * Step 7.5: Fit shape for sampled points
+ * Returns: 0 on success
+ */
+CALIB_API int CALIB_TrajStep_7_5_FitShape(TrajStepContext ctx);
+
+/**
  * Step 8: Verify points by mask
  * Returns: 0 on success
  */
