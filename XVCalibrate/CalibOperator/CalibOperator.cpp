@@ -471,8 +471,12 @@ void DetectCircles(Image* img, Point2D* pts, int* count) {
     threshold(blurred, brightBinary, 0, 255, THRESH_BINARY + THRESH_OTSU);
 
     Mat kernel = getStructuringElement(MORPH_ELLIPSE, Size(7, 7));
+    // 先闭后开
     morphologyEx(brightBinary, brightBinary, MORPH_CLOSE, kernel);
     morphologyEx(brightBinary, brightBinary, MORPH_OPEN, kernel);
+    // 先开后闭
+    morphologyEx(brightBinary, brightBinary, MORPH_OPEN, kernel);
+    morphologyEx(brightBinary, brightBinary, MORPH_CLOSE, kernel);
 
     std::vector<std::vector<Point>> brightContours;
     findContours(brightBinary, brightContours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
@@ -546,8 +550,12 @@ void DetectCircles(Image* img, Point2D* pts, int* count) {
     Mat darkBinary;
     threshold(innerGray, darkBinary, 0, 255, THRESH_BINARY_INV + THRESH_OTSU);
     darkBinary.setTo(0, calibMask == 0);
+    // 先开后闭
     morphologyEx(darkBinary, darkBinary, MORPH_OPEN, kernel2);
     morphologyEx(darkBinary, darkBinary, MORPH_CLOSE, kernel2);
+    // 先闭后开
+    morphologyEx(darkBinary, darkBinary, MORPH_CLOSE, kernel2);
+    morphologyEx(darkBinary, darkBinary, MORPH_OPEN, kernel2);
 
     std::vector<std::vector<Point>> darkContours;
     findContours(darkBinary, darkContours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
@@ -556,8 +564,12 @@ void DetectCircles(Image* img, Point2D* pts, int* count) {
     adaptiveThreshold(innerGray, darkAdaptive, 255,
                       ADAPTIVE_THRESH_GAUSSIAN_C, THRESH_BINARY_INV, 31, 10);
     darkAdaptive.setTo(0, calibMask == 0);
+    // 先开后闭
     morphologyEx(darkAdaptive, darkAdaptive, MORPH_OPEN, kernel2);
     morphologyEx(darkAdaptive, darkAdaptive, MORPH_CLOSE, kernel2);
+    // 先闭后开
+    morphologyEx(darkAdaptive, darkAdaptive, MORPH_CLOSE, kernel2);
+    morphologyEx(darkAdaptive, darkAdaptive, MORPH_OPEN, kernel2);
 
     std::vector<std::vector<Point>> adaptiveContours;
     findContours(darkAdaptive, adaptiveContours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
@@ -1868,8 +1880,12 @@ void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count,
     // 形态学处理
     Mat kernel = getStructuringElement(MORPH_ELLIPSE, Size(5, 5));
     Mat morphed;
+    // 先闭后开
     morphologyEx(binaryBright, morphed, MORPH_CLOSE, kernel);
     morphologyEx(morphed, morphed, MORPH_OPEN, kernel);
+    // 先开后闭
+    morphologyEx(morphed, morphed, MORPH_OPEN, kernel);
+    morphologyEx(morphed, morphed, MORPH_CLOSE, kernel);
 
     // 提取外轮廓
     std::vector<std::vector<Point>> outerContours;
@@ -1923,8 +1939,12 @@ void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count,
 
     // ---- 步骤 5：形态学清理 ----
     Mat kernel2 = getStructuringElement(MORPH_ELLIPSE, Size(3, 3));
+    // 先闭后开：先填充细小孔洞，再去除孤立噪点
     morphologyEx(darkBinary, darkBinary, MORPH_CLOSE, kernel2);
     morphologyEx(darkBinary, darkBinary, MORPH_OPEN, kernel2);
+    // 先开后闭：先去除孤立噪点，再填充细小孔洞
+    morphologyEx(darkBinary, darkBinary, MORPH_OPEN, kernel2);
+    morphologyEx(darkBinary, darkBinary, MORPH_CLOSE, kernel2);
 
     // 膨胀+腐蚀：先膨胀让暗条变粗融合小间隙，再腐蚀回来使轮廓光滑
     Mat dilateKernel = getStructuringElement(MORPH_ELLIPSE, Size(5, 5));
@@ -2247,8 +2267,12 @@ void Step_PreprocessAndFindContours(cv::Mat* grayMat, cv::Mat* binaryBright,
     
     // 形态学处理
     cv::Mat kernel = getStructuringElement(MORPH_ELLIPSE, cv::Size(5, 5));
+    // 先闭后开
     morphologyEx(*binaryBright, *morphed, MORPH_CLOSE, kernel);
     morphologyEx(*morphed, *morphed, MORPH_OPEN, kernel);
+    // 先开后闭
+    morphologyEx(*morphed, *morphed, MORPH_OPEN, kernel);
+    morphologyEx(*morphed, *morphed, MORPH_CLOSE, kernel);
     
     // 提取外轮廓
     findContours(*morphed, *outerContours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
@@ -2347,8 +2371,12 @@ void Step_MorphologyCleanup(cv::Mat* darkBinary, int kernelSize, int blurKsize, 
 
 
     cv::Mat kernel = getStructuringElement(MORPH_ELLIPSE, cv::Size(kernelSize, kernelSize));
+    // 先闭后开
     morphologyEx(*darkBinary, *darkBinary, MORPH_CLOSE, kernel);
     morphologyEx(*darkBinary, *darkBinary, MORPH_OPEN, kernel);
+    // 先开后闭
+    morphologyEx(*darkBinary, *darkBinary, MORPH_OPEN, kernel);
+    morphologyEx(*darkBinary, *darkBinary, MORPH_CLOSE, kernel);
 
     // 膨胀+腐蚀：先膨胀让暗条变粗融合小间隙，再腐蚀回来使轮廓光滑
     int dilateSize = kernelSize + 2;

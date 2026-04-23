@@ -11,6 +11,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="120"/>
@@ -31,8 +32,22 @@
             <Button x:Name="BtnAutoTrajTest" Content="7. AutoTrajTest" Width="150" Height="32" Margin="0,0,10,0" Click="BtnAutoTrajTest_Click"/>
         </StackPanel>
 
-        <!-- Row 2: Step-by-step trajectory buttons -->
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,10">
+        <!-- Row 2: PLC Communication -->
+        <Border Grid.Row="2" Background="#F5F5F5" BorderBrush="#CCCCCC" BorderThickness="1" Padding="8" Margin="0,0,0,10" CornerRadius="3">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="PLC:" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <TextBlock Text="IP:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                <TextBox x:Name="TxtPlcIp" Text="192.168.0.1" Width="120" Height="26" VerticalContentAlignment="Center" Margin="0,0,10,0"/>
+                <TextBlock Text="Port:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                <TextBox x:Name="TxtPlcPort" Text="502" Width="55" Height="26" VerticalContentAlignment="Center" Margin="0,0,10,0"/>
+                <Button x:Name="BtnPlcConnect" Content="Connect" Width="75" Height="28" Margin="0,0,5,0" Click="BtnPlcConnect_Click"/>
+                <Button x:Name="BtnPlcDisconnect" Content="Disconnect" Width="80" Height="28" IsEnabled="False" Click="BtnPlcDisconnect_Click"/>
+                <TextBlock x:Name="TxtPlcStatus" Text="[Disconnected]" Foreground="Gray" FontWeight="Bold" VerticalAlignment="Center" Margin="15,0,0,0" FontFamily="Consolas"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Row 3: Step-by-step trajectory buttons -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,10">
             <Button x:Name="BtnLoadTrajImg" Content="1.Load" Width="72" Height="28" Margin="0,0,3,0" Click="BtnLoadTrajImg_Click"/>
             <Button x:Name="BtnStep1" Content="2.Gray" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep1_Click"/>
             <Button x:Name="BtnStep2" Content="3.Contour" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep2_Click"/>
@@ -47,8 +62,8 @@
             <Button x:Name="BtnStep10" Content="11.Out" Width="72" Height="28" Click="BtnStep10_Click"/>
         </StackPanel>
 
-        <!-- Row 3: Step parameters panel -->
-        <Border Grid.Row="3" Background="#F5F5F5" BorderBrush="#CCCCCC" BorderThickness="1" Padding="10" Margin="0,0,0,10" CornerRadius="3">
+        <!-- Row 4: Step parameters panel -->
+        <Border Grid.Row="4" Background="#F5F5F5" BorderBrush="#CCCCCC" BorderThickness="1" Padding="10" Margin="0,0,0,10" CornerRadius="3">
             <StackPanel>
                 <TextBlock x:Name="TxtParamsTitle" Text="Step Parameters:" FontWeight="Bold" Margin="0,0,0,5"/>
                 <WrapPanel>
@@ -90,8 +105,8 @@
             </StackPanel>
         </Border>
 
-        <!-- Row 4: Image display with zoom support -->
-        <Border Grid.Row="4" BorderBrush="Black" BorderThickness="1" Background="Black" Margin="0,0,0,10"
+        <!-- Row 5: Image display with zoom support -->
+        <Border Grid.Row="5" BorderBrush="Black" BorderThickness="1" Background="Black" Margin="0,0,0,10"
                 ClipToBounds="True">
             <ScrollViewer x:Name="ImageScrollViewer" 
                           HorizontalScrollBarVisibility="Auto" 
@@ -116,13 +131,13 @@
             </ScrollViewer>
         </Border>
 
-        <!-- Row 5: Status bar -->
-        <Border Grid.Row="5" Background="#E0E0E0" Padding="5" Margin="0,0,0,10">
+        <!-- Row 6: Status bar -->
+        <Border Grid.Row="6" Background="#E0E0E0" Padding="5" Margin="0,0,0,10">
             <TextBlock x:Name="StatusText" Text="Ready - Click buttons to start" VerticalAlignment="Center"/>
         </Border>
 
-        <!-- Row 6: Log text box -->
-        <TextBox x:Name="LogTextBox" Grid.Row="6" 
+        <!-- Row 7: Log text box -->
+        <TextBox x:Name="LogTextBox" Grid.Row="7"
                  IsReadOnly="True" 
                  FontFamily="Consolas" FontSize="11"
                  VerticalScrollBarVisibility="Auto"

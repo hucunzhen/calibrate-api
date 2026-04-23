@@ -5,6 +5,8 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
 using CalibOperatorPInvoke;
+using HslCommunication;
+using HslCommunication.Profinet.XINJE;
 
 namespace CalibOperatorCLI_Example
 {
@@ -17,6 +19,8 @@ namespace CalibOperatorCLI_Example
         private int _trajStep = 0;  // 轨迹检测当前步骤
         private StreamWriter? _logWriter;
         private TrajectoryStepDetector? _trajDetector;
+        private XinJETcpNet? _plc;
+        private bool _plcConnected = false;
 
         private const int IMAGE_WIDTH = 2448;
         private const int IMAGE_HEIGHT = 2048;
@@ -490,6 +494,14 @@ namespace CalibOperatorCLI_Example
         {
             base.OnClosing(e);
             Log("[INFO] Application closing...");
+
+            // 断开PLC连接
+            if (_plc != null)
+            {
+                if (_plcConnected) _plc.ConnectClose();
+                _plc = null;
+            }
+
             _currentImage?.Dispose();
             _trajDetector?.Dispose();
             _logWriter?.Close();
@@ -1078,6 +1090,106 @@ namespace CalibOperatorCLI_Example
             {
                 Log($"[ERROR] 保存图片失败: {ex.Message}");
                 MessageBox.Show($"保存图片失败:\n{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        // ================================================================
+        // PLC 通信
+        // ================================================================
+
+        private void BtnPlcConnect_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                string ip = TxtPlcIp.Text.Trim();
+                if (!int.TryParse(TxtPlcPort.Text.Trim(), out int port) || port <= 0 || port > 65535)
+                {
+                    MessageBox.Show("Please enter a valid port (1-65535).", "Invalid Port", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                if (string.IsNullOrEmpty(ip))
+                {
+                    MessageBox.Show("Please enter a valid IP address.", "Invalid IP", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                Log($"[PLC] Connecting to {ip}:{port}...");
+
+                // 关闭旧连接
+                if (_plc != null)
+                {
+                    if (_plcConnected) _plc.ConnectClose();
+                    _plc = null;
+                    _plcConnected = false;
+                }
+
+                // 创建信捷PLC连接
+                _plc = new XinJETcpNet();
+                _plc.IpAddress = ip;
+                _plc.Port = port;
+
+                var result = _plc.ConnectServer();
+                if (result.IsSuccess)
+                {
+                    _plcConnected = true;
+                    Log($"[PLC] Connected successfully to {ip}:{port}");
+
+                    // 更新UI
+                    BtnPlcConnect.IsEnabled = false;
+                    BtnPlcDisconnect.IsEnabled = true;
+                    TxtPlcIp.IsEnabled = false;
+                    TxtPlcPort.IsEnabled = false;
+                    TxtPlcStatus.Text = "[Connected]";
+                    TxtPlcStatus.Foreground = new SolidColorBrush(Colors.Green);
+                }
+                else
+                {
+                    _plcConnected = false;
+                    _plc = null;
+                    Log($"[PLC] Connection failed: {result.Message}");
+                    MessageBox.Show($"PLC connection failed!\n\nError: {result.Message}",
+                        "PLC Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                _plcConnected = false;
+                _plc = null;
+                Log($"[PLC] Connection error: {ex.Message}");
+                MessageBox.Show($"PLC connection error:\n{ex.Message}", "PLC Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void BtnPlcDisconnect_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                Log("[PLC] Disconnecting...");
+
+                if (_plc != null && _plcConnected)
+                {
+                    _plc.ConnectClose();
+                    Log("[PLC] Connection closed");
+                }
+
+                _plc = null;
+                _plcConnected = false;
+
+                // 恢复UI
+                BtnPlcConnect.IsEnabled = true;
+                BtnPlcDisconnect.IsEnabled = false;
+                TxtPlcIp.IsEnabled = true;
+                TxtPlcPort.IsEnabled = true;
+                TxtPlcStatus.Text = "[Disconnected]";
+                TxtPlcStatus.Foreground = new SolidColorBrush(Colors.Gray);
+
+                Log("[PLC] Disconnected");
+            }
+            catch (Exception ex)
+            {
+                Log($"[PLC] Disconnect error: {ex.Message}");
+                MessageBox.Show($"PLC disconnect error:\n{ex.Message}", "PLC Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
     }

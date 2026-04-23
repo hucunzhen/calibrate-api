@@ -1648,8 +1648,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
 
             }
-
-            SetWindowTextA(g_hwndStatus, statusText);
             InvalidateRect(hwnd, NULL, FALSE);
         }
         return 0;

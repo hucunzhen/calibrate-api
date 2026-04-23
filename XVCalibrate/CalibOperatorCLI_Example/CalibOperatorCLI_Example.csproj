@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <PackageReference Include="System.Drawing.Common" Version="6.0.0" />
+    <PackageReference Include="HslCommunication" Version="12.7.0" />
   </ItemGroup>
 
   <!-- 复制依赖的 DLL 到输出目录 -->
