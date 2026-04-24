@@ -1,147 +1,120 @@
 <Window x:Class="CalibOperatorCLI_Example.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Calibration GUI - 9-Point Calibration Tool"
-        Height="950" Width="950"
+        xmlns:local="clr-namespace:CalibOperatorCLI_Example"
+        Title="Calibration GUI"
+        WindowState="Maximized"
         WindowStartupLocation="CenterScreen"
-        ResizeMode="CanMinimize">
-    <Grid Margin="10">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="120"/>
-        </Grid.RowDefinitions>
-
-        <!-- Row 0: First row of buttons -->
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
-            <Button x:Name="BtnGenerateImage" Content="1. Generate Image" Width="150" Height="32" Margin="0,0,10,0" Click="BtnGenerateImage_Click"/>
-            <Button x:Name="BtnLoadImage" Content="2. Load Image" Width="150" Height="32" Margin="0,0,10,0" Click="BtnLoadImage_Click"/>
-            <Button x:Name="BtnDetectCircles" Content="3. Detect Circles" Width="150" Height="32" Margin="0,0,10,0" Click="BtnDetectCircles_Click"/>
-            <Button x:Name="BtnCalibrate" Content="4. Calibrate" Width="150" Height="32" Click="BtnCalibrate_Click"/>
-        </StackPanel>
-
-        <!-- Row 1: Second row of buttons -->
-        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
-            <Button x:Name="BtnSaveResults" Content="5. Save Results" Width="150" Height="32" Margin="0,0,10,0" Click="BtnSaveResults_Click"/>
-            <Button x:Name="BtnTestTransform" Content="6. Test Transform" Width="150" Height="32" Margin="0,0,10,0" Click="BtnTestTransform_Click"/>
-            <Button x:Name="BtnAutoTrajTest" Content="7. AutoTrajTest" Width="150" Height="32" Margin="0,0,10,0" Click="BtnAutoTrajTest_Click"/>
-        </StackPanel>
-
-        <!-- Row 2: PLC Communication -->
-        <Border Grid.Row="2" Background="#F5F5F5" BorderBrush="#CCCCCC" BorderThickness="1" Padding="8" Margin="0,0,0,10" CornerRadius="3">
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Text="PLC:" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                <TextBlock Text="IP:" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                <TextBox x:Name="TxtPlcIp" Text="192.168.0.1" Width="120" Height="26" VerticalContentAlignment="Center" Margin="0,0,10,0"/>
-                <TextBlock Text="Port:" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                <TextBox x:Name="TxtPlcPort" Text="502" Width="55" Height="26" VerticalContentAlignment="Center" Margin="0,0,10,0"/>
-                <Button x:Name="BtnPlcConnect" Content="Connect" Width="75" Height="28" Margin="0,0,5,0" Click="BtnPlcConnect_Click"/>
-                <Button x:Name="BtnPlcDisconnect" Content="Disconnect" Width="80" Height="28" IsEnabled="False" Click="BtnPlcDisconnect_Click"/>
-                <TextBlock x:Name="TxtPlcStatus" Text="[Disconnected]" Foreground="Gray" FontWeight="Bold" VerticalAlignment="Center" Margin="15,0,0,0" FontFamily="Consolas"/>
+        ResizeMode="CanResize"
+        WindowStyle="SingleBorderWindow">
+    <DockPanel>
+        <!-- Top navigation bar -->
+        <Border DockPanel.Dock="Top" Background="#2D2D2D" Padding="0">
+            <StackPanel Orientation="Horizontal">
+                <Button x:Name="NavCalibration" Content="标定" Width="100" Height="36"
+                        Background="#2D2D2D" Foreground="White" BorderThickness="0"
+                        FontWeight="Bold" Click="NavCalibration_Click">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="border" Background="{TemplateBinding Background}" Padding="10,6">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="border" Property="Background" Value="#404040"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsSelected, ElementName=NavCalibration}" Value="True">
+                                    <Setter Property="Background" Value="#007ACC"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button x:Name="NavTrajectory" Content="轨迹检测" Width="100" Height="36"
+                        Background="#2D2D2D" Foreground="White" BorderThickness="0"
+                        FontWeight="Bold" Click="NavTrajectory_Click">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="border" Background="{TemplateBinding Background}" Padding="10,6">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="border" Property="Background" Value="#404040"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button x:Name="NavPlc" Content="PLC" Width="100" Height="36"
+                        Background="#2D2D2D" Foreground="White" BorderThickness="0"
+                        FontWeight="Bold" Click="NavPlc_Click">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="border" Background="{TemplateBinding Background}" Padding="10,6">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="border" Property="Background" Value="#404040"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button x:Name="NavHistogram" Content="直方图" Width="100" Height="36"
+                        Background="#2D2D2D" Foreground="White" BorderThickness="0"
+                        FontWeight="Bold" Click="NavHistogram_Click">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="border" Background="{TemplateBinding Background}" Padding="10,6">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="border" Property="Background" Value="#404040"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </Button.Style>
+                </Button>
             </StackPanel>
         </Border>
 
-        <!-- Row 3: Step-by-step trajectory buttons -->
-        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,10">
-            <Button x:Name="BtnLoadTrajImg" Content="1.Load" Width="72" Height="28" Margin="0,0,3,0" Click="BtnLoadTrajImg_Click"/>
-            <Button x:Name="BtnStep1" Content="2.Gray" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep1_Click"/>
-            <Button x:Name="BtnStep2" Content="3.Contour" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep2_Click"/>
-            <Button x:Name="BtnStep3" Content="4.Mask" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep3_Click"/>
-            <Button x:Name="BtnStep4" Content="5.Dark" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep4_Click"/>
-            <Button x:Name="BtnStep5" Content="6.Morph" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep5_Click"/>
-            <Button x:Name="BtnStep6" Content="7.Sort" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep6_Click"/>
-            <Button x:Name="BtnStep7" Content="8.Sample" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep7_Click"/>
-            <Button x:Name="BtnFit" Content="8.5 Fit" Width="60" Height="28" Margin="0,0,3,0" Click="BtnFit_Click"/>
-            <Button x:Name="BtnStep8" Content="9.Verify" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep8_Click"/>
-            <Button x:Name="BtnStep9" Content="10.Dedup" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep9_Click"/>
-            <Button x:Name="BtnStep10" Content="11.Out" Width="72" Height="28" Click="BtnStep10_Click"/>
-        </StackPanel>
-
-        <!-- Row 4: Step parameters panel -->
-        <Border Grid.Row="4" Background="#F5F5F5" BorderBrush="#CCCCCC" BorderThickness="1" Padding="10" Margin="0,0,0,10" CornerRadius="3">
-            <StackPanel>
-                <TextBlock x:Name="TxtParamsTitle" Text="Step Parameters:" FontWeight="Bold" Margin="0,0,0,5"/>
-                <WrapPanel>
-                    <!-- Step 3: Mask -->
-                    <StackPanel x:Name="SpStep2Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
-                        <TextBlock Text="Blur Kernel:" VerticalAlignment="Center" Width="100"/>
-                        <TextBox x:Name="TxtStep2Blur" Text="7" Width="50" Height="24" VerticalContentAlignment="Center"/>
-                        <TextBlock Text="Morph Kernel:" VerticalAlignment="Center" Margin="15,0,0,0"/>
-                        <TextBox x:Name="TxtStep2Morph" Text="5" Width="50" Height="24" VerticalContentAlignment="Center" Margin="5,0,0,0"/>
-                    </StackPanel>
-                    <StackPanel x:Name="SpStep3Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
-                        <TextBlock Text="Mask ContourIdx:" VerticalAlignment="Center" Width="100"/>
-                        <TextBox x:Name="TxtStep3ContourIdx" Text="0" Width="60" Height="24" VerticalContentAlignment="Center"/>
-                        <TextBlock Text=" (0=auto)" VerticalAlignment="Center" Foreground="Gray" Margin="5,0,0,0"/>
-                    </StackPanel>
-                    <!-- Step 4: DarkBars -->
-                    <StackPanel x:Name="SpStep4Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
-                        <TextBlock Text="Dark Threshold:" VerticalAlignment="Center" Width="100"/>
-                        <TextBox x:Name="TxtStep4Threshold" Text="45" Width="60" Height="24" VerticalContentAlignment="Center"/>
-                    </StackPanel>
-                    <!-- Step 5: Morph -->
-                    <StackPanel x:Name="SpStep5Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
-                        <TextBlock Text="Morph Kernel:" VerticalAlignment="Center" Width="100"/>
-                        <TextBox x:Name="TxtStep5Kernel" Text="3" Width="50" Height="24" VerticalContentAlignment="Center"/>
-                        <TextBlock Text="Blur Kernel:" VerticalAlignment="Center" Margin="15,0,0,0"/>
-                        <TextBox x:Name="TxtStep5Blur" Text="5" Width="50" Height="24" VerticalContentAlignment="Center" Margin="5,0,0,0"/>
-                        <TextBlock Text="Blur Sigma:" VerticalAlignment="Center" Margin="15,0,0,0"/>
-                        <TextBox x:Name="TxtStep5BlurSigma" Text="1.0" Width="50" Height="24" VerticalContentAlignment="Center" Margin="5,0,0,0"/>
-                    </StackPanel>
-                    <!-- Step 7: Sample -->
-                    <StackPanel x:Name="SpStep7Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
-                        <TextBlock Text="Sample Bars:" VerticalAlignment="Center" Width="100"/>
-                        <TextBox x:Name="TxtStep7Bars" Text="16" Width="60" Height="24" VerticalContentAlignment="Center"/>
-                        <TextBlock Text="Band Width:" VerticalAlignment="Center" Margin="15,0,0,0"/>
-                        <TextBox x:Name="TxtStep7BandWidth" Text="5" Width="50" Height="24" VerticalContentAlignment="Center" Margin="5,0,0,0"/>
-                        <TextBlock Text="(0=off)" VerticalAlignment="Center" Foreground="Gray" Margin="5,0,0,0"/>
-                    </StackPanel>
-                </WrapPanel>
-            </StackPanel>
+        <!-- Active tab indicator line -->
+        <Border DockPanel.Dock="Top" Height="2">
+            <Border.Background>
+                <SolidColorBrush x:Name="ActiveTabLine" Color="#007ACC"/>
+            </Border.Background>
         </Border>
 
-        <!-- Row 5: Image display with zoom support -->
-        <Border Grid.Row="5" BorderBrush="Black" BorderThickness="1" Background="Black" Margin="0,0,0,10"
-                ClipToBounds="True">
-            <ScrollViewer x:Name="ImageScrollViewer" 
-                          HorizontalScrollBarVisibility="Auto" 
-                          VerticalScrollBarVisibility="Auto"
-                          PreviewMouseWheel="ImageScrollViewer_PreviewMouseWheel"
-                          PreviewMouseDown="ImageScrollViewer_PreviewMouseDown"
-                          PreviewMouseMove="ImageScrollViewer_PreviewMouseMove"
-                          PreviewMouseUp="ImageScrollViewer_PreviewMouseUp"
-                          PreviewMouseRightButtonUp="ImageScrollViewer_PreviewMouseRightButtonUp">
-                <Image x:Name="ImageDisplay" 
-                       Stretch="Uniform" 
-                       RenderOptions.BitmapScalingMode="HighQuality">
-                    <Image.ContextMenu>
-                        <ContextMenu>
-                            <MenuItem Header="保存图片" Click="SaveImage_Click"/>
-                        </ContextMenu>
-                    </Image.ContextMenu>
-                    <Image.LayoutTransform>
-                        <ScaleTransform x:Name="ImageScaleTransform" ScaleX="1" ScaleY="1"/>
-                    </Image.LayoutTransform>
-                </Image>
-            </ScrollViewer>
-        </Border>
-
-        <!-- Row 6: Status bar -->
-        <Border Grid.Row="6" Background="#E0E0E0" Padding="5" Margin="0,0,0,10">
-            <TextBlock x:Name="StatusText" Text="Ready - Click buttons to start" VerticalAlignment="Center"/>
-        </Border>
-
-        <!-- Row 7: Log text box -->
-        <TextBox x:Name="LogTextBox" Grid.Row="7"
-                 IsReadOnly="True" 
-                 FontFamily="Consolas" FontSize="11"
-                 VerticalScrollBarVisibility="Auto"
-                 Background="#1E1E1E" Foreground="#90EE90"
-                 AcceptsReturn="True" TextWrapping="Wrap"/>
-    </Grid>
+        <!-- Page frame -->
+        <Frame x:Name="MainFrame" NavigationUIVisibility="Hidden"/>
+    </DockPanel>
 </Window>

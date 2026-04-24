@@ -15,6 +15,13 @@
     <PackageReference Include="HslCommunication" Version="12.7.0" />
   </ItemGroup>
 
+  <!-- 海康威视相机 SDK -->
+  <ItemGroup>
+    <Reference Include="MvCameraControl.Net">
+      <HintPath>..\..\Development\DotNet\win64\netstandard2.0\MvCameraControl.Net.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
   <!-- 复制依赖的 DLL 到输出目录 -->
   <ItemGroup Condition="'$(Configuration)' == 'Debug'">
     <None Include="..\..\bin\x64\Debug\CalibOperatorNative.dll">
@@ -43,4 +50,16 @@
   <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
     <EnableUnmanagedDebugging>true</EnableUnmanagedDebugging>
   </PropertyGroup>
+
+  <!-- 编译后自动复制海康 MVS Runtime 原生 DLL -->
+  <Target Name="CopyMvsRuntime" AfterTargets="Build" Condition="'$(PlatformTarget)' == 'x64'">
+    <PropertyGroup>
+      <MvsRuntimeDir Condition="Exists('$(ProgramFiles(x86))\Common Files\MVS\Runtime\Win64_x64')">$(ProgramFiles(x86))\Common Files\MVS\Runtime\Win64_x64</MvsRuntimeDir>
+      <MvsRuntimeDir Condition="Exists('D:\MVS\Development\Bin') == 'false' and '$(MvsRuntimeDir)' == ''">$(MvsRuntimeDir)</MvsRuntimeDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <MvsDll Include="$(MvsRuntimeDir)\*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(MvsDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="'$(MvsRuntimeDir)' != ''" />
+  </Target>
 </Project>

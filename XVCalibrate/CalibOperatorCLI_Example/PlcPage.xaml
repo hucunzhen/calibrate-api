@@ -1,0 +1,47 @@
+<Page x:Class="CalibOperatorCLI_Example.PlcPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      Title="PLC Communication">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="150"/>
+        </Grid.RowDefinitions>
+
+        <!-- Connection -->
+        <Border Grid.Row="0" Background="#F5F5F5" BorderBrush="#CCCCCC" BorderThickness="1" Padding="10" Margin="0,0,0,10" CornerRadius="3">
+            <StackPanel>
+                <TextBlock Text="PLC Connection" FontWeight="Bold" Margin="0,0,0,8"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                    <TextBlock Text="IP:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <TextBox x:Name="TxtPlcIp" Text="192.168.0.1" Width="120" Height="26" VerticalContentAlignment="Center" Margin="0,0,10,0"/>
+                    <TextBlock Text="Port:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <TextBox x:Name="TxtPlcPort" Text="502" Width="55" Height="26" VerticalContentAlignment="Center" Margin="0,0,10,0"/>
+                    <Button x:Name="BtnPlcConnect" Content="Connect" Width="75" Height="28" Margin="0,0,5,0" Click="BtnPlcConnect_Click"/>
+                    <Button x:Name="BtnPlcDisconnect" Content="Disconnect" Width="80" Height="28" IsEnabled="False" Click="BtnPlcDisconnect_Click"/>
+                    <TextBlock x:Name="TxtPlcStatus" Text="[Disconnected]" Foreground="Gray" FontWeight="Bold" VerticalAlignment="Center" Margin="15,0,0,0" FontFamily="Consolas"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Placeholder content area -->
+        <Border Grid.Row="1" Background="#FAFAFA" BorderBrush="#DDDDDD" BorderThickness="1" Padding="10" Margin="0,0,0,10" CornerRadius="3">
+            <TextBlock Text="PLC communication area - add read/write operations as needed" Foreground="Gray" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+        </Border>
+
+        <!-- Status -->
+        <Border Grid.Row="2" Background="#E0E0E0" Padding="5" Margin="0,0,0,5">
+            <TextBlock x:Name="StatusText" Text="Ready" VerticalAlignment="Center"/>
+        </Border>
+
+        <!-- Log -->
+        <TextBox x:Name="LogTextBox" Grid.Row="3"
+                 IsReadOnly="True"
+                 FontFamily="Consolas" FontSize="11"
+                 VerticalScrollBarVisibility="Auto"
+                 Background="#1E1E1E" Foreground="#90EE90"
+                 AcceptsReturn="True" TextWrapping="Wrap"/>
+    </Grid>
+</Page>

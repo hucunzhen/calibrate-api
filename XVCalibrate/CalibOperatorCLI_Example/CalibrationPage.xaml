@@ -1,0 +1,69 @@
+<Page x:Class="CalibOperatorCLI_Example.CalibrationPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      Title="Calibration">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="150"/>
+        </Grid.RowDefinitions>
+
+        <!-- Buttons -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
+            <Button x:Name="BtnGenerateImage" Content="1. Generate Image" Width="150" Height="32" Margin="0,0,10,0" Click="BtnGenerateImage_Click"/>
+            <Button x:Name="BtnLoadImage" Content="2. Load Image" Width="150" Height="32" Margin="0,0,10,0" Click="BtnLoadImage_Click"/>
+            <Button x:Name="BtnGrabImage" Content="📷 Grab Image" Width="150" Height="32" Margin="0,0,10,0" Click="BtnGrabImage_Click" ToolTip="从相机采集一帧图像"/>
+            <Button x:Name="BtnConnectCamera" Content="🔌 Connect" Width="100" Height="32" Margin="0,0,10,0" Click="BtnConnectCamera_Click" ToolTip="连接/断开相机"/>
+            <Button x:Name="BtnDetectCircles" Content="3. Detect Circles" Width="150" Height="32" Margin="0,0,10,0" Click="BtnDetectCircles_Click"/>
+            <Button x:Name="BtnCalibrate" Content="4. Calibrate" Width="150" Height="32" Click="BtnCalibrate_Click"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+            <Button x:Name="BtnSaveResults" Content="5. Save Results" Width="150" Height="32" Margin="0,0,10,0" Click="BtnSaveResults_Click"/>
+            <Button x:Name="BtnTestTransform" Content="6. Test Transform" Width="150" Height="32" Margin="0,0,10,0" Click="BtnTestTransform_Click"/>
+            <Button x:Name="BtnAutoTrajTest" Content="7. AutoTrajTest" Width="150" Height="32" Margin="0,0,10,0" Click="BtnAutoTrajTest_Click"/>
+        </StackPanel>
+
+        <!-- Image display -->
+        <Border Grid.Row="2" BorderBrush="Black" BorderThickness="1" Background="Black" Margin="0,0,0,10"
+                ClipToBounds="True">
+            <ScrollViewer x:Name="ImageScrollViewer"
+                          HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Auto"
+                          PreviewMouseWheel="ImageScrollViewer_PreviewMouseWheel"
+                          PreviewMouseDown="ImageScrollViewer_PreviewMouseDown"
+                          PreviewMouseMove="ImageScrollViewer_PreviewMouseMove"
+                          PreviewMouseUp="ImageScrollViewer_PreviewMouseUp"
+                          PreviewMouseRightButtonUp="ImageScrollViewer_PreviewMouseRightButtonUp">
+                <Image x:Name="ImageDisplay"
+                       Stretch="Uniform"
+                       RenderOptions.BitmapScalingMode="HighQuality">
+                    <Image.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="保存图片" Click="SaveImage_Click"/>
+                        </ContextMenu>
+                    </Image.ContextMenu>
+                    <Image.LayoutTransform>
+                        <ScaleTransform x:Name="ImageScaleTransform" ScaleX="1" ScaleY="1"/>
+                    </Image.LayoutTransform>
+                </Image>
+            </ScrollViewer>
+        </Border>
+
+        <!-- Status bar -->
+        <Border Grid.Row="3" Background="#E0E0E0" Padding="5" Margin="0,0,0,10">
+            <TextBlock x:Name="StatusText" Text="Ready" VerticalAlignment="Center"/>
+        </Border>
+
+        <!-- Log -->
+        <TextBox x:Name="LogTextBox" Grid.Row="4"
+                 IsReadOnly="True"
+                 FontFamily="Consolas" FontSize="11"
+                 VerticalScrollBarVisibility="Auto"
+                 Background="#1E1E1E" Foreground="#90EE90"
+                 AcceptsReturn="True" TextWrapping="Wrap"/>
+    </Grid>
+</Page>

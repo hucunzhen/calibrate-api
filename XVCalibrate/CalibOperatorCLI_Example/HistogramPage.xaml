@@ -1,0 +1,117 @@
+<Page x:Class="CalibOperatorCLI_Example.HistogramPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      Title="Histogram Analysis">
+    <Grid Margin="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Toolbar Row 1: core actions -->
+        <WrapPanel Grid.Row="0" Margin="0,0,0,3">
+            <Button x:Name="BtnLoadImage" Content="加载图片" Width="68" Height="26" Margin="0,0,6,2" Click="BtnLoadImage_Click"/>
+            <Separator Width="1" Margin="4,2" Background="#CCCCCC"/>
+            <TextBlock Text="阈值线:" VerticalAlignment="Center" Margin="4,0,2,0" FontSize="12"/>
+            <CheckBox x:Name="ChkShowOtsu" Content="Otsu" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="12" IsChecked="True" Click="ChkThreshold_Click"/>
+            <CheckBox x:Name="ChkShowMean" Content="均值" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="12" Click="ChkThreshold_Click"/>
+            <CheckBox x:Name="ChkShowCustom" Content="自定义:" VerticalAlignment="Center" Margin="0,0,2,0" FontSize="12" Click="ChkThreshold_Click"/>
+            <TextBox x:Name="TxtCustomThreshold" Text="128" Width="40" Height="22" VerticalContentAlignment="Center" FontSize="12" TextChanged="TxtCustomThreshold_TextChanged"/>
+            <Separator Width="1" Margin="8,2" Background="#CCCCCC"/>
+            <TextBlock Text="模式:" VerticalAlignment="Center" Margin="4,0,2,0" FontSize="12"/>
+            <RadioButton x:Name="RbFullImage" Content="全图" GroupName="AnalysisMode" IsChecked="True" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="12" Click="ModeChanged_Click"/>
+            <RadioButton x:Name="RbROI" Content="ROI框选" GroupName="AnalysisMode" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="12" Click="ModeChanged_Click"/>
+            <Separator Width="1" Margin="8,2" Background="#CCCCCC"/>
+            <CheckBox x:Name="ChkLogScale" Content="对数刻度" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="12" Click="ChkLogScale_Click"/>
+            <CheckBox x:Name="ChkShowCumulative" Content="累积分布" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="12" Click="ChkShowCumulative_Click"/>
+            <CheckBox x:Name="ChkShowStats" Content="统计信息" VerticalAlignment="Center" IsChecked="True" FontSize="12" Click="ChkShowStats_Click"/>
+        </WrapPanel>
+
+        <!-- Toolbar Row 2: range selection -->
+        <WrapPanel Grid.Row="1" Margin="0,0,0,3">
+            <TextBlock Text="灰度范围:" VerticalAlignment="Center" Margin="4,0,3,0" FontSize="12" FontWeight="Bold"/>
+            <CheckBox x:Name="ChkEnableRange" Content="启用高亮" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="12" Click="RangeChanged_Click"/>
+            <TextBlock Text="Min" VerticalAlignment="Center" Margin="4,0,2,0" FontSize="12"/>
+            <TextBox x:Name="TxtRangeMin" Text="0" Width="40" Height="22" VerticalContentAlignment="Center" FontSize="12" TextChanged="RangeChanged_Click"/>
+            <TextBlock Text="~" VerticalAlignment="Center" Margin="3,0" FontSize="12"/>
+            <TextBlock Text="Max" VerticalAlignment="Center" Margin="3,0,2,0" FontSize="12"/>
+            <TextBox x:Name="TxtRangeMax" Text="255" Width="40" Height="22" VerticalContentAlignment="Center" FontSize="12" TextChanged="RangeChanged_Click"/>
+            <TextBlock x:Name="TxtRangeInfo" Text="" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="12" Foreground="#CC6600" FontWeight="Bold"/>
+        </WrapPanel>
+
+        <!-- Statistics panel -->
+        <Border x:Name="StatsPanel" Grid.Row="2" Background="#F5F5F5" BorderBrush="#CCCCCC" BorderThickness="1" Padding="6" Margin="0,0,0,4" CornerRadius="3">
+            <WrapPanel>
+                <TextBlock FontWeight="Bold" Text="统计：" Margin="0,0,8,0" FontSize="12"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,16,0">
+                    <TextBlock Text="像素数: " Foreground="#555" FontSize="12"/>
+                    <TextBlock x:Name="TxtPixelCount" Text="-" FontWeight="Bold" FontSize="12"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,16,0">
+                    <TextBlock Text="均值: " Foreground="#555" FontSize="12"/>
+                    <TextBlock x:Name="TxtMean" Text="-" FontWeight="Bold" FontSize="12"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,16,0">
+                    <TextBlock Text="标准差: " Foreground="#555" FontSize="12"/>
+                    <TextBlock x:Name="TxtStdDev" Text="-" FontWeight="Bold" FontSize="12"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,16,0">
+                    <TextBlock Text="最小: " Foreground="#555" FontSize="12"/>
+                    <TextBlock x:Name="TxtMin" Text="-" FontWeight="Bold" FontSize="12"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,16,0">
+                    <TextBlock Text="最大: " Foreground="#555" FontSize="12"/>
+                    <TextBlock x:Name="TxtMax" Text="-" FontWeight="Bold" FontSize="12"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,16,0">
+                    <TextBlock Text="中位数: " Foreground="#555" FontSize="12"/>
+                    <TextBlock x:Name="TxtMedian" Text="-" FontWeight="Bold" FontSize="12"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,16,0">
+                    <TextBlock Text="Otsu阈值: " Foreground="#555" FontSize="12"/>
+                    <TextBlock x:Name="TxtOtsu" Text="-" FontWeight="Bold" Foreground="#CC0000" FontSize="12"/>
+                </StackPanel>
+            </WrapPanel>
+        </Border>
+
+        <!-- Main area: histogram + image side by side -->
+        <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="3"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Histogram canvas -->
+            <Border Grid.Column="0" BorderBrush="#CCCCCC" BorderThickness="1" Background="White" Margin="0,0,0,0"
+                    ClipToBounds="True" MouseMove="HistogramCanvas_MouseMove" MouseLeave="HistogramCanvas_MouseLeave">
+                <Canvas x:Name="HistogramCanvas" ClipToBounds="True"/>
+            </Border>
+
+            <GridSplitter Grid.Column="1" Width="3" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="#DDDDDD"/>
+
+            <!-- Image preview -->
+            <Border Grid.Column="2" BorderBrush="Black" BorderThickness="1" Background="Black"
+                    ClipToBounds="True">
+                <Grid>
+                    <Image x:Name="ImagePreview" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+                    <!-- ROI selection rectangle -->
+                    <Rectangle x:Name="RoiRect" Stroke="Red" StrokeThickness="2" StrokeDashArray="5,3"
+                               Fill="#33000000" Visibility="Collapsed"
+                               MouseLeftButtonDown="RoiRect_MouseLeftButtonDown"
+                               MouseMove="RoiRect_MouseMove"
+                               MouseLeftButtonUp="RoiRect_MouseLeftButtonUp"
+                               Cursor="Cross"/>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Status bar -->
+        <Border Grid.Row="4" Background="#E0E0E0" Padding="4,3">
+            <TextBlock x:Name="StatusText" Text="Ready" VerticalAlignment="Center" FontSize="12"/>
+        </Border>
+    </Grid>
+</Page>

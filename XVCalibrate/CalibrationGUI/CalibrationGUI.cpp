@@ -379,6 +379,7 @@ static double g_avgError = 0;        // 平均误差（毫米）
 static double g_maxError = 0;        // 最大误差（毫米）
 static int g_step = 0;               // 当前工作流程步骤
 static DetectMethod g_detectMethod = METHOD_OPENCV;  // 当前使用的检测方法
+static int g_useContourMode = 1;  // 是否使用 Canvas 轮廓采样模式（0=旧方案, 1=Canvas）
 
 // 世界坐标（物理坐标，单位：毫米）
 // 标定板的9个已知点位置，呈3x3网格分布
@@ -1317,7 +1318,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 // 调用 DetectTrajectoryOpenCV（新签名：传入 stepImages/stepBarIds）
                 FreeStepImages();
                 DetectTrajectoryOpenCV(&g_image, g_trajPixels, &g_trajCount,
-                                      g_stepImages, g_trajBarId, STEP_COUNT);
+                                      g_stepImages, g_trajBarId, STEP_COUNT,
+                                      g_useContourMode);
                 LOG_INFO("Auto-test: detected %d trajectory points", g_trajCount);
 
                 ShowTrajectoryImage(&g_image, g_trajPixels, g_trajCount);
@@ -1611,7 +1613,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     // 执行OpenCV轨迹检测（包含6步中间结果）
                     LOG_INFO("Button 7: Starting OpenCV trajectory detection...");
                     DetectTrajectoryOpenCV(&g_image, g_trajPixels, &g_trajCount,
-                                          g_stepImages, g_trajBarId, STEP_COUNT);
+                                          g_stepImages, g_trajBarId, STEP_COUNT,
+                                          g_useContourMode);
                     LOG_INFO("Button 7: Detection complete, found %d trajectory points", g_trajCount);
 
                     // 统计各暗条的点数量

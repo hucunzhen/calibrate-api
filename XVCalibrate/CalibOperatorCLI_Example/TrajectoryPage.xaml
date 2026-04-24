@@ -1,0 +1,192 @@
+<Page x:Class="CalibOperatorCLI_Example.TrajectoryPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      Title="Trajectory Detection">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="150"/>
+        </Grid.RowDefinitions>
+
+        <!-- Step buttons -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,5">
+            <Button x:Name="BtnLoadTrajImg" Content="1.Load" Width="72" Height="28" Margin="0,0,3,0" Click="BtnLoadTrajImg_Click" ToolTip="加载待检测图像"/>
+            <Button x:Name="BtnStep1" Content="2.Gray" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep1_Click" ToolTip="转换为灰度图像，可选应用 CLAHE 增强对比度"/>
+            <Button x:Name="BtnStep2" Content="3.Contour" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep2_Click" ToolTip="查找图像中的轮廓，提取工件外边缘"/>
+            <Button x:Name="BtnCanny" Content="2b.Canny" Width="72" Height="28" Margin="0,0,3,0" Click="BtnCanny_Click" ToolTip="Canny边缘检测，提取清晰边缘轮廓"/>
+            <Button x:Name="BtnStep3" Content="4.Mask" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep3_Click" ToolTip="根据轮廓生成掩码，限定检测区域"/>
+            <Button x:Name="BtnStep4" Content="5.Dark" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep4_Click" ToolTip="检测暗条区域（工件内部暗纹）"/>
+            <Button x:Name="BtnStep5" Content="6.Morph" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep5_Click" ToolTip="形态学处理：闭运算 + 模糊 + 重二值化，平滑暗条区域"/>
+            <Button x:Name="BtnExpandEdge" Content="5.5.Exp" Width="72" Height="28" Margin="0,0,3,0" Click="BtnExpandEdge_Click" ToolTip="边界约束膨胀，将暗条区域向外扩展至工件边缘"/>
+            <Button x:Name="BtnStep6" Content="7.Sort" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep6_Click" ToolTip="对轮廓按面积排序，筛选有效暗条轮廓"/>
+            <Button x:Name="BtnStep7" Content="8.Sample" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep7_Click" ToolTip="沿暗条窄带采样，生成轨迹点序列"/>
+            <Button x:Name="BtnFit" Content="8.5 Fit" Width="60" Height="28" Margin="0,0,3,0" Click="BtnFit_Click" ToolTip="轨迹拟合或曲率去噪"/>
+            <Button x:Name="BtnStep8" Content="9.Verify" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep8_Click" ToolTip="验证轨迹有效性，剔除异常点"/>
+            <Button x:Name="BtnStep9" Content="10.Dedup" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep9_Click" ToolTip="去除重复或过近的轨迹点"/>
+            <Button x:Name="BtnStep10" Content="11.Out" Width="72" Height="28" Click="BtnStep10_Click" ToolTip="输出最终检测结果"/>
+        </StackPanel>
+
+        <!-- Parameters -->
+        <Border Grid.Row="1" Background="#F5F5F5" BorderBrush="#CCCCCC" BorderThickness="1" Padding="10" Margin="0,0,0,5" CornerRadius="3">
+            <StackPanel>
+                <TextBlock Text="Step Parameters:" FontWeight="Bold" Margin="0,0,0,5"/>
+                <WrapPanel>
+                    <StackPanel x:Name="SpStep2Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
+                        <TextBlock Text="Blur Kernel:" VerticalAlignment="Center" Width="100" ToolTip="高斯模糊核大小，用于灰度图预处理去噪，值越大越平滑（奇数）"/>
+                        <TextBox x:Name="TxtStep2Blur" Text="7" Width="50" Height="24" VerticalContentAlignment="Center" ToolTip="高斯模糊核大小，用于灰度图预处理去噪，值越大越平滑（奇数）"/>
+                        <TextBlock Text="Morph Kernel:" VerticalAlignment="Center" Margin="15,0,0,0" ToolTip="形态学操作核大小，用于填充轮廓断裂区域"/>
+                        <TextBox x:Name="TxtStep2Morph" Text="5" Width="50" Height="24" VerticalContentAlignment="Center" Margin="5,0,0,0" ToolTip="形态学操作核大小，用于填充轮廓断裂区域"/>
+                    </StackPanel>
+                    <StackPanel x:Name="SpStep2bParams" Margin="0,0,20,5" Visibility="Collapsed">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
+                            <TextBlock Text="Threshold Mult:" VerticalAlignment="Center" Width="100" ToolTip="Canny 阈值自动计算时的乘数因子，增大可检测更弱边缘"/>
+                            <TextBox x:Name="TxtCannyMult" Text="1.0" Width="50" Height="24" VerticalContentAlignment="Center" ToolTip="Canny 阈值自动计算时的乘数因子，增大可检测更弱边缘"/>
+                            <TextBlock Text="Blur:" VerticalAlignment="Center" Margin="15,0,0,0" ToolTip="Canny 前置高斯模糊核大小"/>
+                            <TextBox x:Name="TxtCannyBlur" Text="5" Width="50" Height="24" VerticalContentAlignment="Center" ToolTip="Canny 前置高斯模糊核大小"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,2,0,2">
+                            <TextBlock Text="Bilateral D:" VerticalAlignment="Center" Width="100" ToolTip="双边滤波邻域直径，用于保边去噪"/>
+                            <TextBox x:Name="TxtCannyBilateralD" Text="9" Width="50" Height="24" VerticalContentAlignment="Center" ToolTip="双边滤波邻域直径，用于保边去噪"/>
+                            <TextBlock Text="SigmaColor:" VerticalAlignment="Center" Margin="10,0,0,0" ToolTip="颜色域标准差，值越大颜色差异大的像素也参与滤波"/>
+                            <TextBox x:Name="TxtCannyBilateralSC" Text="75" Width="50" Height="24" VerticalContentAlignment="Center" ToolTip="颜色域标准差，值越大颜色差异大的像素也参与滤波"/>
+                            <TextBlock Text="SigmaSpace:" VerticalAlignment="Center" Margin="10,0,0,0" ToolTip="空间域标准差，值越大远处像素也参与滤波"/>
+                            <TextBox x:Name="TxtCannyBilateralSS" Text="75" Width="50" Height="24" VerticalContentAlignment="Center" ToolTip="空间域标准差，值越大远处像素也参与滤波"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,2,0,2">
+                            <TextBlock Text="NLMeans H:" VerticalAlignment="Center" Width="100" ToolTip="非局部均值去噪的滤波强度参数，0=禁用，推荐 3~15"/>
+                            <TextBox x:Name="TxtCannyNlmeansH" Text="0" Width="50" Height="24" VerticalContentAlignment="Center" ToolTip="非局部均值去噪的滤波强度参数，0=禁用，推荐 3~15"/>
+                            <TextBlock Text="Template:" VerticalAlignment="Center" Margin="10,0,0,0" ToolTip="NLMeans 模板窗口大小（奇数）"/>
+                            <TextBox x:Name="TxtCannyNlmeansT" Text="7" Width="40" Height="24" VerticalContentAlignment="Center" ToolTip="NLMeans 模板窗口大小（奇数）"/>
+                            <TextBlock Text="Search:" VerticalAlignment="Center" Margin="10,0,0,0" ToolTip="NLMeans 搜索窗口大小（奇数），值越大越慢但去噪越好"/>
+                            <TextBox x:Name="TxtCannyNlmeansS" Text="21" Width="40" Height="24" VerticalContentAlignment="Center" ToolTip="NLMeans 搜索窗口大小（奇数），值越大越慢但去噪越好"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                            <TextBlock Text="Manual Low:" VerticalAlignment="Center" Width="100" ToolTip="手动设置 Canny 低阈值，0=自动计算"/>
+                            <TextBox x:Name="TxtCannyLow" Text="0" Width="50" Height="24" VerticalContentAlignment="Center" ToolTip="手动设置 Canny 低阈值，0=自动计算"/>
+                            <TextBlock Text="High:" VerticalAlignment="Center" Margin="5,0,0,0" ToolTip="手动设置 Canny 高阈值，0=自动计算"/>
+                            <TextBox x:Name="TxtCannyHigh" Text="0" Width="50" Height="24" VerticalContentAlignment="Center" ToolTip="手动设置 Canny 高阈值，0=自动计算"/>
+                        </StackPanel>
+                    </StackPanel>
+                    <StackPanel x:Name="SpStep3Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
+                        <TextBlock Text="Mask ContourIdx:" VerticalAlignment="Center" Width="100" ToolTip="选择哪个轮廓作为掩码，0=自动选择最大轮廓"/>
+                        <TextBox x:Name="TxtStep3ContourIdx" Text="0" Width="60" Height="24" VerticalContentAlignment="Center" ToolTip="选择哪个轮廓作为掩码，0=自动选择最大轮廓"/>
+                        <TextBlock Text=" (0=auto)" VerticalAlignment="Center" Foreground="Gray" Margin="5,0,0,0"/>
+                    </StackPanel>
+                    <StackPanel x:Name="SpStep4Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
+                        <TextBlock Text="Dark Threshold:" VerticalAlignment="Center" Width="100" ToolTip="暗条灰度阈值，低于此值的像素被视为暗条区域"/>
+                        <TextBox x:Name="TxtStep4Threshold" Text="50" Width="60" Height="24" VerticalContentAlignment="Center" ToolTip="暗条灰度阈值，低于此值的像素被视为暗条区域"/>
+                    </StackPanel>
+                    <StackPanel x:Name="SpStep5Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
+                        <TextBlock Text="Morph Kernel:" VerticalAlignment="Center" Width="100" ToolTip="形态学操作核大小，用于闭合暗条区域内的断裂"/>
+                        <TextBox x:Name="TxtStep5Kernel" Text="5" Width="50" Height="24" VerticalContentAlignment="Center" ToolTip="形态学操作核大小，用于闭合暗条区域内的断裂"/>
+                        <TextBlock Text="Blur Kernel:" VerticalAlignment="Center" Margin="15,0,0,0" ToolTip="重二值化前的高斯模糊核大小，值越大边缘越光滑"/>
+                        <TextBox x:Name="TxtStep5Blur" Text="9" Width="50" Height="24" VerticalContentAlignment="Center" Margin="5,0,0,0" ToolTip="重二值化前的高斯模糊核大小，值越大边缘越光滑"/>
+                        <TextBlock Text="Blur Sigma:" VerticalAlignment="Center" Margin="15,0,0,0" ToolTip="高斯模糊标准差，控制平滑强度"/>
+                        <TextBox x:Name="TxtStep5BlurSigma" Text="2.0" Width="50" Height="24" VerticalContentAlignment="Center" Margin="5,0,0,0" ToolTip="高斯模糊标准差，控制平滑强度"/>
+                        <TextBlock Text="Expand:" VerticalAlignment="Center" Margin="15,0,0,0" ToolTip="暗条区域向外扩展像素数，增大可覆盖更多边缘"/>
+                        <TextBox x:Name="TxtStep5Expand" Text="15" Width="50" Height="24" VerticalContentAlignment="Center" Margin="5,0,0,0" ToolTip="暗条区域向外扩展像素数，增大可覆盖更多边缘"/>
+                    </StackPanel>
+                    <StackPanel x:Name="SpStep7Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
+                        <TextBlock Text="Sample Bars:" VerticalAlignment="Center" Width="100" ToolTip="沿暗条等距采样的条数，值越大轨迹点越密集"/>
+                        <TextBox x:Name="TxtStep7Bars" Text="16" Width="60" Height="24" VerticalContentAlignment="Center" ToolTip="沿暗条等距采样的条数，值越大轨迹点越密集"/>
+                        <TextBlock Text="Band Width:" VerticalAlignment="Center" Margin="15,0,0,0" ToolTip="窄带采样宽度（像素），控制采样区域宽度"/>
+                        <TextBox x:Name="TxtStep7BandWidth" Text="8" Width="50" Height="24" VerticalContentAlignment="Center" Margin="5,0,0,0" ToolTip="窄带采样宽度（像素），控制采样区域宽度"/>
+                        <CheckBox x:Name="ChkContourMode" Content="Canvas轮廓采样" IsChecked="true" VerticalAlignment="Center" Margin="15,0,0,0" ToolTip="使用 Canvas 轮廓模式采样，更平滑的轨迹生成方式"/>
+                    </StackPanel>
+                    <StackPanel x:Name="SpStep75Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
+                        <TextBlock Text="Fit Mode:" VerticalAlignment="Center" Width="100" ToolTip="轨迹拟合模式：Stadium=跑道型椭圆拟合，曲率去噪=基于曲率滤波去噪"/>
+                        <ComboBox x:Name="CmbFitMode" Width="130" Height="24" VerticalContentAlignment="Center" SelectedIndex="0" ToolTip="轨迹拟合模式：Stadium=跑道型椭圆拟合，曲率去噪=基于曲率滤波去噪">
+                            <ComboBoxItem Content="Stadium跑道型"/>
+                            <ComboBoxItem Content="曲率去噪"/>
+                        </ComboBox>
+                    </StackPanel>
+                </WrapPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- CLAHE options -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,5">
+            <CheckBox x:Name="ChkCLAHE" Content="CLAHE" VerticalAlignment="Center" Margin="0,0,10,0"
+                      ToolTip="对比度受限自适应直方图均衡化，增强局部对比度使边缘更清晰"/>
+            <TextBlock Text="ClipLimit:" VerticalAlignment="Center" ToolTip="对比度限制阈值，典型值 2.0~4.0，值越大局部对比度增强越强"/>
+            <TextBox x:Name="TxtCLAHEClip" Text="2.0" Width="50" Height="24" VerticalContentAlignment="Center" Margin="3,0,0,0"
+                     ToolTip="对比度限制阈值，典型值 2.0~4.0，值越大局部对比度增强越强"/>
+            <TextBlock Text="TileSize:" VerticalAlignment="Center" Margin="10,0,0,0" ToolTip="分块大小（像素），通常 8 或 16，值越大局部适应性越弱"/>
+            <TextBox x:Name="TxtCLAHEGrid" Text="8" Width="50" Height="24" VerticalContentAlignment="Center" Margin="3,0,0,0"
+                     ToolTip="分块大小（像素），通常 8 或 16，值越大局部适应性越弱"/>
+        </StackPanel>
+
+        <!-- Quick auto-detect -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,5">
+            <Button x:Name="BtnAutoDetect" Content="一键自动检测" Width="120" Height="28" Click="BtnAutoDetect_Click"/>
+            <Button x:Name="BtnHollowDetect" Content="空洞检测" Width="100" Height="28" Margin="10,0,0,0" Click="BtnHollowDetect_Click"
+                    ToolTip="空洞检测方案：二值化→最大轮廓→5-50固定阈值找空洞→采样"/>
+            <TextBlock Text="Blur:" VerticalAlignment="Center" Margin="8,0,0,0" ToolTip="高斯模糊核大小（奇数）"/>
+            <TextBox x:Name="TxtHollowBlur" Text="7" Width="50" Height="24" VerticalContentAlignment="Center" Margin="3,0,0,0"
+                     ToolTip="高斯模糊核大小（奇数）"/>
+            <TextBlock Text="Morph:" VerticalAlignment="Center" Margin="8,0,0,0" ToolTip="形态学核大小（奇数）"/>
+            <TextBox x:Name="TxtHollowMorph" Text="5" Width="50" Height="24" VerticalContentAlignment="Center" Margin="3,0,0,0"
+                     ToolTip="形态学核大小（奇数）"/>
+        </StackPanel>
+
+        <!-- Image display -->
+        <Border Grid.Row="4" BorderBrush="Black" BorderThickness="1" Background="Black" Margin="0,0,0,5"
+                ClipToBounds="True">
+            <Grid x:Name="ImageContainer">
+                <!-- 单图显示（默认） -->
+                <ScrollViewer x:Name="ImageScrollViewer"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Auto"
+                              PreviewMouseWheel="ImageScrollViewer_PreviewMouseWheel"
+                              PreviewMouseDown="ImageScrollViewer_PreviewMouseDown"
+                              PreviewMouseMove="ImageScrollViewer_PreviewMouseMove"
+                              PreviewMouseUp="ImageScrollViewer_PreviewMouseUp"
+                              PreviewMouseRightButtonUp="ImageScrollViewer_PreviewMouseRightButtonUp">
+                    <Image x:Name="ImageDisplay"
+                           Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="HighQuality">
+                        <Image.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="保存图片" Click="SaveImage_Click"/>
+                            </ContextMenu>
+                        </Image.ContextMenu>
+                        <Image.LayoutTransform>
+                            <ScaleTransform x:Name="ImageScaleTransform" ScaleX="1" ScaleY="1"/>
+                        </Image.LayoutTransform>
+                    </Image>
+                </ScrollViewer>
+
+                <!-- 步骤图网格显示（空洞检测后） -->
+                <ScrollViewer x:Name="StepGridScrollViewer"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Auto"
+                              Visibility="Collapsed"
+                              PreviewMouseWheel="StepGridScrollViewer_PreviewMouseWheel">
+                    <UniformGrid x:Name="StepImageGrid" Columns="3" Margin="4">
+                        <UniformGrid.LayoutTransform>
+                            <ScaleTransform x:Name="StepGridScaleTransform" ScaleX="1" ScaleY="1"/>
+                        </UniformGrid.LayoutTransform>
+                    </UniformGrid>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <!-- Status -->
+        <Border Grid.Row="5" Background="#E0E0E0" Padding="5" Margin="0,0,0,5">
+            <TextBlock x:Name="StatusText" Text="Ready" VerticalAlignment="Center"/>
+        </Border>
+
+        <!-- Log -->
+        <TextBox x:Name="LogTextBox" Grid.Row="6"
+                 IsReadOnly="True"
+                 FontFamily="Consolas" FontSize="11"
+                 VerticalScrollBarVisibility="Auto"
+                 Background="#1E1E1E" Foreground="#90EE90"
+                 AcceptsReturn="True" TextWrapping="Wrap"/>
+    </Grid>
+</Page>
