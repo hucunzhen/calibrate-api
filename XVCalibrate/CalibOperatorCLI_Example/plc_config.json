@@ -38,6 +38,12 @@
     "RunStatus": "M510"
   },
 
+  "GvarList": {
+    "StartAddress": "D5000",
+    "MaxCount": 1024,
+    "RegistersPerItem": 28
+  },
+
   "BitActions": {
     "XForward": { "Register": "D2025", "Bit": 0, "Value": true },
     "XReverse": { "Register": "D2025", "Bit": 8, "Value": true },

@@ -7,6 +7,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="150"/>
         </Grid.RowDefinitions>
 
@@ -181,13 +182,58 @@
             </StackPanel>
         </Border>
 
+        <!-- GVAR List -->
+        <Border Grid.Row="2" Background="#FAFAFA" BorderBrush="#7B1FA2" BorderThickness="1" Padding="10" Margin="0,0,0,5" CornerRadius="3">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
+                    <TextBlock Text="GVAR List" FontWeight="Bold" Foreground="#7B1FA2" Margin="0,0,10,0"/>
+                    <TextBlock Text="Addr:" VerticalAlignment="Center" Margin="0,0,3,0" Foreground="#666"/>
+                    <TextBlock x:Name="TxtGvarAddr" Text="D5000" VerticalAlignment="Center" Margin="0,0,6,0" FontFamily="Consolas" FontWeight="Bold"/>
+                    <TextBlock Text="Count:" VerticalAlignment="Center" Margin="0,0,3,0" Foreground="#666"/>
+                    <TextBox x:Name="TxtGvarCount" Text="50" Width="45" Height="24" VerticalContentAlignment="Center" Margin="0,0,6,0" ToolTip="读取条数"/>
+                    <Button x:Name="BtnReadGvar" Content="Read" Width="55" Height="26" Margin="0,0,4,0" Click="BtnReadGvar_Click"/>
+                    <Button x:Name="BtnWriteGvar" Content="Write All" Width="65" Height="26" Margin="0,0,4,0" Click="BtnWriteGvar_Click" Foreground="#1565C0" FontWeight="Bold"/>
+                    <Button x:Name="BtnClearGvar" Content="Clear" Width="55" Height="26" Margin="0,0,4,0" Click="BtnClearGvar_Click" Foreground="#D32F2F"/>
+                    <Button x:Name="BtnAddGvar" Content="+" Width="26" Height="26" Margin="0,0,4,0" Click="BtnAddGvar_Click" FontWeight="Bold" FontSize="14"/>
+                    <Button x:Name="BtnRemoveGvar" Content="-" Width="26" Height="26" Margin="0,0,0,0" Click="BtnRemoveGvar_Click" FontWeight="Bold" FontSize="14" Foreground="#D32F2F"/>
+                </StackPanel>
+                <DataGrid x:Name="DgGvarList"
+                          AutoGenerateColumns="False"
+                          CanUserAddRows="False"
+                          CanUserDeleteRows="False"
+                          SelectionMode="Single"
+                          FontFamily="Consolas" FontSize="11"
+                          HeadersVisibility="Column"
+                          GridLinesVisibility="All"
+                          AlternatingRowBackground="#F5F5F5">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="35" IsReadOnly="True"/>
+                        <DataGridTextColumn Header="type1" Binding="{Binding type1}" Width="50"/>
+                        <DataGridTextColumn Header="p0.x" Binding="{Binding p0x, StringFormat=F3}" Width="65"/>
+                        <DataGridTextColumn Header="p0.y" Binding="{Binding p0y, StringFormat=F3}" Width="65"/>
+                        <DataGridTextColumn Header="p0.z" Binding="{Binding p0z, StringFormat=F3}" Width="65"/>
+                        <DataGridTextColumn Header="p1.x" Binding="{Binding p1x, StringFormat=F3}" Width="65"/>
+                        <DataGridTextColumn Header="p1.y" Binding="{Binding p1y, StringFormat=F3}" Width="65"/>
+                        <DataGridTextColumn Header="p1.z" Binding="{Binding p1z, StringFormat=F3}" Width="65"/>
+                        <DataGridTextColumn Header="cx" Binding="{Binding cx, StringFormat=F3}" Width="65"/>
+                        <DataGridTextColumn Header="cy" Binding="{Binding cy, StringFormat=F3}" Width="65"/>
+                        <DataGridTextColumn Header="r" Binding="{Binding r, StringFormat=F3}" Width="55"/>
+                        <DataGridTextColumn Header="start°" Binding="{Binding start_deg, StringFormat=F3}" Width="55"/>
+                        <DataGridTextColumn Header="end°" Binding="{Binding end_deg, StringFormat=F3}" Width="55"/>
+                        <DataGridTextColumn Header="z0" Binding="{Binding z0, StringFormat=F3}" Width="55"/>
+                        <DataGridTextColumn Header="z1" Binding="{Binding z1, StringFormat=F3}" Width="55"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </DockPanel>
+        </Border>
+
         <!-- Status -->
-        <Border Grid.Row="2" Background="#E0E0E0" Padding="5" Margin="0,0,0,5">
+        <Border Grid.Row="3" Background="#E0E0E0" Padding="5" Margin="0,0,0,5">
             <TextBlock x:Name="StatusText" Text="Ready" VerticalAlignment="Center"/>
         </Border>
 
         <!-- Log -->
-        <TextBox x:Name="LogTextBox" Grid.Row="3"
+        <TextBox x:Name="LogTextBox" Grid.Row="4"
                  IsReadOnly="True"
                  FontFamily="Consolas" FontSize="11"
                  VerticalScrollBarVisibility="Auto"

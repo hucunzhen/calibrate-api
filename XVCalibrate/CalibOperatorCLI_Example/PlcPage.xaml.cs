@@ -107,6 +107,9 @@ namespace CalibOperatorCLI_Example
             LblZManualSpd.Text = $"ManualSpd {TryReg("ZManualSpeed", "---")}:";
             LblZPosLimit.Text = $"+Limit {TryReg("ZPosLimit", "---")}:";
             LblZNegLimit.Text = $"-Limit {TryReg("ZNegLimit", "---")}:";
+
+            // GVAR 列表地址
+            TxtGvarAddr.Text = _config?.GvarList?.StartAddress ?? "D5000";
         }
 
         private string TryReg(string key, string fallback)
@@ -287,6 +290,180 @@ namespace CalibOperatorCLI_Example
 
             var result = _plc.ReadBool(coilAddr.ToString());
             return result.IsSuccess && result.Content;
+        }
+
+        // ===== GVAR 列表读写 =====
+        private GVAR[]? _gvarList;
+
+        /// <summary>
+        /// GVAR 列表在内存中的缓存
+        /// </summary>
+        public GVAR[] GvarList => _gvarList ?? Array.Empty<GVAR>();
+
+        /// <summary>
+        /// 读取 GVAR 列表（从 D5000 开始，批量读取所有寄存器后解析）
+        /// </summary>
+        private bool ReadGvarList(int count)
+        {
+            if (_plc == null || !_plcConnected) return false;
+            var gvarCfg = _config?.GvarList;
+            if (gvarCfg == null)
+            {
+                Log("[PLC] GvarList 未在配置中定义");
+                return false;
+            }
+
+            int totalRegisters = count * GVAR.WORD_COUNT;
+            if (totalRegisters <= 0 || totalRegisters > 2000)
+            {
+                Log($"[PLC] GVAR count={count} 无效（寄存器总数={totalRegisters}）");
+                return false;
+            }
+
+            int startAddr = XinjeAddressToModbus(gvarCfg.StartAddress);
+            if (startAddr < 0)
+            {
+                Log($"[PLC] GVAR 起始地址无效: {gvarCfg.StartAddress}");
+                return false;
+            }
+
+            var result = _plc.ReadUInt16(startAddr.ToString(), (ushort)totalRegisters);
+            if (!result.IsSuccess)
+            {
+                Log($"[PLC] 读取 GVAR 列表失败: {result.Message}");
+                return false;
+            }
+
+            ushort[] regs = result.Content;
+            _gvarList = new GVAR[count];
+            for (int i = 0; i < count; i++)
+            {
+                int offset = i * GVAR.WORD_COUNT;
+                if (offset + GVAR.WORD_COUNT <= regs.Length)
+                    _gvarList[i] = GVAR.FromRegisters(regs, offset);
+            }
+
+            Log($"[PLC] 读取 GVAR 列表成功：{count} 项，起始 {gvarCfg.StartAddress}，共 {totalRegisters} 寄存器");
+            return true;
+        }
+
+        /// <summary>
+        /// 写入 GVAR 列表（将缓存中的数据批量写入 PLC）
+        /// </summary>
+        private bool WriteGvarList()
+        {
+            if (_plc == null || !_plcConnected) return false;
+            if (_gvarList == null || _gvarList.Length == 0)
+            {
+                Log("[PLC] GVAR 列表为空，无数据可写入");
+                return false;
+            }
+
+            var gvarCfg = _config?.GvarList;
+            if (gvarCfg == null)
+            {
+                Log("[PLC] GvarList 未在配置中定义");
+                return false;
+            }
+
+            int count = _gvarList.Length;
+            int totalRegisters = count * GVAR.WORD_COUNT;
+            int startAddr = XinjeAddressToModbus(gvarCfg.StartAddress);
+            if (startAddr < 0)
+            {
+                Log($"[PLC] GVAR 起始地址无效: {gvarCfg.StartAddress}");
+                return false;
+            }
+
+            // 组装所有寄存器数据
+            ushort[] regs = new ushort[totalRegisters];
+            for (int i = 0; i < count; i++)
+                _gvarList[i].ToRegisters(regs, i * GVAR.WORD_COUNT);
+
+            var result = _plc.Write(startAddr.ToString(), regs);
+            if (!result.IsSuccess)
+            {
+                Log($"[PLC] 写入 GVAR 列表失败: {result.Message}");
+                return false;
+            }
+
+            Log($"[PLC] 写入 GVAR 列表成功：{count} 项，起始 {gvarCfg.StartAddress}，共 {totalRegisters} 寄存器");
+            return true;
+        }
+
+        private void RefreshGvarGrid()
+        {
+            if (_gvarList == null) return;
+            var items = new List<GvarItemViewModel>();
+            for (int i = 0; i < _gvarList.Length; i++)
+                items.Add(GvarItemViewModel.FromGVAR(i, _gvarList[i]));
+            DgGvarList.ItemsSource = items;
+        }
+
+        private void BtnReadGvar_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            if (!int.TryParse(TxtGvarCount.Text.Trim(), out int count) || count <= 0 || count > 200)
+            {
+                MessageBox.Show("条数应为 1-200 的整数", "输入错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            if (ReadGvarList(count))
+            {
+                RefreshGvarGrid();
+                Log($"[PLC] GVAR 列表已刷新：{count} 项");
+            }
+        }
+
+        private void BtnWriteGvar_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+
+            // 从 DataGrid 收集数据写回 _gvarList
+            var items = DgGvarList.ItemsSource as List<GvarItemViewModel>;
+            if (items == null || items.Count == 0)
+            {
+                MessageBox.Show("列表为空，无数据可写入", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            _gvarList = new GVAR[items.Count];
+            for (int i = 0; i < items.Count; i++)
+                _gvarList[i] = items[i].ToGVAR();
+
+            if (WriteGvarList())
+                Log($"[PLC] 已将 {items.Count} 条 GVAR 写入 PLC");
+        }
+
+        private void BtnClearGvar_Click(object sender, RoutedEventArgs e)
+        {
+            _gvarList = Array.Empty<GVAR>();
+            DgGvarList.ItemsSource = new List<GvarItemViewModel>();
+            Log("[PLC] GVAR 列表已清空");
+        }
+
+        private void BtnAddGvar_Click(object sender, RoutedEventArgs e)
+        {
+            var items = DgGvarList.ItemsSource as List<GvarItemViewModel> ?? new List<GvarItemViewModel>();
+            items.Add(GvarItemViewModel.FromGVAR(items.Count, new GVAR()));
+            DgGvarList.ItemsSource = null;
+            DgGvarList.ItemsSource = items;
+        }
+
+        private void BtnRemoveGvar_Click(object sender, RoutedEventArgs e)
+        {
+            var items = DgGvarList.ItemsSource as List<GvarItemViewModel>;
+            if (items == null || items.Count == 0) return;
+            var selected = DgGvarList.SelectedItem as GvarItemViewModel;
+            if (selected != null && items.Remove(selected))
+            {
+                // 重新编号
+                for (int i = 0; i < items.Count; i++)
+                    items[i].Index = i;
+                DgGvarList.ItemsSource = null;
+                DgGvarList.ItemsSource = items;
+                Log($"[PLC] 已删除第 {selected.Index} 条 GVAR");
+            }
         }
 
         private DispatcherTimer? _holdTimer;
@@ -683,12 +860,182 @@ namespace CalibOperatorCLI_Example
         public int HdModbusOffset { get; set; } = 0xA080;
         public Dictionary<string, string>? Registers { get; set; }
         public Dictionary<string, BitActionConfig>? BitActions { get; set; }
+        public GvarListConfig? GvarList { get; set; }
 
         internal class BitActionConfig
         {
             public string Register { get; set; } = "";
             public int Bit { get; set; }
             public bool Value { get; set; }
+        }
+
+        internal class GvarListConfig
+        {
+            public string StartAddress { get; set; } = "D5000";
+            public int MaxCount { get; set; } = 50;
+            /// <summary>
+            /// 每个 GVAR 占用的寄存器数量
+            /// short(1) + pad(1) + SpVec3(6) + SpVec3(6) + 7*float(14) = 28
+            /// </summary>
+            public int RegistersPerItem { get; set; } = 28;
+        }
+    }
+
+    /// <summary>
+    /// 三维向量（float）
+    /// </summary>
+    public struct SpVec3
+    {
+        public float x;
+        public float y;
+        public float z;
+
+        public SpVec3(float x, float y, float z)
+        {
+            this.x = x;
+            this.y = y;
+            this.z = z;
+        }
+    }
+
+    /// <summary>
+    /// GVAR DataGrid 行绑定的 ViewModel（struct 字段展开为属性，支持双向绑定）
+    /// </summary>
+    public class GvarItemViewModel
+    {
+        public int Index { get; set; }
+        public short type1 { get; set; }
+        public float p0x { get; set; }
+        public float p0y { get; set; }
+        public float p0z { get; set; }
+        public float p1x { get; set; }
+        public float p1y { get; set; }
+        public float p1z { get; set; }
+        public float cx { get; set; }
+        public float cy { get; set; }
+        public float r { get; set; }
+        public float start_deg { get; set; }
+        public float end_deg { get; set; }
+        public float z0 { get; set; }
+        public float z1 { get; set; }
+
+        public GVAR ToGVAR()
+        {
+            return new GVAR
+            {
+                type1 = type1,
+                spVec3_p0 = new SpVec3(p0x, p0y, p0z),
+                spVec3_p1 = new SpVec3(p1x, p1y, p1z),
+                cx = cx, cy = cy, r = r,
+                start_deg = start_deg, end_deg = end_deg,
+                z0 = z0, z1 = z1
+            };
+        }
+
+        public static GvarItemViewModel FromGVAR(int index, GVAR g)
+        {
+            return new GvarItemViewModel
+            {
+                Index = index,
+                type1 = g.type1,
+                p0x = g.spVec3_p0.x, p0y = g.spVec3_p0.y, p0z = g.spVec3_p0.z,
+                p1x = g.spVec3_p1.x, p1y = g.spVec3_p1.y, p1z = g.spVec3_p1.z,
+                cx = g.cx, cy = g.cy, r = g.r,
+                start_deg = g.start_deg, end_deg = g.end_deg,
+                z0 = g.z0, z1 = g.z1
+            };
+        }
+    }
+
+    /// <summary>
+    /// 线段结构体 GVAR
+    /// PLC 内存布局（每项 28 个寄存器）：
+    ///   [0]      type1 (short) — 线段类型
+    ///   [1]      pad — 对齐填充
+    ///   [2..7]   spVec3_p0 (3×float) — 起点 x,y,z
+    ///   [8..13]  spVec3_p1 (3×float) — 终点 x,y,z
+    ///   [14..15] cx (float) — 圆心 X
+    ///   [16..17] cy (float) — 圆心 Y
+    ///   [18..19] r (float) — 半径
+    ///   [20..21] start_deg (float) — 起始角度
+    ///   [22..23] end_deg (float) — 终止角度
+    ///   [24..25] z0 (float)
+    ///   [26..27] z1 (float)
+    /// </summary>
+    public struct GVAR
+    {
+        /// <summary>每个 GVAR 占用的寄存器数</summary>
+        public const int WORD_COUNT = 28;
+
+        public short type1;
+        public SpVec3 spVec3_p0;
+        public SpVec3 spVec3_p1;
+        public float cx;
+        public float cy;
+        public float r;
+        public float start_deg;
+        public float end_deg;
+        public float z0;
+        public float z1;
+
+        /// <summary>
+        /// 从 ushort 寄存器数组解析 GVAR（从 offset 位置开始，读取 28 个寄存器）
+        /// 寄存器布局：[type1(1w)][pad(1w)][spVec3_p0(6w)][spVec3_p1(6w)][cx~z1(14w)]
+        /// </summary>
+        public static GVAR FromRegisters(ushort[] regs, int offset)
+        {
+            return new GVAR
+            {
+                type1 = (short)regs[offset + 0],
+                // offset+1: pad
+                spVec3_p0 = new SpVec3(
+                    ReadFloat(regs, offset + 2),
+                    ReadFloat(regs, offset + 4),
+                    ReadFloat(regs, offset + 6)),
+                spVec3_p1 = new SpVec3(
+                    ReadFloat(regs, offset + 8),
+                    ReadFloat(regs, offset + 10),
+                    ReadFloat(regs, offset + 12)),
+                cx = ReadFloat(regs, offset + 14),
+                cy = ReadFloat(regs, offset + 16),
+                r = ReadFloat(regs, offset + 18),
+                start_deg = ReadFloat(regs, offset + 20),
+                end_deg = ReadFloat(regs, offset + 22),
+                z0 = ReadFloat(regs, offset + 24),
+                z1 = ReadFloat(regs, offset + 26)
+            };
+        }
+
+        /// <summary>
+        /// 将 GVAR 写入 ushort 寄存器数组（从 offset 位置开始，写入 28 个寄存器）
+        /// </summary>
+        public void ToRegisters(ushort[] regs, int offset)
+        {
+            regs[offset + 0] = (ushort)type1;
+            // offset+1: pad
+            WriteFloat(regs, offset + 2, spVec3_p0.x);
+            WriteFloat(regs, offset + 4, spVec3_p0.y);
+            WriteFloat(regs, offset + 6, spVec3_p0.z);
+            WriteFloat(regs, offset + 8, spVec3_p1.x);
+            WriteFloat(regs, offset + 10, spVec3_p1.y);
+            WriteFloat(regs, offset + 12, spVec3_p1.z);
+            WriteFloat(regs, offset + 14, cx);
+            WriteFloat(regs, offset + 16, cy);
+            WriteFloat(regs, offset + 18, r);
+            WriteFloat(regs, offset + 20, start_deg);
+            WriteFloat(regs, offset + 22, end_deg);
+            WriteFloat(regs, offset + 24, z0);
+            WriteFloat(regs, offset + 26, z1);
+        }
+
+        private static float ReadFloat(ushort[] regs, int idx)
+            => BitConverter.ToSingle(BitConverter.GetBytes((regs[idx + 1] << 16) | regs[idx]), 0);
+
+        private static void WriteFloat(ushort[] regs, int idx, float value)
+        {
+            byte[] bytes = BitConverter.GetBytes(value);
+            regs[idx] = (ushort)((bytes[0] << 8) | bytes[1]);
+            regs[idx + 1] = (ushort)((bytes[2] << 8) | bytes[3]);
         }
     }
 }
