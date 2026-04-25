@@ -132,6 +132,12 @@
             <TextBlock Text="Morph:" VerticalAlignment="Center" Margin="8,0,0,0" ToolTip="形态学核大小（奇数）"/>
             <TextBox x:Name="TxtHollowMorph" Text="5" Width="50" Height="24" VerticalContentAlignment="Center" Margin="3,0,0,0"
                      ToolTip="形态学核大小（奇数）"/>
+            <TextBlock Text="GrayLow:" VerticalAlignment="Center" Margin="8,0,0,0" ToolTip="空洞灰度下限，mask内灰度低于此值的像素被排除"/>
+            <TextBox x:Name="TxtHollowGrayLow" Text="5" Width="50" Height="24" VerticalContentAlignment="Center" Margin="3,0,0,0"
+                     ToolTip="空洞灰度下限（默认5）"/>
+            <TextBlock Text="GrayHigh:" VerticalAlignment="Center" Margin="8,0,0,0" ToolTip="空洞灰度上限，mask内灰度高于此值的像素被排除"/>
+            <TextBox x:Name="TxtHollowGrayHigh" Text="50" Width="50" Height="24" VerticalContentAlignment="Center" Margin="3,0,0,0"
+                     ToolTip="空洞灰度上限（默认50）"/>
         </StackPanel>
 
         <!-- Image display -->
@@ -166,7 +172,15 @@
                               HorizontalScrollBarVisibility="Auto"
                               VerticalScrollBarVisibility="Auto"
                               Visibility="Collapsed"
-                              PreviewMouseWheel="StepGridScrollViewer_PreviewMouseWheel">
+                              PreviewMouseWheel="StepGridScrollViewer_PreviewMouseWheel"
+                              PreviewMouseRightButtonDown="StepGridScrollViewer_PreviewMouseDown"
+                              PreviewMouseMove="StepGridScrollViewer_PreviewMouseMove"
+                              PreviewMouseRightButtonUp="StepGridScrollViewer_PreviewMouseUp">
+                    <ScrollViewer.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="保存当前网格截图" Click="StepGridSave_Click"/>
+                        </ContextMenu>
+                    </ScrollViewer.ContextMenu>
                     <UniformGrid x:Name="StepImageGrid" Columns="3" Margin="4">
                         <UniformGrid.LayoutTransform>
                             <ScaleTransform x:Name="StepGridScaleTransform" ScaleX="1" ScaleY="1"/>

@@ -3415,7 +3415,8 @@ void DetectHollowTrajectory(Image* img, Point2D* trajPixels, int* count,
                             int blurKsize, int morphKernelSize,
                             int targetHollows, int bandWidth,
                             bool useContourMode, int outerExpandPixels,
-                            double grayMergeRatio) {
+                            double grayMergeRatio,
+                            int hollowGrayLow, int hollowGrayHigh) {
     LOG_INFO("=== Starting Hollow Trajectory Detection ===");
 
     if (!img || !img->data) {
@@ -3494,14 +3495,15 @@ void DetectHollowTrajectory(Image* img, Point2D* trajPixels, int* count,
     }
 
     // ---- 步骤 2：在 mask 内部反求空洞 ----
-    // 重新用 5-50 固定阈值对 mask 内区域二值化（而非 OTSU），
+    // 重新用 hollowGrayLow-hollowGrayHigh 固定阈值对 mask 内区域二值化（而非 OTSU），
     // 更精确匹配原图中目标区域的灰度特征（灰度 8-80）
     Mat innerRegion = grayMat.clone();
     innerRegion.setTo(255, mask == 0);  // mask 外设为白色
 
-    // 5 <= gray <= 50 → 255（目标轮廓），其余 → 0（背景）
+    // hollowGrayLow <= gray <= hollowGrayHigh → 255（目标轮廓），其余 → 0（背景）
     Mat binaryDark;
-    binaryDark = (innerRegion >= 5) & (innerRegion <= 50);
+    binaryDark = (innerRegion >= hollowGrayLow) & (innerRegion <= hollowGrayHigh);
+    LOG_INFO("Hollow gray range: [%d, %d]", hollowGrayLow, hollowGrayHigh);
     // mask 外区域也置 0
     binaryDark.setTo(0, mask == 0);
     innerRegion.release();
@@ -3509,9 +3511,9 @@ void DetectHollowTrajectory(Image* img, Point2D* trajPixels, int* count,
     // 形态学处理：先闭后开 + 先开后闭
     Mat kernel = getStructuringElement(MORPH_ELLIPSE, Size(morphKernelSize, morphKernelSize));
     Mat morphed;
-    morphologyEx(binaryDark, morphed, MORPH_CLOSE, kernel);
+    morphologyEx(binaryDark, morphed, MORPH_OPEN, kernel);
     morphologyEx(morphed, morphed, MORPH_OPEN, kernel);
-    morphologyEx(morphed, morphed, MORPH_OPEN, kernel);
+    morphologyEx(morphed, morphed, MORPH_CLOSE, kernel);
     morphologyEx(morphed, morphed, MORPH_CLOSE, kernel);
  
     // ---- 步骤图 2：固定阈值二值化（用于空洞检测） ----
@@ -3521,7 +3523,7 @@ void DetectHollowTrajectory(Image* img, Point2D* trajPixels, int* count,
         memcpy(stepImages[1].data, morphed.data, w * h);
     }
 
-    // binaryDark 中 5~50 区域为 255（目标），直接取外轮廓即为空洞
+    // binaryDark 中 hollowGrayLow~hollowGrayHigh 区域为 255（目标），直接取外轮廓即为空洞
     std::vector<std::vector<Point>> hierarchyContours;
     findContours(morphed, hierarchyContours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
 
@@ -3565,6 +3567,31 @@ void DetectHollowTrajectory(Image* img, Point2D* trajPixels, int* count,
         stepImages[3].width = w; stepImages[3].height = h; stepImages[3].channels = 1;
         stepImages[3].data = (unsigned char*)malloc(w * h);
         memcpy(stepImages[3].data, hollowBinary.data, w * h);
+    }
+
+    // ---- 步骤图 5：彩色空洞标注（每个空洞不同颜色） ----
+    if (stepImages && stepImageCount >= 5) {
+        Mat colorHollow = Mat::zeros(h, w, CV_8UC3);
+        for (int k = 0; k < takeHollows; k++) {
+            int idx = sortedHollows[k].second;
+            int colorIdx = k % 16;
+            const unsigned char* clr = BAR_COLORS[colorIdx];
+            Scalar color(clr[0], clr[1], clr[2]);  // BGR
+            drawContours(colorHollow, hierarchyContours, idx, color, FILLED);
+            // 画白色边界线
+            drawContours(colorHollow, hierarchyContours, idx, Scalar(255, 255, 255), 1);
+        }
+        // 限制在 mask 内
+        Mat colorMask3;
+        cvtColor(mask, colorMask3, COLOR_GRAY2BGR);
+        colorHollow.setTo(Scalar(0, 0, 0), mask == 0);
+        colorMask3.release();
+
+        stepImages[4].width = w; stepImages[4].height = h; stepImages[4].channels = 3;
+        int dataLen = w * h * 3;
+        stepImages[4].data = (unsigned char*)malloc(dataLen);
+        memcpy(stepImages[4].data, colorHollow.data, dataLen);
+        colorHollow.release();
     }
 
     // ---- 步骤 5：形态学清理 ----

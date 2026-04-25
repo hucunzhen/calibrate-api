@@ -28,6 +28,7 @@ namespace CalibOperatorCLI_Example
 
         // 右键拖动相关
         private bool _isDragging = false;
+        private bool _hasDragged = false;  // 是否实际发生了拖动（区分点击和拖动）
         private System.Windows.Point _lastMousePos;
         private System.Windows.Input.MouseButton _dragButton;
 
@@ -154,19 +155,24 @@ namespace CalibOperatorCLI_Example
 
                 // 参数解析
                 int blurKsize = 7, morphKernelSize = 5;
+                int hollowGrayLow = 5, hollowGrayHigh = 50;
                 int.TryParse(TxtHollowBlur.Text, out blurKsize);
                 int.TryParse(TxtHollowMorph.Text, out morphKernelSize);
+                int.TryParse(TxtHollowGrayLow.Text, out hollowGrayLow);
+                int.TryParse(TxtHollowGrayHigh.Text, out hollowGrayHigh);
                 if (blurKsize % 2 == 0) blurKsize++;
                 if (morphKernelSize % 2 == 0) morphKernelSize++;
                 bool useContourMode = ChkContourMode.IsChecked == true;
 
-                Log($"[HOLLOW] blur={blurKsize}, morph={morphKernelSize}, contourMode={useContourMode}");
+                Log($"[HOLLOW] blur={blurKsize}, morph={morphKernelSize}, contourMode={useContourMode}, grayRange=[{hollowGrayLow}, {hollowGrayHigh}]");
 
                 var result = CalibAPI.DetectHollowTrajectory(_currentImage,
                     blurKsize, morphKernelSize,
                     targetHollows: 16, bandWidth: 8,
                     useContourMode: useContourMode,
-                    outerExpandPixels: 25);
+                    outerExpandPixels: 25,
+                    hollowGrayLow: hollowGrayLow,
+                    hollowGrayHigh: hollowGrayHigh);
 
                 if (result.Success && result.Count > 0)
                 {
@@ -860,15 +866,99 @@ namespace CalibOperatorCLI_Example
             e.Handled = true;
         }
 
+        // 步骤图网格右键拖动相关
+        private bool _isGridDragging = false;
+        private bool _hasGridDragged = false;
+        private System.Windows.Point _gridLastMousePos;
+
+        private void StepGridScrollViewer_PreviewMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (e.RightButton == System.Windows.Input.MouseButtonState.Pressed)
+            {
+                _isGridDragging = true;
+                _hasGridDragged = false;
+                _gridLastMousePos = e.GetPosition(StepGridScrollViewer);
+                StepGridScrollViewer.CaptureMouse();
+                StepGridScrollViewer.Cursor = System.Windows.Input.Cursors.Hand;
+                e.Handled = true;  // 阻止 ContextMenu 在按下时触发
+            }
+        }
+
+        private void StepGridScrollViewer_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+        {
+            if (_isGridDragging)
+            {
+                var pos = e.GetPosition(StepGridScrollViewer);
+                double dx = _gridLastMousePos.X - pos.X;
+                double dy = _gridLastMousePos.Y - pos.Y;
+                if (Math.Abs(dx) > 1 || Math.Abs(dy) > 1)
+                    _hasGridDragged = true;
+                StepGridScrollViewer.ScrollToHorizontalOffset(StepGridScrollViewer.HorizontalOffset + dx);
+                StepGridScrollViewer.ScrollToVerticalOffset(StepGridScrollViewer.VerticalOffset + dy);
+                _gridLastMousePos = pos;
+            }
+        }
+
+        private void StepGridScrollViewer_PreviewMouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (_isGridDragging && e.ChangedButton == System.Windows.Input.MouseButton.Right)
+            {
+                _isGridDragging = false;
+                StepGridScrollViewer.ReleaseMouseCapture();
+                StepGridScrollViewer.Cursor = System.Windows.Input.Cursors.Arrow;
+                if (_hasGridDragged)
+                {
+                    _hasGridDragged = false;
+                    e.Handled = true;  // 拖动结束，阻止 ContextMenu 弹出
+                }
+                // 未拖动（纯点击）→ 不拦截，让 ContextMenu 正常弹出
+            }
+        }
+
+        private void StepGridSave_Click(object sender, RoutedEventArgs e)
+        {
+            if (StepImageGrid.Children.Count == 0) return;
+
+            // 渲染整个网格到 RenderTargetBitmap
+            StepImageGrid.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+            System.Windows.Size desiredSize = StepImageGrid.DesiredSize;
+            StepImageGrid.Arrange(new System.Windows.Rect(desiredSize));
+
+            var renderTarget = new RenderTargetBitmap((int)desiredSize.Width, (int)desiredSize.Height, 96, 96, PixelFormats.Pbgra32);
+            renderTarget.Render(StepImageGrid);
+            renderTarget.Freeze();
+
+            // PNG 编码器
+            var pngEncoder = new PngBitmapEncoder();
+            pngEncoder.Frames.Add(BitmapFrame.Create(renderTarget));
+
+            // 保存对话框
+            var dlg = new Microsoft.Win32.SaveFileDialog
+            {
+                Filter = "PNG 图片|*.png",
+                DefaultExt = ".png",
+                FileName = "hollow_step_grid.png"
+            };
+            if (dlg.ShowDialog() == true)
+            {
+                using var fs = System.IO.File.Create(dlg.FileName);
+                pngEncoder.Save(fs);
+                Log($"[GRID] 步骤图网格已保存: {dlg.FileName}");
+                UpdateStatus($"已保存: {System.IO.Path.GetFileName(dlg.FileName)}");
+            }
+        }
+
         private void ImageScrollViewer_PreviewMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
         {
             if (e.RightButton == System.Windows.Input.MouseButtonState.Pressed)
             {
                 _isDragging = true;
+                _hasDragged = false;
                 _dragButton = System.Windows.Input.MouseButton.Right;
                 _lastMousePos = e.GetPosition(ImageScrollViewer);
                 ImageScrollViewer.CaptureMouse();
                 ImageScrollViewer.Cursor = System.Windows.Input.Cursors.Hand;
+                e.Handled = true;  // 阻止 ContextMenu 在按下时触发
             }
         }
 
@@ -877,8 +967,12 @@ namespace CalibOperatorCLI_Example
             if (_isDragging && _dragButton == System.Windows.Input.MouseButton.Right)
             {
                 var pos = e.GetPosition(ImageScrollViewer);
-                ImageScrollViewer.ScrollToHorizontalOffset(ImageScrollViewer.HorizontalOffset + _lastMousePos.X - pos.X);
-                ImageScrollViewer.ScrollToVerticalOffset(ImageScrollViewer.VerticalOffset + _lastMousePos.Y - pos.Y);
+                double dx = _lastMousePos.X - pos.X;
+                double dy = _lastMousePos.Y - pos.Y;
+                if (Math.Abs(dx) > 1 || Math.Abs(dy) > 1)
+                    _hasDragged = true;  // 标记发生了实际拖动
+                ImageScrollViewer.ScrollToHorizontalOffset(ImageScrollViewer.HorizontalOffset + dx);
+                ImageScrollViewer.ScrollToVerticalOffset(ImageScrollViewer.VerticalOffset + dy);
                 _lastMousePos = pos;
             }
         }
@@ -890,10 +984,25 @@ namespace CalibOperatorCLI_Example
                 _isDragging = false;
                 ImageScrollViewer.ReleaseMouseCapture();
                 ImageScrollViewer.Cursor = System.Windows.Input.Cursors.Arrow;
+                if (_hasDragged)
+                {
+                    // 拖动结束，阻止后续的 ContextMenu 弹出
+                    e.Handled = true;
+                }
+                // 未拖动（纯点击）→ 不标记 Handled，让 ContextMenu 正常弹出
             }
         }
 
-        private void ImageScrollViewer_PreviewMouseRightButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e) { }
+        private void ImageScrollViewer_PreviewMouseRightButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            // 如果发生了拖动，在这里也拦截，防止 ContextMenu 弹出
+            if (_hasDragged)
+            {
+                _hasDragged = false;
+                e.Handled = true;
+            }
+            // 未拖动时，不拦截 → Image.ContextMenu 正常弹出
+        }
 
         private void SaveImage_Click(object sender, RoutedEventArgs e)
         {

@@ -126,11 +126,13 @@ CALIB_API int CALIB_DetectHollowTrajectory(Image* img, Point2D* trajPixels, int*
                                             int blurKsize, int morphKernelSize,
                                             int targetHollows, int bandWidth,
                                             int useContourMode, int outerExpandPixels,
-                                            double grayMergeRatio) {
+                                            double grayMergeRatio,
+                                            int hollowGrayLow, int hollowGrayHigh) {
     int detected = 0;
     ::DetectHollowTrajectory(img, trajPixels, &detected, stepImages, stepBarIds, stepImageCount,
                               blurKsize, morphKernelSize, targetHollows, bandWidth,
-                              useContourMode != 0, outerExpandPixels, grayMergeRatio);
+                              useContourMode != 0, outerExpandPixels, grayMergeRatio,
+                              hollowGrayLow, hollowGrayHigh);
     if (count) *count = detected;
     return detected;
 }

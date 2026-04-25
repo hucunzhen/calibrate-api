@@ -265,12 +265,15 @@ void Step_DrawColoredTrajectory(Point2D* trajPixels, int count, int* stepBarIds,
 // useContourMode: true=Canvas 轮廓等弧长采样，false=膨胀+网格采样
 // outerExpandPixels: Canvas 模式外围膨胀半径(像素)
 // grayMergeRatio: 灰度过渡合并强度（0.0~1.0），0=不合并，默认0.3
+// hollowGrayLow: 空洞灰度下限（默认5），mask 内灰度低于此值的像素被排除
+// hollowGrayHigh: 空洞灰度上限（默认50），mask 内灰度高于此值的像素被排除
 void DetectHollowTrajectory(Image* img, Point2D* trajPixels, int* count,
                             Image* stepImages, int* stepBarIds, int stepImageCount,
                             int blurKsize = 7, int morphKernelSize = 5,
                             int targetHollows = 16, int bandWidth = 8,
                             bool useContourMode = true, int outerExpandPixels = 25,
-                            double grayMergeRatio = 0.3);
+                            double grayMergeRatio = 0.3,
+                            int hollowGrayLow = 5, int hollowGrayHigh = 50);
 
 // 委托接口（兼容旧代码）
 void DetectTrajectoryFitShape(Image* img, Point2D* trajPixels, int* count);

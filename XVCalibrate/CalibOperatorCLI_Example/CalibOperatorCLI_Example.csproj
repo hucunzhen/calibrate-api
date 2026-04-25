@@ -15,6 +15,13 @@
     <PackageReference Include="HslCommunication" Version="12.7.0" />
   </ItemGroup>
 
+  <!-- PLC 配置文件复制到输出目录 -->
+  <ItemGroup>
+    <None Include="plc_config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
   <!-- 海康威视相机 SDK -->
   <ItemGroup>
     <Reference Include="MvCameraControl.Net">

@@ -148,7 +148,8 @@ CALIB_API int CALIB_DetectHollowTrajectory(Image* img, Point2D* trajPixels, int*
                                             int blurKsize, int morphKernelSize,
                                             int targetHollows, int bandWidth,
                                             int useContourMode, int outerExpandPixels,
-                                            double grayMergeRatio);
+                                            double grayMergeRatio,
+                                            int hollowGrayLow, int hollowGrayHigh);
 
 /**
  * Draw colored trajectory on image

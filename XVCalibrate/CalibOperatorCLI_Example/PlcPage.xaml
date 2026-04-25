@@ -26,9 +26,159 @@
             </StackPanel>
         </Border>
 
-        <!-- Placeholder content area -->
+        <!-- Axis Position Display -->
         <Border Grid.Row="1" Background="#FAFAFA" BorderBrush="#DDDDDD" BorderThickness="1" Padding="10" Margin="0,0,0,10" CornerRadius="3">
-            <TextBlock Text="PLC communication area - add read/write operations as needed" Foreground="Gray" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+            <StackPanel>
+                <TextBlock Text="Axis Position" FontWeight="Bold" Margin="0,0,0,8"/>
+                <!-- 寄存器地址配置 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="X Addr:" VerticalAlignment="Center" Margin="0,0,3,0" Foreground="#D32F2F" FontWeight="Bold"/>
+                    <TextBox x:Name="TxtRegX" Text="" Width="70" Height="24" VerticalContentAlignment="Center" Margin="0,0,12,0" ToolTip="X轴位置寄存器地址（从配置加载）"/>
+                    <TextBlock Text="Y Addr:" VerticalAlignment="Center" Margin="0,0,3,0" Foreground="#1976D2" FontWeight="Bold"/>
+                    <TextBox x:Name="TxtRegY" Text="" Width="70" Height="24" VerticalContentAlignment="Center" Margin="0,0,12,0" ToolTip="Y轴位置寄存器地址（从配置加载）"/>
+                    <TextBlock Text="Z Addr:" VerticalAlignment="Center" Margin="0,0,3,0" Foreground="#388E3C" FontWeight="Bold"/>
+                    <TextBox x:Name="TxtRegZ" Text="" Width="70" Height="24" VerticalContentAlignment="Center" Margin="0,0,12,0" ToolTip="Z轴位置寄存器地址（从配置加载）"/>
+                    <CheckBox x:Name="ChkAutoRead" Content="Auto Read" VerticalAlignment="Center" Margin="10,0,0,0" IsChecked="False" Checked="ChkAutoRead_Checked" Unchecked="ChkAutoRead_Unchecked" ToolTip="勾选后自动定时读取PLC位置"/>
+                    <TextBlock Text="Interval(ms):" VerticalAlignment="Center" Margin="8,0,3,0"/>
+                    <TextBox x:Name="TxtReadInterval" Text="500" Width="55" Height="24" VerticalContentAlignment="Center" ToolTip="自动读取间隔（毫秒）"/>
+                    <Button x:Name="BtnReadOnce" Content="Read" Width="55" Height="26" Margin="8,0,0,0" Click="BtnReadOnce_Click" ToolTip="手动读取一次位置"/>
+                </StackPanel>
+                <!-- X轴正反转控制 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="X Rotate:" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="Bold"/>
+                    <Button x:Name="BtnXForward" Content="Forward" Width="90" Height="28" Margin="0,0,6,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture"/>
+                    <Button x:Name="BtnXReverse" Content="Reverse" Width="90" Height="28" Margin="0,0,4,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture"/>
+                    <TextBlock x:Name="TxtXRotateStatus" Text="---" VerticalAlignment="Center" Margin="4,0,8,0" Foreground="Gray" FontFamily="Consolas"/>
+                    <Button x:Name="BtnXZero" Content="Zero" Width="120" Height="28" Margin="0,0,8,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture" Foreground="#D32F2F" FontWeight="Bold"/>
+                    <Button x:Name="BtnXHome" Content="Home" Width="120" Height="28" Margin="0,0,12,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture" Foreground="#1565C0" FontWeight="Bold"/>
+                    <Button x:Name="BtnManual" Content="Manual" Width="120" Height="28" Margin="0,0,6,0" Click="BtnManual_Click" Foreground="#6A1B9A" FontWeight="Bold"/>
+                    <Button x:Name="BtnAuto" Content="Auto" Width="120" Height="28" Margin="0,0,12,0" Click="BtnAuto_Click" Foreground="#2E7D32" FontWeight="Bold"/>
+                    <TextBlock x:Name="TxtModeStatus" Text="---" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="Gray" FontFamily="Consolas" FontWeight="Bold"/>
+                </StackPanel>
+                <!-- Y轴正反转控制 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="Y Rotate:" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="Bold"/>
+                    <Button x:Name="BtnYForward" Content="Forward" Width="90" Height="28" Margin="0,0,6,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture"/>
+                    <Button x:Name="BtnYReverse" Content="Reverse" Width="90" Height="28" Margin="0,0,4,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture"/>
+                    <TextBlock x:Name="TxtYRotateStatus" Text="---" VerticalAlignment="Center" Margin="4,0,8,0" Foreground="Gray" FontFamily="Consolas"/>
+                    <Button x:Name="BtnYZero" Content="Zero" Width="120" Height="28" Margin="0,0,8,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture" Foreground="#D32F2F" FontWeight="Bold"/>
+                    <Button x:Name="BtnYHome" Content="Home" Width="120" Height="28" Margin="0,0,12,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture" Foreground="#1565C0" FontWeight="Bold"/>
+                </StackPanel>
+                <!-- Z轴正反转控制 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="Z Rotate:" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="Bold"/>
+                    <Button x:Name="BtnZForward" Content="Forward" Width="90" Height="28" Margin="0,0,6,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture"/>
+                    <Button x:Name="BtnZReverse" Content="Reverse" Width="90" Height="28" Margin="0,0,4,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture"/>
+                    <TextBlock x:Name="TxtZRotateStatus" Text="---" VerticalAlignment="Center" Margin="4,0,8,0" Foreground="Gray" FontFamily="Consolas"/>
+                    <Button x:Name="BtnZZero" Content="Zero" Width="120" Height="28" Margin="0,0,8,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture" Foreground="#D32F2F" FontWeight="Bold"/>
+                    <Button x:Name="BtnZHome" Content="Home" Width="120" Height="28" Margin="0,0,12,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture" Foreground="#1565C0" FontWeight="Bold"/>
+                </StackPanel>
+                <!-- 启动/停止控制 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="Control:" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="Bold"/>
+                    <Button x:Name="BtnStart" Content="Start" Width="120" Height="28" Margin="0,0,6,0" Click="BtnStart_Click" Foreground="#E65100" FontWeight="Bold"/>
+                    <Button x:Name="BtnStop" Content="Stop" Width="120" Height="28" Margin="0,0,12,0" Click="BtnStop_Click" Foreground="#455A64" FontWeight="Bold"/>
+                    <TextBlock Text="Running:" VerticalAlignment="Center" Foreground="#666"/>
+                    <TextBlock x:Name="TxtRunStatus" Text="---" VerticalAlignment="Center" Margin="4,0,0,0" Foreground="Gray" FontFamily="Consolas" FontWeight="Bold"/>
+                </StackPanel>
+                <!-- X轴参数读写 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="X Params:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold"/>
+                    <TextBlock x:Name="LblXHomeSpd" Text="HomeSpd:" VerticalAlignment="Center" Foreground="#666"/>
+                    <TextBox x:Name="TxtXHomeSpd" Width="70" Height="24" VerticalContentAlignment="Center" Margin="2,0,4,0" ToolTip="复位速度"/>
+                    <Button x:Name="BtnReadXHomeSpd" Content="R" Width="24" Height="24" Margin="0,0,2,0" Click="BtnReadXHomeSpd_Click" ToolTip="读取复位速度"/>
+                    <Button x:Name="BtnWriteXHomeSpd" Content="W" Width="24" Height="24" Margin="0,0,10,0" Click="BtnWriteXHomeSpd_Click" ToolTip="写入复位速度" Foreground="#1565C0" FontWeight="Bold"/>
+                    <TextBlock x:Name="LblXManualSpd" Text="ManualSpd:" VerticalAlignment="Center" Foreground="#666"/>
+                    <TextBox x:Name="TxtXManualSpd" Width="70" Height="24" VerticalContentAlignment="Center" Margin="2,0,4,0" ToolTip="手动速度"/>
+                    <Button x:Name="BtnReadXManualSpd" Content="R" Width="24" Height="24" Margin="0,0,2,0" Click="BtnReadXManualSpd_Click" ToolTip="读取手动速度"/>
+                    <Button x:Name="BtnWriteXManualSpd" Content="W" Width="24" Height="24" Margin="0,0,10,0" Click="BtnWriteXManualSpd_Click" ToolTip="写入手动速度" Foreground="#1565C0" FontWeight="Bold"/>
+                    <TextBlock x:Name="LblXPosLimit" Text="+Limit:" VerticalAlignment="Center" Foreground="#666"/>
+                    <TextBox x:Name="TxtXPosLimit" Width="70" Height="24" VerticalContentAlignment="Center" Margin="2,0,4,0" ToolTip="正限位"/>
+                    <Button x:Name="BtnReadXPosLimit" Content="R" Width="24" Height="24" Margin="0,0,2,0" Click="BtnReadXPosLimit_Click" ToolTip="读取正限位"/>
+                    <Button x:Name="BtnWriteXPosLimit" Content="W" Width="24" Height="24" Margin="0,0,10,0" Click="BtnWriteXPosLimit_Click" ToolTip="写入正限位" Foreground="#1565C0" FontWeight="Bold"/>
+                    <TextBlock x:Name="LblXNegLimit" Text="-Limit:" VerticalAlignment="Center" Foreground="#666"/>
+                    <TextBox x:Name="TxtXNegLimit" Width="70" Height="24" VerticalContentAlignment="Center" Margin="2,0,4,0" ToolTip="负限位"/>
+                    <Button x:Name="BtnReadXNegLimit" Content="R" Width="24" Height="24" Margin="0,0,2,0" Click="BtnReadXNegLimit_Click" ToolTip="读取负限位"/>
+                    <Button x:Name="BtnWriteXNegLimit" Content="W" Width="24" Height="24" Margin="0,0,10,0" Click="BtnWriteXNegLimit_Click" ToolTip="写入负限位" Foreground="#1565C0" FontWeight="Bold"/>
+                </StackPanel>
+                <!-- Y轴参数读写 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="Y Params:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold"/>
+                    <TextBlock x:Name="LblYHomeSpd" Text="HomeSpd:" VerticalAlignment="Center" Foreground="#666"/>
+                    <TextBox x:Name="TxtYHomeSpd" Width="70" Height="24" VerticalContentAlignment="Center" Margin="2,0,4,0" ToolTip="Y复位速度"/>
+                    <Button x:Name="BtnReadYHomeSpd" Content="R" Width="24" Height="24" Margin="0,0,2,0" Click="BtnReadYHomeSpd_Click" ToolTip="读取Y复位速度"/>
+                    <Button x:Name="BtnWriteYHomeSpd" Content="W" Width="24" Height="24" Margin="0,0,10,0" Click="BtnWriteYHomeSpd_Click" ToolTip="写入Y复位速度" Foreground="#1565C0" FontWeight="Bold"/>
+                    <TextBlock x:Name="LblYManualSpd" Text="ManualSpd:" VerticalAlignment="Center" Foreground="#666"/>
+                    <TextBox x:Name="TxtYManualSpd" Width="70" Height="24" VerticalContentAlignment="Center" Margin="2,0,4,0" ToolTip="Y手动速度"/>
+                    <Button x:Name="BtnReadYManualSpd" Content="R" Width="24" Height="24" Margin="0,0,2,0" Click="BtnReadYManualSpd_Click" ToolTip="读取Y手动速度"/>
+                    <Button x:Name="BtnWriteYManualSpd" Content="W" Width="24" Height="24" Margin="0,0,10,0" Click="BtnWriteYManualSpd_Click" ToolTip="写入Y手动速度" Foreground="#1565C0" FontWeight="Bold"/>
+                    <TextBlock x:Name="LblYPosLimit" Text="+Limit:" VerticalAlignment="Center" Foreground="#666"/>
+                    <TextBox x:Name="TxtYPosLimit" Width="70" Height="24" VerticalContentAlignment="Center" Margin="2,0,4,0" ToolTip="Y正限位"/>
+                    <Button x:Name="BtnReadYPosLimit" Content="R" Width="24" Height="24" Margin="0,0,2,0" Click="BtnReadYPosLimit_Click" ToolTip="读取Y正限位"/>
+                    <Button x:Name="BtnWriteYPosLimit" Content="W" Width="24" Height="24" Margin="0,0,10,0" Click="BtnWriteYPosLimit_Click" ToolTip="写入Y正限位" Foreground="#1565C0" FontWeight="Bold"/>
+                    <TextBlock x:Name="LblYNegLimit" Text="-Limit:" VerticalAlignment="Center" Foreground="#666"/>
+                    <TextBox x:Name="TxtYNegLimit" Width="70" Height="24" VerticalContentAlignment="Center" Margin="2,0,4,0" ToolTip="Y负限位"/>
+                    <Button x:Name="BtnReadYNegLimit" Content="R" Width="24" Height="24" Margin="0,0,2,0" Click="BtnReadYNegLimit_Click" ToolTip="读取Y负限位"/>
+                    <Button x:Name="BtnWriteYNegLimit" Content="W" Width="24" Height="24" Margin="0,0,10,0" Click="BtnWriteYNegLimit_Click" ToolTip="写入Y负限位" Foreground="#1565C0" FontWeight="Bold"/>
+                </StackPanel>
+                <!-- Z轴参数读写 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="Z Params:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold"/>
+                    <TextBlock x:Name="LblZHomeSpd" Text="HomeSpd:" VerticalAlignment="Center" Foreground="#666"/>
+                    <TextBox x:Name="TxtZHomeSpd" Width="70" Height="24" VerticalContentAlignment="Center" Margin="2,0,4,0" ToolTip="Z复位速度"/>
+                    <Button x:Name="BtnReadZHomeSpd" Content="R" Width="24" Height="24" Margin="0,0,2,0" Click="BtnReadZHomeSpd_Click" ToolTip="读取Z复位速度"/>
+                    <Button x:Name="BtnWriteZHomeSpd" Content="W" Width="24" Height="24" Margin="0,0,10,0" Click="BtnWriteZHomeSpd_Click" ToolTip="写入Z复位速度" Foreground="#1565C0" FontWeight="Bold"/>
+                    <TextBlock x:Name="LblZManualSpd" Text="ManualSpd:" VerticalAlignment="Center" Foreground="#666"/>
+                    <TextBox x:Name="TxtZManualSpd" Width="70" Height="24" VerticalContentAlignment="Center" Margin="2,0,4,0" ToolTip="Z手动速度"/>
+                    <Button x:Name="BtnReadZManualSpd" Content="R" Width="24" Height="24" Margin="0,0,2,0" Click="BtnReadZManualSpd_Click" ToolTip="读取Z手动速度"/>
+                    <Button x:Name="BtnWriteZManualSpd" Content="W" Width="24" Height="24" Margin="0,0,10,0" Click="BtnWriteZManualSpd_Click" ToolTip="写入Z手动速度" Foreground="#1565C0" FontWeight="Bold"/>
+                    <TextBlock x:Name="LblZPosLimit" Text="+Limit:" VerticalAlignment="Center" Foreground="#666"/>
+                    <TextBox x:Name="TxtZPosLimit" Width="70" Height="24" VerticalContentAlignment="Center" Margin="2,0,4,0" ToolTip="Z正限位"/>
+                    <Button x:Name="BtnReadZPosLimit" Content="R" Width="24" Height="24" Margin="0,0,2,0" Click="BtnReadZPosLimit_Click" ToolTip="读取Z正限位"/>
+                    <Button x:Name="BtnWriteZPosLimit" Content="W" Width="24" Height="24" Margin="0,0,10,0" Click="BtnWriteZPosLimit_Click" ToolTip="写入Z正限位" Foreground="#1565C0" FontWeight="Bold"/>
+                    <TextBlock x:Name="LblZNegLimit" Text="-Limit:" VerticalAlignment="Center" Foreground="#666"/>
+                    <TextBox x:Name="TxtZNegLimit" Width="70" Height="24" VerticalContentAlignment="Center" Margin="2,0,4,0" ToolTip="Z负限位"/>
+                    <Button x:Name="BtnReadZNegLimit" Content="R" Width="24" Height="24" Margin="0,0,2,0" Click="BtnReadZNegLimit_Click" ToolTip="读取Z负限位"/>
+                    <Button x:Name="BtnWriteZNegLimit" Content="W" Width="24" Height="24" Margin="0,0,10,0" Click="BtnWriteZNegLimit_Click" ToolTip="写入Z负限位" Foreground="#1565C0" FontWeight="Bold"/>
+                </StackPanel>
+                <!-- 位置数值显示 -->
+                <Grid Margin="0,4,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <!-- X -->
+                    <Border Grid.Column="0" Background="#FFF3F3" BorderBrush="#D32F2F" BorderThickness="2" CornerRadius="4" Padding="10" Margin="0,0,5,0">
+                        <StackPanel HorizontalAlignment="Center">
+                            <TextBlock Text="X Axis" FontSize="14" FontWeight="Bold" Foreground="#D32F2F" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="TxtPosX" Text="---" FontSize="24" FontWeight="Bold" Foreground="#D32F2F" HorizontalAlignment="Center" FontFamily="Consolas"/>
+                        </StackPanel>
+                    </Border>
+                    <!-- Y -->
+                    <Border Grid.Column="1" Background="#F3F8FF" BorderBrush="#1976D2" BorderThickness="2" CornerRadius="4" Padding="10" Margin="0,0,5,0">
+                        <StackPanel HorizontalAlignment="Center">
+                            <TextBlock Text="Y Axis" FontSize="14" FontWeight="Bold" Foreground="#1976D2" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="TxtPosY" Text="---" FontSize="24" FontWeight="Bold" Foreground="#1976D2" HorizontalAlignment="Center" FontFamily="Consolas"/>
+                        </StackPanel>
+                    </Border>
+                    <!-- Z -->
+                    <Border Grid.Column="2" Background="#F3FFF3" BorderBrush="#388E3C" BorderThickness="2" CornerRadius="4" Padding="10" Margin="0,0,5,0">
+                        <StackPanel HorizontalAlignment="Center">
+                            <TextBlock Text="Z Axis" FontSize="14" FontWeight="Bold" Foreground="#388E3C" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="TxtPosZ" Text="---" FontSize="24" FontWeight="Bold" Foreground="#388E3C" HorizontalAlignment="Center" FontFamily="Consolas"/>
+                        </StackPanel>
+                    </Border>
+                    <!-- XY Speed -->
+                    <Border Grid.Column="3" Background="#FFF8E1" BorderBrush="#F57F17" BorderThickness="2" CornerRadius="4" Padding="10">
+                        <StackPanel HorizontalAlignment="Center">
+                            <TextBlock Text="XY Speed" FontSize="14" FontWeight="Bold" Foreground="#F57F17" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="TxtSpeedXY" Text="---" FontSize="24" FontWeight="Bold" Foreground="#F57F17" HorizontalAlignment="Center" FontFamily="Consolas"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </StackPanel>
         </Border>
 
         <!-- Status -->

@@ -1,0 +1,57 @@
+{
+  "ModbusStation": 0,
+  "HdModbusOffset": 41088,
+
+  "Registers": {
+    "PositionX": "HD2100",
+    "PositionY": "HD2200",
+    "PositionZ": "HD2000",
+    "SpeedXY": "D4004",
+
+    "XHomeSpeed": "HD2120",
+    "XManualSpeed": "HD2114",
+    "XPosLimit": "HD2176",
+    "XNegLimit": "HD2178",
+
+    "XRotate": "D2025",
+    "XZero": "D2023",
+    "XHome": "D2026",
+
+    "YHomeSpeed": "HD2220",
+    "YManualSpeed": "HD2214",
+    "YPosLimit": "HD2276",
+    "YNegLimit": "HD2278",
+    "YRotate": "D2045",
+    "YZero": "D2043",
+    "YHome": "D2046",
+
+    "ZHomeSpeed": "HD2020",
+    "ZManualSpeed": "HD2014",
+    "ZPosLimit": "HD2076",
+    "ZNegLimit": "HD2078",
+    "ZRotate": "D2005",
+    "ZZero": "D2003",
+    "ZHome": "D2006",
+
+    "ManualMode": "M509",
+    "RunStartStop": "M500",
+    "RunStatus": "M510"
+  },
+
+  "BitActions": {
+    "XForward": { "Register": "D2025", "Bit": 0, "Value": true },
+    "XReverse": { "Register": "D2025", "Bit": 8, "Value": true },
+    "XZero":    { "Register": "D2023", "Bit": 8, "Value": true },
+    "XHome":    { "Register": "D2026", "Bit": 8, "Value": true },
+
+    "YForward": { "Register": "D2045", "Bit": 0, "Value": true },
+    "YReverse": { "Register": "D2045", "Bit": 8, "Value": true },
+    "YZero":    { "Register": "D2043", "Bit": 8, "Value": true },
+    "YHome":    { "Register": "D2046", "Bit": 8, "Value": true },
+
+    "ZForward": { "Register": "D2005", "Bit": 0, "Value": true },
+    "ZReverse": { "Register": "D2005", "Bit": 8, "Value": true },
+    "ZZero":    { "Register": "D2003", "Bit": 8, "Value": true },
+    "ZHome":    { "Register": "D2006", "Bit": 8, "Value": true }
+  }
+}

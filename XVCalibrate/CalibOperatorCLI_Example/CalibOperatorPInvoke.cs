@@ -217,7 +217,8 @@ namespace CalibOperatorPInvoke
             int blurKsize, int morphKernelSize,
             int targetHollows, int bandWidth,
             int useContourMode, int outerExpandPixels,
-            double grayMergeRatio);
+            double grayMergeRatio,
+            int hollowGrayLow, int hollowGrayHigh);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern void CALIB_DrawTrajectoryColored(IntPtr img, IntPtr trajPixels, int count, IntPtr barIds);
@@ -707,17 +708,20 @@ namespace CalibOperatorPInvoke
         /// <param name="bandWidth">窄带采样宽度(像素)，0=原始轮廓采样，>0=窄带采样（默认8）</param>
         /// <param name="useContourMode">true=Canvas轮廓等弧长采样（默认true）</param>
         /// <param name="outerExpandPixels">Canvas模式外围膨胀半径(像素，默认25)</param>
+        /// <param name="hollowGrayLow">空洞灰度下限（默认5）</param>
+        /// <param name="hollowGrayHigh">空洞灰度上限（默认50）</param>
         public static TrajectoryResult DetectHollowTrajectory(CalibImage img,
             int blurKsize = 7, int morphKernelSize = 5,
             int targetHollows = 16, int bandWidth = 8,
-            bool useContourMode = true, int outerExpandPixels = 25)
+            bool useContourMode = true, int outerExpandPixels = 25,
+            int hollowGrayLow = 5, int hollowGrayHigh = 50)
         {
             TrajectoryResult result = new TrajectoryResult();
 
             // 步骤图标签
-            result.StepLabels = new List<string> { "Grayscale", "Binary(5-50)", "Mask", "Hollow" };
+            result.StepLabels = new List<string> { "Grayscale", $"Binary({hollowGrayLow}-{hollowGrayHigh})", "Mask", "Hollow", "Hollow(Color)" };
 
-            int stepImageCount = 4;
+            int stepImageCount = 5;
             int nativeImgSize = Marshal.SizeOf<NativeImage>();
 
             IntPtr ptsPtr = Marshal.AllocHGlobal(Marshal.SizeOf<NativePoint2D>() * MaxTrajectoryPoints);
@@ -736,7 +740,8 @@ namespace CalibOperatorPInvoke
                 int detected = NativeAPI.CALIB_DetectHollowTrajectory(img.NativePtr, ptsPtr, ref count,
                     stepImgsPtr, IntPtr.Zero, stepImageCount,
                     blurKsize, morphKernelSize, targetHollows, bandWidth,
-                    useContourMode ? 1 : 0, outerExpandPixels, 0.0);
+                    useContourMode ? 1 : 0, outerExpandPixels, 0.0,
+                    hollowGrayLow, hollowGrayHigh);
 
                 // 解析步骤图
                 for (int i = 0; i < stepImageCount; i++)
