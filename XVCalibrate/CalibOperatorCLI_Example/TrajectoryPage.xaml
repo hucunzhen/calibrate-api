@@ -24,7 +24,7 @@
             <Button x:Name="BtnStep5" Content="6.Morph" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep5_Click" ToolTip="形态学处理：闭运算 + 模糊 + 重二值化，平滑暗条区域"/>
             <Button x:Name="BtnExpandEdge" Content="5.5.Exp" Width="72" Height="28" Margin="0,0,3,0" Click="BtnExpandEdge_Click" ToolTip="边界约束膨胀，将暗条区域向外扩展至工件边缘"/>
             <Button x:Name="BtnStep6" Content="7.Sort" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep6_Click" ToolTip="对轮廓按面积排序，筛选有效暗条轮廓"/>
-            <Button x:Name="BtnStep7" Content="8.Sample" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep7_Click" ToolTip="沿暗条窄带采样，生成轨迹点序列"/>
+            <Button x:Name="BtnStep7" Content="8.Sample" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep7_Click" ToolTip="等弧长轮廓采样，沿暗条轮廓均匀采样生成轨迹点"/>
             <Button x:Name="BtnFit" Content="8.5 Fit" Width="60" Height="28" Margin="0,0,3,0" Click="BtnFit_Click" ToolTip="轨迹拟合或曲率去噪"/>
             <Button x:Name="BtnStep8" Content="9.Verify" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep8_Click" ToolTip="验证轨迹有效性，剔除异常点"/>
             <Button x:Name="BtnStep9" Content="10.Dedup" Width="72" Height="28" Margin="0,0,3,0" Click="BtnStep9_Click" ToolTip="去除重复或过近的轨迹点"/>
@@ -92,11 +92,10 @@
                         <TextBox x:Name="TxtStep5Expand" Text="15" Width="50" Height="24" VerticalContentAlignment="Center" Margin="5,0,0,0" ToolTip="暗条区域向外扩展像素数，增大可覆盖更多边缘"/>
                     </StackPanel>
                     <StackPanel x:Name="SpStep7Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
-                        <TextBlock Text="Sample Bars:" VerticalAlignment="Center" Width="100" ToolTip="沿暗条等距采样的条数，值越大轨迹点越密集"/>
-                        <TextBox x:Name="TxtStep7Bars" Text="16" Width="60" Height="24" VerticalContentAlignment="Center" ToolTip="沿暗条等距采样的条数，值越大轨迹点越密集"/>
-                        <TextBlock Text="Band Width:" VerticalAlignment="Center" Margin="15,0,0,0" ToolTip="窄带采样宽度（像素），控制采样区域宽度"/>
-                        <TextBox x:Name="TxtStep7BandWidth" Text="8" Width="50" Height="24" VerticalContentAlignment="Center" Margin="5,0,0,0" ToolTip="窄带采样宽度（像素），控制采样区域宽度"/>
-                        <CheckBox x:Name="ChkContourMode" Content="Canvas轮廓采样" IsChecked="true" VerticalAlignment="Center" Margin="15,0,0,0" ToolTip="使用 Canvas 轮廓模式采样，更平滑的轨迹生成方式"/>
+                        <TextBlock Text="Target Bars:" VerticalAlignment="Center" Width="100" ToolTip="采样的暗条数量"/>
+                        <TextBox x:Name="TxtStep7Bars" Text="16" Width="60" Height="24" VerticalContentAlignment="Center" ToolTip="采样的暗条数量"/>
+                        <TextBlock Text="Spacing:" VerticalAlignment="Center" Margin="15,0,0,0" ToolTip="等弧长采样间距（像素）"/>
+                        <TextBox x:Name="TxtStep7BandWidth" Text="3" Width="50" Height="24" VerticalContentAlignment="Center" Margin="5,0,0,0" ToolTip="等弧长采样间距（像素）"/>
                     </StackPanel>
                     <StackPanel x:Name="SpStep75Params" Orientation="Horizontal" Margin="0,0,20,5" Visibility="Collapsed">
                         <TextBlock Text="Fit Mode:" VerticalAlignment="Center" Width="100" ToolTip="轨迹拟合模式：Stadium=跑道型椭圆拟合，曲率去噪=基于曲率滤波去噪"/>

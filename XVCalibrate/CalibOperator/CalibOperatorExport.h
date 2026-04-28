@@ -1,4 +1,4 @@
-/**
+﻿/**
  * CalibOperatorExport.h - Native C API for CalibOperator
  * 
  * This header provides plain C exports for the CalibOperator library,
@@ -224,9 +224,19 @@ CALIB_API int CALIB_TrajStep_2b_CannyEdges(TrajStepContext ctx, double lowThresh
  * blurKsize: Gaussian blur kernel size (default: 7)
  * morphKernelSize: Morphology kernel size (default: 5)
  * enableWatershed: Enable watershed pre-segmentation before Step 2 (default: false)
+ * minArea: Minimum contour area threshold, contours below are filtered (0=no filter)
  * Returns: 0 on success
  */
-CALIB_API int CALIB_TrajStep_2_PreprocessAndFindContours(TrajStepContext ctx, int blurKsize, int morphKernelSize, bool enableWatershed);
+CALIB_API int CALIB_TrajStep_2_PreprocessAndFindContours(TrajStepContext ctx, int blurKsize, int morphKernelSize, bool enableWatershed, double minArea);
+
+/**
+ * Step 2.5: Create mask from specified contour
+ * contourIdx: Index of contour to fill as mask (-1 = auto-select largest).
+ *   Only the selected contour interior is filled (255), background and other contours remain 0.
+ * Fills context: mask (CV_8UC1)
+ * Returns: 0 on success, -1 on error or empty contours
+ */
+CALIB_API int CALIB_TrajStep_2_5_CreateMask(TrajStepContext ctx, int contourIdx);
 
 /**
  * Step 3: Create workpiece mask from contours
@@ -234,6 +244,16 @@ CALIB_API int CALIB_TrajStep_2_PreprocessAndFindContours(TrajStepContext ctx, in
  * Returns: 0 on success
  */
 CALIB_API int CALIB_TrajStep_3_CreateWorkpieceMask(TrajStepContext ctx, int maxContourIdx);
+
+/**
+ * Step 3b: Detect hollow contours inside workpiece mask
+ * Uses gray range [hollowGrayLow, hollowGrayHigh] to binarize inside mask,
+ * then morphology cleanup + contour finding + area-based sorting.
+ * Fills context: darkBinary, sortedBars, darkContours, darkBarCount
+ * Subsequent steps (6-sort, 7-sample, etc.) can operate on these directly.
+ * Returns: Number of hollows found, -1 on error
+ */
+CALIB_API int CALIB_TrajStep_3b_DetectHollow(TrajStepContext ctx, int hollowGrayLow, int hollowGrayHigh, int targetHollows, int morphKernelSize);
 
 /**
  * Step 4: Detect dark bars and outer stadium region
@@ -251,6 +271,15 @@ CALIB_API int CALIB_TrajStep_4_DetectDarkBars(TrajStepContext ctx, int darkThres
  * blurSigma: Gaussian blur sigma (default: 1.0)
  * Returns: 0 on success
  */
+
+/** Set darkBinary data from external source (e.g. FlowPage upstream output) */
+CALIB_API int CALIB_TrajStep_SetDarkBinary(TrajStepContext ctx, const void* data, int width, int height);
+/** Set grayMat data from external source (e.g. FlowPage upstream output) */
+CALIB_API int CALIB_TrajStep_SetGrayMat(TrajStepContext ctx, const void* data, int width, int height);
+/** Set mask data from external source */
+CALIB_API int CALIB_TrajStep_SetMask(TrajStepContext ctx, const void* data, int width, int height);
+/** Get contour visualization image (dark bar contours drawn on dark background) */
+CALIB_API int CALIB_TrajStep_GetContourVis(TrajStepContext ctx, Image* outImage);
 CALIB_API int CALIB_TrajStep_5_MorphologyCleanup(TrajStepContext ctx, int kernelSize, int blurKsize, double blurSigma);
 
 /**
@@ -262,6 +291,8 @@ CALIB_API int CALIB_TrajStep_5_MorphologyCleanup(TrajStepContext ctx, int kernel
  */
 CALIB_API int CALIB_TrajStep_5_5_ExpandToEdgeBoundary(TrajStepContext ctx, int expandPixels);
 
+CALIB_API int CALIB_TrajStep_2c_GrayRangeBinary(TrajStepContext ctx, int grayLow, int grayHigh);
+
 /**
  * Step 6: Find and sort dark contours by area
  * Returns: Number of dark bars found
@@ -269,15 +300,12 @@ CALIB_API int CALIB_TrajStep_5_5_ExpandToEdgeBoundary(TrajStepContext ctx, int e
 CALIB_API int CALIB_TrajStep_6_FindAndSortDarkContours(TrajStepContext ctx);
 
 /**
- * Step 7: Sample contours equidistantly
+ * Step 7: Sample contours equidistantly (pure OpenCV arc-length sampling)
  * targetBars: Number of bars to sample (default: 16)
- * bandWidth: Narrow band width in pixels (0 = original contour sampling, >0 = narrow band sampling)
- * includeOuterBand: Whether to include outer stadium-shaped region (uses outerMask from Step 4)
- * useContourMode: true=Canvas mode (arc-length sampling on outer contour), false=legacy mode
- * outerExpandPixels: Outer expand radius for Canvas mode (pixels), default 25
+ * spacing: Sampling spacing in pixels along each contour (default: 3.0, range 1.0~10.0)
  * Returns: 0 on success
  */
-CALIB_API int CALIB_TrajStep_7_SampleContours(TrajStepContext ctx, int targetBars, int bandWidth, bool includeOuterBand, bool useContourMode, int outerExpandPixels);
+CALIB_API int CALIB_TrajStep_7_SampleContours(TrajStepContext ctx, int targetBars, double spacing);
 
 /**
  * Step 7.5: Fit shape for sampled points
@@ -347,6 +375,64 @@ CALIB_API int CALIB_TrajStep_GetPoints(TrajStepContext ctx, Point2D* points, int
  * colors: Array to store 16 colors (48 bytes total)
  */
 CALIB_API void CALIB_GetBarColors(unsigned char colors[48]);
+
+// ================================================================
+// Independent Contour Sampling (no step context required)
+// ================================================================
+
+/**
+ * Sample contours directly from binary image data.
+ * Internally does findContours + area sort + equidistant arc-length sampling.
+ * binaryData: Single-channel binary data (width*height bytes, 0 or 255)
+ * Returns: Number of sampled points (<= maxPoints)
+ */
+CALIB_API int CALIB_SampleContours(const unsigned char* binaryData, int width, int height,
+                                    int targetBars, double spacing, int minArea,
+                                    Point2D* outPoints, int* outBarIds, int maxPoints);
+
+/**
+ * Export sorted contour data from step context (after Step 6 FindAndSortDarkContours).
+ * flatX, flatY: Output arrays for flattened contour point coordinates.
+ * contourLengths: Output array, contourLengths[i] = number of points in contour i.
+ * maxContours: Maximum number of contours to export.
+ * maxPointsPerContour: Maximum total points buffer size.
+ * Returns: Number of contours exported (>= 0), or -1 on error.
+ */
+CALIB_API int CALIB_TrajStep_ExportSortedContours(TrajStepContext ctx,
+                                                   int* flatX, int* flatY,
+                                                   int* contourLengths,
+                                                   int maxContours, int maxTotalPoints);
+
+/**
+ * Sample contours from pre-exported point data (no findContours needed).
+ * flatX, flatY: Flattened contour points (all contours concatenated).
+ * contourLengths: Number of points per contour.
+ * numContours: Total number of contours.
+ * targetBars: Take first N contours.
+ * width, height: Image dimensions for bounds checking.
+ * spacing: Arc-length sampling spacing in pixels.
+ * outPoints, outBarIds: Output sampled points and bar IDs.
+ * maxPoints: Maximum output buffer size.
+ * Returns: Number of sampled points.
+ */
+CALIB_API int CALIB_SampleContoursFromPoints(const int* flatX, const int* flatY,
+                                              const int* contourLengths, int numContours,
+                                              int targetBars, int width, int height,
+                                              double spacing,
+                                              Point2D* outPoints, int* outBarIds, int maxPoints);
+
+// ================================================================
+// Image Utility
+// ================================================================
+
+/**
+ * Apply mask to source image: output = src where mask != 0, else 0
+ * src: Source image (grayscale or color)
+ * mask: Mask image (single channel, same dimensions as src)
+ * outImg: Output image (same dimensions and channels as src)
+ * Returns: 0 on success, -1 on null input, -2 on dimension mismatch
+ */
+CALIB_API int CALIB_ApplyMask(Image* src, Image* mask, Image* outImg);
 
 #ifdef __cplusplus
 }

@@ -1,4 +1,4 @@
-<Window x:Class="CalibOperatorCLI_Example.MainWindow"
+﻿<Window x:Class="CalibOperatorCLI_Example.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:CalibOperatorCLI_Example"
@@ -85,6 +85,28 @@
                 <Button x:Name="NavHistogram" Content="直方图" Width="100" Height="36"
                         Background="#2D2D2D" Foreground="White" BorderThickness="0"
                         FontWeight="Bold" Click="NavHistogram_Click">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="border" Background="{TemplateBinding Background}" Padding="10,6">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="border" Property="Background" Value="#404040"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button x:Name="NavFlow" Content="组态" Width="100" Height="36"
+                        Background="#2D2D2D" Foreground="White" BorderThickness="0"
+                        FontWeight="Bold" Click="NavFlow_Click">
                     <Button.Style>
                         <Style TargetType="Button">
                             <Setter Property="Template">

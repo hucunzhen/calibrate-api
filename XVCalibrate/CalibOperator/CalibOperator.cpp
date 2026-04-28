@@ -1956,9 +1956,10 @@ void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count,
     dilate(darkBinary, darkBinary, dilateKernel);
     erode(darkBinary, darkBinary, dilateKernel);
 
-    const int kBandWidth = 8;  // 窄带宽度(像素)
-    const bool kIncludeOuterBand = true;  // 包含暗条外围跑道型区域
-    const int kOuterExpandPixels = 25;    // 外围跑道膨胀半径(像素)
+    const double kSamplingSpacing = 3.0;  // 等弧长采样间距(像素)
+
+
+
 
 
     // 高斯模糊 + 重二值化：让暗条轮廓更光滑
@@ -1992,63 +1993,22 @@ void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count,
     int targetBars = std::min(barCount, CALIB_MAX_BARS);
     LOG_INFO("Dark bars found: %d (taking top %d)", barCount, targetBars);
 
-    // ---- 步骤 4.5：Canvas 外围跑道轮廓提取 ----
-    std::vector<std::vector<Point>> outerContourBars;
-    if (useContourMode && kIncludeOuterBand) {
-        Step_DetectOuterContour(darkContours, sortedBars, targetBars,
-                                 w, h, kOuterExpandPixels, mask,
-                                 &outerContourBars);
-    }
-
-    // 等间距轮廓采样（窄带模式：在暗条外侧 bandWidth 像素的窄带上采样）
+    // 等间距轮廓采样（等弧长采样，spacing=3像素）
     std::vector<Point> allPoints;
     std::vector<int> allBarIds;
 
     Step_SampleContoursEquidistant(&darkContours, &sortedBars, targetBars,
                                      w, h, &allPoints, &allBarIds,
-                                     kBandWidth, &mask, kIncludeOuterBand, &outerMask,
-                                     &outerContourBars, useContourMode);
+                                     3.0);
 
-    // 步骤5可视化：暗条(255) + 窄带区域(128) + 外围跑道(64) + 背景(0)
+    // 步骤5可视化：暗条区域(255) + 暗条轮廓线(192)
     if (stepImages && stepImageCount >= 5) {
         Mat step5Vis = Mat::zeros(h, w, CV_8UC1);
         step5Vis.setTo(255, darkBinary);  // 暗条区域=白
-
-        if (kBandWidth > 0) {
-            // 窄带模式：在暗条外侧显示窄带区域
-            Mat dilated;
-            int kw = 2 * kBandWidth + 1;
-            Mat bandKernel = getStructuringElement(MORPH_ELLIPSE, Size(kw, kw));
-            dilate(darkBinary, dilated, bandKernel);
-            bandKernel.release();
-            Mat band = dilated - darkBinary;
-            dilated.release();
-            band.setTo(0, mask == 0);  // 限制在工件 mask 内
-            step5Vis.setTo(128, band);  // 窄带区域=灰
-
-            // 外围跑道型区域可视化
-            if (kIncludeOuterBand) {
-                if (useContourMode && !outerContourBars.empty()) {
-                    // Canvas 模式：用外围轮廓绘制（白色线条显示轮廓边界）
-                    for (int ob = 0; ob < (int)outerContourBars.size() && ob < targetBars; ob++) {
-                        if (!outerContourBars[ob].empty()) {
-                            drawContours(step5Vis, outerContourBars, ob, Scalar(64), FILLED);
-                            drawContours(step5Vis, outerContourBars, ob, Scalar(192), 1);
-                        }
-                    }
-                } else if (!outerMask.empty()) {
-                    // 旧方案：用灰度阈值 mask 显示
-                    Mat outerVis = outerMask.clone();
-                    outerVis.setTo(0, darkBinary != 0);  // 减去暗条
-                    outerVis.setTo(0, band != 0);  // 减去窄带
-                    step5Vis.setTo(64, outerVis);  // 外围区域=深灰
-                    outerVis.release();
-                }
-            }
-
-            band.release();
+        // 暗条轮廓叠加显示（用轮廓线标记各暗条）
+        for (int b = 0; b < targetBars && b < (int)sortedBars.size(); b++) {
+            drawContours(step5Vis, darkContours, sortedBars[b].second, Scalar(192), 1);
         }
-
         stepImages[4].width = step5Vis.cols;
         stepImages[4].height = step5Vis.rows;
         stepImages[4].channels = 1;
@@ -2069,10 +2029,8 @@ void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count,
             int px = allPoints[i].x;
             int py = allPoints[i].y;
             if (px >= 0 && px < w && py >= 0 && py < h) {
-                // 窄带模式: 验证点在工件范围内; 原始模式: 验证点在暗条区域内
-                bool valid = (kBandWidth > 0)
-                    ? (mask.at<unsigned char>(py, px) != 0)
-                    : (darkBinary.at<unsigned char>(py, px) != 0);
+                // 验证点在暗条区域内
+                bool valid = (darkBinary.at<unsigned char>(py, px) != 0);
                 if (valid) {
                     allPoints[keptCount] = allPoints[i];
                     allBarIds[keptCount] = allBarIds[i];
@@ -2194,8 +2152,6 @@ void DetectTrajectoryOpenCV(Image* img, Point2D* trajPixels, int* count,
         darkContours.swap(empty1);
         std::vector<std::vector<Point>> empty2;
         outerContours.swap(empty2);
-        std::vector<std::vector<Point>> empty1b;
-        outerContourBars.swap(empty1b);
         std::vector<std::pair<double, int>> empty3;
         sortedBars.swap(empty3);
         std::vector<Point> empty4;
@@ -2393,12 +2349,13 @@ void Step_DetectCannyEdges(const cv::Mat& grayMat, cv::Mat* edgeMap,
 }
 
 // 2. 高斯模糊 + OTSU二值化 + 形态学处理 + 提取外轮廓
+// minArea: 最小轮廓面积阈值，小于此值的轮廓被过滤掉 (0=不过滤)
 void Step_PreprocessAndFindContours(cv::Mat* grayMat, cv::Mat* binaryBright,
                                      cv::Mat* morphed, cv::Mat* mask, cv::Mat* coloredMask,
                                      std::vector<std::vector<cv::Point>>* outerContours,
 
                                      int blurKsize, int morphKernelSize,
-                                     bool enableWatershed) {
+                                     bool enableWatershed, double minArea) {
 
     if (!grayMat || grayMat->empty()) return;
     int w = grayMat->cols, h = grayMat->rows;
@@ -2407,25 +2364,45 @@ void Step_PreprocessAndFindContours(cv::Mat* grayMat, cv::Mat* binaryBright,
     cv::Mat step2Input;
     Step_WatershedPresegment(*grayMat, &step2Input, enableWatershed);
     
-    // 高斯模糊
+    // 高斯模糊（使用传入参数）
+    int bk = (blurKsize > 0 && (blurKsize % 2) == 1) ? blurKsize : 7;
     cv::Mat blurred;
-    cv::GaussianBlur(step2Input, blurred, cv::Size(7, 7), 1.5);
+    cv::GaussianBlur(step2Input, blurred, cv::Size(bk, bk), 1.5);
+    LOG_INFO("Step_PreprocessAndFindContours: blurKsize=%d", bk);
     
     // OTSU二值化
     cv::threshold(blurred, *binaryBright, 0, 255, THRESH_BINARY + THRESH_OTSU);
     
-    // 形态学处理
-    cv::Mat kernel = getStructuringElement(MORPH_ELLIPSE, cv::Size(5, 5));
+    // 形态学处理（使用传入参数）
+    int mk = (morphKernelSize > 0 && (morphKernelSize % 2) == 1) ? morphKernelSize : 5;
+    cv::Mat kernel = getStructuringElement(MORPH_ELLIPSE, cv::Size(mk, mk));
     // 先闭后开
     morphologyEx(*binaryBright, *morphed, MORPH_CLOSE, kernel);
     morphologyEx(*morphed, *morphed, MORPH_OPEN, kernel);
     // 先开后闭
     morphologyEx(*morphed, *morphed, MORPH_OPEN, kernel);
     morphologyEx(*morphed, *morphed, MORPH_CLOSE, kernel);
+    LOG_INFO("Step_PreprocessAndFindContours: morphKernelSize=%d", mk);
     
     // 提取外轮廓
     findContours(*morphed, *outerContours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
     LOG_INFO("Step_PreprocessAndFindContours: found %d outer contours", (int)outerContours->size());
+    
+    // 按面积过滤小轮廓
+    if (minArea > 0 && !outerContours->empty()) {
+        std::vector<std::vector<cv::Point>> filtered;
+        for (size_t i = 0; i < outerContours->size(); i++) {
+            double a = contourArea((*outerContours)[i]);
+            if (a >= minArea) {
+                filtered.push_back(std::move((*outerContours)[i]));
+            }
+        }
+        int removed = (int)outerContours->size() - (int)filtered.size();
+        if (removed > 0) {
+            *outerContours = std::move(filtered);
+            LOG_INFO("  Filtered %d contours smaller than %.1f, remaining %d", removed, minArea, (int)outerContours->size());
+        }
+    }
     
     // 生成mask（二值）
     *mask = cv::Mat::zeros(h, w, CV_8UC1);
@@ -2467,8 +2444,51 @@ void Step_PreprocessAndFindContours(cv::Mat* grayMat, cv::Mat* binaryBright,
         }
     }
     
+    step2Input.release();
     blurred.release();
     kernel.release();
+}
+
+// 2.5 生成 Mask：从外轮廓列表中找到面积最大的轮廓，填充内部区域作为 mask
+// outerContours: Step2 输出的外轮廓列表
+// width, height: 图像尺寸
+// mask: 输出 mask（CV_8UC1，最大轮廓内部=255，其余=0）
+void Step_CreateMaskFromLargestContour(const std::vector<std::vector<cv::Point>>& outerContours,
+                                        int width, int height, cv::Mat* mask, int contourIdx) {
+    *mask = cv::Mat::zeros(height, width, CV_8UC1);
+    if (outerContours.empty()) {
+        LOG_WARN("Step_CreateMaskFromLargestContour: outerContours is empty!");
+        return;
+    }
+
+    int targetIdx = contourIdx;
+    if (targetIdx < 0) {
+        // contourIdx < 0 时自动选面积最大的轮廓
+        int maxIdx = 0;
+        double maxArea = 0.0;
+        for (size_t i = 0; i < outerContours.size(); i++) {
+            double a = cv::contourArea(outerContours[i]);
+            if (a > maxArea) {
+                maxArea = a;
+                maxIdx = (int)i;
+            }
+        }
+        targetIdx = maxIdx;
+        LOG_INFO("Step_CreateMaskFromLargestContour: auto-selected largest idx=%d area=%.1f", targetIdx, maxArea);
+    }
+
+    if (targetIdx < 0 || targetIdx >= (int)outerContours.size()) {
+        LOG_WARN("Step_CreateMaskFromLargestContour: contourIdx=%d out of range [0, %d), total contours=%d",
+                 contourIdx, (int)outerContours.size(), (int)outerContours.size());
+        return;
+    }
+
+    double area = cv::contourArea(outerContours[targetIdx]);
+    LOG_INFO("Step_CreateMaskFromLargestContour: found %d contours, using idx=%d area=%.1f",
+             (int)outerContours.size(), targetIdx, area);
+
+    // 只填充选中的那条轮廓内部，不包含背景和其他轮廓
+    cv::drawContours(*mask, outerContours, targetIdx, cv::Scalar(255), cv::FILLED);
 }
 
 // 3. 根据外轮廓生成工件mask
@@ -2719,10 +2739,9 @@ void Step_MorphologyCleanup(cv::Mat* darkBinary, int kernelSize, int blurKsize, 
 
     cv::Mat kernel = getStructuringElement(MORPH_ELLIPSE, cv::Size(kernelSize, kernelSize));
     // 先闭后开
+    morphologyEx(*darkBinary, *darkBinary, MORPH_OPEN, kernel);
+    morphologyEx(*darkBinary, *darkBinary, MORPH_OPEN, kernel);
     morphologyEx(*darkBinary, *darkBinary, MORPH_CLOSE, kernel);
-    morphologyEx(*darkBinary, *darkBinary, MORPH_OPEN, kernel);
-    // 先开后闭
-    morphologyEx(*darkBinary, *darkBinary, MORPH_OPEN, kernel);
     morphologyEx(*darkBinary, *darkBinary, MORPH_CLOSE, kernel);
 
     // 膨胀+腐蚀：先膨胀让暗条变粗融合小间隙，再腐蚀回来使轮廓光滑
@@ -2869,307 +2888,199 @@ int Step_FindAndSortDarkContours(cv::Mat* darkBinary, int width, int height,
     return (int)sortedBars->size();
 }
 
-// 内部辅助：对一条轮廓做等间距采样
-static void sampleContourEquidistant(const std::vector<cv::Point>& contour,
-                                      double spacing, int width, int height,
-                                      std::vector<cv::Point2d>& outPts) {
-    int ptCount = (int)contour.size();
-    if (ptCount < 5) return;
-
-    double perimeter = arcLength(contour, true);
-    int sampleCount = std::max(10, (int)(perimeter / spacing));
-
-    std::vector<double> cumLen(ptCount, 0.0);
-    for (int j = 1; j < ptCount; j++) {
-        double dx = contour[j].x - contour[j-1].x;
-        double dy = contour[j].y - contour[j-1].y;
-        cumLen[j] = cumLen[j-1] + sqrt(dx*dx + dy*dy);
-    }
-
-    for (int s = 0; s < sampleCount; s++) {
-        double targetLen = perimeter * s / sampleCount;
-        int lo = 0, hi = ptCount - 1;
-        while (lo < hi - 1) {
-            int mid = (lo + hi) / 2;
-            if (cumLen[mid] <= targetLen) lo = mid;
-            else hi = mid;
-        }
-        double segLen = cumLen[hi] - cumLen[lo];
-        double t = (segLen > 0.001) ? (targetLen - cumLen[lo]) / segLen : 0.0;
-        int px = (int)(contour[lo].x + t * (contour[hi].x - contour[lo].x));
-        int py = (int)(contour[lo].y + t * (contour[hi].y - contour[lo].y));
-        if (px >= 0 && px < width && py >= 0 && py < height) {
-            outPts.push_back(cv::Point2d((double)px, (double)py));
-        }
-    }
-}
-
-// 7. 等间距轮廓采样 (Canvas 方案：基于轮廓查找 + 等弧长采样)
-// bandWidth: 窄带宽度(像素)，0 = 原始轮廓采样，>0 = 暗条外侧窄带采样
-// workMask: 工件 mask（窄带模式必须非空）
-// includeOuterBand: 是否包含暗条外围跑道型区域
-// outerMask: 外围跑道区域 mask（由 Step_DetectDarkBars 生成，兼容旧接口）
-// outerContourBars: 每个暗条的外围跑道轮廓（由 Step_DetectOuterContour 生成，新方案优先使用）
-// useContourMode: true=使用轮廓等弧长采样（新方案），false=使用膨胀+网格采样（旧方案兼容）
+// 7. 等间距轮廓采样（纯 OpenCV 方案）
+// spacing: 采样间距（像素），沿每条暗条轮廓等弧长采样
+// 算法：cv::arcLength 计算周长 → 等弧长插值 → 输出像素坐标
 void Step_SampleContoursEquidistant(std::vector<std::vector<cv::Point>>* darkContours,
                                      std::vector<std::pair<double, int>>* sortedBars,
                                      int targetBars, int width, int height,
                                      std::vector<cv::Point>* allPoints,
                                      std::vector<int>* allBarIds,
-                                     int bandWidth,
-                                     const cv::Mat* workMask,
-                                     bool includeOuterBand,
-                                     const cv::Mat* outerMask,
-                                     const std::vector<std::vector<cv::Point>>* outerContourBars,
-                                     bool useContourMode) {
+                                     double spacing) {
+    allPoints->clear();
+    allBarIds->clear();
 
-    // ---- 模式 0：原始轮廓采样（bandWidth=0） ----
-    if (bandWidth <= 0 || workMask == NULL) {
-        for (int b = 0; b < targetBars && b < (int)sortedBars->size(); b++) {
-            const std::vector<cv::Point>& contour = (*darkContours)[(*sortedBars)[b].second];
-            std::vector<cv::Point2d> sampledPts;
-            sampleContourEquidistant(contour, 2.0, width, height, sampledPts);
-
-            for (size_t fi = 0; fi < sampledPts.size(); fi++) {
-                int px = (int)std::round(sampledPts[fi].x);
-                int py = (int)std::round(sampledPts[fi].y);
-                if (px >= 0 && px < width && py >= 0 && py < height) {
-                    allPoints->push_back(cv::Point(px, py));
-                    allBarIds->push_back(b);
-                }
-            }
-        }
-        return;
-    }
-
-    // ---- 窄带模式 ----
-    LOG_INFO("Step_SampleContoursEquidistant: band mode, bandWidth=%d, contourMode=%s",
-             bandWidth, useContourMode ? "true" : "false");
-
-    // === 窄带区域采样（暗条紧邻外侧，与暗条同量级） ===
-    // 为所有暗条合并一个 filled mask
-    cv::Mat allBarsMask = cv::Mat::zeros(height, width, CV_8UC1);
     for (int b = 0; b < targetBars && b < (int)sortedBars->size(); b++) {
-        drawContours(allBarsMask, *darkContours, (*sortedBars)[b].second, cv::Scalar(255), FILLED);
-    }
+        int idx = (*sortedBars)[b].second;
+        if (idx < 0 || idx >= (int)darkContours->size()) {
+            LOG_WARN("  Bar %d: sortedBars index %d out of range (darkContours count=%d), skip",
+                     b, idx, (int)darkContours->size());
+            continue;
+        }
+        const std::vector<cv::Point>& contour = (*darkContours)[idx];
+        int ptCount = (int)contour.size();
+        if (ptCount < 5) continue;
 
-    // 膨胀得到扩大区域
-    int kSize = 2 * bandWidth + 1;
-    cv::Mat dilKernel = getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(kSize, kSize));
-    cv::Mat dilated;
-    dilate(allBarsMask, dilated, dilKernel);
+        // 计算轮廓周长，确定采样数
+        double perimeter = cv::arcLength(contour, true);
+        if (perimeter < 1.0) continue;
+        int sampleCount = std::max(10, (int)(perimeter / spacing));
 
-    // 窄带 = 膨胀后 - 原暗条，且在工件范围内
-    cv::Mat bandMask;
-    subtract(dilated, allBarsMask, bandMask);
-    bandMask.setTo(0, *workMask == 0);
+        // 累计弧长数组
+        std::vector<double> cumLen(ptCount, 0.0);
+        for (int j = 1; j < ptCount; j++) {
+            double dx = contour[j].x - contour[j-1].x;
+            double dy = contour[j].y - contour[j-1].y;
+            cumLen[j] = cumLen[j-1] + std::sqrt(dx*dx + dy*dy);
+        }
 
-    int bandPixels = cv::countNonZero(bandMask);
-    LOG_INFO("  Band pixels: %d (bandWidth=%d)", bandPixels, bandWidth);
-
-    // 对窄带区域逐条提取
-    for (int b = 0; b < targetBars && b < (int)sortedBars->size(); b++) {
-        cv::Mat singleMask = cv::Mat::zeros(height, width, CV_8UC1);
-        drawContours(singleMask, *darkContours, (*sortedBars)[b].second, cv::Scalar(255), FILLED);
-
-        cv::Mat singleDilated;
-        dilate(singleMask, singleDilated, dilKernel);
-
-        cv::Mat singleBand;
-        subtract(singleDilated, singleMask, singleBand);
-        singleBand.setTo(0, *workMask == 0);
-
-        std::vector<cv::Point> bandPixelsVec;
-        cv::findNonZero(singleBand, bandPixelsVec);
-
-        if (!bandPixelsVec.empty()) {
-            double spacing = 3.0;
-            int gridStep = std::max(1, (int)spacing);
-
-            std::vector<cv::Point2d> sampledPts;
-            for (size_t pi = 0; pi < bandPixelsVec.size(); pi++) {
-                int px = bandPixelsVec[pi].x;
-                int py = bandPixelsVec[pi].y;
-                if (px % gridStep == 0 && py % gridStep == 0) {
-                    if (px >= 0 && px < width && py >= 0 && py < height) {
-                        sampledPts.push_back(cv::Point2d(px, py));
-                    }
-                }
+        // 等弧长插值采样
+        for (int s = 0; s < sampleCount; s++) {
+            double targetLen = perimeter * s / sampleCount;
+            // 二分查找插值段
+            int lo = 0, hi = ptCount - 1;
+            while (lo < hi - 1) {
+                int mid = (lo + hi) / 2;
+                if (cumLen[mid] <= targetLen) lo = mid;
+                else hi = mid;
             }
-
-            // 网格采样点太少时回退到均匀间隔
-            if ((int)sampledPts.size() < 10) {
-                sampledPts.clear();
-                int bandPxCount = (int)bandPixelsVec.size();
-                int sampleCount = std::max(10, bandPxCount / (gridStep * gridStep));
-                for (int s = 0; s < sampleCount; s++) {
-                    int idx = s * bandPxCount / sampleCount;
-                    if (idx < bandPxCount) {
-                        int px = bandPixelsVec[idx].x;
-                        int py = bandPixelsVec[idx].y;
-                        if (px >= 0 && px < width && py >= 0 && py < height) {
-                            sampledPts.push_back(cv::Point2d(px, py));
-                        }
-                    }
-                }
-            }
-
-            for (size_t fi = 0; fi < sampledPts.size(); fi++) {
-                int px = (int)std::round(sampledPts[fi].x);
-                int py = (int)std::round(sampledPts[fi].y);
-                if (px >= 0 && px < width && py >= 0 && py < height) {
-                    allPoints->push_back(cv::Point(px, py));
-                    allBarIds->push_back(b);
-                }
+            double segLen = cumLen[hi] - cumLen[lo];
+            double t = (segLen > 1e-6) ? (targetLen - cumLen[lo]) / segLen : 0.0;
+            int px = (int)std::round(contour[lo].x + t * (contour[hi].x - contour[lo].x));
+            int py = (int)std::round(contour[lo].y + t * (contour[hi].y - contour[lo].y));
+            if (px >= 0 && px < width && py >= 0 && py < height) {
+                allPoints->push_back(cv::Point(px, py));
+                allBarIds->push_back(b);
             }
         }
 
-        singleMask.release();
-        singleDilated.release();
-        singleBand.release();
+        LOG_INFO("  Bar %d: contour=%d pts, perimeter=%.1f, sampled=%d (spacing=%.1f)",
+                 b, ptCount, perimeter, sampleCount, spacing);
     }
 
-    allBarsMask.release();
-    dilKernel.release();
-    dilated.release();
-    bandMask.release();
+    LOG_INFO("Step_SampleContoursEquidistant: total %d points from %d bars",
+             (int)allPoints->size(), std::min(targetBars, (int)sortedBars->size()));
+}
 
-    // === 外围跑道型区域采样 ===
-    if (!includeOuterBand) return;
+// 独立轮廓采样：从二值图直接采样，不依赖 stepDetector 上下文
+int SampleContoursFromBinary(const unsigned char* binaryData, int width, int height,
+                              int targetBars, double spacing, int minArea,
+                              Point2D* outPoints, int* outBarIds, int maxPoints) {
+    if (!binaryData || width <= 0 || height <= 0 || !outPoints) return 0;
 
-    // ---- Canvas 方案（轮廓等弧长采样） ----
-    if (useContourMode && outerContourBars != NULL &&
-        (int)outerContourBars->size() >= targetBars) {
-        LOG_INFO("Step_SampleContoursEquidistant: outer contour mode (arc-length sampling)");
+    cv::Mat binary(height, width, CV_8UC1, const_cast<unsigned char*>(binaryData));
 
-        for (int b = 0; b < targetBars && b < (int)sortedBars->size(); b++) {
-            const std::vector<cv::Point>& outerContour = (*outerContourBars)[b];
-            if (outerContour.empty()) {
-                LOG_DEBUG("  Bar %d: no outer contour, skip", b);
-                continue;
-            }
+    // findContours
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(binary, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
+    LOG_INFO("SampleContoursFromBinary: found %d contours", (int)contours.size());
 
-            // 计算外围轮廓的周长，根据周长自适应采样密度
-            double perimeter = cv::arcLength(outerContour, true);
-            if (perimeter < 10.0) {
-                LOG_DEBUG("  Bar %d: outer perimeter too small (%.1f), skip", b, perimeter);
-                continue;
-            }
-
-            // 采样间距 5 像素，确保足够的采样密度同时避免锯齿
-            double outerSpacing = 5.0;
-            int sampleCount = std::max(20, (int)(perimeter / outerSpacing));
-
-            // 等弧长采样
-            std::vector<cv::Point2d> sampledPts;
-            sampleContourEquidistant(outerContour, outerSpacing, width, height, sampledPts);
-
-            // 如果等弧长采样点太少（轮廓过小），补充均匀间隔采样
-            if ((int)sampledPts.size() < 10) {
-                sampledPts.clear();
-                int ptCount = (int)outerContour.size();
-                for (int s = 0; s < ptCount; s += 3) {
-                    int px = outerContour[s].x;
-                    int py = outerContour[s].y;
-                    if (px >= 0 && px < width && py >= 0 && py < height) {
-                        sampledPts.push_back(cv::Point2d(px, py));
-                    }
-                }
-            }
-
-            LOG_INFO("  Bar %d: outer contour sampled %d pts (perimeter=%.1f)",
-                     b, (int)sampledPts.size(), perimeter);
-
-            for (size_t fi = 0; fi < sampledPts.size(); fi++) {
-                int px = (int)std::round(sampledPts[fi].x);
-                int py = (int)std::round(sampledPts[fi].y);
-                if (px >= 0 && px < width && py >= 0 && py < height) {
-                    allPoints->push_back(cv::Point(px, py));
-                    allBarIds->push_back(b);
-                }
-            }
-        }
-        return;
-    }
-
-    // ---- 旧方案兼容：灰度阈值 + 膨胀归属 ----
-    if (outerMask != NULL && !outerMask->empty()) {
-        int totalOuterPixels = cv::countNonZero(*outerMask);
-        LOG_INFO("Step_SampleContoursEquidistant: outer band sampling (legacy mode), outerMask pixels=%d", totalOuterPixels);
-
-        if (totalOuterPixels > 0) {
-            for (int b = 0; b < targetBars && b < (int)sortedBars->size(); b++) {
-                cv::Mat singleMask = cv::Mat::zeros(height, width, CV_8UC1);
-                drawContours(singleMask, *darkContours, (*sortedBars)[b].second, cv::Scalar(255), FILLED);
-
-                int expandSize = 2 * 20 + 1;
-                cv::Mat expandKernel = getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(expandSize, expandSize));
-                cv::Mat expanded;
-                dilate(singleMask, expanded, expandKernel);
-
-                cv::Mat barOuter;
-                cv::bitwise_and(expanded, *outerMask, barOuter);
-                cv::bitwise_and(barOuter, 255 - singleMask, barOuter);
-
-                cv::Mat narrowBand;
-                int narrowKw = 2 * bandWidth + 1;
-                cv::Mat narrowKernel = getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(narrowKw, narrowKw));
-                cv::Mat narrowDilated;
-                dilate(singleMask, narrowDilated, narrowKernel);
-                narrowBand = narrowDilated - singleMask;
-                narrowBand.setTo(0, *workMask == 0);
-                cv::bitwise_and(barOuter, 255 - narrowBand, barOuter);
-
-                std::vector<cv::Point> outerPixels;
-                cv::findNonZero(barOuter, outerPixels);
-
-                if (!outerPixels.empty()) {
-                    double spacing = 3.0;
-                    int gridStep = std::max(1, (int)spacing);
-
-                    std::vector<cv::Point2d> sampledPts;
-                    for (size_t pi = 0; pi < outerPixels.size(); pi++) {
-                        int px = outerPixels[pi].x;
-                        int py = outerPixels[pi].y;
-                        if (px % gridStep == 0 && py % gridStep == 0) {
-                            sampledPts.push_back(cv::Point2d(px, py));
-                        }
-                    }
-
-                    if ((int)sampledPts.size() < 10) {
-                        sampledPts.clear();
-                        int outerPxCount = (int)outerPixels.size();
-                        int sampleCount = std::max(10, outerPxCount / (gridStep * gridStep));
-                        for (int s = 0; s < sampleCount; s++) {
-                            int idx = s * outerPxCount / sampleCount;
-                            if (idx < outerPxCount) {
-                                sampledPts.push_back(cv::Point2d(outerPixels[idx].x, outerPixels[idx].y));
-                            }
-                        }
-                    }
-
-                    LOG_INFO("  Bar %d: outer band sampled %d points (legacy)", b, (int)sampledPts.size());
-
-                    for (size_t fi = 0; fi < sampledPts.size(); fi++) {
-                        int px = (int)std::round(sampledPts[fi].x);
-                        int py = (int)std::round(sampledPts[fi].y);
-                        if (px >= 0 && px < width && py >= 0 && py < height) {
-                            allPoints->push_back(cv::Point(px, py));
-                            allBarIds->push_back(b);
-                        }
-                    }
-                }
-
-                singleMask.release();
-                expanded.release();
-                expandKernel.release();
-                barOuter.release();
-                narrowDilated.release();
-                narrowKernel.release();
-                narrowBand.release();
-            }
+    // 按面积排序
+    std::vector<std::pair<double, int>> sortedBars;
+    for (size_t i = 0; i < contours.size(); i++) {
+        double a = cv::contourArea(contours[i]);
+        if (a >= (double)minArea) {
+            sortedBars.push_back(std::make_pair(a, (int)i));
         }
     }
+    std::sort(sortedBars.begin(), sortedBars.end(),
+              [](const std::pair<double, int>& a, const std::pair<double, int>& b) {
+                  return a.first > b.first;
+              });
+    LOG_INFO("  After area filter (min=%.0f): %d contours, taking top %d",
+             (double)minArea, (int)sortedBars.size(), targetBars);
+
+    int totalPts = 0;
+    int takeBars = std::min(targetBars, (int)sortedBars.size());
+
+    for (int b = 0; b < takeBars && totalPts < maxPoints; b++) {
+        int idx = sortedBars[b].second;
+        if (idx < 0 || idx >= (int)contours.size()) continue;
+        const std::vector<cv::Point>& contour = contours[idx];
+        int ptCount = (int)contour.size();
+        if (ptCount < 5) continue;
+
+        double perimeter = cv::arcLength(contour, true);
+        if (perimeter < 1.0) continue;
+        int sampleCount = std::max(10, (int)(perimeter / spacing));
+
+        // 累计弧长数组
+        std::vector<double> cumLen(ptCount, 0.0);
+        for (int j = 1; j < ptCount; j++) {
+            double dx = contour[j].x - contour[j-1].x;
+            double dy = contour[j].y - contour[j-1].y;
+            cumLen[j] = cumLen[j-1] + std::sqrt(dx*dx + dy*dy);
+        }
+
+        // 等弧长插值采样
+        for (int s = 0; s < sampleCount && totalPts < maxPoints; s++) {
+            double targetLen = perimeter * s / sampleCount;
+            int lo = 0, hi = ptCount - 1;
+            while (lo < hi - 1) {
+                int mid = (lo + hi) / 2;
+                if (cumLen[mid] <= targetLen) lo = mid;
+                else hi = mid;
+            }
+            double segLen = cumLen[hi] - cumLen[lo];
+            double t = (segLen > 1e-6) ? (targetLen - cumLen[lo]) / segLen : 0.0;
+            int px = (int)std::round(contour[lo].x + t * (contour[hi].x - contour[lo].x));
+            int py = (int)std::round(contour[lo].y + t * (contour[hi].y - contour[lo].y));
+            if (px >= 0 && px < width && py >= 0 && py < height) {
+                outPoints[totalPts].x = (float)px;
+                outPoints[totalPts].y = (float)py;
+                if (outBarIds) outBarIds[totalPts] = b;
+                totalPts++;
+            }
+        }
+        LOG_INFO("  Bar %d: contour=%d pts, perimeter=%.1f, sampled=%d",
+                 b, ptCount, perimeter, sampleCount);
+    }
+
+    LOG_INFO("SampleContoursFromBinary: total %d points from %d bars", totalPts, takeBars);
+    return totalPts;
+}
+
+int SampleContoursFromPoints(const int* flatX, const int* flatY,
+                             const int* contourLengths, int numContours,
+                             int targetBars, int width, int height,
+                             double spacing,
+                             Point2D* outPoints, int* outBarIds, int maxPoints) {
+    if (!flatX || !flatY || !contourLengths || numContours <= 0 || !outPoints) return 0;
+    int totalPts = 0;
+    int takeBars = std::min(targetBars, numContours);
+
+    int offset = 0;
+    for (int b = 0; b < takeBars && totalPts < maxPoints; b++) {
+        int ptCount = contourLengths[b];
+        if (ptCount < 5) { offset += ptCount; continue; }
+
+        // 构造累积弧长数组
+        std::vector<double> cumLen(ptCount, 0.0);
+        for (int j = 1; j < ptCount; j++) {
+            double dx = flatX[offset + j] - flatX[offset + j - 1];
+            double dy = flatY[offset + j] - flatY[offset + j - 1];
+            cumLen[j] = cumLen[j - 1] + std::sqrt(dx * dx + dy * dy);
+        }
+
+        double perimeter = cumLen[ptCount - 1];
+        if (perimeter < 1.0) { offset += ptCount; continue; }
+        int sampleCount = std::max(10, (int)(perimeter / spacing));
+
+        for (int s = 0; s < sampleCount && totalPts < maxPoints; s++) {
+            double targetLen = perimeter * s / sampleCount;
+            int lo = 0, hi = ptCount - 1;
+            while (lo < hi - 1) {
+                int mid = (lo + hi) / 2;
+                if (cumLen[mid] <= targetLen) lo = mid;
+                else hi = mid;
+            }
+            double segLen = cumLen[hi] - cumLen[lo];
+            double t = (segLen > 1e-6) ? (targetLen - cumLen[lo]) / segLen : 0.0;
+            int px = (int)std::round(flatX[offset + lo] + t * (flatX[offset + hi] - flatX[offset + lo]));
+            int py = (int)std::round(flatY[offset + lo] + t * (flatY[offset + hi] - flatY[offset + lo]));
+            if (px >= 0 && px < width && py >= 0 && py < height) {
+                outPoints[totalPts].x = (double)px;
+                outPoints[totalPts].y = (double)py;
+                outBarIds[totalPts] = b;
+                totalPts++;
+            }
+        }
+        LOG_INFO("  Bar %d: contour=%d pts, perimeter=%.1f, sampled=%d (spacing=%.1f)",
+                 b, ptCount, perimeter, sampleCount, spacing);
+        offset += ptCount;
+    }
+    LOG_INFO("SampleContoursFromPoints: total %d points from %d bars", totalPts, takeBars);
+    return totalPts;
 }
 
 
@@ -3603,8 +3514,9 @@ void DetectHollowTrajectory(Image* img, Point2D* trajPixels, int* count,
 
     //// 膨胀+腐蚀让边缘光滑
     Mat dilateKernel = getStructuringElement(MORPH_ELLIPSE, Size(morphKernelSize + 2, morphKernelSize + 2));
-    dilate(hollowBinary, hollowBinary, dilateKernel);
     erode(hollowBinary, hollowBinary, dilateKernel);
+    dilate(hollowBinary, hollowBinary, dilateKernel);
+
     dilateKernel.release();
 
     // 高斯模糊 + 重二值化
@@ -3623,7 +3535,7 @@ void DetectHollowTrajectory(Image* img, Point2D* trajPixels, int* count,
     if (areaThreshold < 500.0) areaThreshold = 500.0;
 
     std::vector<std::pair<double, int>> sortedBars;
-    for (size_t i = 0; i < takeHollows; i++) {
+    for (size_t i = 0; i < hollowContours.size(); i++) {
         double area = contourArea(hollowContours[i]);
         if (area > areaThreshold) {
             sortedBars.push_back(std::make_pair(area, (int)i));
@@ -3644,22 +3556,13 @@ void DetectHollowTrajectory(Image* img, Point2D* trajPixels, int* count,
         return;
     }
 
-    // ---- Canvas 外围跑道轮廓提取 ----
-    std::vector<std::vector<Point>> outerContourBars;
-    //if (useContourMode) {
-    //    Step_DetectOuterContour(hollowContours, sortedBars, targetBars,
-    //                            w, h, 0, mask,
-    //                            &outerContourBars);
-    //}
-
     // ---- 等间距轮廓采样 ----
     std::vector<Point> allPoints;
     std::vector<int> allBarIds;
 
     Step_SampleContoursEquidistant(&hollowContours, &sortedBars, targetBars,
                                      w, h, &allPoints, &allBarIds,
-                                     0, &mask, true, NULL,
-                                     &outerContourBars, useContourMode);
+                                     3.0);
 
 
     LOG_INFO("Contour sampling: %d hollow bars, raw points=%d", targetBars, (int)allPoints.size());
@@ -3689,6 +3592,47 @@ void DetectHollowTrajectory(Image* img, Point2D* trajPixels, int* count,
 
     //// ---- 去重 + 排序 ----
     //Step_DeduplicateAndSort(&allPoints, &allBarIds);
+
+    // ---- 等间距重采样到固定 1000 个点 ----
+    {
+        int targetCount = 1000;
+        int rawCount = (int)allPoints.size();
+        if (rawCount > targetCount && targetCount > 0) {
+            // 计算累积弧长
+            std::vector<double> cumLen(rawCount, 0.0);
+            for (int i = 1; i < rawCount; i++) {
+                double dx = (double)allPoints[i].x - allPoints[i-1].x;
+                double dy = (double)allPoints[i].y - allPoints[i-1].y;
+                cumLen[i] = cumLen[i-1] + sqrt(dx*dx + dy*dy);
+            }
+            double totalLen = cumLen[rawCount - 1];
+            LOG_INFO("Resampling trajectory: %d -> %d points (total arc length=%.1f)", rawCount, targetCount, totalLen);
+
+            std::vector<Point> resampled(targetCount);
+            std::vector<int> resampledBarIds(targetCount);
+            for (int i = 0; i < targetCount; i++) {
+                double targetLen = totalLen * i / targetCount;
+                // 二分查找
+                int lo = 0, hi = rawCount - 1;
+                while (lo < hi - 1) {
+                    int mid = (lo + hi) / 2;
+                    if (cumLen[mid] <= targetLen) lo = mid;
+                    else hi = mid;
+                }
+                double segLen = cumLen[hi] - cumLen[lo];
+                double t = (segLen > 0.001) ? (targetLen - cumLen[lo]) / segLen : 0.0;
+                resampled[i].x = (int)(allPoints[lo].x + t * (allPoints[hi].x - allPoints[lo].x));
+                resampled[i].y = (int)(allPoints[lo].y + t * (allPoints[hi].y - allPoints[lo].y));
+                resampledBarIds[i] = allBarIds[lo];
+            }
+            allPoints = resampled;
+            allBarIds = resampledBarIds;
+        }
+        else if (rawCount < targetCount && rawCount > 1) {
+            // 点数不足 1000 时，不强制补充，保持原始点数
+            LOG_INFO("Trajectory has only %d points (< target %d), keeping original", rawCount, targetCount);
+        }
+    }
 
     // ---- 输出 ----
     int outCount = 0;

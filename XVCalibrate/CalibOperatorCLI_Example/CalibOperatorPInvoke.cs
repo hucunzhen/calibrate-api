@@ -1,4 +1,4 @@
-/**
+﻿/**
  * CalibOperatorPInvoke.cs - C# P/Invoke Wrapper for CalibOperator
  * 
  * 本文件使用 P/Invoke (Platform Invoke) 方式调用 native C++ DLL，
@@ -11,6 +11,7 @@
  */
 
 using System;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -232,6 +233,24 @@ namespace CalibOperatorPInvoke
 
         // Trajectory step-by-step API
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_ApplyMask(IntPtr src, IntPtr mask, IntPtr outImg);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_SampleContours(IntPtr binaryData, int width, int height,
+            int targetBars, double spacing, int minArea,
+            IntPtr outPoints, IntPtr outBarIds, int maxPoints);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_ExportSortedContours(IntPtr ctx,
+            IntPtr flatX, IntPtr flatY, IntPtr contourLengths, int maxContours, int maxTotalPoints);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_SampleContoursFromPoints(IntPtr flatX, IntPtr flatY,
+            IntPtr contourLengths, int numContours,
+            int targetBars, int width, int height, double spacing,
+            IntPtr outPoints, IntPtr outBarIds, int maxPoints);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern IntPtr CALIB_TrajStep_Create();
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
@@ -253,14 +272,32 @@ namespace CalibOperatorPInvoke
                                                               int nlmeansH, int nlmeansTemplateSize, int nlmeansSearchSize);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern int CALIB_TrajStep_2_PreprocessAndFindContours(IntPtr ctx, int blurKsize, int morphKernelSize, [MarshalAs(UnmanagedType.I1)] bool enableWatershed);
+        public static extern int CALIB_TrajStep_2_PreprocessAndFindContours(IntPtr ctx, int blurKsize, int morphKernelSize, [MarshalAs(UnmanagedType.I1)] bool enableWatershed, double minArea);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_2c_GrayRangeBinary(IntPtr ctx, int grayLow, int grayHigh);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_2_5_CreateMask(IntPtr ctx, int contourIdx);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int CALIB_TrajStep_3_CreateWorkpieceMask(IntPtr ctx, int maxContourIdx);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_3b_DetectHollow(IntPtr ctx, int hollowGrayLow, int hollowGrayHigh, int targetHollows, int morphKernelSize);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int CALIB_TrajStep_4_DetectDarkBars(IntPtr ctx, int darkThreshold, int darkMinThreshold, int outerThreshold);
 
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_SetDarkBinary(IntPtr ctx, IntPtr data, int width, int height);
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_SetGrayMat(IntPtr ctx, IntPtr data, int width, int height);
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_SetMask(IntPtr ctx, IntPtr data, int width, int height);
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_GetContourVis(IntPtr ctx, IntPtr outImage);
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int CALIB_TrajStep_5_MorphologyCleanup(IntPtr ctx, int kernelSize, int blurKsize, double blurSigma);
 
@@ -271,7 +308,7 @@ namespace CalibOperatorPInvoke
         public static extern int CALIB_TrajStep_6_FindAndSortDarkContours(IntPtr ctx);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern int CALIB_TrajStep_7_SampleContours(IntPtr ctx, int targetBars, int bandWidth, [MarshalAs(UnmanagedType.I1)] bool includeOuterBand, [MarshalAs(UnmanagedType.I1)] bool useContourMode, int outerExpandPixels);
+        public static extern int CALIB_TrajStep_7_SampleContours(IntPtr ctx, int targetBars, double spacing);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int CALIB_TrajStep_7_5_FitShape(IntPtr ctx, int fitMode, double approxEpsilon);
@@ -873,6 +910,133 @@ namespace CalibOperatorPInvoke
             }
             return colors;
         }
+
+        /// <summary>
+        /// 独立轮廓采样：从二值图直接 findContours + 排序 + 等弧长采样
+        /// </summary>
+        /// <param name="binaryImage">二值图 CalibImage</param>
+        /// <param name="targetBars">目标轮廓数</param>
+        /// <param name="spacing">采样间距（像素）</param>
+        /// <param name="minArea">最小轮廓面积</param>
+        /// <returns>采样点数组</returns>
+        public static Point2D[] SampleContours(CalibImage binaryImage, int targetBars = 16, double spacing = 3.0, int minArea = 500)
+        {
+            if (binaryImage == null) throw new ArgumentNullException(nameof(binaryImage));
+            int w = binaryImage.Width, h = binaryImage.Height;
+            if (w <= 0 || h <= 0) return Array.Empty<Point2D>();
+
+            NativeImage native = binaryImage.GetNativeStruct();
+            if (native.data == IntPtr.Zero) return Array.Empty<Point2D>();
+
+            int maxPoints = w * h;
+            int ptSize = Marshal.SizeOf<NativePoint2D>();
+            IntPtr ptsPtr = Marshal.AllocHGlobal(ptSize * maxPoints);
+            IntPtr barIdsPtr = Marshal.AllocHGlobal(sizeof(int) * maxPoints);
+            try
+            {
+                int count = NativeAPI.CALIB_SampleContours(native.data, w, h, targetBars, spacing, minArea,
+                                                             ptsPtr, barIdsPtr, maxPoints);
+                if (count <= 0) return Array.Empty<Point2D>();
+
+                Point2D[] result = new Point2D[count];
+                for (int i = 0; i < count; i++)
+                {
+                    IntPtr elemPtr = IntPtr.Add(ptsPtr, i * ptSize);
+                    NativePoint2D nativePt = Marshal.PtrToStructure<NativePoint2D>(elemPtr);
+                    result[i] = Point2D.FromNative(nativePt);
+                }
+                return result;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(ptsPtr);
+                Marshal.FreeHGlobal(barIdsPtr);
+            }
+        }
+
+        /// <summary>
+        /// 从轮廓点数据做等弧长采样（独立函数，不依赖 stepDetector 上下文）
+        /// </summary>
+        /// <param name="flatX">扁平化的 X 坐标数组</param>
+        /// <param name="flatY">扁平化的 Y 坐标数组</param>
+        /// <param name="contourLengths">每条轮廓的点数</param>
+        /// <param name="width">图像宽度（边界检查用）</param>
+        /// <param name="height">图像高度（边界检查用）</param>
+        /// <param name="targetBars">取前N条轮廓</param>
+        /// <param name="spacing">等弧长采样间距</param>
+        /// <returns>采样点数组</returns>
+        public static Point2D[] SampleContoursFromPoints(int[] flatX, int[] flatY,
+            int[] contourLengths, int width, int height,
+            int targetBars, double spacing)
+        {
+            if (flatX == null || flatY == null || contourLengths == null)
+                throw new ArgumentNullException("轮廓数据不能为空");
+            int numContours = contourLengths.Length;
+            if (numContours == 0) return Array.Empty<Point2D>();
+
+            int maxPoints = width * height;
+            int ptSize = Marshal.SizeOf<NativePoint2D>();
+            IntPtr ptsPtr = Marshal.AllocHGlobal(ptSize * maxPoints);
+            IntPtr barIdsPtr = Marshal.AllocHGlobal(sizeof(int) * maxPoints);
+
+            // 将 int[] 复制到非托管内存
+            int totalInputPts = flatX.Length;
+            IntPtr xPtr = Marshal.AllocHGlobal(sizeof(int) * totalInputPts);
+            IntPtr yPtr = Marshal.AllocHGlobal(sizeof(int) * totalInputPts);
+            IntPtr lenPtr = Marshal.AllocHGlobal(sizeof(int) * numContours);
+            try
+            {
+                Marshal.Copy(flatX, 0, xPtr, totalInputPts);
+                Marshal.Copy(flatY, 0, yPtr, totalInputPts);
+                Marshal.Copy(contourLengths, 0, lenPtr, numContours);
+
+                int count = NativeAPI.CALIB_SampleContoursFromPoints(xPtr, yPtr, lenPtr,
+                    numContours, targetBars, width, height, spacing,
+                    ptsPtr, barIdsPtr, maxPoints);
+                if (count <= 0) return Array.Empty<Point2D>();
+
+                Point2D[] result = new Point2D[count];
+                for (int i = 0; i < count; i++)
+                {
+                    IntPtr elemPtr = IntPtr.Add(ptsPtr, i * ptSize);
+                    NativePoint2D nativePt = Marshal.PtrToStructure<NativePoint2D>(elemPtr);
+                    result[i] = Point2D.FromNative(nativePt);
+                }
+                return result;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(ptsPtr);
+                Marshal.FreeHGlobal(barIdsPtr);
+                Marshal.FreeHGlobal(xPtr);
+                Marshal.FreeHGlobal(yPtr);
+                Marshal.FreeHGlobal(lenPtr);
+            }
+        }
+    }
+
+    // ================================================================
+    // General Image Operations
+    // ================================================================
+
+    public static class ImageOps
+    {
+        /// <summary>
+        /// Apply mask to source image: output = src where mask != 0, else 0
+        /// </summary>
+        public static CalibImage ApplyMask(CalibImage src, CalibImage mask)
+        {
+            if (src == null) throw new ArgumentNullException(nameof(src));
+            if (mask == null) throw new ArgumentNullException(nameof(mask));
+            var result = new CalibImage();
+            int ret = NativeAPI.CALIB_ApplyMask(src.NativePtr, mask.NativePtr, result.NativePtr);
+            if (ret == -2)
+                throw new ArgumentException("Source and mask images must have the same dimensions");
+            else if (ret != 0)
+                throw new InvalidOperationException("ApplyMask failed");
+            result.RefreshProperties();
+            return result;
+        }
     }
 
     // ================================================================
@@ -971,10 +1135,40 @@ namespace CalibOperatorPInvoke
         /// <summary>
         /// Step 2: 预处理 + 找外轮廓
         /// </summary>
-        public void PreprocessAndFindContours(int blurKsize = 7, int morphKernelSize = 5, bool enableWatershed = false)
+        /// <param name="blurKsize">高斯模糊核大小（奇数）</param>
+        /// <param name="morphKernelSize">形态学核大小（奇数）</param>
+        /// <param name="enableWatershed">启用分水岭预分割</param>
+        /// <param name="minArea">最小轮廓面积阈值，小于此值的轮廓被过滤（0=不过滤）</param>
+        public void PreprocessAndFindContours(int blurKsize = 7, int morphKernelSize = 5, bool enableWatershed = false, double minArea = 0)
         {
             CheckDisposed();
-            NativeAPI.CALIB_TrajStep_2_PreprocessAndFindContours(_context, blurKsize, morphKernelSize, enableWatershed);
+            NativeAPI.CALIB_TrajStep_2_PreprocessAndFindContours(_context, blurKsize, morphKernelSize, enableWatershed, minArea);
+        }
+
+        /// <summary>
+        /// Step 2c: 按灰度范围二值化
+        /// grayLow ≤ gray ≤ grayHigh → 255（目标），其余 → 0
+        /// 结果存入 binaryBright，可通过 GetStepImage(2) 获取
+        /// </summary>
+        public void GrayRangeBinary(int grayLow = 5, int grayHigh = 50)
+        {
+            CheckDisposed();
+            NativeAPI.CALIB_TrajStep_2c_GrayRangeBinary(_context, grayLow, grayHigh);
+        }
+
+        /// <summary>
+        /// Step 2.5: 生成 Mask — 自动取外轮廓中面积最大的轮廓，填充内部区域
+        /// 需要先执行 Step 2（PreprocessAndFindContours）
+        /// </summary>
+        /// <returns>0 成功，-1 失败（轮廓为空）</returns>
+        /// <summary>
+        /// Step 2.5: 从外轮廓生成Mask
+        /// </summary>
+        /// <param name="contourIdx">轮廓索引 (-1=自动选最大)</param>
+        public int CreateMaskFromLargestContour(int contourIdx = -1)
+        {
+            CheckDisposed();
+            return NativeAPI.CALIB_TrajStep_2_5_CreateMask(_context, contourIdx);
         }
 
         /// <summary>
@@ -984,6 +1178,21 @@ namespace CalibOperatorPInvoke
         {
             CheckDisposed();
             NativeAPI.CALIB_TrajStep_3_CreateWorkpieceMask(_context, maxContourIdx);
+        }
+
+        /// <summary>
+        /// Step 3b: 空洞检测 — 在 mask 内按灰度范围反求空洞
+        /// 填充 darkBinary / sortedBars / darkContours，后续可直接 sample
+        /// </summary>
+        /// <param name="hollowGrayLow">空洞灰度下限（默认5）</param>
+        /// <param name="hollowGrayHigh">空洞灰度上限（默认50）</param>
+        /// <param name="targetHollows">目标空洞数量（默认16）</param>
+        /// <param name="morphKernelSize">形态学核大小（奇数，默认5）</param>
+        /// <returns>检测到的空洞数量</returns>
+        public int DetectHollow(int hollowGrayLow = 5, int hollowGrayHigh = 50, int targetHollows = 16, int morphKernelSize = 5)
+        {
+            CheckDisposed();
+            return NativeAPI.CALIB_TrajStep_3b_DetectHollow(_context, hollowGrayLow, hollowGrayHigh, targetHollows, morphKernelSize);
         }
 
         /// <summary>
@@ -1005,6 +1214,69 @@ namespace CalibOperatorPInvoke
         {
             CheckDisposed();
             NativeAPI.CALIB_TrajStep_5_MorphologyCleanup(_context, kernelSize, blurKsize, blurSigma);
+        }
+
+
+        /// <summary>
+        /// Set darkBinary data from external source (e.g. FlowPage upstream operator output)
+        /// </summary>
+        public void SetDarkBinary(CalibImage img)
+        {
+            CheckDisposed();
+            if (img == null)
+                throw new ArgumentNullException(nameof(img));
+            var native = img.GetNativeStruct();
+            if (native.data == IntPtr.Zero)
+                throw new ArgumentException("CalibImage has no native data", nameof(img));
+            NativeAPI.CALIB_TrajStep_SetDarkBinary(_context, native.data, native.width, native.height);
+        }
+
+        /// <summary>
+        /// 设置 grayMat 数据（从外部图像传入，替代内部灰度化结果）
+        /// </summary>
+        public void SetGrayMat(CalibImage img)
+        {
+            CheckDisposed();
+            if (img == null)
+                throw new ArgumentNullException(nameof(img));
+            var native = img.GetNativeStruct();
+            if (native.data == IntPtr.Zero)
+                throw new ArgumentException("CalibImage has no native data", nameof(img));
+            NativeAPI.CALIB_TrajStep_SetGrayMat(_context, native.data, native.width, native.height);
+        }
+
+        /// <summary>
+        /// 设置 mask 数据（从外部图像传入）
+        /// </summary>
+        public void SetMask(CalibImage img)
+        {
+            CheckDisposed();
+            if (img == null)
+                throw new ArgumentNullException(nameof(img));
+            var native = img.GetNativeStruct();
+            if (native.data == IntPtr.Zero)
+                throw new ArgumentException("CalibImage has no native data", nameof(img));
+            NativeAPI.CALIB_TrajStep_SetMask(_context, native.data, native.width, native.height);
+        }
+
+        /// <summary>
+        /// 获取轮廓可视化图（darkBinary + 轮廓边界线）
+        /// </summary>
+        public CalibImage GetContourVis()
+        {
+            CheckDisposed();
+            CalibImage output = new CalibImage();
+            int result = NativeAPI.CALIB_TrajStep_GetContourVis(_context, output.NativePtr);
+            if (result != 0)
+            {
+                output.Dispose();
+                return null;
+            }
+            var native = output.GetNativeStruct();
+            output.Width = native.width;
+            output.Height = native.height;
+            output.Channels = native.channels;
+            return output;
         }
 
         /// <summary>
@@ -1030,17 +1302,59 @@ namespace CalibOperatorPInvoke
         }
 
         /// <summary>
-        /// Step 7: 等间距采样
+        /// 导出排序后的轮廓点数据（扁平化），用于传给独立采样算子
         /// </summary>
-        /// <param name="targetBars">目标暗条数量</param>
-        /// <param name="bandWidth">窄带宽度(像素)，0=原始轮廓采样，>0=窄带采样</param>
-        /// <param name="includeOuterBand">是否包含暗条外围跑道型区域</param>
-        /// <param name="useContourMode">true=Canvas模式(等弧长轮廓采样)，false=旧方案(网格采样)</param>
-        /// <param name="outerExpandPixels">Canvas模式外围膨胀半径(像素)，默认25</param>
-        public void SampleContours(int targetBars = 16, int bandWidth = 8, bool includeOuterBand = true, bool useContourMode = true, int outerExpandPixels = 25)
+        /// <returns>元组 (flatX, flatY, contourLengths, contourCount)</returns>
+        public (int[] flatX, int[] flatY, int[] contourLengths, int contourCount) ExportSortedContours()
         {
             CheckDisposed();
-            NativeAPI.CALIB_TrajStep_7_SampleContours(_context, targetBars, bandWidth, includeOuterBand, useContourMode, outerExpandPixels);
+            int maxContours = DarkBarCount > 0 ? DarkBarCount : 16;
+            int maxTotalPoints = 2448 * 2048;
+
+            int[] flatX = new int[maxTotalPoints];
+            int[] flatY = new int[maxTotalPoints];
+            int[] contourLengths = new int[maxContours];
+
+            IntPtr xPtr = Marshal.AllocHGlobal(sizeof(int) * maxTotalPoints);
+            IntPtr yPtr = Marshal.AllocHGlobal(sizeof(int) * maxTotalPoints);
+            IntPtr lenPtr = Marshal.AllocHGlobal(sizeof(int) * maxContours);
+            try
+            {
+                int count = NativeAPI.CALIB_TrajStep_ExportSortedContours(_context,
+                    xPtr, yPtr, lenPtr, maxContours, maxTotalPoints);
+                if (count <= 0)
+                    return (Array.Empty<int>(), Array.Empty<int>(), Array.Empty<int>(), 0);
+
+                // 计算实际总点数
+                int totalPts = 0;
+                for (int i = 0; i < count; i++) totalPts += contourLengths[i];
+                // 先从 lenPtr 读取 contourLengths
+                Marshal.Copy(lenPtr, contourLengths, 0, count);
+                totalPts = 0;
+                for (int i = 0; i < count; i++) totalPts += contourLengths[i];
+
+                Marshal.Copy(xPtr, flatX, 0, totalPts);
+                Marshal.Copy(yPtr, flatY, 0, totalPts);
+                return (flatX.Take(totalPts).ToArray(), flatY.Take(totalPts).ToArray(),
+                        contourLengths.Take(count).ToArray(), count);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(xPtr);
+                Marshal.FreeHGlobal(yPtr);
+                Marshal.FreeHGlobal(lenPtr);
+            }
+        }
+
+        /// <summary>
+        /// Step 7: 等间距轮廓采样（纯 OpenCV 等弧长采样）
+        /// </summary>
+        /// <param name="targetBars">目标暗条数量（默认16）</param>
+        /// <param name="spacing">采样间距（像素），沿每条暗条轮廓等弧长采样（默认3.0）</param>
+        public void SampleContours(int targetBars = 16, double spacing = 3.0)
+        {
+            CheckDisposed();
+            NativeAPI.CALIB_TrajStep_7_SampleContours(_context, targetBars, spacing);
         }
 
         /// <summary>
@@ -1186,12 +1500,9 @@ namespace CalibOperatorPInvoke
         /// <param name="doFit">是否执行形状拟合</param>
         /// <param name="doVerify">是否执行Mask验证</param>
         /// <param name="doDedup">是否执行去重排序</param>
-        /// <param name="bandWidth">窄带宽度(像素)，0=原始轮廓采样，>0=窄带采样</param>
-        /// <param name="includeOuterBand">是否包含暗条外围跑道型区域（基于灰度阈值检测）</param>
-        /// <param name="outerThreshold">外围跑道上界阈值（0=自适应Otsu）</param>
-        /// <param name="useContourMode">true=Canvas模式(等弧长轮廓采样)，false=旧方案(网格采样)</param>
-        /// <param name="outerExpandPixels">Canvas模式外围膨胀半径(像素)，默认25</param>
-        public TrajectoryResult Detect(CalibImage img, bool doFit = true, bool doVerify = true, bool doDedup = true, int bandWidth = 8, bool includeOuterBand = true, int outerThreshold = 0, bool useContourMode = true, int outerExpandPixels = 25, double claheClipLimit = 0, int claheTileGridSize = 8)
+        /// <param name="spacing">采样间距（像素），沿每条暗条轮廓等弧长采样（默认3.0）</param>
+        /// <param name="outerThreshold">外围跑道上界阈值（0=自适应Otsu，保留兼容）</param>
+        public TrajectoryResult Detect(CalibImage img, bool doFit = true, bool doVerify = true, bool doDedup = true, double spacing = 3.0, int outerThreshold = 0, double claheClipLimit = 0, int claheTileGridSize = 8)
         {
             ConvertToGrayscale(img);
             if (claheClipLimit > 0) ApplyCLAHE(claheClipLimit, claheTileGridSize);
@@ -1200,7 +1511,7 @@ namespace CalibOperatorPInvoke
             DetectDarkBars(50, 0, outerThreshold);
             MorphologyCleanup(5, 9, 2.0);
             FindAndSortDarkContours();
-            SampleContours(16, bandWidth, includeOuterBand, useContourMode, outerExpandPixels);
+            SampleContours(16, spacing);
             if (doFit) FitShape();
             if (doVerify) VerifyByMask();
             if (doDedup) DeduplicateAndSort();

@@ -1,0 +1,168 @@
+{
+  "Nodes": [
+    {
+      "Id": "dd7b98dd-e338-41d3-bf49-7f62c569bcc4",
+      "TypeId": "load_image",
+      "X": 168,
+      "Y": 66,
+      "Params": {}
+    },
+    {
+      "Id": "131b849e-1f89-4c3b-a560-263c0e352459",
+      "TypeId": "grayscale",
+      "X": 176,
+      "Y": 185,
+      "Params": {}
+    },
+    {
+      "Id": "33ae36f4-7472-402e-8643-03ed21e55c82",
+      "TypeId": "binarize",
+      "X": 174,
+      "Y": 325,
+      "Params": {
+        "blurSize": "7",
+        "morphSize": "5"
+      }
+    },
+    {
+      "Id": "9ab33acd-7492-4637-8a71-77dc7176f346",
+      "TypeId": "find_contours",
+      "X": 180,
+      "Y": 445,
+      "Params": {}
+    },
+    {
+      "Id": "ae96c374-350f-497b-9321-f2845568ccb8",
+      "TypeId": "create_mask",
+      "X": 186,
+      "Y": 558,
+      "Params": {}
+    },
+    {
+      "Id": "57816f7b-8658-4983-a26d-a0046a65c95e",
+      "TypeId": "gray_range_binary",
+      "X": 494,
+      "Y": 333,
+      "Params": {
+        "grayLow": "5",
+        "grayHigh": "50"
+      }
+    },
+    {
+      "Id": "d93e4d38-56f0-48ab-b3e3-37fb34304082",
+      "TypeId": "display",
+      "X": 1229,
+      "Y": 490,
+      "Params": {}
+    },
+    {
+      "Id": "09d6d3ac-460a-4065-969d-2919000cd35b",
+      "TypeId": "apply_mask",
+      "X": 490,
+      "Y": 441,
+      "Params": {}
+    },
+    {
+      "Id": "f6d80ce9-b3d2-404e-a005-d73ea97702f1",
+      "TypeId": "morphology",
+      "X": 486,
+      "Y": 560,
+      "Params": {
+        "kernelSize": "5",
+        "blurKsize": "9",
+        "blurSigma": "2.0"
+      }
+    },
+    {
+      "Id": "29ed0770-a3f4-4860-a885-b6d9c99fc33d",
+      "TypeId": "find_contours",
+      "X": 789,
+      "Y": 293,
+      "Params": {}
+    },
+    {
+      "Id": "1af39876-c76e-4bfa-b7c8-9c93246d68fb",
+      "TypeId": "sample",
+      "X": 812,
+      "Y": 489,
+      "Params": {
+        "numSamples": "16",
+        "stepSize": "8"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "dd7b98dd-e338-41d3-bf49-7f62c569bcc4",
+      "FromPort": "Image",
+      "ToNodeId": "131b849e-1f89-4c3b-a560-263c0e352459",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "131b849e-1f89-4c3b-a560-263c0e352459",
+      "FromPort": "Out",
+      "ToNodeId": "33ae36f4-7472-402e-8643-03ed21e55c82",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "33ae36f4-7472-402e-8643-03ed21e55c82",
+      "FromPort": "Out",
+      "ToNodeId": "9ab33acd-7492-4637-8a71-77dc7176f346",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "9ab33acd-7492-4637-8a71-77dc7176f346",
+      "FromPort": "Out",
+      "ToNodeId": "ae96c374-350f-497b-9321-f2845568ccb8",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "131b849e-1f89-4c3b-a560-263c0e352459",
+      "FromPort": "Out",
+      "ToNodeId": "57816f7b-8658-4983-a26d-a0046a65c95e",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "ae96c374-350f-497b-9321-f2845568ccb8",
+      "FromPort": "Mask",
+      "ToNodeId": "09d6d3ac-460a-4065-969d-2919000cd35b",
+      "ToPort": "Mask"
+    },
+    {
+      "FromNodeId": "57816f7b-8658-4983-a26d-a0046a65c95e",
+      "FromPort": "Out",
+      "ToNodeId": "09d6d3ac-460a-4065-969d-2919000cd35b",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "09d6d3ac-460a-4065-969d-2919000cd35b",
+      "FromPort": "Out",
+      "ToNodeId": "f6d80ce9-b3d2-404e-a005-d73ea97702f1",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "f6d80ce9-b3d2-404e-a005-d73ea97702f1",
+      "FromPort": "Out",
+      "ToNodeId": "29ed0770-a3f4-4860-a885-b6d9c99fc33d",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "29ed0770-a3f4-4860-a885-b6d9c99fc33d",
+      "FromPort": "Out",
+      "ToNodeId": "d93e4d38-56f0-48ab-b3e3-37fb34304082",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "29ed0770-a3f4-4860-a885-b6d9c99fc33d",
+      "FromPort": "Out",
+      "ToNodeId": "1af39876-c76e-4bfa-b7c8-9c93246d68fb",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "1af39876-c76e-4bfa-b7c8-9c93246d68fb",
+      "FromPort": "Points",
+      "ToNodeId": "d93e4d38-56f0-48ab-b3e3-37fb34304082",
+      "ToPort": "Points"
+    }
+  ]
+}

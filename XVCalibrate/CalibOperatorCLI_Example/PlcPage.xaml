@@ -17,7 +17,7 @@
                 <TextBlock Text="PLC Connection" FontWeight="Bold" Margin="0,0,0,8"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
                     <TextBlock Text="IP:" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                    <TextBox x:Name="TxtPlcIp" Text="192.168.0.1" Width="120" Height="26" VerticalContentAlignment="Center" Margin="0,0,10,0"/>
+                    <TextBox x:Name="TxtPlcIp" Text="192.168.6.6" Width="120" Height="26" VerticalContentAlignment="Center" Margin="0,0,10,0"/>
                     <TextBlock Text="Port:" VerticalAlignment="Center" Margin="0,0,4,0"/>
                     <TextBox x:Name="TxtPlcPort" Text="502" Width="55" Height="26" VerticalContentAlignment="Center" Margin="0,0,10,0"/>
                     <Button x:Name="BtnPlcConnect" Content="Connect" Width="75" Height="28" Margin="0,0,5,0" Click="BtnPlcConnect_Click"/>
@@ -41,7 +41,7 @@
                     <TextBox x:Name="TxtRegZ" Text="" Width="70" Height="24" VerticalContentAlignment="Center" Margin="0,0,12,0" ToolTip="Z轴位置寄存器地址（从配置加载）"/>
                     <CheckBox x:Name="ChkAutoRead" Content="Auto Read" VerticalAlignment="Center" Margin="10,0,0,0" IsChecked="False" Checked="ChkAutoRead_Checked" Unchecked="ChkAutoRead_Unchecked" ToolTip="勾选后自动定时读取PLC位置"/>
                     <TextBlock Text="Interval(ms):" VerticalAlignment="Center" Margin="8,0,3,0"/>
-                    <TextBox x:Name="TxtReadInterval" Text="500" Width="55" Height="24" VerticalContentAlignment="Center" ToolTip="自动读取间隔（毫秒）"/>
+                    <TextBox x:Name="TxtReadInterval" Text="500" Width="55" Height="24" VerticalContentAlignment="Center" ToolTip="自动读取间隔（毫秒）" TextChanged="TxtReadInterval_TextChanged"/>
                     <Button x:Name="BtnReadOnce" Content="Read" Width="55" Height="26" Margin="8,0,0,0" Click="BtnReadOnce_Click" ToolTip="手动读取一次位置"/>
                 </StackPanel>
                 <!-- X轴正反转控制 -->
@@ -188,14 +188,15 @@
                 <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
                     <TextBlock Text="GVAR List" FontWeight="Bold" Foreground="#7B1FA2" Margin="0,0,10,0"/>
                     <TextBlock Text="Addr:" VerticalAlignment="Center" Margin="0,0,3,0" Foreground="#666"/>
-                    <TextBlock x:Name="TxtGvarAddr" Text="D5000" VerticalAlignment="Center" Margin="0,0,6,0" FontFamily="Consolas" FontWeight="Bold"/>
+                    <TextBlock x:Name="TxtGvarAddr" Text="D30000" VerticalAlignment="Center" Margin="0,0,6,0" FontFamily="Consolas" FontWeight="Bold"/>
                     <TextBlock Text="Count:" VerticalAlignment="Center" Margin="0,0,3,0" Foreground="#666"/>
                     <TextBox x:Name="TxtGvarCount" Text="50" Width="45" Height="24" VerticalContentAlignment="Center" Margin="0,0,6,0" ToolTip="读取条数"/>
                     <Button x:Name="BtnReadGvar" Content="Read" Width="55" Height="26" Margin="0,0,4,0" Click="BtnReadGvar_Click"/>
                     <Button x:Name="BtnWriteGvar" Content="Write All" Width="65" Height="26" Margin="0,0,4,0" Click="BtnWriteGvar_Click" Foreground="#1565C0" FontWeight="Bold"/>
                     <Button x:Name="BtnClearGvar" Content="Clear" Width="55" Height="26" Margin="0,0,4,0" Click="BtnClearGvar_Click" Foreground="#D32F2F"/>
                     <Button x:Name="BtnAddGvar" Content="+" Width="26" Height="26" Margin="0,0,4,0" Click="BtnAddGvar_Click" FontWeight="Bold" FontSize="14"/>
-                    <Button x:Name="BtnRemoveGvar" Content="-" Width="26" Height="26" Margin="0,0,0,0" Click="BtnRemoveGvar_Click" FontWeight="Bold" FontSize="14" Foreground="#D32F2F"/>
+                    <Button x:Name="BtnRemoveGvar" Content="-" Width="26" Height="26" Margin="0,0,8,0" Click="BtnRemoveGvar_Click" FontWeight="Bold" FontSize="14" Foreground="#D32F2F"/>
+                    <Button x:Name="BtnImportTrajectoryToGvar" Content="导入轨迹" Width="75" Height="26" Margin="0,0,0,0" Click="BtnImportTrajectoryToGvar_Click" Foreground="#7B1FA2" FontWeight="Bold" ToolTip="将轨迹检测结果导入为 GVAR 直线段列表（需先在轨迹页完成检测）"/>
                 </StackPanel>
                 <DataGrid x:Name="DgGvarList"
                           AutoGenerateColumns="False"

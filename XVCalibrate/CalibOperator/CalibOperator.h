@@ -143,10 +143,11 @@ void Step_WatershedPresegment(const cv::Mat& grayMat, cv::Mat* step2Output, bool
 void Step_ApplyCLAHE(cv::Mat* grayMat, double clipLimit, int tileGridSize);
 
 // 2. 高斯模糊 + OTSU二值化 + 形态学处理 + 提取外轮廓
+// minArea: 最小轮廓面积阈值，小于此值的轮廓被过滤掉 (0=不过滤)
 void Step_PreprocessAndFindContours(cv::Mat* grayMat, cv::Mat* binaryBright, 
                                      cv::Mat* morphed, cv::Mat* mask, cv::Mat* coloredMask,
                                      std::vector<std::vector<cv::Point>>* outerContours,
-                                     int blurKsize, int morphKernelSize, bool enableWatershed = false);
+                                     int blurKsize, int morphKernelSize, bool enableWatershed = false, double minArea = 0);
 
 // 2b（可选）. Canny 边缘检测，输出边缘图
 // grayMat: 输入灰度图
@@ -158,6 +159,12 @@ void Step_DetectCannyEdges(const cv::Mat& grayMat, cv::Mat* edgeMap,
                             double lowThreshold, double highThreshold, int blurKsize,
                             int bilateralD = 0, double bilateralSigmaColor = 75, double bilateralSigmaSpace = 75,
                             int nlmeansH = 0, int nlmeansTemplateSize = 7, int nlmeansSearchSize = 21);
+
+// 2.5 生成 Mask：从外轮廓中找到面积最大的轮廓，填充内部区域
+// outerContours: Step2 输出的外轮廓列表
+// mask: 输出 mask（最大轮廓内部=255，其余=0）
+void Step_CreateMaskFromLargestContour(const std::vector<std::vector<cv::Point>>& outerContours,
+                                        int width, int height, cv::Mat* mask, int contourIdx = -1);
 
 // 3. 根据外轮廓生成工件mask
 void Step_CreateWorkpieceMask(std::vector<std::vector<cv::Point>>* outerContours,
@@ -173,56 +180,52 @@ void Step_DetectDarkBars(cv::Mat* grayMat, cv::Mat* mask, int darkThreshold,
                           int darkMinThreshold, int outerThreshold,
                           cv::Mat* darkBinary, cv::Mat* outerMask);
 
-// 4.5 基于轮廓查找的外围跑道轮廓提取 (Canvas 方案)
-// outerExpandPixels: 膨胀半径(像素)，用于覆盖外围跑道区域
-// outerContours: 输出每个暗条的外围跑道轮廓（与 darkContours 中的暗条顺序一一对应）
-void Step_DetectOuterContour(const std::vector<std::vector<cv::Point>>& darkContours,
-                              const std::vector<std::pair<double, int>>& sortedBars,
-                              int targetBars, int width, int height,
-                              int outerExpandPixels,
-                              const cv::Mat& workMask,
-                              std::vector<std::vector<cv::Point>>* outerContours);
-
-// 5. 形态学清理
+// 5. 形态学清理（闭-开-开-闭 + 膨胀腐蚀）
 void Step_MorphologyCleanup(cv::Mat* darkBinary, int kernelSize, int blurKsize, double blurSigma);
 
-// 5.5 边界约束膨胀：将暗条沿 Canny 边缘膨胀到下一条跑道型边界
-// 逐圈膨胀，计算每圈与Canny边缘的重合度（overlap ratio），
-// 当重合度达到峰值后停止，找到"刚好贴上下一条跑道型边界"的最佳位置。
-// darkBinary: 输入/输出，morph后的暗条二值图，会被原地修改（膨胀后更新）
-// edgeMap: Canny边缘图（边缘=255，非边缘=0）
-// expandPixels: 最大膨胀半径（像素）
-// mask: 工件mask，膨胀结果会被限制在工件范围内
-// expandedMask: 输出，膨胀后的增量区域 = expanded - original（可为NULL）
+// 5b. 扩展到边缘边界（可选，Canny 辅助）
 void Step_ExpandToEdgeBoundary(cv::Mat* darkBinary, const cv::Mat& edgeMap,
                                 int expandPixels, const cv::Mat& mask,
                                 cv::Mat* expandedMask);
 
-// 6. 提取暗条轮廓并按面积排序，返回找到的暗条数量
+// 6. 提取并按面积排序暗条轮廓，返回有效暗条数量
 int Step_FindAndSortDarkContours(cv::Mat* darkBinary, int width, int height,
-                                   std::vector<std::pair<double, int>>* sortedBars,
-                                   std::vector<std::vector<cv::Point>>* darkContours);
+                                  std::vector<std::pair<double, int>>* sortedBars,
+                                  std::vector<std::vector<cv::Point>>* darkContours);
 
-// 7. 等间距轮廓采样
-// bandWidth: 窄带宽度(像素)，0 = 原始轮廓采样（兼容旧行为），>0 = 暗条外侧窄带采样
-// workMask: 工件 mask（窄带模式必须非空），原始模式可传 NULL
-// includeOuterBand: 是否包含暗条外围跑道型区域
-// outerMask: 外围跑道区域 mask（由 Step_DetectDarkBars 生成，旧方案兼容）
-// outerContourBars: 每个暗条的外围跑道轮廓（由 Step_DetectOuterContour 生成，Canvas 方案优先）
-// useContourMode: true=使用轮廓等弧长采样（Canvas），false=使用膨胀+网格采样（旧方案）
+
+// 7. 等间距轮廓采样（纯 OpenCV 方案）
+// spacing: 采样间距（像素），沿每条暗条轮廓等弧长采样（建议 2.0~5.0）
 void Step_SampleContoursEquidistant(std::vector<std::vector<cv::Point>>* darkContours,
                                      std::vector<std::pair<double, int>>* sortedBars,
                                      int targetBars, int width, int height,
                                      std::vector<cv::Point>* allPoints,
                                      std::vector<int>* allBarIds,
-                                     int bandWidth = 0,
-                                     const cv::Mat* workMask = NULL,
-                                     bool includeOuterBand = false,
-                                     const cv::Mat* outerMask = NULL,
-                                     const std::vector<std::vector<cv::Point>>* outerContourBars = NULL,
-                                     bool useContourMode = false);
+                                     double spacing = 3.0);
 
-// 7.5 形状拟合: 按barId分组，对每条暗条的采样点做分段形状拟合
+// 独立轮廓采样：从二值图直接 findContours + 排序 + 等弧长采样，不依赖 stepDetector
+// binaryData: 二值图数据（width*height, 0/255）
+// 返回采样点数（<= maxPoints），通过 outPoints 输出
+int SampleContoursFromBinary(const unsigned char* binaryData, int width, int height,
+                              int targetBars, double spacing, int minArea,
+                              Point2D* outPoints, int* outBarIds, int maxPoints);
+
+// 从已有的轮廓点数据做等弧长采样（独立函数，不依赖 stepDetector 上下文）
+// flatPoints: 扁平化的轮廓点数组，所有轮廓的点依次排列
+// contourLengths: 每条轮廓的点数，数组长度 = numContours
+// numContours: 轮廓数量
+// targetBars: 取前N条轮廓做采样
+// spacing: 等弧长采样间距
+// outPoints, outBarIds: 输出采样点和对应的 barId
+// maxPoints: 输出缓冲区最大点数
+// 返回实际采样点数
+int SampleContoursFromPoints(const int* flatX, const int* flatY,
+                             const int* contourLengths, int numContours,
+                             int targetBars, int width, int height,
+                             double spacing,
+                             Point2D* outPoints, int* outBarIds, int maxPoints);
+
+// 按barId分组，对每条暗条的采样点做分段形状拟合
 // fitMode: 0=stadium跑道型拟合(默认), 1=曲率去噪(删除局部曲率异常大的点)
 // approxEpsilon: fitMode=1时未使用(保留参数供未来扩展)
 void Step_FitShape(std::vector<cv::Point>* allPoints, std::vector<int>* allBarIds,

@@ -15,6 +15,11 @@ namespace CalibOperatorCLI_Example
         private TrajectoryStepDetector? _trajDetector;
         private int _trajStep = 0;
 
+        /// <summary>
+        /// 最后一次轨迹检测的结果，供 PlcPage 等其他页面读取
+        /// </summary>
+        public TrajectoryResult? LastResult { get; private set; }
+
         // 缩放相关
         private double _zoomLevel = 1.0;
         private const double ZOOM_STEP = 0.1;
@@ -162,20 +167,20 @@ namespace CalibOperatorCLI_Example
                 int.TryParse(TxtHollowGrayHigh.Text, out hollowGrayHigh);
                 if (blurKsize % 2 == 0) blurKsize++;
                 if (morphKernelSize % 2 == 0) morphKernelSize++;
-                bool useContourMode = ChkContourMode.IsChecked == true;
 
-                Log($"[HOLLOW] blur={blurKsize}, morph={morphKernelSize}, contourMode={useContourMode}, grayRange=[{hollowGrayLow}, {hollowGrayHigh}]");
+                Log($"[HOLLOW] blur={blurKsize}, morph={morphKernelSize}, grayRange=[{hollowGrayLow}, {hollowGrayHigh}]");
 
                 var result = CalibAPI.DetectHollowTrajectory(_currentImage,
                     blurKsize, morphKernelSize,
                     targetHollows: 16, bandWidth: 8,
-                    useContourMode: useContourMode,
+                    useContourMode: true,
                     outerExpandPixels: 25,
                     hollowGrayLow: hollowGrayLow,
                     hollowGrayHigh: hollowGrayHigh);
 
                 if (result.Success && result.Count > 0)
                 {
+                    LastResult = result;
                     Log($"[HOLLOW] SUCCESS! Found {result.Count} points");
 
                     // 先获取原图的 BitmapSource（在画轨迹之前，用于网格中透明叠加显示）
@@ -422,7 +427,6 @@ namespace CalibOperatorCLI_Example
                 _trajStep = 0;
                 ResetZoom();
 
-                bool useContourMode = ChkContourMode.IsChecked == true;
                 int fitMode = CmbFitMode.SelectedIndex;
 
                 // CLAHE 参数
@@ -434,11 +438,10 @@ namespace CalibOperatorCLI_Example
                     int.TryParse(TxtCLAHEGrid.Text, out claheTileGridSize);
                 }
 
-                Log($"[AUTO] ContourMode={useContourMode}, FitMode={fitMode}, CLAHE={claheClipLimit > 0}({claheClipLimit:F1},{claheTileGridSize})");
+                Log($"[AUTO] FitMode={fitMode}, CLAHE={claheClipLimit > 0}({claheClipLimit:F1},{claheTileGridSize})");
 
                 var result = _trajDetector.Detect(_currentImage, doFit: true, doVerify: true, doDedup: true,
-                    bandWidth: 8, includeOuterBand: true, outerThreshold: 0,
-                    useContourMode: useContourMode, outerExpandPixels: 25,
+                    spacing: 3.0, outerThreshold: 0,
                     claheClipLimit: claheClipLimit, claheTileGridSize: claheTileGridSize);
 
                 if (fitMode >= 0)
@@ -446,6 +449,7 @@ namespace CalibOperatorCLI_Example
 
                 if (result.Success)
                 {
+                    LastResult = result;
                     Log($"[AUTO] SUCCESS! Found {result.Count} points");
                     if (result.Count > 0)
                     {
@@ -697,20 +701,16 @@ namespace CalibOperatorCLI_Example
             {
                 if (_trajDetector == null || _currentImage == null) return;
                 PrepareStep(6);
-                int targetBars = 16, bandWidth = 8;
+                int targetBars = 16;
+                double spacing = 3.0;
                 int.TryParse(TxtStep7Bars.Text, out targetBars);
-                int.TryParse(TxtStep7BandWidth.Text, out bandWidth);
-                bool useContourMode = ChkContourMode.IsChecked == true;
-                Log($"[STEP 7] Sample (bars={targetBars}, bandWidth={bandWidth}, canvas={useContourMode})...");
-                _trajDetector.SampleContours(targetBars, bandWidth, true, useContourMode, 25);
+                double.TryParse(TxtStep7BandWidth.Text, out spacing);
+                if (spacing <= 0) spacing = 3.0;
+                Log($"[STEP 7] Sample (bars={targetBars}, spacing={spacing:F1})...");
+                _trajDetector.SampleContours(targetBars, spacing);
                 int ptCount = _trajDetector.GetPointCount();
                 Log($"[INFO] Points: {ptCount}");
 
-                if (bandWidth > 0)
-                {
-                    var bandImg = _trajDetector.GetStepImage(5);
-                    if (bandImg != null) { DisplayImage(bandImg); bandImg.Dispose(); }
-                }
                 if (ptCount > 0)
                 {
                     var coloredTraj = _trajDetector.DrawColoredTrajectory(_currentImage.Width, _currentImage.Height);
@@ -804,6 +804,7 @@ namespace CalibOperatorCLI_Example
                 var result = _trajDetector.ConvertToOutput();
                 if (result.Success && result.Count > 0)
                 {
+                    LastResult = result;
                     Log($"[INFO] SUCCESS! {result.Count} points");
                     var coloredTraj = _trajDetector.DrawColoredTrajectory(_currentImage.Width, _currentImage.Height);
                     DisplayImage(coloredTraj);

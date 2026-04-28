@@ -1,4 +1,4 @@
-/**
+﻿/**
  * CalibOperatorExport.cpp - Native C API Implementation
  */
 
@@ -264,13 +264,36 @@ CALIB_API int CALIB_TrajStep_2b_CannyEdges(TrajStepContext ctx, double lowThresh
     return 0;
 }
 
-CALIB_API int CALIB_TrajStep_2_PreprocessAndFindContours(TrajStepContext ctx, int blurKsize, int morphKernelSize, bool enableWatershed) {
+CALIB_API int CALIB_TrajStep_2_PreprocessAndFindContours(TrajStepContext ctx, int blurKsize, int morphKernelSize, bool enableWatershed, double minArea) {
     if (!ctx) return -1;
     TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
     Step_PreprocessAndFindContours(&impl->grayMat, &impl->binaryBright, 
                                     &impl->morphed, &impl->mask, &impl->coloredMask, 
                                     &impl->outerContours, blurKsize, morphKernelSize,
-                                    enableWatershed);
+                                    enableWatershed, minArea);
+    return 0;
+}
+
+CALIB_API int CALIB_TrajStep_2c_GrayRangeBinary(TrajStepContext ctx, int grayLow, int grayHigh) {
+    if (!ctx) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    if (impl->grayMat.empty()) return -1;
+
+    // 按灰度范围二值化: grayLow <= gray <= grayHigh → 255, 其余 → 0
+    cv::Mat result;
+    cv::inRange(impl->grayMat, grayLow, grayHigh, result);
+    impl->binaryBright = result;
+    return 0;
+}
+
+CALIB_API int CALIB_TrajStep_2_5_CreateMask(TrajStepContext ctx, int contourIdx) {
+    if (!ctx) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    if (impl->outerContours.empty()) {
+        return -1;
+    }
+    impl->mask.release();
+    Step_CreateMaskFromLargestContour(impl->outerContours, impl->width, impl->height, &impl->mask, contourIdx);
     return 0;
 }
 
@@ -282,6 +305,111 @@ CALIB_API int CALIB_TrajStep_3_CreateWorkpieceMask(TrajStepContext ctx, int maxC
     return 0;
 }
 
+CALIB_API int CALIB_TrajStep_3b_DetectHollow(TrajStepContext ctx, int hollowGrayLow, int hollowGrayHigh, int targetHollows, int morphKernelSize) {
+    if (!ctx) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    if (impl->grayMat.empty() || impl->mask.empty()) return -1;
+
+    if (morphKernelSize % 2 == 0) morphKernelSize++;
+    if (morphKernelSize < 3) morphKernelSize = 3;
+
+    int h = impl->height, w = impl->width;
+
+    // ---- 按灰度范围在 mask 内二值化 ----
+    cv::Mat innerRegion = impl->grayMat.clone();
+    innerRegion.setTo(255, impl->mask == 0);
+
+    cv::Mat binaryDark;
+    binaryDark = (innerRegion >= hollowGrayLow) & (innerRegion <= hollowGrayHigh);
+    binaryDark.setTo(0, impl->mask == 0);
+    innerRegion.release();
+
+    // ---- 形态学处理 ----
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(morphKernelSize, morphKernelSize));
+    cv::Mat morphed;
+    cv::morphologyEx(binaryDark, morphed, cv::MORPH_OPEN, kernel);
+    cv::morphologyEx(morphed, morphed, cv::MORPH_OPEN, kernel);
+    cv::morphologyEx(morphed, morphed, cv::MORPH_CLOSE, kernel);
+    cv::morphologyEx(morphed, morphed, cv::MORPH_CLOSE, kernel);
+
+    // ---- 找空洞轮廓并按面积排序 ----
+    std::vector<std::vector<cv::Point>> hierarchyContours;
+    cv::findContours(morphed, hierarchyContours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
+
+    std::vector<std::pair<double, int>> sortedHollows;
+    for (size_t i = 0; i < hierarchyContours.size(); i++) {
+        double area = cv::contourArea(hierarchyContours[i]);
+        if (area > 100) {
+            sortedHollows.push_back(std::make_pair(area, (int)i));
+        }
+    }
+    std::sort(sortedHollows.begin(), sortedHollows.end(),
+              [](const std::pair<double, int>& a, const std::pair<double, int>& b) {
+                  return a.first > b.first;
+              });
+
+    int takeHollows = std::min((int)sortedHollows.size(), std::min(targetHollows, CALIB_MAX_BARS));
+
+    // ---- 构建空洞二值图 hollowBinary ----
+    cv::Mat hollowBinary = cv::Mat::zeros(h, w, CV_8UC1);
+    for (int k = 0; k < takeHollows; k++) {
+        int idx = sortedHollows[k].second;
+        cv::drawContours(hollowBinary, hierarchyContours, idx, cv::Scalar(255), cv::FILLED);
+    }
+    hollowBinary.setTo(0, impl->mask == 0);
+    binaryDark.release();
+
+    // ---- 再次形态学清理空洞二值图 ----
+    cv::morphologyEx(hollowBinary, hollowBinary, cv::MORPH_CLOSE, kernel);
+    cv::morphologyEx(hollowBinary, hollowBinary, cv::MORPH_OPEN, kernel);
+    cv::morphologyEx(hollowBinary, hollowBinary, cv::MORPH_OPEN, kernel);
+    cv::morphologyEx(hollowBinary, hollowBinary, cv::MORPH_CLOSE, kernel);
+
+    cv::Mat dilateKernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(morphKernelSize + 2, morphKernelSize + 2));
+    cv::erode(hollowBinary, hollowBinary, dilateKernel);
+    cv::dilate(hollowBinary, hollowBinary, dilateKernel);
+    dilateKernel.release();
+
+    hollowBinary.setTo(0, impl->mask == 0);
+
+    // ---- 最终提取空洞轮廓并排序 ----
+    std::vector<std::vector<cv::Point>> hollowContours;
+    cv::findContours(hollowBinary, hollowContours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
+
+    double areaThreshold = (double)(w * h) * 0.002;
+    if (areaThreshold < 500.0) areaThreshold = 500.0;
+
+    impl->sortedBars.clear();
+    for (size_t i = 0; i < hollowContours.size(); i++) {
+        double area = cv::contourArea(hollowContours[i]);
+        if (area > areaThreshold) {
+            impl->sortedBars.push_back(std::make_pair(area, (int)i));
+        }
+    }
+    std::sort(impl->sortedBars.begin(), impl->sortedBars.end(),
+              [](const std::pair<double, int>& a, const std::pair<double, int>& b) {
+                  return a.first > b.first;
+              });
+
+    int barCount = std::min((int)impl->sortedBars.size(), CALIB_MAX_BARS);
+
+    // ---- 按排序结果提取对应的轮廓 ----
+    impl->darkContours.clear();
+    for (int i = 0; i < barCount; i++) {
+        int idx = impl->sortedBars[i].second;
+        impl->darkContours.push_back(hollowContours[idx]);
+    }
+
+    // ---- 存入 context ----
+    impl->darkBinary = hollowBinary;
+    impl->darkBarCount = barCount;
+    // bandWidth=0, includeOuterBand=true (后续 sample 时如需窄带可调整)
+    impl->bandWidth = 0;
+    impl->includeOuterBand = true;
+
+    return barCount;
+}
+
 CALIB_API int CALIB_TrajStep_4_DetectDarkBars(TrajStepContext ctx, int darkThreshold, int darkMinThreshold, int outerThreshold) {
     if (!ctx) return -1;
     TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
@@ -290,6 +418,61 @@ CALIB_API int CALIB_TrajStep_4_DetectDarkBars(TrajStepContext ctx, int darkThres
     return 0;
 }
 
+
+CALIB_API int CALIB_TrajStep_SetDarkBinary(TrajStepContext ctx, const void* data, int width, int height) {
+    if (!ctx || !data) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    if (impl->darkBinary.empty() || impl->darkBinary.cols != width || impl->darkBinary.rows != height) {
+        impl->darkBinary.create(height, width, CV_8UC1);
+    }
+    memcpy(impl->darkBinary.data, data, width * height);
+    return 0;
+}
+
+CALIB_API int CALIB_TrajStep_SetGrayMat(TrajStepContext ctx, const void* data, int width, int height) {
+    if (!ctx || !data) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    if (impl->grayMat.empty() || impl->grayMat.cols != width || impl->grayMat.rows != height) {
+        impl->grayMat.create(height, width, CV_8UC1);
+    }
+    memcpy(impl->grayMat.data, data, width * height);
+    return 0;
+}
+
+CALIB_API int CALIB_TrajStep_SetMask(TrajStepContext ctx, const void* data, int width, int height) {
+    if (!ctx || !data) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+    if (impl->mask.empty() || impl->mask.cols != width || impl->mask.rows != height) {
+        impl->mask.create(height, width, CV_8UC1);
+    }
+    memcpy(impl->mask.data, data, width * height);
+    return 0;
+}
+
+CALIB_API int CALIB_TrajStep_GetContourVis(TrajStepContext ctx, Image* outImage) {
+    if (!ctx || !outImage) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+
+    // 在 darkBinary 上叠加暗条轮廓边界线
+    cv::Mat vis = impl->darkBinary.clone();
+
+    // 只画通过面积过滤的轮廓（sortedBars 里记录的）
+    for (size_t i = 0; i < impl->sortedBars.size(); i++) {
+        int idx = impl->sortedBars[i].second;
+        if (idx >= 0 && idx < (int)impl->darkContours.size()) {
+            cv::drawContours(vis, impl->darkContours, idx, cv::Scalar(128), 2);
+        }
+    }
+
+    if (outImage->data) free(outImage->data);
+    outImage->width = vis.cols;
+    outImage->height = vis.rows;
+    outImage->channels = 1;
+    int dataSize = vis.cols * vis.rows;
+    outImage->data = (unsigned char*)malloc(dataSize);
+    memcpy(outImage->data, vis.data, dataSize);
+    return 0;
+}
 CALIB_API int CALIB_TrajStep_5_MorphologyCleanup(TrajStepContext ctx, int kernelSize, int blurKsize, double blurSigma) {
 
     if (!ctx) return -1;
@@ -320,62 +503,18 @@ CALIB_API int CALIB_TrajStep_6_FindAndSortDarkContours(TrajStepContext ctx) {
     return impl->darkBarCount;
 }
 
-CALIB_API int CALIB_TrajStep_7_SampleContours(TrajStepContext ctx, int targetBars, int bandWidth, bool includeOuterBand, bool useContourMode, int outerExpandPixels) {
+CALIB_API int CALIB_TrajStep_7_SampleContours(TrajStepContext ctx, int targetBars, double spacing) {
     if (!ctx) return -1;
     TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
 
     // 快照恢复：重复运行时从上次输入重新开始
     impl->RestoreSnapshot();
 
-    impl->bandWidth = bandWidth;
-    impl->includeOuterBand = includeOuterBand;
-    const cv::Mat* workMask = (bandWidth > 0) ? &impl->mask : NULL;
-    const cv::Mat* outerMaskPtr = includeOuterBand ? &impl->outerMask : NULL;
-
-    // Canvas 模式：先提取外围跑道轮廓
-    const std::vector<std::vector<cv::Point>>* outerContourPtr = NULL;
-    if (useContourMode && includeOuterBand && bandWidth > 0) {
-        impl->outerContourBars.clear();
-        Step_DetectOuterContour(impl->darkContours, impl->sortedBars, targetBars,
-                                 impl->width, impl->height, outerExpandPixels, impl->mask,
-                                 &impl->outerContourBars);
-        outerContourPtr = &impl->outerContourBars;
-    }
+    if (spacing <= 0.0) spacing = 3.0;
 
     Step_SampleContoursEquidistant(&impl->darkContours, &impl->sortedBars, targetBars,
                                     impl->width, impl->height, &impl->allPoints, &impl->allBarIds,
-                                    bandWidth, workMask, includeOuterBand, outerMaskPtr,
-                                    outerContourPtr, useContourMode);
-
-    // 计算窄带可视化图：暗条=255，窄带=128，外围跑道=64，背景=0
-    impl->bandMask.release();
-    if (bandWidth > 0 && !impl->darkBinary.empty()) {
-        impl->bandMask = cv::Mat::zeros(impl->height, impl->width, CV_8UC1);
-        impl->bandMask.setTo(255, impl->darkBinary);
-
-        // 内窄带
-        int kw = 2 * bandWidth + 1;
-        cv::Mat bandKernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(kw, kw));
-        cv::Mat dilated;
-        cv::dilate(impl->darkBinary, dilated, bandKernel);
-        bandKernel.release();
-        cv::Mat band = dilated - impl->darkBinary;
-        dilated.release();
-        band.setTo(0, impl->mask == 0);
-        impl->bandMask.setTo(128, band);
-
-        // 外围跑道型区域（基于灰度阈值 mask，用64灰度显示）
-        if (includeOuterBand && !impl->outerMask.empty()) {
-            // 减去暗条和窄带区域，只显示纯外围
-            cv::Mat outerVis = impl->outerMask.clone();
-            outerVis.setTo(0, impl->darkBinary != 0);  // 减去暗条
-            outerVis.setTo(0, band != 0);  // 减去窄带
-            impl->bandMask.setTo(64, outerVis);
-            outerVis.release();
-        }
-
-        band.release();
-    }
+                                    spacing);
 
     // 保存快照：下次重复运行时从这里恢复
     impl->SaveSnapshot();
@@ -502,6 +641,7 @@ CALIB_API int CALIB_TrajStep_GetStepImage(TrajStepContext ctx, int step, Image* 
             break;
         case 6: srcMat = &impl->edgeMap; break;  // 步骤2b: Canny边缘图
         case 7: srcMat = &impl->expandedMask; break;  // 步骤5.5: 边界膨胀增量区域
+        case 8: srcMat = &impl->mask; break;  // 二值mask（仅最大轮廓）
         default: return -1;
     }
     
@@ -546,4 +686,81 @@ CALIB_API void CALIB_GetBarColors(unsigned char colors[48]) {
         colors[i * 3 + 1] = BAR_COLORS[i][1];
         colors[i * 3 + 2] = BAR_COLORS[i][2];
     }
+}
+
+// ================================================================
+// Independent Contour Sampling
+// ================================================================
+
+CALIB_API int CALIB_SampleContours(const unsigned char* binaryData, int width, int height,
+                                    int targetBars, double spacing, int minArea,
+                                    Point2D* outPoints, int* outBarIds, int maxPoints) {
+    return ::SampleContoursFromBinary(binaryData, width, height, targetBars, spacing, minArea,
+                                       outPoints, outBarIds, maxPoints);
+}
+
+CALIB_API int CALIB_TrajStep_ExportSortedContours(TrajStepContext ctx,
+                                                   int* flatX, int* flatY,
+                                                   int* contourLengths,
+                                                   int maxContours, int maxTotalPoints) {
+    if (!ctx || !flatX || !flatY || !contourLengths) return -1;
+    TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
+
+    int exportCount = 0;
+    int totalPts = 0;
+    for (int b = 0; b < (int)impl->sortedBars.size() && b < maxContours; b++) {
+        int idx = impl->sortedBars[b].second;
+        if (idx < 0 || idx >= (int)impl->darkContours.size()) continue;
+        const std::vector<cv::Point>& contour = impl->darkContours[idx];
+        int ptCount = (int)contour.size();
+        if (totalPts + ptCount > maxTotalPoints) break;
+
+        contourLengths[exportCount] = ptCount;
+        for (int j = 0; j < ptCount; j++) {
+            flatX[totalPts + j] = contour[j].x;
+            flatY[totalPts + j] = contour[j].y;
+        }
+        totalPts += ptCount;
+        exportCount++;
+    }
+    printf("ExportSortedContours: exported %d contours, %d total points\n", exportCount, totalPts);
+    return exportCount;
+}
+
+CALIB_API int CALIB_SampleContoursFromPoints(const int* flatX, const int* flatY,
+                                              const int* contourLengths, int numContours,
+                                              int targetBars, int width, int height,
+                                              double spacing,
+                                              Point2D* outPoints, int* outBarIds, int maxPoints) {
+    return ::SampleContoursFromPoints(flatX, flatY, contourLengths, numContours,
+                                       targetBars, width, height, spacing,
+                                       outPoints, outBarIds, maxPoints);
+}
+
+// ================================================================
+// Image Utility
+// ================================================================
+
+CALIB_API int CALIB_ApplyMask(Image* src, Image* mask, Image* outImg) {
+    if (!src || !mask || !outImg) return -1;
+    if (src->width != mask->width || src->height != mask->height) return -2;
+
+    int totalPixels = src->width * src->height;
+    int channels = src->channels;
+    outImg->width = src->width;
+    outImg->height = src->height;
+    outImg->channels = channels;
+    int dataSize = totalPixels * channels;
+    if (outImg->data) free(outImg->data);
+    outImg->data = (unsigned char*)malloc(dataSize);
+    if (!outImg->data) return -1;
+
+    for (int i = 0; i < totalPixels; i++) {
+        if (mask->data[i] != 0) {
+            memcpy(outImg->data + i * channels, src->data + i * channels, channels);
+        } else {
+            memset(outImg->data + i * channels, 0, channels);
+        }
+    }
+    return 0;
 }

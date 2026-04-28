@@ -23,6 +23,11 @@ namespace CalibOperatorCLI_Example
 
         private int HdModbusOffset => _config?.HdModbusOffset ?? 0xA080;
 
+        /// <summary>
+        /// 由 MainWindow 注入：获取轨迹检测最新结果的委托
+        /// </summary>
+        public Func<TrajectoryResult?>? GetTrajectoryResult { get; set; }
+
         public PlcPage()
         {
             InitializeComponent();
@@ -375,16 +380,43 @@ namespace CalibOperatorCLI_Example
                 return false;
             }
 
-            // 组装所有寄存器数据
-            ushort[] regs = new ushort[totalRegisters];
-            for (int i = 0; i < count; i++)
-                _gvarList[i].ToRegisters(regs, i * GVAR.WORD_COUNT);
-
-            var result = _plc.Write(startAddr.ToString(), regs);
-            if (!result.IsSuccess)
+            // 分批写入，每条 GVAR 写 2 次：type1(short) + 连续 float 数组
+            // 让 HslCommunication 自动处理信捷 PLC 的字节序
+            int totalItems = count;
+            int written = 0;
+            for (int i = 0; i < totalItems; i++)
             {
-                Log($"[PLC] 写入 GVAR 列表失败: {result.Message}");
-                return false;
+                var g = _gvarList[i];
+                int itemBase = startAddr + i * GVAR.WORD_COUNT;
+
+                try
+                {
+                    // 写 type1 (short) 到寄存器 0
+                    var r = _plc.Write(itemBase.ToString(), (short)g.type1);
+                    if (!r.IsSuccess) throw new Exception(r.Message);
+
+                    // 写 13 个连续 float: 从寄存器 2 开始（跳过 pad 寄存器 1）
+                    // 寄存器 2..27 = p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, cx, cy, r, start_deg, end_deg, z0, z1
+                    float[] floats = new float[]
+                    {
+                        g.spVec3_p0.x, g.spVec3_p0.y, g.spVec3_p0.z,
+                        g.spVec3_p1.x, g.spVec3_p1.y, g.spVec3_p1.z,
+                        g.cx, g.cy, g.r,
+                        g.start_deg, g.end_deg,
+                        g.z0, g.z1
+                    };
+                    r = _plc.Write((itemBase + 2).ToString(), floats);
+                    if (!r.IsSuccess) throw new Exception(r.Message);
+                }
+                catch (Exception ex)
+                {
+                    Log($"[PLC] 写入 GVAR 第 {i + 1}/{totalItems} 条失败: {ex.Message}");
+                    Log($"[PLC] 已写入 {written}/{totalItems} 条");
+                    return false;
+                }
+                written++;
+                if (totalItems > 10 && (written % 100 == 0 || written == totalItems))
+                    Log($"[PLC] 写入进度: {written}/{totalItems} 条");
             }
 
             Log($"[PLC] 写入 GVAR 列表成功：{count} 项，起始 {gvarCfg.StartAddress}，共 {totalRegisters} 寄存器");
@@ -464,6 +496,52 @@ namespace CalibOperatorCLI_Example
                 DgGvarList.ItemsSource = items;
                 Log($"[PLC] 已删除第 {selected.Index} 条 GVAR");
             }
+        }
+
+        /// <summary>
+        /// 将轨迹检测得到的点序列转换为 GVAR 直线段列表，并刷新 DataGrid
+        /// 每两个相邻轨迹点构成一条 GVAR 线段（type1=0，p0/p1 填 x/y，z=0，圆弧参数置零）
+        /// </summary>
+        private void BtnImportTrajectoryToGvar_Click(object sender, RoutedEventArgs e)
+        {
+            if (GetTrajectoryResult == null)
+            {
+                MessageBox.Show("未连接轨迹检测模块，请联系开发人员检查初始化代码。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            var trajResult = GetTrajectoryResult();
+            if (trajResult == null || !trajResult.Success || trajResult.Points == null || trajResult.Count == 0)
+            {
+                MessageBox.Show("当前没有可用的轨迹检测结果。\n请先在「轨迹检测」页面完成检测（Step10 或 AutoDetect）。",
+                    "无轨迹数据", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var pts = trajResult.Points;
+            int n = trajResult.Count;
+
+            // 每两个相邻点构成一条直线段 GVAR（type1 = 0）
+            // 最后一段：n-1 → 0（闭合）
+            var gvarList = new List<GVAR>();
+            for (int i = 0; i < n; i++)
+            {
+                var p0 = pts[i];
+                var p1 = pts[(i + 1) % n];
+                gvarList.Add(new GVAR
+                {
+                    type1 = 0,
+                    spVec3_p0 = new SpVec3((float)p0.X, (float)p0.Y, 0f),
+                    spVec3_p1 = new SpVec3((float)p1.X, (float)p1.Y, 0f),
+                    cx = 0f, cy = 0f, r = 0f,
+                    start_deg = 0f, end_deg = 0f,
+                    z0 = 0f, z1 = 0f
+                });
+            }
+
+            _gvarList = gvarList.ToArray();
+            RefreshGvarGrid();
+            Log($"[PLC] 已从轨迹导入 {gvarList.Count} 条 GVAR 直线段（{n} 个轨迹点）");
         }
 
         private DispatcherTimer? _holdTimer;
@@ -759,6 +837,15 @@ namespace CalibOperatorCLI_Example
             Log("[PLC] 自动读取已停止");
         }
 
+        private void TxtReadInterval_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_readTimer == null) return; // auto read 未开启，不需要更新
+            if (!int.TryParse(TxtReadInterval.Text.Trim(), out int ms) || ms < 50)
+                return;
+            _readTimer.Interval = TimeSpan.FromMilliseconds(ms);
+            Log($"[PLC] 自动读取间隔已更新为 {ms}ms");
+        }
+
         private void BtnPlcConnect_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -1034,8 +1121,10 @@ namespace CalibOperatorCLI_Example
         private static void WriteFloat(ushort[] regs, int idx, float value)
         {
             byte[] bytes = BitConverter.GetBytes(value);
-            regs[idx] = (ushort)((bytes[0] << 8) | bytes[1]);
-            regs[idx + 1] = (ushort)((bytes[2] << 8) | bytes[3]);
+            // BitConverter on little-endian: bytes = [D, C, B, A] (A=MSB, D=LSB)
+            // 信捷 Modbus float ABCD 大端: 寄存器0=[A,B], 寄存器1=[C,D]
+            regs[idx] = (ushort)((bytes[3] << 8) | bytes[2]);     // 寄存器0 = A,B (高字)
+            regs[idx + 1] = (ushort)((bytes[1] << 8) | bytes[0]); // 寄存器1 = C,D (低字)
         }
     }
 }

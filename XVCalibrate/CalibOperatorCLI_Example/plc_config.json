@@ -39,7 +39,7 @@
   },
 
   "GvarList": {
-    "StartAddress": "D5000",
+    "StartAddress": "D30000",
     "MaxCount": 1024,
     "RegistersPerItem": 28
   },
