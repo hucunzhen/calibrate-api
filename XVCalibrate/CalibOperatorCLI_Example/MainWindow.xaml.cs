@@ -140,7 +140,7 @@ namespace CalibOperatorCLI_Example
             if (!loaded) return false;
 
             SaveLastFlowPath(flowFilePath);
-            return await _flowPage.RunAllAsync(clearLog: true);
+            return await _flowPage.RunAllAsync(clearLog: true, preferNativeEngine: true);
         }
 
         private static string GetLastFlowRecordPath()

@@ -169,9 +169,11 @@
   <ItemGroup>
     <ClInclude Include="CalibOperator.h" />
     <ClInclude Include="CalibOperatorExport.h" />
+    <ClInclude Include="FlowEngineNative.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CalibOperatorExport.cpp" />
+    <ClCompile Include="FlowEngineNative.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\CalibOperator\CalibOperator.vcxproj">

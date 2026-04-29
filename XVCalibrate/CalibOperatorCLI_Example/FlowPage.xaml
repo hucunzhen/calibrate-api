@@ -18,18 +18,32 @@
                     <ItemsControl x:Name="OperatorToolbox" Margin="4">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border Background="#2D2D30" BorderBrush="#3C3C3C" BorderThickness="1"
-                                        CornerRadius="4" Margin="0,0,0,3" Padding="8,6"
-                                        MouseLeftButtonDown="OperatorItem_MouseLeftButtonDown"
-                                        Cursor="Hand">
-                                    <StackPanel>
-                                        <TextBlock Text="{Binding DisplayName}" Foreground="#DCDCDC"
-                                                   FontSize="12" FontWeight="SemiBold"/>
-                                        <TextBlock Text="{Binding Description}" Foreground="#858585"
-                                                   FontSize="10" Margin="0,2,0,0"
-                                                   TextTrimming="CharacterEllipsis"/>
-                                    </StackPanel>
-                                </Border>
+                                <Expander IsExpanded="{Binding IsExpanded}" Margin="0,6,0,0"
+                                          Background="#2B2B2E" Foreground="#CCCCCC">
+                                    <Expander.Header>
+                                        <Border Background="#303033" CornerRadius="4" Padding="6,4">
+                                            <TextBlock Text="{Binding Name}" Foreground="#9CDCFE" FontSize="12" FontWeight="Bold"/>
+                                        </Border>
+                                    </Expander.Header>
+                                    <ItemsControl ItemsSource="{Binding Operators}" Margin="0,4,0,0">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Background="#2D2D30" BorderBrush="#3C3C3C" BorderThickness="1"
+                                                        CornerRadius="4" Margin="0,0,0,3" Padding="8,6"
+                                                        MouseLeftButtonDown="OperatorItem_MouseLeftButtonDown"
+                                                        Cursor="Hand">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding DisplayName}" Foreground="#DCDCDC"
+                                                                   FontSize="12" FontWeight="SemiBold"/>
+                                                        <TextBlock Text="{Binding Description}" Foreground="#858585"
+                                                                   FontSize="10" Margin="0,2,0,0"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </Expander>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -57,6 +71,9 @@
                     <Button Content="&#xE74E;" FontFamily="Segoe MDL2 Assets" Width="32" Height="28"
                             ToolTip="全部运行" Background="#2D2D2D" Foreground="White"
                             BorderThickness="0" Click="RunAll_Click"/>
+                    <Button x:Name="StopRunButton" Content="&#xE71A;" FontFamily="Segoe MDL2 Assets" Width="32" Height="28"
+                            ToolTip="停止执行" Background="#2D2D2D" Foreground="#FFB3B3"
+                            BorderThickness="0" Margin="4,0,0,0" Click="StopRun_Click" IsEnabled="False"/>
                     <Button Content="&#xE711;" FontFamily="Segoe MDL2 Assets" Width="32" Height="28"
                             ToolTip="清空画布" Background="#2D2D2D" Foreground="White"
                             BorderThickness="0" Margin="4,0,0,0" Click="ClearCanvas_Click"/>

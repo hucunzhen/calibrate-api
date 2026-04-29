@@ -3,6 +3,7 @@
  */
 
 #include "CalibOperatorExport.h"
+#include "FlowEngineNative.h"
 
 #ifdef CALIBOPERATOR_EXPORTS
 #define CALIB_API __declspec(dllexport)
@@ -763,4 +764,41 @@ CALIB_API int CALIB_ApplyMask(Image* src, Image* mask, Image* outImg) {
         }
     }
     return 0;
+}
+
+// ================================================================
+// Native Flow Engine exports
+// ================================================================
+
+CALIB_API FlowEngineContext CALIB_FlowEngine_Create() {
+    return FlowEngine_Create();
+}
+
+CALIB_API void CALIB_FlowEngine_Free(FlowEngineContext ctx) {
+    FlowEngine_Free(ctx);
+}
+
+CALIB_API int CALIB_FlowEngine_LoadFromFile(FlowEngineContext ctx, const char* flowFilePath) {
+    return FlowEngine_LoadFromFile(ctx, flowFilePath);
+}
+
+CALIB_API int CALIB_FlowEngine_LoadFromJson(FlowEngineContext ctx, const char* flowJsonText) {
+    return FlowEngine_LoadFromJson(ctx, flowJsonText);
+}
+
+CALIB_API FlowRunResult CALIB_FlowEngine_Run(FlowEngineContext ctx) {
+    NativeFlowRunResult r = FlowEngine_Run(ctx);
+    FlowRunResult out{};
+    out.success = r.success;
+    out.executedNodes = r.executedNodes;
+    out.totalNodes = r.totalNodes;
+    return out;
+}
+
+CALIB_API const char* CALIB_FlowEngine_GetLastError(FlowEngineContext ctx) {
+    return FlowEngine_GetLastError(ctx);
+}
+
+CALIB_API const char* CALIB_FlowEngine_GetLastReportJson(FlowEngineContext ctx) {
+    return FlowEngine_GetLastReportJson(ctx);
 }

@@ -58,6 +58,14 @@ namespace CalibOperatorPInvoke
         public IntPtr data;  // unsigned char*
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct NativeFlowRunResult
+    {
+        public int success;
+        public int executedNodes;
+        public int totalNodes;
+    }
+
     // ================================================================
     // Managed Structures
     // ================================================================
@@ -333,6 +341,28 @@ namespace CalibOperatorPInvoke
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int CALIB_TrajStep_GetPoints(IntPtr ctx, IntPtr points, IntPtr barIds, int maxCount);
+
+        // Native Flow Engine API
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr CALIB_FlowEngine_Create();
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void CALIB_FlowEngine_Free(IntPtr ctx);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        public static extern int CALIB_FlowEngine_LoadFromFile(IntPtr ctx, string flowFilePath);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        public static extern int CALIB_FlowEngine_LoadFromJson(IntPtr ctx, string flowJsonText);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern NativeFlowRunResult CALIB_FlowEngine_Run(IntPtr ctx);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr CALIB_FlowEngine_GetLastError(IntPtr ctx);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr CALIB_FlowEngine_GetLastReportJson(IntPtr ctx);
     }
 
     // ================================================================
@@ -527,7 +557,8 @@ namespace CalibOperatorPInvoke
         {
             CalibImage img = new CalibImage();
             int result = NativeAPI.CALIB_CreateCalibrationImage(img.NativePtr, width, height);
-            if (result != 0)
+            // Native CreateCalibrationImage 返回 1 表示成功（与部分接口 0=成功 不同）
+            if (result <= 0)
             {
                 img.Dispose();
                 throw new Exception($"Failed to create calibration image: error {result}");
@@ -1535,6 +1566,83 @@ namespace CalibOperatorPInvoke
         {
             if (_disposed || _context == IntPtr.Zero)
                 throw new ObjectDisposedException("TrajectoryStepDetector");
+        }
+    }
+
+    public class FlowEngineRunResult
+    {
+        public bool Success { get; set; }
+        public int ExecutedNodes { get; set; }
+        public int TotalNodes { get; set; }
+        public string ErrorMessage { get; set; } = "";
+        public string ReportJson { get; set; } = "{}";
+    }
+
+    /// <summary>
+    /// Native Flow Engine wrapper (flow.json parsed and executed in C++).
+    /// </summary>
+    public sealed class NativeFlowEngine : IDisposable
+    {
+        private IntPtr _ctx;
+        private bool _disposed;
+
+        public NativeFlowEngine()
+        {
+            _ctx = NativeAPI.CALIB_FlowEngine_Create();
+            if (_ctx == IntPtr.Zero) throw new OutOfMemoryException("Failed to create native flow engine");
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            if (_ctx != IntPtr.Zero)
+            {
+                NativeAPI.CALIB_FlowEngine_Free(_ctx);
+                _ctx = IntPtr.Zero;
+            }
+            _disposed = true;
+            GC.SuppressFinalize(this);
+        }
+
+        ~NativeFlowEngine()
+        {
+            Dispose();
+        }
+
+        private static string PtrToUtf8String(IntPtr ptr)
+        {
+            return ptr == IntPtr.Zero ? "" : (Marshal.PtrToStringAnsi(ptr) ?? "");
+        }
+
+        public void LoadFromFile(string flowPath)
+        {
+            if (string.IsNullOrWhiteSpace(flowPath))
+                throw new ArgumentException("flowPath is empty", nameof(flowPath));
+            int rc = NativeAPI.CALIB_FlowEngine_LoadFromFile(_ctx, flowPath);
+            if (rc != 0)
+                throw new InvalidOperationException("NativeFlowEngine load failed: " + PtrToUtf8String(NativeAPI.CALIB_FlowEngine_GetLastError(_ctx)));
+        }
+
+        public void LoadFromJson(string flowJson)
+        {
+            if (string.IsNullOrWhiteSpace(flowJson))
+                throw new ArgumentException("flowJson is empty", nameof(flowJson));
+            int rc = NativeAPI.CALIB_FlowEngine_LoadFromJson(_ctx, flowJson);
+            if (rc != 0)
+                throw new InvalidOperationException("NativeFlowEngine load failed: " + PtrToUtf8String(NativeAPI.CALIB_FlowEngine_GetLastError(_ctx)));
+        }
+
+        public FlowEngineRunResult Run()
+        {
+            var r = NativeAPI.CALIB_FlowEngine_Run(_ctx);
+            return new FlowEngineRunResult
+            {
+                Success = r.success != 0,
+                ExecutedNodes = r.executedNodes,
+                TotalNodes = r.totalNodes,
+                ErrorMessage = PtrToUtf8String(NativeAPI.CALIB_FlowEngine_GetLastError(_ctx)),
+                ReportJson = PtrToUtf8String(NativeAPI.CALIB_FlowEngine_GetLastReportJson(_ctx))
+            };
         }
     }
 }

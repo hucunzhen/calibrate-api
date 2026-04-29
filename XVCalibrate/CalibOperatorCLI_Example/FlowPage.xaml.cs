@@ -11,6 +11,7 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Numerics;
 using Microsoft.Win32;
 using CalibOperatorPInvoke;
 
@@ -93,6 +94,48 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "camera_snap",
+                DisplayName = "相机取一帧",
+                Description = "从相机抓取单帧图像",
+                Category = "输入",
+                Params =
+                {
+                    new OperatorParam { Name = "deviceIndex", DisplayName = "设备索引", DefaultValue = "0", Description = "相机枚举索引，从0开始" },
+                    new OperatorParam { Name = "targetWidth", DisplayName = "目标宽度", DefaultValue = "0", Description = "预留参数，当前未缩放（填0即可）" },
+                    new OperatorParam { Name = "targetHeight", DisplayName = "目标高度", DefaultValue = "0", Description = "预留参数，当前未缩放（填0即可）" }
+                },
+                Ports = { new PortDef { Name = "Image", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" } }
+            },
+            new OperatorDef
+            {
+                TypeId = "camera_loop",
+                DisplayName = "相机循环取图",
+                Description = "循环抓取多帧并输出最后一帧",
+                Category = "输入",
+                Params =
+                {
+                    new OperatorParam { Name = "deviceIndex", DisplayName = "设备索引", DefaultValue = "0", Description = "相机枚举索引，从0开始" },
+                    new OperatorParam
+                    {
+                        Name = "mode",
+                        DisplayName = "执行模式",
+                        DefaultValue = "last_only",
+                        Description = "last_only=仅输出最后一帧；per_frame=每帧驱动下游执行一次",
+                        Options = new List<string> { "last_only", "per_frame" }
+                    },
+                    new OperatorParam { Name = "frameCount", DisplayName = "抓取帧数", DefaultValue = "10", Description = "循环抓取总帧数，>=1" },
+                    new OperatorParam { Name = "intervalMs", DisplayName = "帧间隔(ms)", DefaultValue = "100", Description = "每帧之间等待时间" },
+                    new OperatorParam { Name = "targetWidth", DisplayName = "目标宽度", DefaultValue = "0", Description = "预留参数，当前未缩放（填0即可）" },
+                    new OperatorParam { Name = "targetHeight", DisplayName = "目标高度", DefaultValue = "0", Description = "预留参数，当前未缩放（填0即可）" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Image", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Count", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#607D8B" }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "grayscale",
                 DisplayName = "灰度化",
                 Description = "Step1: 图像转灰度",
@@ -162,6 +205,83 @@ namespace CalibOperatorCLI_Example
                 Params =
                 {
                     new OperatorParam { Name = "threshold", DisplayName = "梯度阈值", DefaultValue = "48", Description = "梯度幅值阈值，越大越干净（Scharr 幅值通常大于 Sobel）" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "phase_congruency",
+                DisplayName = "相位一致性边缘",
+                Description = "频域相位检测(DFT + Log-Gabor + Phase-only重建)边缘检测",
+                Category = "预处理",
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Response", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Edge", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" }
+                },
+                Params =
+                {
+                    new OperatorParam { Name = "threshold", DisplayName = "一致性阈值", DefaultValue = "0.45", Description = "相位一致性阈值(0~1)，越大越严格" },
+                    new OperatorParam { Name = "noiseSigma", DisplayName = "噪声抑制", DefaultValue = "0.12", Description = "噪声抑制系数(0~1)，越大越抑制弱响应" },
+                    new OperatorParam { Name = "blurKsize", DisplayName = "预平滑核", DefaultValue = "3", Description = "预平滑核大小(奇数，1表示不平滑)" },
+                    new OperatorParam { Name = "debugDumpPrefix", DisplayName = "调试输出前缀", DefaultValue = "", Description = "可选；填写后会输出 *_response.bmp 与 *_binary.bmp" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "freq_filter_binary",
+                DisplayName = "频域滤波二值化",
+                Description = "频域滤波后回到空域并输出二值图",
+                Category = "预处理",
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Filtered", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Binary", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" }
+                },
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "mode",
+                        DisplayName = "滤波模式",
+                        DefaultValue = "bandpass",
+                        Description = "lowpass | highpass | bandpass",
+                        Options = new List<string> { "lowpass", "highpass", "bandpass" }
+                    },
+                    new OperatorParam { Name = "lowCut", DisplayName = "低截止(归一化)", DefaultValue = "0.06", Description = "0~0.5，band/high 生效" },
+                    new OperatorParam { Name = "highCut", DisplayName = "高截止(归一化)", DefaultValue = "0.24", Description = "0~0.5，band/low 生效" },
+                    new OperatorParam { Name = "threshold", DisplayName = "二值阈值", DefaultValue = "0.48", Description = "0~1，useOtsu=false 时生效" },
+                    new OperatorParam { Name = "useOtsu", DisplayName = "自动阈值", DefaultValue = "true", Description = "true/false" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "local_freq_sauvola_niblack",
+                DisplayName = "局部频域阈值(S/N)",
+                Description = "先做频域带通，再用 Sauvola/Niblack 局部阈值输出二值图",
+                Category = "预处理",
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Filtered", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Binary", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" }
+                },
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "method",
+                        DisplayName = "局部阈值方法",
+                        DefaultValue = "sauvola",
+                        Description = "sauvola | niblack",
+                        Options = new List<string> { "sauvola", "niblack" }
+                    },
+                    new OperatorParam { Name = "windowSize", DisplayName = "窗口大小", DefaultValue = "25", Description = "奇数，建议 15~41" },
+                    new OperatorParam { Name = "k", DisplayName = "k系数", DefaultValue = "0.32", Description = "Sauvola常用0.2~0.5；Niblack常用-0.2~0.2" },
+                    new OperatorParam { Name = "R", DisplayName = "Sauvola动态范围R", DefaultValue = "0.5", Description = "0~1，通常0.3~0.7；仅Sauvola生效" },
+                    new OperatorParam { Name = "lowCut", DisplayName = "低截止(归一化)", DefaultValue = "0.04", Description = "0~0.5，带通下限" },
+                    new OperatorParam { Name = "highCut", DisplayName = "高截止(归一化)", DefaultValue = "0.28", Description = "0~0.5，带通上限" }
                 }
             },
             new OperatorDef
@@ -630,6 +750,72 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "calibrate_homography",
+                DisplayName = "透视标定(H)",
+                Description = "基于单应矩阵(Homography)进行标定（适合存在透视畸变）",
+                Category = "标定",
+                Ports =
+                {
+                    new PortDef { Name = "ImagePts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "WorldPts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "H", Direction = PortDirection.Output, DataType = typeof(HomographyTransform), ColorHex = "#E91E63" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "img_to_world_homography",
+                DisplayName = "坐标转换(H)",
+                Description = "使用单应矩阵进行像素->世界坐标转换",
+                Category = "标定",
+                Ports =
+                {
+                    new PortDef { Name = "Pixel", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "H", Direction = PortDirection.Input, DataType = typeof(HomographyTransform), ColorHex = "#E91E63" },
+                    new PortDef { Name = "World", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "calibrate_poly2d",
+                DisplayName = "二次多项式标定",
+                Description = "使用二次多项式拟合像素->世界映射（适合轻微非线性）",
+                Category = "标定",
+                Ports =
+                {
+                    new PortDef { Name = "ImagePts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "WorldPts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Poly", Direction = PortDirection.Output, DataType = typeof(Poly2DTransform), ColorHex = "#E91E63" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "img_to_world_poly2d",
+                DisplayName = "坐标转换(Poly2D)",
+                Description = "使用二次多项式进行像素->世界坐标转换",
+                Category = "标定",
+                Ports =
+                {
+                    new PortDef { Name = "Pixel", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Poly", Direction = PortDirection.Input, DataType = typeof(Poly2DTransform), ColorHex = "#E91E63" },
+                    new PortDef { Name = "World", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "display_calibration",
+                DisplayName = "显示标定结果",
+                Description = "统一显示 Affine/Homography/Poly2D 标定参数",
+                Category = "标定",
+                Ports =
+                {
+                    new PortDef { Name = "Transform", Direction = PortDirection.Input, DataType = typeof(AffineTransform), ColorHex = "#E91E63" },
+                    new PortDef { Name = "H", Direction = PortDirection.Input, DataType = typeof(HomographyTransform), ColorHex = "#E91E63" },
+                    new PortDef { Name = "Poly", Direction = PortDirection.Input, DataType = typeof(Poly2DTransform), ColorHex = "#E91E63" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "send_plc",
                 DisplayName = "发送PLC",
                 Description = "将轨迹发送到PLC",
@@ -768,6 +954,13 @@ namespace CalibOperatorCLI_Example
             }
         }
 
+        public class ToolboxGroup
+        {
+            public string Name { get; set; } = "";
+            public bool IsExpanded { get; set; } = true;
+            public ObservableCollection<OperatorDef> Operators { get; } = new ObservableCollection<OperatorDef>();
+        }
+
         /// <summary>
         /// 连线
         /// </summary>
@@ -791,7 +984,7 @@ namespace CalibOperatorCLI_Example
 
         private readonly List<FlowNode> _nodes = new List<FlowNode>();
         private readonly List<FlowConnection> _connections = new List<FlowConnection>();
-        private readonly ObservableCollection<OperatorDef> _toolboxItems = new ObservableCollection<OperatorDef>();
+        private readonly ObservableCollection<ToolboxGroup> _toolboxGroups = new ObservableCollection<ToolboxGroup>();
 
         // 拖拽状态
         private bool _isDraggingNode;
@@ -802,6 +995,10 @@ namespace CalibOperatorCLI_Example
         // 连线状态
         private PortVisual? _connectingFromPort;
         private Path? _tempConnectionPath;
+        private Window? _livePreviewWindow;
+        private System.Windows.Controls.Image? _livePreviewImageCtrl;
+        private System.Threading.CancellationTokenSource? _runCts;
+        private bool _isRunInProgress;
 
         private int _nodeCounter;
 
@@ -809,15 +1006,51 @@ namespace CalibOperatorCLI_Example
         {
             InitializeComponent();
             InitializeToolbox();
+            if (StopRunButton != null) StopRunButton.IsEnabled = false;
+        }
+
+        private void ThrowIfExecutionCancelled()
+        {
+            if (_runCts?.IsCancellationRequested == true)
+                throw new OperationCanceledException("用户停止执行");
         }
 
         private void InitializeToolbox()
         {
-            // 按分类排序
-            var sorted = OperatorRegistry.OrderBy(o => o.Category).ThenBy(o => o.DisplayName).ToList();
-            foreach (var op in sorted)
-                _toolboxItems.Add(op);
-            OperatorToolbox.ItemsSource = _toolboxItems;
+            string[] categoryOrder =
+            {
+                "输入",
+                "预处理",
+                "后处理",
+                "验证",
+                "流程",
+                "标定",
+                "输出",
+                "可视化"
+            };
+
+            _toolboxGroups.Clear();
+            var grouped = OperatorRegistry
+                .GroupBy(o => o.Category ?? "")
+                .ToDictionary(g => g.Key, g => g.OrderBy(x => x.DisplayName).ToList());
+
+            foreach (var category in categoryOrder)
+            {
+                if (!grouped.TryGetValue(category, out var ops) || ops.Count == 0) continue;
+                var group = new ToolboxGroup { Name = category, IsExpanded = true };
+                foreach (var op in ops) group.Operators.Add(op);
+                _toolboxGroups.Add(group);
+                grouped.Remove(category);
+            }
+
+            foreach (var kv in grouped.OrderBy(k => k.Key))
+            {
+                var group = new ToolboxGroup { Name = kv.Key, IsExpanded = true };
+                foreach (var op in kv.Value) group.Operators.Add(op);
+                _toolboxGroups.Add(group);
+            }
+
+            OperatorToolbox.ItemsSource = _toolboxGroups;
         }
 
         // ================================================================
@@ -868,7 +1101,13 @@ namespace CalibOperatorCLI_Example
         {
             var def = node.Def;
             double w = def.DefaultWidth;
-            double h = def.DefaultHeight;
+            int inputCount = def.Ports.Count(p => p.Direction == PortDirection.Input);
+            int outputCount = def.Ports.Count(p => p.Direction == PortDirection.Output);
+            int rowCount = Math.Max(inputCount, outputCount);
+            if (rowCount == 0) rowCount = 1;
+            // 标题+端口区+摘要的最小自适应高度，避免新增端口被裁切
+            double minAutoHeight = 52 + rowCount * 18 + 18;
+            double h = Math.Max(def.DefaultHeight, minAutoHeight);
 
             // 主容器
             var border = new Border
@@ -918,10 +1157,6 @@ namespace CalibOperatorCLI_Example
 
             int inputIdx = 0;
             int outputIdx = 0;
-            int rowCount = Math.Max(
-                def.Ports.Count(p => p.Direction == PortDirection.Input),
-                def.Ports.Count(p => p.Direction == PortDirection.Output));
-            if (rowCount == 0) rowCount = 1;
 
             for (int r = 0; r < rowCount; r++)
             {
@@ -1417,24 +1652,7 @@ namespace CalibOperatorCLI_Example
 
             try
             {
-                var nodes = _nodes.Select(n => new FlowNodeData
-                {
-                    Id = n.Id.ToString(),
-                    TypeId = n.Def.TypeId,
-                    X = n.X,
-                    Y = n.Y,
-                    Params = new Dictionary<string, string>(n.Params)
-                }).ToList();
-
-                var connections = _connections.Select(c => new FlowConnData
-                {
-                    FromNodeId = c.FromPort.Owner.Id.ToString(),
-                    FromPort = c.FromPort.Definition.Name,
-                    ToNodeId = c.ToPort.Owner.Id.ToString(),
-                    ToPort = c.ToPort.Definition.Name
-                }).ToList();
-
-                var data = new FlowData { Nodes = nodes, Connections = connections };
+                var data = BuildCurrentFlowData();
                 var options = new JsonSerializerOptions { WriteIndented = true };
                 var json = JsonSerializer.Serialize(data, options);
                 System.IO.File.WriteAllText(dlg.FileName, json);
@@ -1445,6 +1663,28 @@ namespace CalibOperatorCLI_Example
             {
                 MessageBox.Show($"保存失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private FlowData BuildCurrentFlowData()
+        {
+            var nodes = _nodes.Select(n => new FlowNodeData
+            {
+                Id = n.Id.ToString(),
+                TypeId = n.Def.TypeId,
+                X = n.X,
+                Y = n.Y,
+                Params = new Dictionary<string, string>(n.Params)
+            }).ToList();
+
+            var connections = _connections.Select(c => new FlowConnData
+            {
+                FromNodeId = c.FromPort.Owner.Id.ToString(),
+                FromPort = c.FromPort.Definition.Name,
+                ToNodeId = c.ToPort.Owner.Id.ToString(),
+                ToPort = c.ToPort.Definition.Name
+            }).ToList();
+
+            return new FlowData { Nodes = nodes, Connections = connections };
         }
 
         public bool LoadFlowFromFile(string filePath, bool showErrorDialog = true)
@@ -2919,6 +3159,668 @@ namespace CalibOperatorCLI_Example
             return edge;
         }
 
+        private static int NextPow2(int v)
+        {
+            v = Math.Max(1, v);
+            int p = 1;
+            while (p < v) p <<= 1;
+            return p;
+        }
+
+        private static void FFT1D(Complex[] a, bool inverse)
+        {
+            int n = a.Length;
+            for (int i = 1, j = 0; i < n; i++)
+            {
+                int bit = n >> 1;
+                for (; (j & bit) != 0; bit >>= 1) j ^= bit;
+                j ^= bit;
+                if (i < j) (a[i], a[j]) = (a[j], a[i]);
+            }
+            for (int len = 2; len <= n; len <<= 1)
+            {
+                double ang = 2 * Math.PI / len * (inverse ? 1 : -1);
+                Complex wlen = new Complex(Math.Cos(ang), Math.Sin(ang));
+                for (int i = 0; i < n; i += len)
+                {
+                    Complex w = Complex.One;
+                    int half = len >> 1;
+                    for (int j = 0; j < half; j++)
+                    {
+                        Complex u = a[i + j];
+                        Complex v = a[i + j + half] * w;
+                        a[i + j] = u + v;
+                        a[i + j + half] = u - v;
+                        w *= wlen;
+                    }
+                }
+            }
+            if (inverse)
+            {
+                for (int i = 0; i < n; i++) a[i] /= n;
+            }
+        }
+
+        private static void FFT2D(Complex[,] data, bool inverse)
+        {
+            int h = data.GetLength(0), w = data.GetLength(1);
+            var row = new Complex[w];
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++) row[x] = data[y, x];
+                FFT1D(row, inverse);
+                for (int x = 0; x < w; x++) data[y, x] = row[x];
+            }
+
+            var col = new Complex[h];
+            for (int x = 0; x < w; x++)
+            {
+                for (int y = 0; y < h; y++) col[y] = data[y, x];
+                FFT1D(col, inverse);
+                for (int y = 0; y < h; y++) data[y, x] = col[y];
+            }
+        }
+
+        /// <summary>
+        /// 频域相位检测器（纯 C# FFT）：
+        /// 2D FFT -> Log-Gabor 带通 -> 相位归一化(phase-only) -> iFFT -> 阈值边缘
+        /// </summary>
+        private static (CalibImage Response, CalibImage Edge) PhaseCongruencyEdgeImage(CalibImage src, double threshold, double noiseSigma, int blurKsize, string? debugDumpPrefix = null)
+        {
+            using var bmp = src.ToBitmap();
+            if (bmp == null) throw new InvalidOperationException("PhaseCongruency: 输入图像转换失败");
+            int w = bmp.Width, h = bmp.Height;
+            var gray = new byte[w * h];
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    var c = bmp.GetPixel(x, y);
+                    gray[y * w + x] = (byte)((c.R * 30 + c.G * 59 + c.B * 11) / 100);
+                }
+            }
+
+            blurKsize = Math.Max(1, blurKsize);
+            if ((blurKsize & 1) == 0) blurKsize += 1;
+            threshold = Math.Max(0.0, Math.Min(1.0, threshold));
+            noiseSigma = Math.Max(0.0, Math.Min(1.0, noiseSigma));
+
+            var srcF = new float[w * h];
+            for (int i = 0; i < gray.Length; i++) srcF[i] = gray[i] / 255f;
+            if (blurKsize > 1)
+            {
+                int[] k = blurKsize <= 3 ? new[] { 1, 2, 1 } : new[] { 1, 4, 6, 4, 1 };
+                int kr = k.Length / 2;
+                float sum = k.Sum();
+                var tmp = new float[w * h];
+                for (int y = 0; y < h; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        float acc = 0;
+                        for (int i = -kr; i <= kr; i++)
+                        {
+                            int nx = Math.Max(0, Math.Min(w - 1, x + i));
+                            acc += srcF[y * w + nx] * k[i + kr];
+                        }
+                        tmp[y * w + x] = acc / sum;
+                    }
+                }
+                for (int y = 0; y < h; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        float acc = 0;
+                        for (int i = -kr; i <= kr; i++)
+                        {
+                            int ny = Math.Max(0, Math.Min(h - 1, y + i));
+                            acc += tmp[ny * w + x] * k[i + kr];
+                        }
+                        srcF[y * w + x] = acc / sum;
+                    }
+                }
+            }
+
+            // 控制频域计算规模（保持实时可用）
+            int maxDim = 512;
+            int dw = w, dh = h;
+            int ds = 1;
+            while (Math.Max(dw, dh) > maxDim)
+            {
+                ds <<= 1;
+                dw = Math.Max(1, w / ds);
+                dh = Math.Max(1, h / ds);
+            }
+
+            var small = new float[dw * dh];
+            for (int y = 0; y < dh; y++)
+                for (int x = 0; x < dw; x++)
+                    small[y * dw + x] = srcF[Math.Min(h - 1, y * ds) * w + Math.Min(w - 1, x * ds)];
+
+            int fw = NextPow2(dw);
+            int fh = NextPow2(dh);
+            var spec = new Complex[fh, fw];
+            for (int y = 0; y < dh; y++)
+                for (int x = 0; x < dw; x++)
+                    spec[y, x] = new Complex(small[y * dw + x], 0);
+            FFT2D(spec, inverse: false);
+
+            // Log-Gabor 带通（频域），centerFreq 与阈值联动：阈值越低频带越宽
+            double centerFreq = 0.22;
+            double sigmaOnf = 0.55 + 0.25 * (1.0 - threshold);
+            double logSigma = Math.Log(Math.Max(1.05, sigmaOnf));
+            if (Math.Abs(logSigma) < 1e-9) logSigma = 0.2;
+
+            var outBytes = new byte[w * h];
+            var respBytes = new byte[w * h];
+            const double eps = 1e-9;
+            var bandSpec = new Complex[fh, fw];
+            var phaseSpec = new Complex[fh, fw];
+            for (int y = 0; y < fh; y++)
+            {
+                double fy = (y <= fh / 2 ? y : y - fh) / (double)fh;
+                for (int x = 0; x < fw; x++)
+                {
+                    double fx = (x <= fw / 2 ? x : x - fw) / (double)fw;
+                    double r = Math.Sqrt(fx * fx + fy * fy);
+                    if (r < 1e-9)
+                    {
+                        bandSpec[y, x] = Complex.Zero;
+                        phaseSpec[y, x] = Complex.Zero;
+                        continue;
+                    }
+
+                    double lr = Math.Log(r / centerFreq);
+                    double lg = Math.Exp(-(lr * lr) / (2.0 * logSigma * logSigma));
+                    Complex f = spec[y, x];
+                    double mag = f.Magnitude + eps;
+                    bandSpec[y, x] = lg * f;           // 保留幅值（结构更接近原图）
+                    phaseSpec[y, x] = (lg / mag) * f;  // phase-only（边缘增强）
+                }
+            }
+
+            FFT2D(bandSpec, inverse: true);
+            FFT2D(phaseSpec, inverse: true);
+
+            // 统计带通响应和相位响应范围（小图）
+            double minBand = double.MaxValue, maxBand = double.MinValue;
+            double minPhase = double.MaxValue, maxPhase = double.MinValue;
+            for (int y = 0; y < dh; y++)
+            {
+                for (int x = 0; x < dw; x++)
+                {
+                    double vb = bandSpec[y, x].Magnitude;
+                    double vp = phaseSpec[y, x].Magnitude;
+                    if (vb < minBand) minBand = vb;
+                    if (vb > maxBand) maxBand = vb;
+                    if (vp < minPhase) minPhase = vp;
+                    if (vp > maxPhase) maxPhase = vp;
+                }
+            }
+            double bandRange = Math.Max(1e-9, maxBand - minBand);
+            double phaseRange = Math.Max(1e-9, maxPhase - minPhase);
+            double th = Math.Max(0.0, Math.Min(1.0, threshold));
+            double damp = Math.Max(0.0, Math.Min(1.0, noiseSigma));
+
+            var response01 = new float[w * h];
+            for (int y = 0; y < h; y++)
+            {
+                int sy = Math.Min(dh - 1, y / ds);
+                for (int x = 0; x < w; x++)
+                {
+                    int sx = Math.Min(dw - 1, x / ds);
+                    double vb = (bandSpec[sy, sx].Magnitude - minBand) / bandRange;
+                    double vp = (phaseSpec[sy, sx].Magnitude - minPhase) / phaseRange;
+                    // 响应图以保幅结构为主，叠加少量 phase-only 增强边缘
+                    double v = 0.78 * vb + 0.22 * vp;
+                    v *= (1.0 - 0.45 * damp);
+                    response01[y * w + x] = (float)v;
+                    int rv = (int)Math.Round(Math.Max(0.0, Math.Min(1.0, v)) * 255.0);
+                    respBytes[y * w + x] = (byte)rv;
+                }
+            }
+
+            // Edge: 基于响应图做 Canny 风格后处理（梯度 -> NMS -> 双阈值连通）
+            var gxArr = new float[w * h];
+            var gyArr = new float[w * h];
+            var gradMag = new float[w * h];
+            for (int y = 1; y < h - 1; y++)
+            {
+                int y0 = (y - 1) * w, y1 = y * w, y2 = (y + 1) * w;
+                for (int x = 1; x < w - 1; x++)
+                {
+                    float p00 = response01[y0 + x - 1], p01 = response01[y0 + x], p02 = response01[y0 + x + 1];
+                    float p10 = response01[y1 + x - 1],                          p12 = response01[y1 + x + 1];
+                    float p20 = response01[y2 + x - 1], p21 = response01[y2 + x], p22 = response01[y2 + x + 1];
+                    float gx = -p00 + p02 - 2f * p10 + 2f * p12 - p20 + p22;
+                    float gy = -p00 - 2f * p01 - p02 + p20 + 2f * p21 + p22;
+                    gxArr[y1 + x] = gx;
+                    gyArr[y1 + x] = gy;
+                    gradMag[y1 + x] = (float)Math.Sqrt(gx * gx + gy * gy);
+                }
+            }
+
+            var nms = new float[w * h];
+            var nmsVals = new List<float>(Math.Max(1, (w - 2) * (h - 2)));
+            for (int y = 1; y < h - 1; y++)
+            {
+                int row = y * w;
+                for (int x = 1; x < w - 1; x++)
+                {
+                    int idx = row + x;
+                    float gm = gradMag[idx];
+                    if (gm <= 1e-9f) continue;
+
+                    float ang = (float)(Math.Atan2(gyArr[idx], gxArr[idx]) * 180.0 / Math.PI);
+                    if (ang < 0f) ang += 180f;
+
+                    float n1, n2;
+                    if ((ang >= 0f && ang < 22.5f) || (ang >= 157.5f && ang <= 180f))
+                    {
+                        n1 = gradMag[idx - 1];
+                        n2 = gradMag[idx + 1];
+                    }
+                    else if (ang >= 22.5f && ang < 67.5f)
+                    {
+                        n1 = gradMag[idx - w + 1];
+                        n2 = gradMag[idx + w - 1];
+                    }
+                    else if (ang >= 67.5f && ang < 112.5f)
+                    {
+                        n1 = gradMag[idx - w];
+                        n2 = gradMag[idx + w];
+                    }
+                    else
+                    {
+                        n1 = gradMag[idx - w - 1];
+                        n2 = gradMag[idx + w + 1];
+                    }
+
+                    if (gm >= n1 && gm >= n2)
+                    {
+                        nms[idx] = gm;
+                        nmsVals.Add(gm);
+                    }
+                }
+            }
+
+            nmsVals.Sort();
+            float q70 = nmsVals.Count > 0 ? nmsVals[(int)(0.70 * (nmsVals.Count - 1))] : 0f;
+            float q92 = nmsVals.Count > 0 ? nmsVals[(int)(0.92 * (nmsVals.Count - 1))] : 0f;
+            float tBlend = (float)Math.Max(0.0, Math.Min(1.0, th));
+            float high = q70 + (q92 - q70) * tBlend;
+            high *= (float)(1.0 - 0.25 * damp);
+            float low = high * (0.38f + 0.15f * (float)damp);
+
+            var marks = new byte[w * h]; // 0=none,1=weak,2=strong
+            var q = new Queue<int>();
+            for (int y = 1; y < h - 1; y++)
+            {
+                int row = y * w;
+                for (int x = 1; x < w - 1; x++)
+                {
+                    int idx = row + x;
+                    float v = nms[idx];
+                    if (v >= high)
+                    {
+                        marks[idx] = 2;
+                        q.Enqueue(idx);
+                    }
+                    else if (v >= low)
+                    {
+                        marks[idx] = 1;
+                    }
+                }
+            }
+
+            // hysteresis: 保留与强边连通的弱边
+            while (q.Count > 0)
+            {
+                int idx = q.Dequeue();
+                int cy = idx / w;
+                int cx = idx - cy * w;
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    int ny = cy + dy;
+                    if (ny <= 0 || ny >= h - 1) continue;
+                    int nrow = ny * w;
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        if (dx == 0 && dy == 0) continue;
+                        int nx = cx + dx;
+                        if (nx <= 0 || nx >= w - 1) continue;
+                        int ni = nrow + nx;
+                        if (marks[ni] == 1)
+                        {
+                            marks[ni] = 2;
+                            q.Enqueue(ni);
+                        }
+                    }
+                }
+            }
+
+            for (int i = 0; i < outBytes.Length; i++)
+                outBytes[i] = marks[i] == 2 ? (byte)255 : (byte)0;
+
+            if (!string.IsNullOrWhiteSpace(debugDumpPrefix))
+            {
+                try
+                {
+                    string prefix = debugDumpPrefix.Trim();
+                    if (!System.IO.Path.IsPathRooted(prefix))
+                        prefix = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, prefix);
+                    string? dir = System.IO.Path.GetDirectoryName(prefix);
+                    if (!string.IsNullOrWhiteSpace(dir))
+                        System.IO.Directory.CreateDirectory(dir);
+
+                    // 响应图（0~1 -> 0~255）
+                    using var respBmp = new System.Drawing.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                    for (int y = 0; y < h; y++)
+                    {
+                        for (int x = 0; x < w; x++)
+                        {
+                            int v = (int)Math.Round(Math.Max(0.0, Math.Min(1.0, response01[y * w + x])) * 255.0);
+                            var c = System.Drawing.Color.FromArgb(v, v, v);
+                            respBmp.SetPixel(x, y, c);
+                        }
+                    }
+                    respBmp.Save(prefix + "_response.bmp", System.Drawing.Imaging.ImageFormat.Bmp);
+
+                    // 二值图
+                    using var binBmp = new System.Drawing.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                    for (int y = 0; y < h; y++)
+                    {
+                        for (int x = 0; x < w; x++)
+                        {
+                            byte b = outBytes[y * w + x];
+                            var c = System.Drawing.Color.FromArgb(b, b, b);
+                            binBmp.SetPixel(x, y, c);
+                        }
+                    }
+                    binBmp.Save(prefix + "_binary.bmp", System.Drawing.Imaging.ImageFormat.Bmp);
+                }
+                catch
+                {
+                    // 调试输出失败不影响主流程
+                }
+            }
+
+            var resp = new CalibImage(w, h, 1);
+            var respNative = resp.GetNativeStruct();
+            Marshal.Copy(respBytes, 0, respNative.data, respBytes.Length);
+
+            var edge = new CalibImage(w, h, 1);
+            var native = edge.GetNativeStruct();
+            Marshal.Copy(outBytes, 0, native.data, outBytes.Length);
+            return (resp, edge);
+        }
+
+        private static (CalibImage Filtered, CalibImage Binary) FrequencyFilterToBinaryImage(
+            CalibImage src, string mode, double lowCut, double highCut, double threshold, bool useOtsu)
+        {
+            using var bmp = src.ToBitmap();
+            if (bmp == null) throw new InvalidOperationException("频域滤波二值化: 输入图像转换失败");
+            int w = bmp.Width, h = bmp.Height;
+            var gray = new byte[w * h];
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    var c = bmp.GetPixel(x, y);
+                    gray[y * w + x] = (byte)((c.R * 30 + c.G * 59 + c.B * 11) / 100);
+                }
+            }
+
+            mode = (mode ?? "bandpass").Trim().ToLowerInvariant();
+            if (mode != "lowpass" && mode != "highpass" && mode != "bandpass") mode = "bandpass";
+            lowCut = Math.Max(0.0, Math.Min(0.5, lowCut));
+            highCut = Math.Max(0.0, Math.Min(0.5, highCut));
+            if (highCut < lowCut)
+            {
+                double t = lowCut;
+                lowCut = highCut;
+                highCut = t;
+            }
+            threshold = Math.Max(0.0, Math.Min(1.0, threshold));
+
+            int fw = NextPow2(w);
+            int fh = NextPow2(h);
+            var spec = new Complex[fh, fw];
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                    spec[y, x] = new Complex(gray[y * w + x] / 255.0, 0);
+            }
+            FFT2D(spec, inverse: false);
+
+            for (int y = 0; y < fh; y++)
+            {
+                double fy = (y <= fh / 2 ? y : y - fh) / (double)fh;
+                for (int x = 0; x < fw; x++)
+                {
+                    double fx = (x <= fw / 2 ? x : x - fw) / (double)fw;
+                    double r = Math.Sqrt(fx * fx + fy * fy);
+                    bool keep = mode switch
+                    {
+                        "lowpass" => r <= highCut,
+                        "highpass" => r >= lowCut,
+                        _ => r >= lowCut && r <= highCut
+                    };
+                    if (!keep) spec[y, x] = Complex.Zero;
+                }
+            }
+
+            FFT2D(spec, inverse: true);
+            var filtered = new float[w * h];
+            double vmin = double.MaxValue, vmax = double.MinValue;
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    double v = spec[y, x].Magnitude;
+                    filtered[y * w + x] = (float)v;
+                    if (v < vmin) vmin = v;
+                    if (v > vmax) vmax = v;
+                }
+            }
+            double vr = Math.Max(1e-9, vmax - vmin);
+            var filteredBytes = new byte[w * h];
+            for (int i = 0; i < filtered.Length; i++)
+                filteredBytes[i] = (byte)Math.Max(0, Math.Min(255, (int)Math.Round((filtered[i] - vmin) / vr * 255.0)));
+
+            int binTh;
+            if (useOtsu)
+            {
+                int[] hist = new int[256];
+                for (int i = 0; i < filteredBytes.Length; i++) hist[filteredBytes[i]]++;
+                int total = filteredBytes.Length;
+                double sum = 0;
+                for (int i = 0; i < 256; i++) sum += i * hist[i];
+                double sumB = 0;
+                int wB = 0;
+                double maxVar = -1;
+                int best = 127;
+                for (int t = 0; t < 256; t++)
+                {
+                    wB += hist[t];
+                    if (wB == 0) continue;
+                    int wF = total - wB;
+                    if (wF == 0) break;
+                    sumB += t * hist[t];
+                    double mB = sumB / wB;
+                    double mF = (sum - sumB) / wF;
+                    double between = wB * (double)wF * (mB - mF) * (mB - mF);
+                    if (between > maxVar)
+                    {
+                        maxVar = between;
+                        best = t;
+                    }
+                }
+                binTh = best;
+            }
+            else
+            {
+                binTh = (int)Math.Round(threshold * 255.0);
+            }
+
+            var binBytes = new byte[w * h];
+            for (int i = 0; i < binBytes.Length; i++)
+                binBytes[i] = filteredBytes[i] >= binTh ? (byte)255 : (byte)0;
+
+            var filteredImg = new CalibImage(w, h, 1);
+            var fNative = filteredImg.GetNativeStruct();
+            Marshal.Copy(filteredBytes, 0, fNative.data, filteredBytes.Length);
+
+            var binaryImg = new CalibImage(w, h, 1);
+            var bNative = binaryImg.GetNativeStruct();
+            Marshal.Copy(binBytes, 0, bNative.data, binBytes.Length);
+            return (filteredImg, binaryImg);
+        }
+
+        private static (CalibImage Filtered, CalibImage Binary) LocalFreqSauvolaNiblackImage(
+            CalibImage src, string method, int windowSize, double k, double r, double lowCut, double highCut)
+        {
+            using var bmp = src.ToBitmap();
+            if (bmp == null) throw new InvalidOperationException("局部频域阈值: 输入图像转换失败");
+            int w = bmp.Width, h = bmp.Height;
+            var gray = new double[w * h];
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    var c = bmp.GetPixel(x, y);
+                    gray[y * w + x] = ((c.R * 30 + c.G * 59 + c.B * 11) / 100.0) / 255.0;
+                }
+            }
+
+            method = (method ?? "sauvola").Trim().ToLowerInvariant();
+            if (method != "sauvola" && method != "niblack") method = "sauvola";
+            windowSize = Math.Max(3, windowSize);
+            if ((windowSize & 1) == 0) windowSize += 1;
+            int wr = windowSize / 2;
+            r = Math.Max(1e-6, Math.Min(1.0, r));
+            lowCut = Math.Max(0.0, Math.Min(0.5, lowCut));
+            highCut = Math.Max(0.0, Math.Min(0.5, highCut));
+            if (highCut < lowCut)
+            {
+                double tmp = lowCut;
+                lowCut = highCut;
+                highCut = tmp;
+            }
+
+            // 频域带通
+            int fw = NextPow2(w);
+            int fh = NextPow2(h);
+            var spec = new Complex[fh, fw];
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                    spec[y, x] = new Complex(gray[y * w + x], 0);
+            FFT2D(spec, inverse: false);
+
+            for (int y = 0; y < fh; y++)
+            {
+                double fy = (y <= fh / 2 ? y : y - fh) / (double)fh;
+                for (int x = 0; x < fw; x++)
+                {
+                    double fx = (x <= fw / 2 ? x : x - fw) / (double)fw;
+                    double fr = Math.Sqrt(fx * fx + fy * fy);
+                    if (!(fr >= lowCut && fr <= highCut))
+                        spec[y, x] = Complex.Zero;
+                }
+            }
+
+            FFT2D(spec, inverse: true);
+            var filtered01 = new double[w * h];
+            double fmin = double.MaxValue, fmax = double.MinValue;
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    double v = spec[y, x].Magnitude;
+                    filtered01[y * w + x] = v;
+                    if (v < fmin) fmin = v;
+                    if (v > fmax) fmax = v;
+                }
+            }
+            double frange = Math.Max(1e-9, fmax - fmin);
+            var filteredBytes = new byte[w * h];
+            for (int i = 0; i < filtered01.Length; i++)
+            {
+                filtered01[i] = (filtered01[i] - fmin) / frange;
+                filteredBytes[i] = (byte)Math.Max(0, Math.Min(255, (int)Math.Round(filtered01[i] * 255.0)));
+            }
+
+            // 积分图用于局部均值/方差
+            int iw = w + 1, ih = h + 1;
+            var integ = new double[iw * ih];
+            var integ2 = new double[iw * ih];
+            for (int y = 1; y <= h; y++)
+            {
+                double row = 0, row2 = 0;
+                int srcRow = (y - 1) * w;
+                int iiRow = y * iw;
+                int iiPrev = (y - 1) * iw;
+                for (int x = 1; x <= w; x++)
+                {
+                    double v = filtered01[srcRow + (x - 1)];
+                    row += v;
+                    row2 += v * v;
+                    integ[iiRow + x] = integ[iiPrev + x] + row;
+                    integ2[iiRow + x] = integ2[iiPrev + x] + row2;
+                }
+            }
+
+            static double RectSum(double[] itg, int stride, int x0, int y0, int x1, int y1)
+            {
+                return itg[y1 * stride + x1] - itg[y0 * stride + x1] - itg[y1 * stride + x0] + itg[y0 * stride + x0];
+            }
+
+            var bin = new byte[w * h];
+            for (int y = 0; y < h; y++)
+            {
+                int y0 = Math.Max(0, y - wr);
+                int y1 = Math.Min(h - 1, y + wr);
+                for (int x = 0; x < w; x++)
+                {
+                    int x0 = Math.Max(0, x - wr);
+                    int x1 = Math.Min(w - 1, x + wr);
+                    int ax0 = x0, ay0 = y0, ax1 = x1 + 1, ay1 = y1 + 1;
+                    int area = (x1 - x0 + 1) * (y1 - y0 + 1);
+                    double sum = RectSum(integ, iw, ax0, ay0, ax1, ay1);
+                    double sum2 = RectSum(integ2, iw, ax0, ay0, ax1, ay1);
+                    double mean = sum / Math.Max(1, area);
+                    double var = Math.Max(0.0, sum2 / Math.Max(1, area) - mean * mean);
+                    double std = Math.Sqrt(var);
+                    double t = method == "niblack"
+                        ? mean + k * std
+                        : mean * (1.0 + k * ((std / r) - 1.0));
+                    bin[y * w + x] = filtered01[y * w + x] >= t ? (byte)255 : (byte)0;
+                }
+            }
+
+            var filteredImg = new CalibImage(w, h, 1);
+            var fNative = filteredImg.GetNativeStruct();
+            Marshal.Copy(filteredBytes, 0, fNative.data, filteredBytes.Length);
+
+            var binaryImg = new CalibImage(w, h, 1);
+            var bNative = binaryImg.GetNativeStruct();
+            Marshal.Copy(bin, 0, bNative.data, bin.Length);
+            return (filteredImg, binaryImg);
+        }
+
+        private static (int WhitePixels, double WhiteRatio) AnalyzeBinaryImage(CalibImage img)
+        {
+            var native = img.GetNativeStruct();
+            if (native.data == IntPtr.Zero || native.width <= 0 || native.height <= 0)
+                return (0, 0);
+            int len = native.width * native.height;
+            var bytes = new byte[len];
+            Marshal.Copy(native.data, bytes, 0, len);
+            int white = 0;
+            for (int i = 0; i < len; i++) if (bytes[i] > 0) white++;
+            return (white, len > 0 ? (double)white / len : 0);
+        }
+
         private static CalibImage PreFilterImage(CalibImage src, string mode, int ksize)
         {
             using var bmp = src.ToBitmap();
@@ -3365,6 +4267,240 @@ namespace CalibOperatorCLI_Example
             compositeNode.ResultSummary = $"Composite {innerList.Count} nodes → {compositeNode.Outputs.Count} outs";
         }
 
+        private struct HomographyTransform
+        {
+            public double H11, H12, H13;
+            public double H21, H22, H23;
+            public double H31, H32, H33;
+        }
+
+        private struct Poly2DTransform
+        {
+            public double X_x, X_y, X_1, X_x2, X_xy, X_y2;
+            public double Y_x, Y_y, Y_1, Y_x2, Y_xy, Y_y2;
+        }
+
+        private static bool SolveLinear(double[,] a, double[] b, out double[] x)
+        {
+            int n = b.Length;
+            x = new double[n];
+            var aug = new double[n, n + 1];
+            for (int r = 0; r < n; r++)
+            {
+                for (int c = 0; c < n; c++) aug[r, c] = a[r, c];
+                aug[r, n] = b[r];
+            }
+
+            for (int i = 0; i < n; i++)
+            {
+                int pivot = i;
+                double best = Math.Abs(aug[i, i]);
+                for (int r = i + 1; r < n; r++)
+                {
+                    double v = Math.Abs(aug[r, i]);
+                    if (v > best) { best = v; pivot = r; }
+                }
+                if (best < 1e-12) return false;
+                if (pivot != i)
+                {
+                    for (int c = i; c <= n; c++)
+                    {
+                        double tmp = aug[i, c];
+                        aug[i, c] = aug[pivot, c];
+                        aug[pivot, c] = tmp;
+                    }
+                }
+
+                double diag = aug[i, i];
+                for (int c = i; c <= n; c++) aug[i, c] /= diag;
+                for (int r = 0; r < n; r++)
+                {
+                    if (r == i) continue;
+                    double f = aug[r, i];
+                    if (Math.Abs(f) < 1e-15) continue;
+                    for (int c = i; c <= n; c++) aug[r, c] -= f * aug[i, c];
+                }
+            }
+            for (int i = 0; i < n; i++) x[i] = aug[i, n];
+            return true;
+        }
+
+        private static bool SolveLeastSquares(double[][] rows, double[] y, int cols, out double[] coeffs)
+        {
+            coeffs = new double[cols];
+            var ata = new double[cols, cols];
+            var aty = new double[cols];
+            for (int r = 0; r < rows.Length; r++)
+            {
+                var row = rows[r];
+                for (int i = 0; i < cols; i++)
+                {
+                    aty[i] += row[i] * y[r];
+                    for (int j = 0; j < cols; j++) ata[i, j] += row[i] * row[j];
+                }
+            }
+            return SolveLinear(ata, aty, out coeffs);
+        }
+
+        private static HomographyTransform FitHomography(Point2D[] imgPts, Point2D[] worldPts)
+        {
+            int n = imgPts.Length;
+            var rows = new List<double[]>(n * 2);
+            var yy = new List<double>(n * 2);
+            for (int i = 0; i < n; i++)
+            {
+                double x = imgPts[i].X, y = imgPts[i].Y;
+                double X = worldPts[i].X, Y = worldPts[i].Y;
+                rows.Add(new[] { x, y, 1.0, 0, 0, 0, -x * X, -y * X });
+                yy.Add(X);
+                rows.Add(new[] { 0, 0, 0, x, y, 1.0, -x * Y, -y * Y });
+                yy.Add(Y);
+            }
+            if (!SolveLeastSquares(rows.ToArray(), yy.ToArray(), 8, out var c))
+                throw new InvalidOperationException("透视标定失败: 方程不可解");
+            return new HomographyTransform
+            {
+                H11 = c[0], H12 = c[1], H13 = c[2],
+                H21 = c[3], H22 = c[4], H23 = c[5],
+                H31 = c[6], H32 = c[7], H33 = 1.0
+            };
+        }
+
+        private static Point2D ApplyHomography(Point2D p, HomographyTransform h)
+        {
+            double den = h.H31 * p.X + h.H32 * p.Y + h.H33;
+            if (Math.Abs(den) < 1e-12) den = 1e-12;
+            return new Point2D(
+                (h.H11 * p.X + h.H12 * p.Y + h.H13) / den,
+                (h.H21 * p.X + h.H22 * p.Y + h.H23) / den);
+        }
+
+        private static Poly2DTransform FitPoly2D(Point2D[] imgPts, Point2D[] worldPts)
+        {
+            int n = imgPts.Length;
+            var rows = new double[n][];
+            var yx = new double[n];
+            var yy = new double[n];
+            for (int i = 0; i < n; i++)
+            {
+                double x = imgPts[i].X, y = imgPts[i].Y;
+                rows[i] = new[] { x, y, 1.0, x * x, x * y, y * y };
+                yx[i] = worldPts[i].X;
+                yy[i] = worldPts[i].Y;
+            }
+            if (!SolveLeastSquares(rows, yx, 6, out var cx) || !SolveLeastSquares(rows, yy, 6, out var cy))
+                throw new InvalidOperationException("Poly2D标定失败: 方程不可解");
+            return new Poly2DTransform
+            {
+                X_x = cx[0], X_y = cx[1], X_1 = cx[2], X_x2 = cx[3], X_xy = cx[4], X_y2 = cx[5],
+                Y_x = cy[0], Y_y = cy[1], Y_1 = cy[2], Y_x2 = cy[3], Y_xy = cy[4], Y_y2 = cy[5]
+            };
+        }
+
+        private static Point2D ApplyPoly2D(Point2D p, Poly2DTransform t)
+        {
+            double x = p.X, y = p.Y;
+            double xx = x * x, xy = x * y, yy = y * y;
+            return new Point2D(
+                t.X_x * x + t.X_y * y + t.X_1 + t.X_x2 * xx + t.X_xy * xy + t.X_y2 * yy,
+                t.Y_x * x + t.Y_y * y + t.Y_1 + t.Y_x2 * xx + t.Y_xy * xy + t.Y_y2 * yy);
+        }
+
+        private static string FormatHomography(HomographyTransform h)
+        {
+            return $"H = [[{h.H11:F6}, {h.H12:F6}, {h.H13:F6}], [{h.H21:F6}, {h.H22:F6}, {h.H23:F6}], [{h.H31:F6}, {h.H32:F6}, {h.H33:F6}]]";
+        }
+
+        private static string FormatPoly2D(Poly2DTransform p)
+        {
+            return $"X = {p.X_x:F6}*x + {p.X_y:F6}*y + {p.X_1:F6} + {p.X_x2:F6}*x^2 + {p.X_xy:F6}*x*y + {p.X_y2:F6}*y^2\n" +
+                   $"Y = {p.Y_x:F6}*x + {p.Y_y:F6}*y + {p.Y_1:F6} + {p.Y_x2:F6}*x^2 + {p.Y_xy:F6}*x*y + {p.Y_y2:F6}*y^2";
+        }
+
+        private static CalibImage GrabOneCameraFrameOrThrow(int deviceIndex, int targetWidth, int targetHeight)
+        {
+            using var cam = new CameraService();
+            if (!cam.ConnectByIndex(deviceIndex))
+                throw new InvalidOperationException($"相机连接失败，deviceIndex={deviceIndex}");
+            var img = cam.GrabOneFrame(targetWidth, targetHeight);
+            if (img == null)
+                throw new InvalidOperationException($"相机取图失败: {cam.LastError ?? "未知错误"}");
+            return img;
+        }
+
+        private static (CalibImage LastImage, int Count) GrabLoopCameraFramesOrThrow(
+            int deviceIndex, int frameCount, int intervalMs, int targetWidth, int targetHeight)
+        {
+            frameCount = Math.Max(1, frameCount);
+            intervalMs = Math.Max(0, intervalMs);
+            CalibImage? last = null;
+            int okCount = 0;
+            using var cam = new CameraService();
+            if (!cam.ConnectByIndex(deviceIndex))
+                throw new InvalidOperationException($"相机连接失败，deviceIndex={deviceIndex}");
+            for (int i = 0; i < frameCount; i++)
+            {
+                var img = cam.GrabOneFrame(targetWidth, targetHeight);
+                if (img != null)
+                {
+                    last?.Dispose();
+                    last = img;
+                    okCount++;
+                }
+                if (intervalMs > 0 && i < frameCount - 1)
+                    System.Threading.Thread.Sleep(intervalMs);
+            }
+            if (last == null)
+                throw new InvalidOperationException($"相机循环取图失败: {cam.LastError ?? "未抓到有效帧"}");
+            return (last, okCount);
+        }
+
+        private static (List<CalibImage> Frames, int Count) GrabLoopCameraFramesListOrThrow(
+            int deviceIndex, int frameCount, int intervalMs, int targetWidth, int targetHeight)
+        {
+            frameCount = Math.Max(1, frameCount);
+            intervalMs = Math.Max(0, intervalMs);
+            var frames = new List<CalibImage>(frameCount);
+            int okCount = 0;
+            using var cam = new CameraService();
+            if (!cam.ConnectByIndex(deviceIndex))
+                throw new InvalidOperationException($"相机连接失败，deviceIndex={deviceIndex}");
+            for (int i = 0; i < frameCount; i++)
+            {
+                var img = cam.GrabOneFrame(targetWidth, targetHeight);
+                if (img != null)
+                {
+                    frames.Add(img);
+                    okCount++;
+                }
+                if (intervalMs > 0 && i < frameCount - 1)
+                    System.Threading.Thread.Sleep(intervalMs);
+            }
+            if (frames.Count == 0)
+                throw new InvalidOperationException($"相机循环取图失败: {cam.LastError ?? "未抓到有效帧"}");
+            return (frames, okCount);
+        }
+
+        private HashSet<FlowNode> GetDownstreamNodes(FlowNode source)
+        {
+            var result = new HashSet<FlowNode>();
+            var q = new Queue<FlowNode>();
+            q.Enqueue(source);
+            result.Add(source);
+            while (q.Count > 0)
+            {
+                var cur = q.Dequeue();
+                foreach (var c in _connections)
+                {
+                    if (c.FromPort.Owner != cur) continue;
+                    var nxt = c.ToPort.Owner;
+                    if (result.Add(nxt))
+                        q.Enqueue(nxt);
+                }
+            }
+            return result;
+        }
+
         private void ExecuteNode(FlowNode node, Dictionary<string, object?>? explicitInputs = null)
         {
             var inputs = explicitInputs ?? GetNodeInputs(node);
@@ -3406,6 +4542,34 @@ namespace CalibOperatorCLI_Example
                         {
                             node.ErrorMessage = "用户取消";
                         }
+                        break;
+                    }
+
+                    case "camera_snap":
+                    {
+                        int deviceIndex = int.TryParse(node.Params.GetValueOrDefault("deviceIndex"), out var di) ? di : 0;
+                        int targetWidth = int.TryParse(node.Params.GetValueOrDefault("targetWidth"), out var tw) ? tw : 0;
+                        int targetHeight = int.TryParse(node.Params.GetValueOrDefault("targetHeight"), out var th) ? th : 0;
+                        var img = GrabOneCameraFrameOrThrow(deviceIndex, targetWidth, targetHeight);
+                        node.Outputs["Image"] = img;
+                        node.ResultSummary = $"Snap OK: dev={deviceIndex}";
+                        break;
+                    }
+
+                    case "camera_loop":
+                    {
+                        int deviceIndex = int.TryParse(node.Params.GetValueOrDefault("deviceIndex"), out var di) ? di : 0;
+                        string mode = (node.Params.GetValueOrDefault("mode", "last_only") ?? "last_only").Trim().ToLowerInvariant();
+                        int frameCount = int.TryParse(node.Params.GetValueOrDefault("frameCount"), out var fc) ? fc : 10;
+                        int intervalMs = int.TryParse(node.Params.GetValueOrDefault("intervalMs"), out var im) ? im : 100;
+                        int targetWidth = int.TryParse(node.Params.GetValueOrDefault("targetWidth"), out var tw) ? tw : 0;
+                        int targetHeight = int.TryParse(node.Params.GetValueOrDefault("targetHeight"), out var th) ? th : 0;
+                        var loopResult = GrabLoopCameraFramesOrThrow(deviceIndex, frameCount, intervalMs, targetWidth, targetHeight);
+                        node.Outputs["Image"] = loopResult.LastImage;
+                        node.Outputs["Count"] = loopResult.Count;
+                        node.ResultSummary = mode == "per_frame"
+                            ? $"Loop(per_frame): captured {loopResult.Count}/{Math.Max(1, frameCount)} (single-node fallback=last frame)"
+                            : $"Loop OK: {loopResult.Count}/{Math.Max(1, frameCount)}";
                         break;
                     }
 
@@ -3501,6 +4665,61 @@ namespace CalibOperatorCLI_Example
                         int threshold = int.TryParse(node.Params.GetValueOrDefault("threshold"), out var th) ? th : 48;
                         var edgeImg = ScharrEdgeImage(srcImg, threshold);
                         node.Outputs["Edge"] = edgeImg;
+                        break;
+                    }
+
+                    case "phase_congruency":
+                    {
+                        var srcImg = inputs["In"] as CalibImage;
+                        if (srcImg == null) throw new InvalidOperationException("PhaseCongruency: 缺少输入图像");
+                        double threshold = double.TryParse(node.Params.GetValueOrDefault("threshold"), out var t) ? t : 0.45;
+                        double noiseSigma = double.TryParse(node.Params.GetValueOrDefault("noiseSigma"), out var ns) ? ns : 0.12;
+                        int blurKsize = int.TryParse(node.Params.GetValueOrDefault("blurKsize"), out var bk) ? bk : 3;
+                        string debugDumpPrefix = node.Params.GetValueOrDefault("debugDumpPrefix", "") ?? "";
+                        var resultImgs = PhaseCongruencyEdgeImage(srcImg, threshold, noiseSigma, blurKsize, debugDumpPrefix);
+                        node.Outputs["Response"] = resultImgs.Response;
+                        var edgeImg = resultImgs.Edge;
+                        node.Outputs["Edge"] = edgeImg;
+                        var stats = AnalyzeBinaryImage(edgeImg);
+                        node.ResultSummary = $"PC->Edge: {stats.WhitePixels} ({stats.WhiteRatio:P2})";
+                        string phaseLog = $"[phase_congruency] th={threshold:F3}, noise={noiseSigma:F3}, blur={blurKsize}, white={stats.WhitePixels} ({stats.WhiteRatio:P2}), debug='{debugDumpPrefix}'";
+                        AppendLog(phaseLog);
+                        Console.WriteLine(phaseLog);
+                        break;
+                    }
+
+                    case "freq_filter_binary":
+                    {
+                        var srcImg = inputs["In"] as CalibImage;
+                        if (srcImg == null) throw new InvalidOperationException("频域滤波二值化: 缺少输入图像");
+                        string mode = node.Params.GetValueOrDefault("mode", "bandpass") ?? "bandpass";
+                        double lowCut = double.TryParse(node.Params.GetValueOrDefault("lowCut"), out var lc) ? lc : 0.06;
+                        double highCut = double.TryParse(node.Params.GetValueOrDefault("highCut"), out var hc) ? hc : 0.24;
+                        double threshold = double.TryParse(node.Params.GetValueOrDefault("threshold"), out var t2) ? t2 : 0.48;
+                        bool useOtsu = bool.TryParse(node.Params.GetValueOrDefault("useOtsu"), out var b2) ? b2 : true;
+                        var result = FrequencyFilterToBinaryImage(srcImg, mode, lowCut, highCut, threshold, useOtsu);
+                        node.Outputs["Filtered"] = result.Filtered;
+                        node.Outputs["Binary"] = result.Binary;
+                        var stats = AnalyzeBinaryImage(result.Binary);
+                        node.ResultSummary = $"FreqBin: {stats.WhitePixels} ({stats.WhiteRatio:P2})";
+                        break;
+                    }
+
+                    case "local_freq_sauvola_niblack":
+                    {
+                        var srcImg = inputs["In"] as CalibImage;
+                        if (srcImg == null) throw new InvalidOperationException("局部频域阈值: 缺少输入图像");
+                        string method = node.Params.GetValueOrDefault("method", "sauvola") ?? "sauvola";
+                        int windowSize = int.TryParse(node.Params.GetValueOrDefault("windowSize"), out var ws) ? ws : 25;
+                        double k = double.TryParse(node.Params.GetValueOrDefault("k"), out var kk) ? kk : 0.32;
+                        double r = double.TryParse(node.Params.GetValueOrDefault("R"), out var rr) ? rr : 0.5;
+                        double lowCut = double.TryParse(node.Params.GetValueOrDefault("lowCut"), out var lc) ? lc : 0.04;
+                        double highCut = double.TryParse(node.Params.GetValueOrDefault("highCut"), out var hc) ? hc : 0.28;
+                        var result = LocalFreqSauvolaNiblackImage(srcImg, method, windowSize, k, r, lowCut, highCut);
+                        node.Outputs["Filtered"] = result.Filtered;
+                        node.Outputs["Binary"] = result.Binary;
+                        var stats = AnalyzeBinaryImage(result.Binary);
+                        node.ResultSummary = $"{method}: {stats.WhitePixels} ({stats.WhiteRatio:P2})";
                         break;
                     }
 
@@ -3979,6 +5198,86 @@ namespace CalibOperatorCLI_Example
                         break;
                     }
 
+                    case "calibrate_homography":
+                    {
+                        var imagePts = inputs["ImagePts"] as Point2D[];
+                        var worldPts = inputs["WorldPts"] as Point2D[];
+                        if (imagePts == null || worldPts == null)
+                            throw new InvalidOperationException("透视标定: 缺少图像点或世界坐标点");
+                        if (imagePts.Length != worldPts.Length)
+                            throw new InvalidOperationException("透视标定: 图像点和世界点数量不一致");
+                        if (imagePts.Length < 4)
+                            throw new InvalidOperationException("透视标定: 至少需要4个点");
+                        var h = FitHomography(imagePts, worldPts);
+                        node.Outputs["H"] = h;
+                        break;
+                    }
+
+                    case "img_to_world_homography":
+                    {
+                        var pixelPts = inputs["Pixel"] as Point2D[];
+                        if (!inputs.TryGetValue("H", out var hObj) || hObj is not HomographyTransform h)
+                            throw new InvalidOperationException("坐标转换(H): 缺少H矩阵");
+                        if (pixelPts == null)
+                            throw new InvalidOperationException("坐标转换(H): 缺少输入点");
+                        node.Outputs["World"] = pixelPts.Select(p => ApplyHomography(p, h)).ToArray();
+                        break;
+                    }
+
+                    case "calibrate_poly2d":
+                    {
+                        var imagePts = inputs["ImagePts"] as Point2D[];
+                        var worldPts = inputs["WorldPts"] as Point2D[];
+                        if (imagePts == null || worldPts == null)
+                            throw new InvalidOperationException("Poly2D标定: 缺少图像点或世界坐标点");
+                        if (imagePts.Length != worldPts.Length)
+                            throw new InvalidOperationException("Poly2D标定: 图像点和世界点数量不一致");
+                        if (imagePts.Length < 6)
+                            throw new InvalidOperationException("Poly2D标定: 至少需要6个点");
+                        var poly = FitPoly2D(imagePts, worldPts);
+                        node.Outputs["Poly"] = poly;
+                        break;
+                    }
+
+                    case "img_to_world_poly2d":
+                    {
+                        var pixelPts = inputs["Pixel"] as Point2D[];
+                        if (!inputs.TryGetValue("Poly", out var polyObj) || polyObj is not Poly2DTransform poly)
+                            throw new InvalidOperationException("坐标转换(Poly2D): 缺少Poly参数");
+                        if (pixelPts == null)
+                            throw new InvalidOperationException("坐标转换(Poly2D): 缺少输入点");
+                        node.Outputs["World"] = pixelPts.Select(p => ApplyPoly2D(p, poly)).ToArray();
+                        break;
+                    }
+
+                    case "display_calibration":
+                    {
+                        string text;
+                        if (inputs.TryGetValue("Transform", out var tObj) && tObj is AffineTransform t)
+                        {
+                            text = $"[Affine]\n{t}";
+                        }
+                        else if (inputs.TryGetValue("H", out var hObj) && hObj is HomographyTransform h)
+                        {
+                            text = $"[Homography]\n{FormatHomography(h)}";
+                        }
+                        else if (inputs.TryGetValue("Poly", out var pObj) && pObj is Poly2DTransform p)
+                        {
+                            text = $"[Poly2D]\n{FormatPoly2D(p)}";
+                        }
+                        else
+                        {
+                            throw new InvalidOperationException("显示标定结果: 未检测到 Transform/H/Poly 输入");
+                        }
+
+                        node.Outputs["Out"] = text;
+                        node.ResultSummary = text.Replace("\n", " | ");
+                        AppendLog(text);
+                        Console.WriteLine(text);
+                        StatusText.Dispatcher.Invoke(() => { StatusText.Text = text.Replace("\n", "  "); });
+                        break;
+                    }
+
                     case "display":
                     {
                         // 显示图像到预览窗口：可选背景图 Img，Image 作为前景层，Points 透明叠加
@@ -4437,13 +5736,25 @@ namespace CalibOperatorCLI_Example
                 }
             }
 
+            IntPtr hBitmap = bmp.GetHbitmap();
             var bitmapSource = System.Windows.Interop.Imaging.CreateBitmapSourceFromHBitmap(
-                bmp.GetHbitmap(), IntPtr.Zero, Int32Rect.Empty,
-                System.Windows.Media.Imaging.BitmapSizeOptions.FromWidthAndHeight(img.Width, img.Height));
+                hBitmap, IntPtr.Zero, Int32Rect.Empty,
+                System.Windows.Media.Imaging.BitmapSizeOptions.FromWidthAndHeight(baseSource.Width, baseSource.Height));
+            bitmapSource.Freeze();
+            DeleteObject(hBitmap);
+            bmp.Dispose();
+
+            string previewTitle = overlayPoints != null ? $"图像预览 ({overlayPoints.Length} 个点)" : "图像预览";
+            if (_livePreviewWindow != null && _livePreviewWindow.IsVisible && _livePreviewImageCtrl != null)
+            {
+                _livePreviewWindow.Title = previewTitle;
+                _livePreviewImageCtrl.Source = bitmapSource;
+                return;
+            }
 
             var win = new Window
             {
-                Title = overlayPoints != null ? $"图像预览 ({overlayPoints.Length} 个点)" : "图像预览",
+                Title = previewTitle,
                 Width = Math.Min(baseSource.Width + 40, 1400),
                 Height = Math.Min(baseSource.Height + 60, 950),
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -4463,6 +5774,7 @@ namespace CalibOperatorCLI_Example
             // 内层：承载图像，应用变换
             var canvas = new System.Windows.Controls.Canvas { RenderTransform = transformGroup, RenderTransformOrigin = new Point(0, 0) };
             var imageCtrl = new System.Windows.Controls.Image { Source = bitmapSource, Width = baseSource.Width, Height = baseSource.Height };
+            _livePreviewImageCtrl = imageCtrl;
             canvas.Children.Add(imageCtrl);
             border.Child = canvas;
 
@@ -4543,14 +5855,14 @@ namespace CalibOperatorCLI_Example
             // ---- 中键/右键双击 适应窗口 ----
             void FitToView()
             {
-                double scaleX = border.ActualWidth / img.Width;
-                double scaleY = border.ActualHeight / img.Height;
+                double scaleX = border.ActualWidth / baseSource.Width;
+                double scaleY = border.ActualHeight / baseSource.Height;
                 double fitScale = Math.Min(scaleX, scaleY) * 0.95;
                 fitScale = Math.Max(fitScale, 0.05);
                 scaleTransform.ScaleX = fitScale;
                 scaleTransform.ScaleY = fitScale;
-                double offsetX = (border.ActualWidth - img.Width * fitScale) / 2;
-                double offsetY = (border.ActualHeight - img.Height * fitScale) / 2;
+                double offsetX = (border.ActualWidth - baseSource.Width * fitScale) / 2;
+                double offsetY = (border.ActualHeight - baseSource.Height * fitScale) / 2;
                 translateTransform.X = offsetX;
                 translateTransform.Y = offsetY;
                 zoomText.Text = $"{(int)(fitScale * 100)}%";
@@ -4599,7 +5911,13 @@ namespace CalibOperatorCLI_Example
 
             // 窗口打开后自适应
             win.ContentRendered += (_, _) => FitToView();
+            win.Closed += (_, _) =>
+            {
+                _livePreviewWindow = null;
+                _livePreviewImageCtrl = null;
+            };
 
+            _livePreviewWindow = win;
             win.Show();
         }
 
@@ -4706,8 +6024,19 @@ namespace CalibOperatorCLI_Example
         [DllImport("gdi32.dll")]
         private static extern bool DeleteObject(IntPtr hObject);
 
-        public async System.Threading.Tasks.Task<bool> RunAllAsync(bool clearLog = true)
+        public async System.Threading.Tasks.Task<bool> RunAllAsync(bool clearLog = true, bool preferNativeEngine = false)
         {
+            if (_isRunInProgress)
+            {
+                AppendLog("[WARN] 已有执行在进行中");
+                return false;
+            }
+
+            _isRunInProgress = true;
+            _runCts?.Cancel();
+            _runCts?.Dispose();
+            _runCts = new System.Threading.CancellationTokenSource();
+            if (StopRunButton != null) StopRunButton.IsEnabled = true;
             StatusText.Text = "运行中...";
             StatusText.Foreground = new SolidColorBrush(Colors.Orange);
             if (clearLog) LogBox.Text = "";
@@ -4724,9 +6053,73 @@ namespace CalibOperatorCLI_Example
 
             try
             {
-                var sorted = TopologicalSort();
+                ThrowIfExecutionCancelled();
+                if (preferNativeEngine)
+                {
+                    // C++ 原生流程引擎：后台执行优先走 native；UI 保留托管执行保证交互输出可用
+                    var flowData = BuildCurrentFlowData();
+                    var flowJson = JsonSerializer.Serialize(flowData, new JsonSerializerOptions { WriteIndented = false });
+                    await System.Threading.Tasks.Task.Yield();
+                    ThrowIfExecutionCancelled();
 
-                // 检查是否有循环依赖
+                    using var engine = new NativeFlowEngine();
+                    engine.LoadFromJson(flowJson);
+                    var run = engine.Run();
+
+                    if (run.Success)
+                    {
+                        foreach (var n in _nodes)
+                        {
+                            n.Executed = true;
+                            n.ErrorMessage = null;
+                            SetNodeStatus(n, false);
+                        }
+                        StatusText.Text = $"执行完成: {run.ExecutedNodes}/{run.TotalNodes} 个节点成功";
+                        StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
+                        AppendLog($"[NATIVE] 执行成功: {run.ExecutedNodes}/{run.TotalNodes}");
+                        if (!string.IsNullOrWhiteSpace(run.ReportJson))
+                            AppendLog($"[NATIVE] Report: {run.ReportJson}");
+                        AppendLog("========== 执行完成 ==========");
+                        return true;
+                    }
+
+                    StatusText.Text = $"Native执行失败，回退托管: {run.ErrorMessage}";
+                    StatusText.Foreground = new SolidColorBrush(Colors.OrangeRed);
+                    AppendLog($"[NATIVE][ERROR] {run.ErrorMessage}", true);
+                    if (!string.IsNullOrWhiteSpace(run.ReportJson))
+                        AppendLog($"[NATIVE] Report: {run.ReportJson}");
+                    AppendLog("[NATIVE] 回退托管执行...");
+                    return await RunAllManagedFallbackAsync();
+                }
+
+                // 交互式 UI 默认走托管执行：保证 display/连线点击查看数据可用
+                return await RunAllManagedFallbackAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText.Text = "执行已停止";
+                StatusText.Foreground = new SolidColorBrush(Colors.OrangeRed);
+                AppendLog("[STOP] 用户中断执行");
+                AppendLog("========== 执行中止 ==========");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"[WARN] 执行异常，回退到托管执行: {ex.Message}");
+                return await RunAllManagedFallbackAsync();
+            }
+            finally
+            {
+                _isRunInProgress = false;
+                if (StopRunButton != null) StopRunButton.IsEnabled = false;
+            }
+        }
+
+        private async System.Threading.Tasks.Task<bool> RunAllManagedFallbackAsync()
+        {
+            try
+            {
+                var sorted = TopologicalSort();
                 if (sorted.Count != _nodes.Count)
                 {
                     StatusText.Text = "错误: 检测到循环依赖!";
@@ -4735,19 +6128,109 @@ namespace CalibOperatorCLI_Example
                     return false;
                 }
 
-                AppendLog($"共 {sorted.Count} 个节点待执行");
+                var perFrameLoops = sorted
+                    .Where(n => n.Def.TypeId == "camera_loop" &&
+                                string.Equals((n.Params.GetValueOrDefault("mode", "last_only") ?? "last_only").Trim(),
+                                    "per_frame", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
 
-                // 按拓扑顺序逐个执行
+                if (perFrameLoops.Count > 1)
+                {
+                    StatusText.Text = "执行失败: 当前仅支持一个 per_frame camera_loop 节点";
+                    StatusText.Foreground = new SolidColorBrush(Colors.Red);
+                    AppendLog("[ERROR] 检测到多个 per_frame camera_loop，当前版本仅支持一个", true);
+                    return false;
+                }
+
+                if (perFrameLoops.Count == 1)
+                {
+                    var loopNode = perFrameLoops[0];
+                    var downstream = GetDownstreamNodes(loopNode);
+                    var preNodes = sorted.Where(n => !downstream.Contains(n)).ToList();
+                    var postNodes = sorted.Where(n => downstream.Contains(n) && n != loopNode).ToList();
+
+                    AppendLog($"检测到 per_frame: {loopNode.Def.DisplayName}，前置 {preNodes.Count} 节点，下游 {postNodes.Count} 节点");
+
+                    int successCountPre = 0;
+                    for (int i = 0; i < preNodes.Count; i++)
+                    {
+                    ThrowIfExecutionCancelled();
+                        var node = preNodes[i];
+                        StatusText.Text = $"执行前置 [{i + 1}/{preNodes.Count}] {node.Def.DisplayName}...";
+                        AppendLog($"[PRE {i + 1}/{preNodes.Count}] 执行: {node.Def.DisplayName}");
+                        await System.Threading.Tasks.Task.Yield();
+                        ExecuteNode(node);
+                        successCountPre++;
+                    }
+
+                    int deviceIndex = int.TryParse(loopNode.Params.GetValueOrDefault("deviceIndex"), out var di) ? di : 0;
+                    int frameCount = int.TryParse(loopNode.Params.GetValueOrDefault("frameCount"), out var fc) ? fc : 10;
+                    int intervalMs = int.TryParse(loopNode.Params.GetValueOrDefault("intervalMs"), out var im) ? im : 100;
+                    int targetWidth = int.TryParse(loopNode.Params.GetValueOrDefault("targetWidth"), out var tw) ? tw : 0;
+                    int targetHeight = int.TryParse(loopNode.Params.GetValueOrDefault("targetHeight"), out var th) ? th : 0;
+
+                    frameCount = Math.Max(1, frameCount);
+                    int okFrames = 0;
+                    using var cam = new CameraService();
+                    if (!cam.ConnectByIndex(deviceIndex))
+                        throw new InvalidOperationException($"相机连接失败，deviceIndex={deviceIndex}");
+
+                    for (int fi = 0; fi < frameCount; fi++)
+                    {
+                        ThrowIfExecutionCancelled();
+                        var frame = cam.GrabOneFrame(targetWidth, targetHeight);
+                        if (frame == null)
+                        {
+                            AppendLog($"[FRAME {fi + 1}/{frameCount}] 抓帧失败: {cam.LastError ?? "未知错误"}", true);
+                            if (intervalMs > 0 && fi < frameCount - 1)
+                                await System.Threading.Tasks.Task.Delay(intervalMs, _runCts?.Token ?? System.Threading.CancellationToken.None);
+                            continue;
+                        }
+                        okFrames++;
+                        loopNode.Outputs.Clear();
+                        loopNode.Outputs["Image"] = frame;
+                        loopNode.Outputs["Count"] = okFrames;
+                        loopNode.Executed = true;
+                        loopNode.ErrorMessage = null;
+                        SetNodeStatus(loopNode, false);
+                        loopNode.ResultSummary = $"per_frame {okFrames}/{frameCount}";
+                        UpdateNodeSummary(loopNode);
+
+                        AppendLog($"[FRAME {fi + 1}/{frameCount}] 开始");
+                        for (int j = 0; j < postNodes.Count; j++)
+                        {
+                            ThrowIfExecutionCancelled();
+                            var node = postNodes[j];
+                            node.Outputs.Clear();
+                            node.ErrorMessage = null;
+                            node.Executed = false;
+                            StatusText.Text = $"Frame[{fi + 1}/{frameCount}] 执行 [{j + 1}/{postNodes.Count}] {node.Def.DisplayName}...";
+                            await System.Threading.Tasks.Task.Yield();
+                            ExecuteNode(node);
+                        }
+
+                        if (intervalMs > 0 && fi < frameCount - 1)
+                            await System.Threading.Tasks.Task.Delay(intervalMs, _runCts?.Token ?? System.Threading.CancellationToken.None);
+                    }
+
+                    if (okFrames <= 0)
+                        throw new InvalidOperationException("per_frame 未抓到任何有效帧");
+
+                    StatusText.Text = $"per_frame 执行完成: 前置 {successCountPre}/{preNodes.Count}, 有效帧 {okFrames}/{frameCount}";
+                    StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
+                    AppendLog($"========== per_frame 执行完成: frames={okFrames}/{frameCount} ==========");
+                    return true;
+                }
+
+                AppendLog($"共 {sorted.Count} 个节点待执行");
                 int successCount = 0;
                 for (int i = 0; i < sorted.Count; i++)
                 {
+                    ThrowIfExecutionCancelled();
                     var node = sorted[i];
                     StatusText.Text = $"执行 [{i + 1}/{sorted.Count}] {node.Def.DisplayName}...";
                     AppendLog($"[{i + 1}/{sorted.Count}] 执行: {node.Def.DisplayName}");
-
-                    // 让 UI 有机会刷新
                     await System.Threading.Tasks.Task.Yield();
-
                     try
                     {
                         ExecuteNode(node);
@@ -4763,17 +6246,16 @@ namespace CalibOperatorCLI_Example
                         return false;
                     }
                 }
-
-                StatusText.Text = $"执行完成: {successCount}/{sorted.Count} 个节点成功";
+                StatusText.Text = $"执行完成(托管回退): {successCount}/{sorted.Count} 个节点成功";
                 StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
-                AppendLog($"========== 执行完成: {successCount}/{sorted.Count} 成功 ==========");
+                AppendLog($"========== 执行完成(托管回退): {successCount}/{sorted.Count} ==========");
                 return true;
             }
             catch (Exception ex)
             {
                 StatusText.Text = $"执行失败: {ex.Message}";
                 StatusText.Foreground = new SolidColorBrush(Colors.Red);
-                AppendLog($"[ERROR] 未预期异常: {ex.Message}", true);
+                AppendLog($"[ERROR] 托管回退执行失败: {ex.Message}", true);
                 AppendLog("========== 执行中止 ==========");
                 return false;
             }
@@ -4781,7 +6263,18 @@ namespace CalibOperatorCLI_Example
 
         private async void RunAll_Click(object sender, RoutedEventArgs e)
         {
-            await RunAllAsync(clearLog: true);
+            await RunAllAsync(clearLog: true, preferNativeEngine: false);
+        }
+
+        private void StopRun_Click(object sender, RoutedEventArgs e)
+        {
+            if (_isRunInProgress && _runCts != null && !_runCts.IsCancellationRequested)
+            {
+                _runCts.Cancel();
+                AppendLog("[STOP] 已请求停止...");
+                StatusText.Text = "正在停止...";
+                StatusText.Foreground = new SolidColorBrush(Colors.OrangeRed);
+            }
         }
     }
 }
