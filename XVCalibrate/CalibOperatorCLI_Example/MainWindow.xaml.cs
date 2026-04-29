@@ -1,4 +1,6 @@
 ﻿using System;
+using System.IO;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -7,6 +9,7 @@ namespace CalibOperatorCLI_Example
 {
     public partial class MainWindow : Window
     {
+        private const string LastFlowFileName = "last_flow_path.txt";
         private CalibrationPage _calibrationPage;
         private TrajectoryPage _trajectoryPage;
         private PlcPage _plcPage;
@@ -38,6 +41,7 @@ namespace CalibOperatorCLI_Example
             _plcPage = new PlcPage();
             _histogramPage = new HistogramPage();
             _flowPage = new FlowPage();
+            _flowPage.FlowLoaded += SaveLastFlowPath;
 
             // 将轨迹检测结果获取委托注入 PlcPage，使其可访问最新轨迹
             _plcPage.GetTrajectoryResult = () => _trajectoryPage.LastResult;
@@ -119,6 +123,78 @@ namespace CalibOperatorCLI_Example
         {
             NavigateTo(_flowPage);
             HighlightTab("Flow");
+            TryAutoLoadLastFlowOnFlowPageSwitch();
+        }
+
+        public async Task<bool> RunFlowConfigInBackgroundAsync(string flowFilePath)
+        {
+            if (string.IsNullOrWhiteSpace(flowFilePath))
+                throw new ArgumentException("Flow 文件路径为空", nameof(flowFilePath));
+            if (!File.Exists(flowFilePath))
+                throw new FileNotFoundException("Flow 文件不存在", flowFilePath);
+
+            NavigateTo(_flowPage);
+            HighlightTab("Flow");
+
+            bool loaded = _flowPage.LoadFlowFromFile(flowFilePath, showErrorDialog: false);
+            if (!loaded) return false;
+
+            SaveLastFlowPath(flowFilePath);
+            return await _flowPage.RunAllAsync(clearLog: true);
+        }
+
+        private static string GetLastFlowRecordPath()
+        {
+            string dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "CalibOperatorCLI_Example");
+            return Path.Combine(dir, LastFlowFileName);
+        }
+
+        private static void SaveLastFlowPath(string flowPath)
+        {
+            if (string.IsNullOrWhiteSpace(flowPath)) return;
+            try
+            {
+                string full = Path.GetFullPath(flowPath);
+                string recordPath = GetLastFlowRecordPath();
+                string? parent = Path.GetDirectoryName(recordPath);
+                if (!string.IsNullOrWhiteSpace(parent))
+                    Directory.CreateDirectory(parent);
+                File.WriteAllText(recordPath, full);
+            }
+            catch
+            {
+                // 非关键流程，忽略持久化失败
+            }
+        }
+
+        private static string? TryReadLastFlowPath()
+        {
+            try
+            {
+                string recordPath = GetLastFlowRecordPath();
+                if (!File.Exists(recordPath)) return null;
+                string path = File.ReadAllText(recordPath).Trim();
+                if (string.IsNullOrWhiteSpace(path)) return null;
+                return path;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void TryAutoLoadLastFlowOnFlowPageSwitch()
+        {
+            string? lastPath = TryReadLastFlowPath();
+            if (string.IsNullOrWhiteSpace(lastPath) || !File.Exists(lastPath)) return;
+
+            string full = Path.GetFullPath(lastPath);
+            string current = _flowPage.CurrentFlowFilePath ?? string.Empty;
+            if (string.Equals(full, current, StringComparison.OrdinalIgnoreCase)) return;
+
+            _flowPage.LoadFlowFromFile(full, showErrorDialog: false);
         }
     }
 }

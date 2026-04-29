@@ -964,15 +964,15 @@ namespace CalibOperatorPInvoke
         /// <param name="height">图像高度（边界检查用）</param>
         /// <param name="targetBars">取前N条轮廓</param>
         /// <param name="spacing">等弧长采样间距</param>
-        /// <returns>采样点数组</returns>
-        public static Point2D[] SampleContoursFromPoints(int[] flatX, int[] flatY,
+        /// <returns>采样点与对应轮廓 ID</returns>
+        public static (Point2D[] Points, int[] BarIds) SampleContoursFromPointsWithBarIds(int[] flatX, int[] flatY,
             int[] contourLengths, int width, int height,
             int targetBars, double spacing)
         {
             if (flatX == null || flatY == null || contourLengths == null)
                 throw new ArgumentNullException("轮廓数据不能为空");
             int numContours = contourLengths.Length;
-            if (numContours == 0) return Array.Empty<Point2D>();
+            if (numContours == 0) return (Array.Empty<Point2D>(), Array.Empty<int>());
 
             int maxPoints = width * height;
             int ptSize = Marshal.SizeOf<NativePoint2D>();
@@ -993,16 +993,18 @@ namespace CalibOperatorPInvoke
                 int count = NativeAPI.CALIB_SampleContoursFromPoints(xPtr, yPtr, lenPtr,
                     numContours, targetBars, width, height, spacing,
                     ptsPtr, barIdsPtr, maxPoints);
-                if (count <= 0) return Array.Empty<Point2D>();
+                if (count <= 0) return (Array.Empty<Point2D>(), Array.Empty<int>());
 
-                Point2D[] result = new Point2D[count];
+                Point2D[] points = new Point2D[count];
                 for (int i = 0; i < count; i++)
                 {
                     IntPtr elemPtr = IntPtr.Add(ptsPtr, i * ptSize);
                     NativePoint2D nativePt = Marshal.PtrToStructure<NativePoint2D>(elemPtr);
-                    result[i] = Point2D.FromNative(nativePt);
+                    points[i] = Point2D.FromNative(nativePt);
                 }
-                return result;
+                int[] barIds = new int[count];
+                Marshal.Copy(barIdsPtr, barIds, 0, count);
+                return (points, barIds);
             }
             finally
             {
@@ -1012,6 +1014,17 @@ namespace CalibOperatorPInvoke
                 Marshal.FreeHGlobal(yPtr);
                 Marshal.FreeHGlobal(lenPtr);
             }
+        }
+
+        /// <summary>
+        /// 从轮廓点数据做等弧长采样（仅返回点，兼容旧调用）
+        /// </summary>
+        public static Point2D[] SampleContoursFromPoints(int[] flatX, int[] flatY,
+            int[] contourLengths, int width, int height,
+            int targetBars, double spacing)
+        {
+            var (points, _) = SampleContoursFromPointsWithBarIds(flatX, flatY, contourLengths, width, height, targetBars, spacing);
+            return points;
         }
     }
 
