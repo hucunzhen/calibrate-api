@@ -104,7 +104,10 @@
                     Drop="FlowCanvas_Drop"
                     MouseLeftButtonDown="FlowCanvas_MouseLeftButtonDown"
                     MouseMove="FlowCanvas_MouseMove"
-                    MouseLeftButtonUp="FlowCanvas_MouseLeftButtonUp">
+                    MouseLeftButtonUp="FlowCanvas_MouseLeftButtonUp"
+                    MouseRightButtonDown="FlowCanvas_MouseRightButtonDown"
+                    MouseRightButtonUp="FlowCanvas_MouseRightButtonUp"
+                    MouseWheel="FlowCanvas_MouseWheel">
                 <Canvas.Resources>
                     <Style TargetType="Path">
                         <Style.Triggers>

@@ -14,6 +14,7 @@ using System.Runtime.InteropServices;
 using System.Numerics;
 using Microsoft.Win32;
 using CalibOperatorPInvoke;
+using HslCommunication.ModBus;
 
 namespace CalibOperatorCLI_Example
 {
@@ -715,8 +716,18 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "world_coords",
                 DisplayName = "世界坐标",
-                Description = "手动输入九点标定的世界坐标",
+                Description = "通过参数配置九点标定的世界坐标",
                 Category = "标定",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "points",
+                        DisplayName = "坐标点列表",
+                        DefaultValue = "100,100;400,100;700,100;100,300;400,300;700,300;100,500;400,500;700,500",
+                        Description = "格式: x,y;x,y;...（建议9点）"
+                    }
+                },
                 Ports =
                 {
                     new PortDef { Name = "Points", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
@@ -816,6 +827,34 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "plc_connect",
+                DisplayName = "PLC连接",
+                Description = "连接 PLC (Modbus TCP)",
+                Category = "输出",
+                Params =
+                {
+                    new OperatorParam { Name = "ip", DisplayName = "IP", DefaultValue = "192.168.6.6", Description = "PLC IP 地址" },
+                    new OperatorParam { Name = "port", DisplayName = "端口", DefaultValue = "502", Description = "Modbus TCP 端口" },
+                    new OperatorParam { Name = "station", DisplayName = "站号", DefaultValue = "1", Description = "站号 (1~247)" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Connected", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#607D8B" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "plc_disconnect",
+                DisplayName = "PLC断开",
+                Description = "断开 PLC 连接",
+                Category = "输出",
+                Ports =
+                {
+                    new PortDef { Name = "Disconnected", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#607D8B" }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "send_plc",
                 DisplayName = "发送PLC",
                 Description = "将轨迹发送到PLC",
@@ -823,6 +862,58 @@ namespace CalibOperatorCLI_Example
                 Ports =
                 {
                     new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "if_gate",
+                DisplayName = "条件判断",
+                Description = "根据输入值与阈值比较输出 True/False",
+                Category = "流程",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "op",
+                        DisplayName = "比较运算",
+                        DefaultValue = ">",
+                        Description = "> | >= | < | <= | == | !=",
+                        Options = new List<string> { ">", ">=", "<", "<=", "==", "!=" }
+                    },
+                    new OperatorParam { Name = "threshold", DisplayName = "阈值", DefaultValue = "0", Description = "比较阈值" },
+                    new OperatorParam { Name = "epsilon", DisplayName = "相等容差", DefaultValue = "1e-6", Description = "==/!= 的容差" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Value", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B" },
+                    new PortDef { Name = "True", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "False", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#F44336" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "route_true",
+                DisplayName = "真分支放行",
+                Description = "条件为 True 时放行输入数据",
+                Category = "流程",
+                Ports =
+                {
+                    new PortDef { Name = "Condition", Direction = PortDirection.Input, DataType = typeof(bool), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "route_false",
+                DisplayName = "假分支放行",
+                Description = "条件为 False 时放行输入数据",
+                Category = "流程",
+                Ports =
+                {
+                    new PortDef { Name = "Condition", Direction = PortDirection.Input, DataType = typeof(bool), ColorHex = "#F44336" },
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B" }
                 }
             },
             new OperatorDef
@@ -999,6 +1090,15 @@ namespace CalibOperatorCLI_Example
         private System.Windows.Controls.Image? _livePreviewImageCtrl;
         private System.Threading.CancellationTokenSource? _runCts;
         private bool _isRunInProgress;
+        private bool _isPanningCanvas;
+        private Point _canvasPanStart;
+        private double _canvasPanX0;
+        private double _canvasPanY0;
+        private readonly TranslateTransform _canvasTranslate = new TranslateTransform(0, 0);
+        private readonly ScaleTransform _canvasScale = new ScaleTransform(1, 1);
+        private readonly TransformGroup _canvasTransform = new TransformGroup();
+        private ModbusTcpNet? _flowPlc;
+        private bool _flowPlcConnected;
 
         private int _nodeCounter;
 
@@ -1006,6 +1106,9 @@ namespace CalibOperatorCLI_Example
         {
             InitializeComponent();
             InitializeToolbox();
+            _canvasTransform.Children.Add(_canvasScale);
+            _canvasTransform.Children.Add(_canvasTranslate);
+            FlowCanvas.RenderTransform = _canvasTransform;
             if (StopRunButton != null) StopRunButton.IsEnabled = false;
         }
 
@@ -1325,6 +1428,16 @@ namespace CalibOperatorCLI_Example
         {
             var pos = e.GetPosition(FlowCanvas);
 
+            // 画布平移（右键拖拽）
+            if (_isPanningCanvas && e.RightButton == MouseButtonState.Pressed)
+            {
+                var screenPos = e.GetPosition(this);
+                _canvasTranslate.X = _canvasPanX0 + (screenPos.X - _canvasPanStart.X);
+                _canvasTranslate.Y = _canvasPanY0 + (screenPos.Y - _canvasPanStart.Y);
+                e.Handled = true;
+                return;
+            }
+
             // 节点拖拽
             if (_isDraggingNode && _dragNode?.Visual != null)
             {
@@ -1514,6 +1627,47 @@ namespace CalibOperatorCLI_Example
                 FlowCanvas.Children.Remove(_tempConnectionPath);
                 _tempConnectionPath = null;
             }
+        }
+
+        private void FlowCanvas_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            _isPanningCanvas = true;
+            _canvasPanStart = e.GetPosition(this);
+            _canvasPanX0 = _canvasTranslate.X;
+            _canvasPanY0 = _canvasTranslate.Y;
+            FlowCanvas.CaptureMouse();
+            FlowCanvas.Cursor = Cursors.ScrollAll;
+            e.Handled = true;
+        }
+
+        private void FlowCanvas_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            if (_isPanningCanvas)
+            {
+                _isPanningCanvas = false;
+                FlowCanvas.ReleaseMouseCapture();
+                FlowCanvas.Cursor = null;
+                e.Handled = true;
+            }
+        }
+
+        private void FlowCanvas_MouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            double factor = e.Delta > 0 ? 1.12 : (1.0 / 1.12);
+            double newScale = Math.Max(0.2, Math.Min(5.0, _canvasScale.ScaleX * factor));
+            if (Math.Abs(newScale - _canvasScale.ScaleX) < 1e-9) return;
+
+            // 以鼠标位置为缩放中心，保持指针下内容不跳动
+            var p = e.GetPosition(this);
+            double worldX = (p.X - _canvasTranslate.X) / _canvasScale.ScaleX;
+            double worldY = (p.Y - _canvasTranslate.Y) / _canvasScale.ScaleY;
+
+            _canvasScale.ScaleX = newScale;
+            _canvasScale.ScaleY = newScale;
+            _canvasTranslate.X = p.X - worldX * newScale;
+            _canvasTranslate.Y = p.Y - worldY * newScale;
+
+            e.Handled = true;
         }
 
         private void UpdateAllConnections()
@@ -4417,6 +4571,26 @@ namespace CalibOperatorCLI_Example
                    $"Y = {p.Y_x:F6}*x + {p.Y_y:F6}*y + {p.Y_1:F6} + {p.Y_x2:F6}*x^2 + {p.Y_xy:F6}*x*y + {p.Y_y2:F6}*y^2";
         }
 
+        private static Point2D[] ParseWorldPointsParam(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                throw new InvalidOperationException("世界坐标参数为空，请填写 points");
+            var parts = raw.Split(new[] { ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+            var points = new List<Point2D>(parts.Length);
+            foreach (var p in parts)
+            {
+                var xy = p.Trim().Split(',', StringSplitOptions.RemoveEmptyEntries);
+                if (xy.Length != 2 ||
+                    !double.TryParse(xy[0].Trim(), out var x) ||
+                    !double.TryParse(xy[1].Trim(), out var y))
+                    throw new InvalidOperationException($"世界坐标格式错误: '{p}'，应为 x,y");
+                points.Add(new Point2D(x, y));
+            }
+            if (points.Count < 4)
+                throw new InvalidOperationException("世界坐标点数量不足，至少需要4个点");
+            return points.ToArray();
+        }
+
         private static CalibImage GrabOneCameraFrameOrThrow(int deviceIndex, int targetWidth, int targetHeight)
         {
             using var cam = new CameraService();
@@ -4575,11 +4749,10 @@ namespace CalibOperatorCLI_Example
 
                     case "world_coords":
                     {
-                        var coords = InputWorldCoordinates();
-                        if (coords != null)
-                            node.Outputs["Points"] = coords;
-                        else
-                            node.ErrorMessage = "用户取消";
+                        string raw = node.Params.GetValueOrDefault("points", "") ?? "";
+                        var coords = ParseWorldPointsParam(raw);
+                        node.Outputs["Points"] = coords;
+                        node.ResultSummary = $"Points: {coords.Length}";
                         break;
                     }
 
@@ -5320,11 +5493,119 @@ namespace CalibOperatorCLI_Example
                         var pts = inputs["Points"] as Point2D[];
                         if (pts == null || pts.Length == 0)
                             throw new InvalidOperationException("发送PLC: 缺少有效的点位数据");
-                        // TODO: 接入 PlcPage 的发送逻辑
+                        if (!_flowPlcConnected || _flowPlc == null)
+                            throw new InvalidOperationException("发送PLC: PLC 未连接，请先执行 PLC连接 算子");
+                        // v1：先打通链路，写入点数到寄存器0；后续可扩展完整轨迹协议
+                        var wr = _flowPlc.Write("0", (short)pts.Length);
+                        if (!wr.IsSuccess)
+                            throw new InvalidOperationException($"发送PLC失败: {wr.Message}");
                         StatusText.Dispatcher.Invoke(() =>
                         {
-                            StatusText.Text = $"轨迹共 {pts.Length} 个点 (PLC发送待接入)";
+                            StatusText.Text = $"PLC发送成功: 点数={pts.Length}";
                         });
+                        node.ResultSummary = $"PLC sent {pts.Length} pts";
+                        break;
+                    }
+
+                    case "plc_connect":
+                    {
+                        string ip = (node.Params.GetValueOrDefault("ip", "192.168.6.6") ?? "192.168.6.6").Trim();
+                        int port = int.TryParse(node.Params.GetValueOrDefault("port"), out var p) ? p : 502;
+                        byte station = byte.TryParse(node.Params.GetValueOrDefault("station"), out var s) ? s : (byte)1;
+
+                        if (_flowPlc != null)
+                        {
+                            try { _flowPlc.ConnectClose(); } catch { }
+                            _flowPlc = null;
+                        }
+
+                        _flowPlc = new ModbusTcpNet(ip, port, station);
+                        var conn = _flowPlc.ConnectServer();
+                        if (!conn.IsSuccess)
+                            throw new InvalidOperationException($"PLC连接失败: {conn.Message}");
+
+                        _flowPlcConnected = true;
+                        node.Outputs["Connected"] = true;
+                        node.ResultSummary = $"Connected {ip}:{port} st={station}";
+                        break;
+                    }
+
+                    case "plc_disconnect":
+                    {
+                        if (_flowPlc != null)
+                        {
+                            try { _flowPlc.ConnectClose(); } catch { }
+                            _flowPlc = null;
+                        }
+                        _flowPlcConnected = false;
+                        node.Outputs["Disconnected"] = true;
+                        node.ResultSummary = "PLC disconnected";
+                        break;
+                    }
+
+                    case "if_gate":
+                    {
+                        if (!inputs.TryGetValue("Value", out var valObj) || valObj == null)
+                            throw new InvalidOperationException("条件判断: 缺少 Value 输入");
+
+                        double value;
+                        if (valObj is bool vb) value = vb ? 1.0 : 0.0;
+                        else if (valObj is int vi) value = vi;
+                        else if (valObj is float vf) value = vf;
+                        else if (valObj is double vd) value = vd;
+                        else if (!double.TryParse(valObj.ToString(), out value))
+                            throw new InvalidOperationException($"条件判断: Value 不是可比较数值/布尔 ({valObj.GetType().Name})");
+
+                        string op = (node.Params.GetValueOrDefault("op", ">") ?? ">").Trim();
+                        double threshold = double.TryParse(node.Params.GetValueOrDefault("threshold"), out var thv) ? thv : 0.0;
+                        double epsilon = double.TryParse(node.Params.GetValueOrDefault("epsilon"), out var eps) ? Math.Max(1e-12, eps) : 1e-6;
+
+                        bool pass = op switch
+                        {
+                            ">" => value > threshold,
+                            ">=" => value >= threshold,
+                            "<" => value < threshold,
+                            "<=" => value <= threshold,
+                            "==" => Math.Abs(value - threshold) <= epsilon,
+                            "!=" => Math.Abs(value - threshold) > epsilon,
+                            _ => throw new InvalidOperationException($"条件判断: 不支持的 op='{op}'")
+                        };
+
+                        node.Outputs["True"] = pass;
+                        node.Outputs["False"] = !pass;
+                        node.ResultSummary = $"if {value:G6} {op} {threshold:G6} => {pass}";
+                        break;
+                    }
+
+                    case "route_true":
+                    {
+                        if (!inputs.TryGetValue("Condition", out var condObj) || condObj is not bool cond)
+                            throw new InvalidOperationException("真分支放行: 缺少 Condition(bool)");
+                        if (cond && inputs.TryGetValue("In", out var inObj))
+                        {
+                            node.Outputs["Out"] = inObj;
+                            node.ResultSummary = "pass=true";
+                        }
+                        else
+                        {
+                            node.ResultSummary = "blocked";
+                        }
+                        break;
+                    }
+
+                    case "route_false":
+                    {
+                        if (!inputs.TryGetValue("Condition", out var condObj) || condObj is not bool cond)
+                            throw new InvalidOperationException("假分支放行: 缺少 Condition(bool)");
+                        if (!cond && inputs.TryGetValue("In", out var inObj))
+                        {
+                            node.Outputs["Out"] = inObj;
+                            node.ResultSummary = "pass=false";
+                        }
+                        else
+                        {
+                            node.ResultSummary = "blocked";
+                        }
                         break;
                     }
 
