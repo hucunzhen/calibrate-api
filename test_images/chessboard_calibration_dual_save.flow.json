@@ -1,0 +1,48 @@
+{
+  "Nodes": [
+    {
+      "Id": "cba53002-1000-4000-8000-000000000001",
+      "TypeId": "chessboard_calibrate_intrinsics",
+      "X": 80,
+      "Y": 160,
+      "Params": {
+        "imagePaths": "../../../../../test_images/chessboard_view1.png;../../../../../test_images/chessboard_view2.png;../../../../../test_images/chessboard_view3.png",
+        "cols": "9",
+        "rows": "6",
+        "squareSizeMm": "25"
+      }
+    },
+    {
+      "Id": "cba53002-1000-4000-8000-000000000002",
+      "TypeId": "save_text",
+      "X": 460,
+      "Y": 80,
+      "Params": {
+        "filePath": "../../../../../test_images/chessboard_intrinsics_only.json"
+      }
+    },
+    {
+      "Id": "cba53002-1000-4000-8000-000000000003",
+      "TypeId": "save_text",
+      "X": 460,
+      "Y": 240,
+      "Params": {
+        "filePath": "../../../../../test_images/chessboard_calibration_full.json"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "cba53002-1000-4000-8000-000000000001",
+      "FromPort": "IntrinsicsJson",
+      "ToNodeId": "cba53002-1000-4000-8000-000000000002",
+      "ToPort": "Text"
+    },
+    {
+      "FromNodeId": "cba53002-1000-4000-8000-000000000001",
+      "FromPort": "CalibrationJson",
+      "ToNodeId": "cba53002-1000-4000-8000-000000000003",
+      "ToPort": "Text"
+    }
+  ]
+}

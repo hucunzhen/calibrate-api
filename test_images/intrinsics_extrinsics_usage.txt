@@ -1,0 +1,32 @@
+内参、外参 — 字段含义与使用（与本仓库棋盘标定 JSON 一致）
+
+一、内参 intrinsics（JSON 根下的 intrinsics 对象）
+  • fx, fy：焦距（像素）。理想针孔模型下常接近；真实传感器可能略有差异。
+  • cx, cy：主点（像素坐标，通常为图像中心附近）。
+  • k1, k2, k3, p1, p2：径向/切向畸变系数（OpenCV 模型）。
+  • rms：标定重投影误差（像素量级），越小通常越好。
+  用途：描述「相机本身」，与场景无关。同一相机、同类采集条件下可在多帧、多流程中复用。
+  典型 OpenCV：cv::undistort；或与外参一起 cv::projectPoints（棋盘角点 Z=0 的 3D 点 → 像素）。
+
+二、外参 extrinsicsPerView（数组，每项对应一张成功标定的图像）
+  • imagePath：该组外参对应的输入图像路径。
+  • rvec：旋转向量（轴角，弧度），与 tvec 一起把棋盘坐标系变换到相机坐标系。
+  • tvec：平移向量；长度单位与标定算子填写的 squareSizeMm 一致（例如毫米）。
+  约定（与 JSON 中 convention 字段一致）：
+    P_cam = R * P_board + t
+    其中 R = Rodrigues(rvec)，棋盘平面为 Z=0，角点世界坐标按方格间距生成。
+
+三、如何选用外参
+  • extrinsicsPerView 里每一组只对该 imagePath 那一帧「棋盘相对相机」的位姿有效。
+  • 换一张图、或棋盘动了，不能把另一视图的 rvec/tvec 直接当当前画面位姿。
+  • 实际测量时常做法：内参沿用标定结果；对「当前帧 + 已知棋盘」用 solvePnP 求当前外参，或与机械臂等做 Hand–Eye 另行估计。
+
+四、像素轨迹 → 棋盘平面世界坐标（mm）
+  • Flow 算子「棋盘像素→世界(mm)」(chessboard_pixels_to_world)：输入像素点列 Points + CalibrationJson，参数 viewIndex 选用 extrinsicsPerView[i]。
+  • 算法：cv::undistortPoints 得到归一化射线，与棋盘平面（OpenCV 约定 board Z=0）求交，再变换到棋盘坐标系得到 XY。
+  • 适用条件：轨迹所在图像与所选视图的外参一致（例如与 chessboard_view1.png 同机位时用 viewIndex=0）。相机或棋盘位姿变化后应改用 solvePnP 等方法更新外参，勿混用其他视图的 rvec/tvec。
+  • 示例：chessboard_trajectory_to_world.flow.json（标定 → 加载 view1 → 角点 → 转世界坐标 → 点列转文本 → 保存）。
+
+五、本仓库示例 flow
+  • chessboard_intrinsics_extrinsics_usage.flow.json
+    运行后：一条分支用 CalibrationJson 连接「显示标定结果」（含完整摘要 + 用法说明），一条分支仅接 Intrinsics 对比「仅内参」显示；同时将完整 CalibrationJson 保存到 chessboard_calibration_usage_example.json。

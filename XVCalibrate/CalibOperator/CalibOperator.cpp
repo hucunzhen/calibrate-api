@@ -7,6 +7,8 @@
 #include "CalibOperator.h"
 #include <stdarg.h>
 #include <time.h>
+#include <string>
+#include <cstdio>
 
 using namespace cv;
 
@@ -437,6 +439,30 @@ int LoadBMP(const char* filename, Image* img) {
     SaveBMP("debug_loaded.bmp", img);
     LOG_INFO("BMP file loaded successfully: %dx%d", img->width, img->height);
 
+    return 1;
+}
+
+int LoadImageFile(const char* filename, Image* img) {
+    if (!filename || !img) return 0;
+    memset(img, 0, sizeof(*img));
+    Mat m = imread(filename, IMREAD_UNCHANGED);
+    if (m.empty()) {
+        LOG_ERROR("LoadImageFile: cannot read %s", filename);
+        return 0;
+    }
+    Mat bgr;
+    if (m.channels() == 1)
+        cvtColor(m, bgr, COLOR_GRAY2BGR);
+    else if (m.channels() == 4)
+        cvtColor(m, bgr, COLOR_BGRA2BGR);
+    else if (m.channels() == 3)
+        bgr = m;
+    else {
+        LOG_ERROR("LoadImageFile: unsupported channels=%d", m.channels());
+        return 0;
+    }
+    MatToImageBGR(bgr, img);
+    LOG_INFO("LoadImageFile: %s -> %dx%d", filename, img->width, img->height);
     return 1;
 }
 
@@ -3702,4 +3728,369 @@ void DrawTrajectoryGrayscale(Image* img, Point2D* trajPixels, int count, int gra
             }
         }
     }
+}
+
+// ========== Chessboard / camera intrinsics ==========
+
+namespace {
+
+static void SplitSemicolonPaths(const char* delimStr, std::vector<std::string>& out) {
+    out.clear();
+    if (!delimStr) return;
+    std::string s(delimStr);
+    size_t start = 0;
+    while (start < s.size()) {
+        size_t semi = s.find(';', start);
+        std::string part = (semi == std::string::npos) ? s.substr(start) : s.substr(start, semi - start);
+        while (!part.empty() && (part.front() == ' ' || part.front() == '\t')) part.erase(part.begin());
+        while (!part.empty() && (part.back() == ' ' || part.back() == '\t')) part.pop_back();
+        if (!part.empty()) out.push_back(part);
+        if (semi == std::string::npos) break;
+        start = semi + 1;
+    }
+}
+
+static int FindChessboardCornersGrayMat(const cv::Mat& gray, int boardCols, int boardRows,
+    std::vector<cv::Point2f>& corners, int refineSubPix, int fastCheck) {
+    if (gray.empty() || gray.type() != CV_8UC1 || boardCols < 2 || boardRows < 2) return -1;
+    cv::Size pattern(boardCols, boardRows);
+    int flags = cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE;
+    if (fastCheck) flags |= cv::CALIB_CB_FAST_CHECK;
+    corners.clear();
+    bool ok = cv::findChessboardCorners(gray, pattern, corners, flags);
+    if (!ok) return 1;
+    if (refineSubPix) {
+        cv::TermCriteria criteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 30, 0.001);
+        cv::cornerSubPix(gray, corners, cv::Size(11, 11), cv::Size(-1, -1), criteria);
+    }
+    return 0;
+}
+
+} // namespace
+
+int FindChessboardCornersGrayBuffer(const unsigned char* grayRowMajor, int width, int height, int boardCols, int boardRows,
+    Point2D* outPts, int* outCount, int maxPts, int refineSubPix, int fastCheck) {
+    if (!grayRowMajor || width <= 0 || height <= 0 || !outCount || maxPts < boardCols * boardRows) return -1;
+    cv::Mat gray(height, width, CV_8UC1, const_cast<unsigned char*>(grayRowMajor));
+    cv::Mat grayClone = gray.clone();
+    std::vector<cv::Point2f> corners;
+    int rc = FindChessboardCornersGrayMat(grayClone, boardCols, boardRows, corners, refineSubPix, fastCheck);
+    if (rc != 0) {
+        *outCount = 0;
+        return rc;
+    }
+    int n = (int)corners.size();
+    *outCount = n;
+    if (outPts && n <= maxPts) {
+        for (int i = 0; i < n; ++i) {
+            outPts[i].x = corners[i].x;
+            outPts[i].y = corners[i].y;
+        }
+    }
+    return 0;
+}
+
+int FindChessboardCorners(Image* img, int boardCols, int boardRows,
+    Point2D* outPts, int* outCount, int maxPts, int refineSubPix, int fastCheck) {
+    if (!img || !img->data || !outCount || boardCols < 2 || boardRows < 2 || maxPts < boardCols * boardRows) return -1;
+    cv::Mat gray;
+    Step_ConvertToGrayscale(img, &gray);
+    std::vector<cv::Point2f> corners;
+    int rc = FindChessboardCornersGrayMat(gray, boardCols, boardRows, corners, refineSubPix, fastCheck);
+    if (rc != 0) {
+        *outCount = 0;
+        return rc;
+    }
+    int n = (int)corners.size();
+    *outCount = n;
+    if (outPts && n <= maxPts) {
+        for (int i = 0; i < n; ++i) {
+            outPts[i].x = corners[i].x;
+            outPts[i].y = corners[i].y;
+        }
+    }
+    return 0;
+}
+
+void DrawChessboardCorners(Image* img, Point2D* pts, int count, int boardCols, int boardRows) {
+    if (!img || !img->data || count < 1 || boardCols < 2 || boardRows < 2) return;
+    cv::Mat bgr;
+    if (img->channels == 1) {
+        cv::Mat gray;
+        Step_ConvertToGrayscale(img, &gray);
+        cvtColor(gray, bgr, COLOR_GRAY2BGR);
+    } else {
+        int w = img->width, h = img->height;
+        int srcRS = ((w * 3 + 3) / 4) * 4;
+        cv::Mat colorMat(h, w, CV_8UC3, img->data, srcRS);
+        bgr = colorMat.clone();
+    }
+    std::vector<cv::Point2f> cvPts;
+    cvPts.reserve(count);
+    for (int i = 0; i < count; ++i)
+        cvPts.emplace_back((float)pts[i].x, (float)pts[i].y);
+    bool patternFound = (count == boardCols * boardRows);
+    cv::drawChessboardCorners(bgr, cv::Size(boardCols, boardRows), cvPts, patternFound);
+    MatToImageBGR(bgr, img);
+}
+
+namespace {
+
+static void AppendEscapedJsonString(std::string& dst, const std::string& s) {
+    dst.push_back('"');
+    for (unsigned char c : s) {
+        if (c == '\\' || c == '"') {
+            dst.push_back('\\');
+            dst.push_back((char)c);
+        } else if (c == '\n')
+            dst += "\\n";
+        else if (c == '\r')
+            dst += "\\r";
+        else if (c == '\t')
+            dst += "\\t";
+        else
+            dst.push_back((char)c);
+    }
+    dst.push_back('"');
+}
+
+static void AppendG(std::string& dst, double x) {
+    char b[96];
+    snprintf(b, sizeof(b), "%.9g", x);
+    dst += b;
+}
+
+} // namespace
+
+int CalibrateCameraChessboardMultiview(const char* pathsDelimited, int boardCols, int boardRows, double squareSize,
+    double* outFx, double* outFy, double* outCx, double* outCy,
+    double* outK1, double* outK2, double* outP1, double* outP2, double* outK3,
+    double* outRms,
+    char* fullCalibrationJsonOut, int fullCalibrationJsonOutSize) {
+    if (!pathsDelimited || boardCols < 2 || boardRows < 2 || squareSize <= 0.0) return -1;
+
+    std::vector<std::string> paths;
+    SplitSemicolonPaths(pathsDelimited, paths);
+    if (paths.empty()) return -2;
+
+    std::vector<cv::Point3f> templateObj;
+    templateObj.reserve(boardCols * boardRows);
+    for (int r = 0; r < boardRows; ++r)
+        for (int c = 0; c < boardCols; ++c)
+            templateObj.emplace_back((float)(c * squareSize), (float)(r * squareSize), 0.f);
+
+    std::vector<std::vector<cv::Point3f>> objPtsVec;
+    std::vector<std::vector<cv::Point2f>> imgPtsVec;
+    std::vector<std::string> usedPaths;
+    cv::Size imageSize;
+
+    for (const auto& path : paths) {
+        cv::Mat img = cv::imread(path, cv::IMREAD_COLOR);
+        if (img.empty()) continue;
+        cv::Mat gray;
+        cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
+        std::vector<cv::Point2f> corners;
+        if (FindChessboardCornersGrayMat(gray, boardCols, boardRows, corners, 1, 0) != 0) continue;
+        if ((int)corners.size() != boardCols * boardRows) continue;
+        usedPaths.push_back(path);
+        imgPtsVec.push_back(corners);
+        objPtsVec.push_back(templateObj);
+        imageSize = gray.size();
+    }
+
+    if (imgPtsVec.size() < 3) return -3;
+
+    cv::Mat cameraMatrix = cv::Mat::eye(3, 3, CV_64F);
+    cv::Mat distCoeffs = cv::Mat::zeros(5, 1, CV_64F);
+    std::vector<cv::Mat> rvecs, tvecs;
+    int flags = cv::CALIB_FIX_K4 | cv::CALIB_FIX_K5 | cv::CALIB_FIX_K6;
+    double rms = cv::calibrateCamera(objPtsVec, imgPtsVec, imageSize, cameraMatrix, distCoeffs, rvecs, tvecs, flags);
+
+    double fx = cameraMatrix.at<double>(0, 0);
+    double fy = cameraMatrix.at<double>(1, 1);
+    double cx = cameraMatrix.at<double>(0, 2);
+    double cy = cameraMatrix.at<double>(1, 2);
+    double k1 = distCoeffs.at<double>(0);
+    double k2 = distCoeffs.rows > 1 ? distCoeffs.at<double>(1) : 0.0;
+    double p1 = distCoeffs.rows > 2 ? distCoeffs.at<double>(2) : 0.0;
+    double p2 = distCoeffs.rows > 3 ? distCoeffs.at<double>(3) : 0.0;
+    double k3 = distCoeffs.rows > 4 ? distCoeffs.at<double>(4) : 0.0;
+
+    if (outFx) *outFx = fx;
+    if (outFy) *outFy = fy;
+    if (outCx) *outCx = cx;
+    if (outCy) *outCy = cy;
+    if (outK1) *outK1 = k1;
+    if (outK2) *outK2 = k2;
+    if (outP1) *outP1 = p1;
+    if (outP2) *outP2 = p2;
+    if (outK3) *outK3 = k3;
+    if (outRms) *outRms = rms;
+
+    if (fullCalibrationJsonOut && fullCalibrationJsonOutSize > 0) {
+        std::string j;
+        j.reserve(4096 + usedPaths.size() * 256);
+        j += "{\"intrinsics\":{";
+        j += "\"fx\":"; AppendG(j, fx);
+        j += ",\"fy\":"; AppendG(j, fy);
+        j += ",\"cx\":"; AppendG(j, cx);
+        j += ",\"cy\":"; AppendG(j, cy);
+        j += ",\"k1\":"; AppendG(j, k1);
+        j += ",\"k2\":"; AppendG(j, k2);
+        j += ",\"p1\":"; AppendG(j, p1);
+        j += ",\"p2\":"; AppendG(j, p2);
+        j += ",\"k3\":"; AppendG(j, k3);
+        j += ",\"rms\":"; AppendG(j, rms);
+        j += "},\"extrinsicsPerView\":[";
+        for (size_t i = 0; i < rvecs.size(); ++i) {
+            if (i) j += ',';
+            j += "{\"imagePath\":";
+            AppendEscapedJsonString(j, usedPaths[i]);
+            const cv::Mat& rv = rvecs[i];
+            const cv::Mat& tv = tvecs[i];
+            j += ",\"rvec\":[";
+            AppendG(j, rv.at<double>(0));
+            j += ',';
+            AppendG(j, rv.at<double>(1));
+            j += ',';
+            AppendG(j, rv.at<double>(2));
+            j += "],\"tvec\":[";
+            AppendG(j, tv.at<double>(0));
+            j += ',';
+            AppendG(j, tv.at<double>(1));
+            j += ',';
+            AppendG(j, tv.at<double>(2));
+            j += "]}";
+        }
+        j += "],\"convention\":\"OpenCV calibrateCamera: P_cam = R*P_board + t; board plane Z=0, units same as squareSize (e.g. mm).\"}";
+        if ((int)j.size() + 1 > fullCalibrationJsonOutSize)
+            fullCalibrationJsonOut[0] = '\0';
+        else
+            memcpy(fullCalibrationJsonOut, j.c_str(), j.size() + 1);
+    }
+
+    return 0;
+}
+
+namespace {
+
+static bool GrabDoubleInSpan(const std::string& span, const char* key, double* out) {
+    std::string pat = std::string("\"") + key + "\":";
+    size_t p = span.find(pat);
+    if (p == std::string::npos)
+        return false;
+    p += pat.size();
+    *out = std::strtod(span.c_str() + p, nullptr);
+    return true;
+}
+
+/** @return 0 ok; -2 intrinsics; -3 extrinsics header; -4..-8 per-view parse */
+static int ParseCalibrationJsonForView(const std::string& json, int viewIndex,
+    double* fx, double* fy, double* cx, double* cy,
+    double* k1, double* k2, double* p1, double* p2, double* k3,
+    double rvec[3], double tvec[3]) {
+    size_t i0 = json.find("\"intrinsics\"");
+    if (i0 == std::string::npos)
+        return -2;
+    size_t i1 = json.find("\"extrinsicsPerView\"", i0);
+    if (i1 == std::string::npos)
+        i1 = json.size();
+    const std::string head = json.substr(i0, i1 - i0);
+    if (!GrabDoubleInSpan(head, "fx", fx) || !GrabDoubleInSpan(head, "fy", fy) ||
+        !GrabDoubleInSpan(head, "cx", cx) || !GrabDoubleInSpan(head, "cy", cy) ||
+        !GrabDoubleInSpan(head, "k1", k1) || !GrabDoubleInSpan(head, "k2", k2) ||
+        !GrabDoubleInSpan(head, "p1", p1) || !GrabDoubleInSpan(head, "p2", p2) ||
+        !GrabDoubleInSpan(head, "k3", k3))
+        return -2;
+
+    size_t exPos = json.find("\"extrinsicsPerView\"");
+    if (exPos == std::string::npos)
+        return -3;
+    size_t arr = json.find('[', exPos);
+    if (arr == std::string::npos)
+        return -3;
+    size_t cursor = arr + 1;
+    for (int vi = 0; vi <= viewIndex; ++vi) {
+        size_t rvKey = json.find("\"rvec\":[", cursor);
+        if (rvKey == std::string::npos)
+            return -4;
+        size_t rv = rvKey + 8;
+        while (rv < json.size() && (json[rv] == ' ' || json[rv] == '\t'))
+            rv++;
+        int np = std::sscanf(json.c_str() + rv, "%lf,%lf,%lf", &rvec[0], &rvec[1], &rvec[2]);
+        if (np != 3)
+            return -5;
+        size_t tvKey = json.find("\"tvec\":[", rv);
+        if (tvKey == std::string::npos)
+            return -6;
+        size_t tv = tvKey + 8;
+        while (tv < json.size() && (json[tv] == ' ' || json[tv] == '\t'))
+            tv++;
+        np = std::sscanf(json.c_str() + tv, "%lf,%lf,%lf", &tvec[0], &tvec[1], &tvec[2]);
+        if (np != 3)
+            return -7;
+        size_t closeBracket = json.find(']', tv);
+        if (closeBracket == std::string::npos)
+            return -8;
+        cursor = closeBracket + 1;
+    }
+    return 0;
+}
+
+} // namespace
+
+int PixelsToChessboardPlaneXY(double fx, double fy, double cx, double cy,
+    double k1, double k2, double p1, double p2, double k3,
+    const double rvec[3], const double tvec[3],
+    const Point2D* pixels, Point2D* worldXYOut, int count) {
+    if (!pixels || !worldXYOut || count <= 0)
+        return -1;
+
+    cv::Mat cam = (cv::Mat_<double>(3, 3) << fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0);
+    cv::Mat dist = (cv::Mat_<double>(5, 1) << k1, k2, p1, p2, k3);
+    cv::Mat rv = (cv::Mat_<double>(3, 1) << rvec[0], rvec[1], rvec[2]);
+    cv::Mat tv = (cv::Mat_<double>(3, 1) << tvec[0], tvec[1], tvec[2]);
+    cv::Mat R;
+    cv::Rodrigues(rv, R);
+    cv::Mat n = R.col(2);
+    double nx = n.at<double>(0), ny = n.at<double>(1), nz = n.at<double>(2);
+    double tx = tv.at<double>(0), ty = tv.at<double>(1), tz = tv.at<double>(2);
+    double n_dot_t = nx * tx + ny * ty + nz * tz;
+
+    std::vector<cv::Point2f> distPts, normPts;
+    distPts.reserve((size_t)count);
+    for (int i = 0; i < count; ++i)
+        distPts.emplace_back((float)pixels[i].x, (float)pixels[i].y);
+    cv::undistortPoints(distPts, normPts, cam, dist);
+
+    cv::Mat Rt = R.t();
+
+    for (int i = 0; i < count; ++i) {
+        double xn = normPts[(size_t)i].x;
+        double yn = normPts[(size_t)i].y;
+        double vx = xn, vy = yn, vz = 1.0;
+        double n_dot_v = nx * vx + ny * vy + nz * vz;
+        if (fabs(n_dot_v) < 1e-12)
+            return -10;
+        double lambda = n_dot_t / n_dot_v;
+        double Xc = lambda * vx, Yc = lambda * vy, Zc = lambda * vz;
+        cv::Mat Pc = (cv::Mat_<double>(3, 1) << Xc, Yc, Zc);
+        cv::Mat Pb = Rt * (Pc - tv);
+        worldXYOut[i].x = Pb.at<double>(0);
+        worldXYOut[i].y = Pb.at<double>(1);
+    }
+    return 0;
+}
+
+int PixelsToChessboardPlaneXYFromCalibrationJson(const char* calibrationJsonUtf8, int viewIndex,
+    const Point2D* pixels, Point2D* worldXYOut, int count) {
+    if (!calibrationJsonUtf8 || !pixels || !worldXYOut || count <= 0 || viewIndex < 0)
+        return -1;
+    std::string json(calibrationJsonUtf8);
+    double fx, fy, cx, cy, k1, k2, p1, p2, k3;
+    double rvec[3], tvec[3];
+    int pr = ParseCalibrationJsonForView(json, viewIndex, &fx, &fy, &cx, &cy, &k1, &k2, &p1, &p2, &k3, rvec, tvec);
+    if (pr != 0)
+        return pr;
+    return PixelsToChessboardPlaneXY(fx, fy, cx, cy, k1, k2, p1, p2, k3, rvec, tvec, pixels, worldXYOut, count);
 }

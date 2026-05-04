@@ -12,6 +12,7 @@
 
 using System;
 using System.Linq;
+using System.Text;
 using System.Runtime.InteropServices;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -44,6 +45,15 @@ namespace CalibOperatorPInvoke
     {
         public double a, b, c;
         public double d, e, f;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NativeCameraIntrinsics
+    {
+        public double fx, fy, cx, cy;
+        public double k1, k2, p1, p2, k3;
+        public double rms;
+        public int success;
     }
 
     /// <summary>
@@ -124,6 +134,39 @@ namespace CalibOperatorPInvoke
     }
 
     /// <summary>
+    /// 由多视图棋盘格标定（OpenCV calibrateCamera）优化求解得到的针孔内参与畸变系数，非预设值、非从相机硬件直接读取。
+    /// </summary>
+    public struct CameraIntrinsics
+    {
+        public double Fx, Fy, Cx, Cy;
+        public double K1, K2, P1, P2, K3;
+        public double Rms;
+
+        public static CameraIntrinsics FromNative(NativeCameraIntrinsics n)
+        {
+            return new CameraIntrinsics
+            {
+                Fx = n.fx,
+                Fy = n.fy,
+                Cx = n.cx,
+                Cy = n.cy,
+                K1 = n.k1,
+                K2 = n.k2,
+                P1 = n.p1,
+                P2 = n.p2,
+                K3 = n.k3,
+                Rms = n.rms
+            };
+        }
+
+        public override string ToString()
+        {
+            return $"（标定求解）fx={Fx:F4} fy={Fy:F4} cx={Cx:F2} cy={Cy:F2} RMS={Rms:F6}\n" +
+                   $"dist k1={K1:F6} k2={K2:F6} p1={P1:F6} p2={P2:F6} k3={K3:F6}";
+        }
+    }
+
+    /// <summary>
     /// 标定结果
     /// </summary>
     public class CalibrationResult
@@ -191,12 +234,35 @@ namespace CalibOperatorPInvoke
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
         public static extern int CALIB_LoadBMP(string filename, IntPtr img);
 
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        public static extern int CALIB_LoadImageFile(string filename, IntPtr img);
+
         // Circle detection
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int CALIB_DetectCircles(IntPtr img, IntPtr pts, ref int count, int maxCount);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern void CALIB_DrawDetectedCircles(IntPtr img, IntPtr pts, int count, int gray);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_FindChessboardCorners(IntPtr img, int boardCols, int boardRows,
+            IntPtr outPts, ref int count, int maxPts, int refineSubPix, int fastCheck);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void CALIB_DrawChessboardCorners(IntPtr img, IntPtr pts, int count, int boardCols, int boardRows);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        public static extern int CALIB_CalibrateCameraChessboard(string pathsDelimited, int boardCols, int boardRows,
+            double squareSizeMm, ref NativeCameraIntrinsics outIntrinsics,
+            IntPtr fullCalibrationJsonOut, int fullCalibrationJsonOutSize);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_PixelsToChessboardPlaneFromCalibrationJson(
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string calibrationJsonUtf8,
+            int viewIndex,
+            [In] NativePoint2D[] pixels,
+            [Out] NativePoint2D[] worldXYOut,
+            int count);
 
         // Calibration
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
@@ -502,11 +568,27 @@ namespace CalibOperatorPInvoke
         public static CalibImage Load(string filename)
         {
             CalibImage img = new CalibImage();
-            int result = NativeAPI.CALIB_LoadBMP(filename, img.NativePtr);
+            int result = NativeAPI.CALIB_LoadImageFile(filename, img.NativePtr);
             if (result != 1)
             {
                 img.Dispose();
                 throw new Exception($"Failed to load image: {filename}");
+            }
+            img.RefreshProperties();
+            return img;
+        }
+
+        /// <summary>
+        /// 仅从 BMP 加载（旧行为，不经过 OpenCV）
+        /// </summary>
+        public static CalibImage LoadBmp(string filename)
+        {
+            CalibImage img = new CalibImage();
+            int result = NativeAPI.CALIB_LoadBMP(filename, img.NativePtr);
+            if (result != 1)
+            {
+                img.Dispose();
+                throw new Exception($"Failed to load BMP: {filename}");
             }
             img.RefreshProperties();
             return img;
@@ -583,6 +665,25 @@ namespace CalibOperatorPInvoke
             return img.Save(filename);
         }
 
+        /// <summary>
+        /// 复制图像缓冲区（行紧凑排列 width×channels）
+        /// </summary>
+        public static CalibImage DuplicateImage(CalibImage src)
+        {
+            if (src == null) throw new ArgumentNullException(nameof(src));
+            NativeImage sn = src.GetNativeStruct();
+            if (sn.data == IntPtr.Zero || sn.width <= 0 || sn.height <= 0)
+                throw new InvalidOperationException("Invalid image");
+            var dst = new CalibImage(sn.width, sn.height, sn.channels);
+            NativeImage dn = dst.GetNativeStruct();
+            int rowBytes = sn.width * sn.channels;
+            int bytes = rowBytes * sn.height;
+            byte[] tmp = new byte[bytes];
+            Marshal.Copy(sn.data, tmp, 0, bytes);
+            Marshal.Copy(tmp, 0, dn.data, bytes);
+            return dst;
+        }
+
         // ================================================================
         // Circle Detection
         // ================================================================
@@ -637,6 +738,122 @@ namespace CalibOperatorPInvoke
             {
                 Marshal.FreeHGlobal(ptsPtr);
             }
+        }
+
+        /// <summary>
+        /// 棋盘格内侧角点检测（完整棋盘时返回 cols×rows 个点）
+        /// </summary>
+        public static Point2D[] FindChessboardCorners(CalibImage img, int boardCols, int boardRows, bool refineSubPix = true, bool fastCheck = true)
+        {
+            if (img == null) throw new ArgumentNullException(nameof(img));
+            int maxPts = boardCols * boardRows;
+            if (boardCols < 2 || boardRows < 2 || maxPts <= 0)
+                return Array.Empty<Point2D>();
+
+            int count = 0;
+            IntPtr ptsPtr = Marshal.AllocHGlobal(Marshal.SizeOf<NativePoint2D>() * maxPts);
+            try
+            {
+                NativeAPI.CALIB_FindChessboardCorners(img.NativePtr, boardCols, boardRows, ptsPtr, ref count, maxPts,
+                    refineSubPix ? 1 : 0, fastCheck ? 1 : 0);
+                if (count <= 0)
+                    return Array.Empty<Point2D>();
+
+                Point2D[] result = new Point2D[count];
+                for (int i = 0; i < count; i++)
+                {
+                    IntPtr elementPtr = IntPtr.Add(ptsPtr, i * Marshal.SizeOf<NativePoint2D>());
+                    NativePoint2D nativePt = Marshal.PtrToStructure<NativePoint2D>(elementPtr);
+                    result[i] = Point2D.FromNative(nativePt);
+                }
+                return result;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(ptsPtr);
+            }
+        }
+
+        /// <summary>
+        /// 在图像上绘制棋盘格角点（输出 BGR）
+        /// </summary>
+        public static void DrawChessboardCorners(CalibImage img, Point2D[] pts, int boardCols, int boardRows)
+        {
+            if (img == null || pts == null || pts.Length == 0) return;
+
+            int count = pts.Length;
+            IntPtr ptsPtr = Marshal.AllocHGlobal(Marshal.SizeOf<NativePoint2D>() * count);
+            try
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    IntPtr elementPtr = IntPtr.Add(ptsPtr, i * Marshal.SizeOf<NativePoint2D>());
+                    Marshal.StructureToPtr(pts[i].ToNative(), elementPtr, false);
+                }
+                NativeAPI.CALIB_DrawChessboardCorners(img.NativePtr, ptsPtr, count, boardCols, boardRows);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(ptsPtr);
+            }
+        }
+
+        /// <summary>
+        /// 多视图棋盘格标定：OpenCV calibrateCamera 优化求解内参、畸变，以及每张成功视图的外参 rvec/tvec（board→camera）。
+        /// 返回的 calibrationJson 含 intrinsics、extrinsicsPerView、convention 字段。
+        /// </summary>
+        public static (CameraIntrinsics intrinsics, string calibrationJson) CalibrateCameraChessboard(string pathsDelimited, int boardCols, int boardRows, double squareSizeMm)
+        {
+            NativeCameraIntrinsics n = new NativeCameraIntrinsics();
+            byte[] buf = new byte[524288];
+            GCHandle handle = GCHandle.Alloc(buf, GCHandleType.Pinned);
+            try
+            {
+                int rc = NativeAPI.CALIB_CalibrateCameraChessboard(pathsDelimited ?? string.Empty, boardCols, boardRows, squareSizeMm, ref n,
+                    handle.AddrOfPinnedObject(), buf.Length);
+                if (rc != 0 || n.success == 0)
+                    throw new InvalidOperationException($"棋盘格标定求解失败 (code {rc})：需至少 3 张成功检出棋盘格的图像以计算内参与外参。");
+                string calJson = Utf8NullTerminated(buf);
+                return (CameraIntrinsics.FromNative(n), calJson);
+            }
+            finally
+            {
+                handle.Free();
+            }
+        }
+
+        /// <summary>
+        /// 像素轨迹 → 棋盘平面 XY（与标定 squareSize 同单位）。使用 CalibrationJson 内参 + extrinsicsPerView[viewIndex]。
+        /// </summary>
+        public static Point2D[] PixelsToChessboardWorld(string calibrationJson, int viewIndex, Point2D[] pixels)
+        {
+            if (pixels == null || pixels.Length == 0)
+                throw new ArgumentException("pixels 不能为空", nameof(pixels));
+            if (string.IsNullOrWhiteSpace(calibrationJson))
+                throw new ArgumentException("calibrationJson 不能为空", nameof(calibrationJson));
+            if (viewIndex < 0)
+                throw new ArgumentOutOfRangeException(nameof(viewIndex));
+
+            var nativeIn = new NativePoint2D[pixels.Length];
+            for (int i = 0; i < pixels.Length; i++)
+                nativeIn[i] = pixels[i].ToNative();
+            var nativeOut = new NativePoint2D[pixels.Length];
+            int rc = NativeAPI.CALIB_PixelsToChessboardPlaneFromCalibrationJson(calibrationJson, viewIndex, nativeIn, nativeOut, pixels.Length);
+            if (rc != 0)
+                throw new InvalidOperationException(
+                    $"棋盘像素→世界坐标失败 (code {rc})。请检查 CalibrationJson 是否完整、viewIndex 是否在 extrinsicsPerView 范围内，以及射线是否与棋盘平面近似平行。");
+
+            var result = new Point2D[pixels.Length];
+            for (int i = 0; i < pixels.Length; i++)
+                result[i] = Point2D.FromNative(nativeOut[i]);
+            return result;
+        }
+
+        private static string Utf8NullTerminated(byte[] buf)
+        {
+            int len = Array.IndexOf(buf, (byte)0);
+            if (len < 0) len = buf.Length;
+            return Encoding.UTF8.GetString(buf, 0, len);
         }
 
         // ================================================================

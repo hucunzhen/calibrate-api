@@ -93,6 +93,9 @@ int SaveBMP(const char* filename, Image* img);
 // 注意：失败时不弹 MessageBox，仅通过日志输出错误
 int LoadBMP(const char* filename, Image* img);
 
+// OpenCV imread：bmp/png/jpeg/tiff 等，输出为 3 通道 BGR（灰度/RGBA 会转换）
+int LoadImageFile(const char* filename, Image* img);
+
 // ========== 圆检测 ==========
 
 // Contour + Crosshair 圆检测（适用于 9 点标定图）
@@ -101,6 +104,39 @@ void DetectCircles(Image* img, Point2D* pts, int* count);
 
 // 在图像上绘制检测到的圆标记
 void DrawDetectedCircles(Image* img, Point2D* pts, int count, int gray);
+
+// ========== 棋盘格 / 相机内参（OpenCV）==========
+// boardCols/boardRows：棋盘内侧角点列数、行数（与 cv::findChessboardCorners 的 patternSize 一致）
+// FindChessboardCorners：返回 0 表示检测到完整角点集；1 表示未找到；负值表示参数错误
+int FindChessboardCorners(Image* img, int boardCols, int boardRows,
+    Point2D* outPts, int* outCount, int maxPts, int refineSubPix, int fastCheck);
+
+// 连续存储的灰度行优先缓冲区（width×height），用于已由 cv::Mat 等得到的灰度图
+int FindChessboardCornersGrayBuffer(const unsigned char* grayRowMajor, int width, int height, int boardCols, int boardRows,
+    Point2D* outPts, int* outCount, int maxPts, int refineSubPix, int fastCheck);
+
+void DrawChessboardCorners(Image* img, Point2D* pts, int count, int boardCols, int boardRows);
+
+// pathsDelimited：多张标定图路径，分号分隔；至少需 3 张成功检出棋盘格的图像
+// squareSize：方格边长（与 world 单位一致，常用 mm）
+// 使用 cv::calibrateCamera 优化求解内参与畸变，结果为标定计算值，非从相机读取
+// fullCalibrationJsonOut：可选；写入 UTF-8 JSON（含 intrinsics 与每视图外参 rvec/tvec，OpenCV board→camera）。
+// 缓冲区不足时写入空串（首字节 0），内参仍有效。
+int CalibrateCameraChessboardMultiview(const char* pathsDelimited, int boardCols, int boardRows, double squareSize,
+    double* outFx, double* outFy, double* outCx, double* outCy,
+    double* outK1, double* outK2, double* outP1, double* outP2, double* outK3,
+    double* outRms,
+    char* fullCalibrationJsonOut, int fullCalibrationJsonOutSize);
+
+// 像素 → 棋盘平面 XY（Z=0），长度单位与标定时 squareSize 一致（如 mm）；畸变先 undistort，再与 extrinsics 求射线与棋盘平面交点
+int PixelsToChessboardPlaneXY(double fx, double fy, double cx, double cy,
+    double k1, double k2, double p1, double p2, double k3,
+    const double rvec[3], const double tvec[3],
+    const Point2D* pixels, Point2D* worldXYOut, int count);
+
+// 从 CalibrateCameraChessboardMultiview 输出的 CalibrationJson 解析内参与 extrinsicsPerView[viewIndex]
+int PixelsToChessboardPlaneXYFromCalibrationJson(const char* calibrationJsonUtf8, int viewIndex,
+    const Point2D* pixels, Point2D* worldXYOut, int count);
 
 // ========== 标定 ==========
 

@@ -6,7 +6,7 @@
       "X": 80,
       "Y": 80,
       "Params": {
-        "filePath": "D:\\work\\calibrate-api\\test_auto.bmp"
+        "filePath": "../../../../../test_auto.bmp"
       }
     },
     {

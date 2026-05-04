@@ -714,6 +714,44 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "save_text",
+                DisplayName = "保存文本",
+                Description = "将字符串以 UTF-8 写入文件（如棋盘格内参 JSON）",
+                Category = "可视化",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "filePath",
+                        DisplayName = "保存路径",
+                        DefaultValue = "flow_output.txt",
+                        Description = "绝对路径或相对可执行目录"
+                    }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Text", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "points_to_text",
+                DisplayName = "点列转文本",
+                Description = "将 Point2D[] 转为每行 x,y 文本，便于接「保存文本」落盘（如棋盘平面 mm 轨迹）",
+                Category = "可视化",
+                Params =
+                {
+                    new OperatorParam { Name = "lineSeparator", DisplayName = "换行", DefaultValue = "lf", Description = "lf 或 crlf" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Text", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "world_coords",
                 DisplayName = "世界坐标",
                 Description = "通过参数配置九点标定的世界坐标",
@@ -815,13 +853,15 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "display_calibration",
                 DisplayName = "显示标定结果",
-                Description = "统一显示 Affine/Homography/Poly2D 标定参数",
+                Description = "统一显示 Affine/Homography/Poly2D；棋盘格标定可接 CalibrationJson（含内参+每视图外参，并在摘要末尾附带用法说明）或仅接 Intrinsics 结构体",
                 Category = "标定",
                 Ports =
                 {
+                    new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B" },
                     new PortDef { Name = "Transform", Direction = PortDirection.Input, DataType = typeof(AffineTransform), ColorHex = "#E91E63" },
                     new PortDef { Name = "H", Direction = PortDirection.Input, DataType = typeof(HomographyTransform), ColorHex = "#E91E63" },
                     new PortDef { Name = "Poly", Direction = PortDirection.Input, DataType = typeof(Poly2DTransform), ColorHex = "#E91E63" },
+                    new PortDef { Name = "Intrinsics", Direction = PortDirection.Input, DataType = typeof(CameraIntrinsics), ColorHex = "#E91E63" },
                     new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" }
                 }
             },
@@ -926,6 +966,64 @@ namespace CalibOperatorCLI_Example
                 {
                     new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Points", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "chessboard_find_corners",
+                DisplayName = "棋盘格角点",
+                Description = "OpenCV 棋盘格内侧角点检测与可视化",
+                Category = "标定",
+                Params =
+                {
+                    new OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "9", Description = "棋盘格内侧角点列数（宽方向）" },
+                    new OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "6", Description = "棋盘格内侧角点行数（高方向）" },
+                    new OperatorParam { Name = "refine", DisplayName = "亚像素细化", DefaultValue = "true", Description = "cornerSubPix 细化" },
+                    new OperatorParam { Name = "fastCheck", DisplayName = "快速检测", DefaultValue = "true", Description = "CALIB_CB_FAST_CHECK，失败时可改为 false" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Points", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Vis", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Found", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#607D8B" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "chessboard_calibrate_intrinsics",
+                DisplayName = "棋盘格内参标定",
+                Description = "由多张棋盘格图像通过 OpenCV calibrateCamera 最小化重投影误差，同时优化求解：相机内参 fx/fy/cx/cy、畸变系数，以及每张成功视图的外参 rvec/tvec（棋盘坐标系→相机坐标系）。输出均为标定计算结果。至少需 3 张成功检出棋盘的视图。完整结果见 CalibrationJson；内参/外参如何用见 test_images/intrinsics_extrinsics_usage.txt 与 chessboard_intrinsics_extrinsics_usage.flow.json。",
+                Category = "标定",
+                Params =
+                {
+                    new OperatorParam { Name = "imagePaths", DisplayName = "图像路径列表", DefaultValue = "", Description = "分号分隔；相对路径相对程序目录；用于标定求解（bmp/png 等 OpenCV 可读格式）" },
+                    new OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "9", Description = "与检测算子一致，用于构造已知三维棋盘角点" },
+                    new OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "6", Description = "与检测算子一致，用于构造已知三维棋盘角点" },
+                    new OperatorParam { Name = "squareSizeMm", DisplayName = "方格边长(mm)", DefaultValue = "25", Description = "棋盘方格物理边长(mm)，与世界坐标尺度一致，参与内参求解" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Intrinsics", Direction = PortDirection.Output, DataType = typeof(CameraIntrinsics), ColorHex = "#E91E63" },
+                    new PortDef { Name = "IntrinsicsJson", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" },
+                    new PortDef { Name = "CalibrationJson", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "chessboard_pixels_to_world",
+                DisplayName = "棋盘像素→世界(mm)",
+                Description = "将像素轨迹投影到标定棋盘平面 Z=0：先 undistort，再按选定视图外参求射线与平面交点，输出 XY 与 squareSizeMm 同单位。CalibrationJson 来自「棋盘格内参标定」；viewIndex 对应 extrinsicsPerView 顺序（与成功标定图像顺序一致）。轨迹须与该视图成像几何一致（如同机位、或静止场景下同 pose）。",
+                Category = "标定",
+                Params =
+                {
+                    new OperatorParam { Name = "viewIndex", DisplayName = "外参视图序号", DefaultValue = "0", Description = "从 0 开始，对应 CalibrationJson.extrinsicsPerView[i]" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B" },
+                    new PortDef { Name = "World", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
                 }
             },
             new OperatorDef
@@ -3662,7 +3760,9 @@ namespace CalibOperatorCLI_Example
                 {
                     string prefix = debugDumpPrefix.Trim();
                     if (!System.IO.Path.IsPathRooted(prefix))
-                        prefix = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, prefix);
+                        prefix = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, prefix));
+                    else
+                        prefix = System.IO.Path.GetFullPath(prefix);
                     string? dir = System.IO.Path.GetDirectoryName(prefix);
                     if (!string.IsNullOrWhiteSpace(dir))
                         System.IO.Directory.CreateDirectory(dir);
@@ -4259,7 +4359,7 @@ namespace CalibOperatorCLI_Example
                 if (!string.IsNullOrEmpty(dir))
                     return System.IO.Path.GetFullPath(System.IO.Path.Combine(dir, path));
             }
-            return System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, path);
+            return System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, path));
         }
 
         private static List<FlowNode> TopologicalSortInner(
@@ -4571,6 +4671,66 @@ namespace CalibOperatorCLI_Example
                    $"Y = {p.Y_x:F6}*x + {p.Y_y:F6}*y + {p.Y_1:F6} + {p.Y_x2:F6}*x^2 + {p.Y_xy:F6}*x*y + {p.Y_y2:F6}*y^2";
         }
 
+        private static string FormatCalibrationFullSummary(string json)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+                var sb = new StringBuilder();
+
+                static string Num(JsonElement obj, string name) =>
+                    obj.TryGetProperty(name, out var v) ? v.GetDouble().ToString("G9") : "?";
+
+                if (root.TryGetProperty("intrinsics", out var intr))
+                {
+                    sb.AppendLine("[内参 · 标定求解]");
+                    sb.AppendLine($"fx={Num(intr, "fx")} fy={Num(intr, "fy")} cx={Num(intr, "cx")} cy={Num(intr, "cy")} RMS={Num(intr, "rms")}");
+                    sb.AppendLine($"k1={Num(intr, "k1")} k2={Num(intr, "k2")} p1={Num(intr, "p1")} p2={Num(intr, "p2")} k3={Num(intr, "k3")}");
+                }
+
+                if (root.TryGetProperty("extrinsicsPerView", out var views) && views.ValueKind == JsonValueKind.Array)
+                {
+                    sb.AppendLine("[外参 · 每视图 board→camera]");
+                    int idx = 0;
+                    foreach (var el in views.EnumerateArray())
+                    {
+                        idx++;
+                        var path = el.TryGetProperty("imagePath", out var pp) ? pp.GetString() ?? "" : "";
+                        sb.AppendLine($"#{idx} {path}");
+                        if (el.TryGetProperty("rvec", out var rv) && rv.ValueKind == JsonValueKind.Array)
+                        {
+                            var a = rv.EnumerateArray().Select(x => x.GetDouble()).ToArray();
+                            if (a.Length >= 3)
+                                sb.AppendLine($"  rvec(rad)=[{a[0]:G9}, {a[1]:G9}, {a[2]:G9}]");
+                        }
+                        if (el.TryGetProperty("tvec", out var tv) && tv.ValueKind == JsonValueKind.Array)
+                        {
+                            var a = tv.EnumerateArray().Select(x => x.GetDouble()).ToArray();
+                            if (a.Length >= 3)
+                                sb.AppendLine($"  tvec(与方格单位一致)=[{a[0]:G9}, {a[1]:G9}, {a[2]:G9}]");
+                        }
+                    }
+                }
+
+                if (root.TryGetProperty("convention", out var cnv))
+                    sb.AppendLine(cnv.GetString());
+
+                sb.AppendLine();
+                sb.AppendLine("[用法说明 · 内参与外参]");
+                sb.AppendLine("· 内参 intrinsics：描述相机本身（fx,fy 焦距像素、cx,cy 主点、k1… 畸变）。同一相机、固定成像条件下可复用于所有帧；用于 undistort、或配合外参做 projectPoints（3D→像素）。");
+                sb.AppendLine("· 外参 extrinsicsPerView：每一张参与标定且成功的图像对应一组 rvec、tvec，表示「棋盘格坐标系 → 相机坐标系」的位姿（OpenCV: P_cam = R·P_board + t；详见上方 convention）。");
+                sb.AppendLine("· 选用外参：不同视图角度不同，不能把视图 A 的 rvec/tvec 当作视图 B 的场景位姿。Hand–Eye 或多相机需在其他链路估计；单相机静态场景应对「当前帧」用 solvePnP 等与棋盘共面的点重算外参，或固定棋盘位姿后只用对应那张图的外参。");
+                sb.AppendLine("· tvec、棋盘角点世界坐标的长度单位与标定节点 squareSizeMm 一致（例如毫米）。");
+                sb.AppendLine("· 像素轨迹→棋盘平面 XY：Flow 算子「棋盘像素→世界(mm)」，输入 Points + CalibrationJson，参数 viewIndex 选用 extrinsicsPerView[i]；示例 test_images/chessboard_trajectory_to_world.flow.json。");
+                return sb.ToString().TrimEnd();
+            }
+            catch
+            {
+                return json;
+            }
+        }
+
         private static Point2D[] ParseWorldPointsParam(string? raw)
         {
             if (string.IsNullOrWhiteSpace(raw))
@@ -4691,7 +4851,7 @@ namespace CalibOperatorCLI_Example
                         string configuredPath = node.Params.GetValueOrDefault("filePath", "")?.Trim() ?? "";
                         string resolvedPath = configuredPath;
                         if (!string.IsNullOrWhiteSpace(configuredPath) && !System.IO.Path.IsPathRooted(configuredPath))
-                            resolvedPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, configuredPath);
+                            resolvedPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, configuredPath));
 
                         if (!string.IsNullOrWhiteSpace(resolvedPath))
                         {
@@ -5344,6 +5504,64 @@ namespace CalibOperatorCLI_Example
                         break;
                     }
 
+                    case "chessboard_find_corners":
+                    {
+                        var chessImg = inputs["Image"] as CalibImage;
+                        if (chessImg == null) throw new InvalidOperationException("棋盘格角点: 缺少输入图像");
+                        int cols = int.TryParse(node.Params.GetValueOrDefault("cols"), out int cc) ? cc : 9;
+                        int rows = int.TryParse(node.Params.GetValueOrDefault("rows"), out int rr) ? rr : 6;
+                        bool refine = bool.TryParse(node.Params.GetValueOrDefault("refine"), out bool rv) ? rv : true;
+                        bool fast = bool.TryParse(node.Params.GetValueOrDefault("fastCheck"), out bool fv) ? fv : true;
+                        var cbPts = CalibAPI.FindChessboardCorners(chessImg, cols, rows, refine, fast);
+                        node.Outputs["Points"] = cbPts;
+                        node.Outputs["Found"] = cbPts.Length > 0;
+                        var vis = CalibAPI.DuplicateImage(chessImg);
+                        if (cbPts.Length > 0)
+                            CalibAPI.DrawChessboardCorners(vis, cbPts, cols, rows);
+                        node.Outputs["Vis"] = vis;
+                        break;
+                    }
+
+                    case "chessboard_calibrate_intrinsics":
+                    {
+                        var rawPaths = node.Params.GetValueOrDefault("imagePaths", "");
+                        int colsI = int.TryParse(node.Params.GetValueOrDefault("cols"), out int ci) ? ci : 9;
+                        int rowsI = int.TryParse(node.Params.GetValueOrDefault("rows"), out int ri) ? ri : 6;
+                        double sqMm = double.TryParse(node.Params.GetValueOrDefault("squareSizeMm"), out double sqv) ? sqv : 25.0;
+                        var segments = rawPaths.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+                        var resolved = new List<string>();
+                        foreach (var seg in segments)
+                        {
+                            var p = seg.Trim();
+                            if (string.IsNullOrEmpty(p)) continue;
+                            var full = System.IO.Path.IsPathRooted(p)
+                                ? System.IO.Path.GetFullPath(p)
+                                : System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, p));
+                            resolved.Add(full);
+                        }
+                        if (resolved.Count == 0)
+                            throw new InvalidOperationException("棋盘格内参: imagePaths 为空（使用分号分隔多张图路径）");
+                        string pathsJoined = string.Join(";", resolved);
+                        var (intr, calJson) = CalibAPI.CalibrateCameraChessboard(pathsJoined, colsI, rowsI, sqMm);
+                        node.Outputs["Intrinsics"] = intr;
+                        node.Outputs["IntrinsicsJson"] = JsonSerializer.Serialize(intr, new JsonSerializerOptions { IncludeFields = true });
+                        node.Outputs["CalibrationJson"] = calJson;
+                        break;
+                    }
+
+                    case "chessboard_pixels_to_world":
+                    {
+                        var pts = inputs["Points"] as Point2D[];
+                        if (pts == null || pts.Length == 0)
+                            throw new InvalidOperationException("棋盘像素→世界: 缺少像素点列 Points（轨迹或角点）");
+                        if (!inputs.TryGetValue("CalibrationJson", out var cjObj) || cjObj is not string calJson || string.IsNullOrWhiteSpace(calJson))
+                            throw new InvalidOperationException("棋盘像素→世界: 缺少 CalibrationJson（须为多视图标定输出的完整 JSON）");
+                        int viewIdx = int.TryParse(node.Params.GetValueOrDefault("viewIndex"), out int vi) ? vi : 0;
+                        var world = CalibAPI.PixelsToChessboardWorld(calJson, viewIdx, pts);
+                        node.Outputs["World"] = world;
+                        break;
+                    }
+
                     case "calibrate":
                     {
                         var imagePts = inputs["ImagePts"] as Point2D[];
@@ -5426,7 +5644,11 @@ namespace CalibOperatorCLI_Example
                     case "display_calibration":
                     {
                         string text;
-                        if (inputs.TryGetValue("Transform", out var tObj) && tObj is AffineTransform t)
+                        if (inputs.TryGetValue("CalibrationJson", out var calJsonObj) && calJsonObj is string cjs && !string.IsNullOrWhiteSpace(cjs))
+                        {
+                            text = FormatCalibrationFullSummary(cjs);
+                        }
+                        else if (inputs.TryGetValue("Transform", out var tObj) && tObj is AffineTransform t)
                         {
                             text = $"[Affine]\n{t}";
                         }
@@ -5438,9 +5660,13 @@ namespace CalibOperatorCLI_Example
                         {
                             text = $"[Poly2D]\n{FormatPoly2D(p)}";
                         }
+                        else if (inputs.TryGetValue("Intrinsics", out var intrObj) && intrObj is CameraIntrinsics ci)
+                        {
+                            text = $"[相机内参 · 标定计算求解]\n{ci}";
+                        }
                         else
                         {
-                            throw new InvalidOperationException("显示标定结果: 未检测到 Transform/H/Poly 输入");
+                            throw new InvalidOperationException("显示标定结果: 未检测到 CalibrationJson / Transform / H / Poly / Intrinsics 输入");
                         }
 
                         node.Outputs["Out"] = text;
@@ -5474,8 +5700,8 @@ namespace CalibOperatorCLI_Example
                         if (string.IsNullOrWhiteSpace(pathParam))
                             pathParam = "flow_output.bmp";
                         var resolvedPath = System.IO.Path.IsPathRooted(pathParam)
-                            ? pathParam
-                            : System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, pathParam);
+                            ? System.IO.Path.GetFullPath(pathParam)
+                            : System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, pathParam));
                         var dir = System.IO.Path.GetDirectoryName(resolvedPath);
                         if (!string.IsNullOrWhiteSpace(dir))
                             System.IO.Directory.CreateDirectory(dir);
@@ -5485,6 +5711,46 @@ namespace CalibOperatorCLI_Example
 
                         node.Outputs["Out"] = inputImg;
                         node.ResultSummary = $"Saved: {System.IO.Path.GetFileName(resolvedPath)}";
+                        break;
+                    }
+
+                    case "save_text":
+                    {
+                        if (!inputs.TryGetValue("Text", out var textObj) || textObj is not string text)
+                            throw new InvalidOperationException("保存文本: 缺少 Text 输入");
+                        var pathParam = node.Params.GetValueOrDefault("filePath", "flow_output.txt");
+                        if (string.IsNullOrWhiteSpace(pathParam))
+                            pathParam = "flow_output.txt";
+                        var resolvedPath = System.IO.Path.IsPathRooted(pathParam)
+                            ? System.IO.Path.GetFullPath(pathParam)
+                            : System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, pathParam));
+                        var dir = System.IO.Path.GetDirectoryName(resolvedPath);
+                        if (!string.IsNullOrWhiteSpace(dir))
+                            System.IO.Directory.CreateDirectory(dir);
+                        System.IO.File.WriteAllText(resolvedPath, text, Encoding.UTF8);
+                        node.Outputs["Out"] = text;
+                        node.ResultSummary = $"Text saved: {System.IO.Path.GetFileName(resolvedPath)}";
+                        break;
+                    }
+
+                    case "points_to_text":
+                    {
+                        var pts = inputs["Points"] as Point2D[];
+                        if (pts == null || pts.Length == 0)
+                            throw new InvalidOperationException("点列转文本: 缺少 Points");
+                        var sep = (node.Params.GetValueOrDefault("lineSeparator", "lf") ?? "lf").Trim().ToLowerInvariant();
+                        string nl = sep == "crlf" ? "\r\n" : "\n";
+                        var sb = new System.Text.StringBuilder();
+                        for (int i = 0; i < pts.Length; i++)
+                        {
+                            if (i > 0) sb.Append(nl);
+                            sb.Append(pts[i].X.ToString("G9", System.Globalization.CultureInfo.InvariantCulture));
+                            sb.Append(',');
+                            sb.Append(pts[i].Y.ToString("G9", System.Globalization.CultureInfo.InvariantCulture));
+                        }
+                        string t = sb.ToString();
+                        node.Outputs["Text"] = t;
+                        node.ResultSummary = $"{pts.Length} points";
                         break;
                     }
 

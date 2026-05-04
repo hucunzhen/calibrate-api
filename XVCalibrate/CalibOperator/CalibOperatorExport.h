@@ -75,6 +75,12 @@ CALIB_API int CALIB_SaveBMP(const char* filename, Image* img);
  */
 CALIB_API int CALIB_LoadBMP(const char* filename, Image* img);
 
+/**
+ * Load image via OpenCV (bmp/png/jpeg/tiff...). Image stored as 3-channel BGR.
+ * Returns: 1 on success, 0 on failure
+ */
+CALIB_API int CALIB_LoadImageFile(const char* filename, Image* img);
+
 // ================================================================
 // Circle Detection
 // ================================================================
@@ -92,6 +98,42 @@ CALIB_API int CALIB_DetectCircles(Image* img, Point2D* pts, int* count, int maxC
  * Draw detected circles on image
  */
 CALIB_API void CALIB_DrawDetectedCircles(Image* img, Point2D* pts, int count, int gray);
+
+/**
+ * Chessboard inner corners (OpenCV). Returns 0 if full pattern found, 1 if not found.
+ */
+CALIB_API int CALIB_FindChessboardCorners(Image* img, int boardCols, int boardRows,
+    Point2D* outPts, int* outCount, int maxPts, int refineSubPix, int fastCheck);
+
+CALIB_API void CALIB_DrawChessboardCorners(Image* img, Point2D* pts, int count, int boardCols, int boardRows);
+
+/** Populated by CALIB_CalibrateCameraChessboard: intrinsics from optimization (cv::calibrateCamera), not read from device. */
+typedef struct {
+    double fx, fy, cx, cy;
+    double k1, k2, p1, p2, k3;
+    double rms;
+    int success;
+} CALIB_CameraIntrinsics;
+
+/**
+ * Estimate camera intrinsics + distortion + per-view extrinsics (rvec,tvec) by cv::calibrateCamera.
+ * fullCalibrationJsonOut: optional UTF-8 JSON (intrinsics + extrinsicsPerView); NULL to skip.
+ * If JSON buffer too small, output is empty string; intrinsics still filled.
+ */
+CALIB_API int CALIB_CalibrateCameraChessboard(const char* pathsDelimited, int boardCols, int boardRows,
+    double squareSizeMm, CALIB_CameraIntrinsics* outIntrinsics,
+    char* fullCalibrationJsonOut, int fullCalibrationJsonOutSize);
+
+/**
+ * 像素轨迹 → 棋盘坐标系 XY（平面 Z=0）。使用 CalibrationJson 中 intrinsics 与 extrinsicsPerView[viewIndex]。
+ * 返回值：0 成功；负数表示参数/解析/几何失败（例如视图序号越界、射线与棋盘平面近似平行）。
+ */
+CALIB_API int CALIB_PixelsToChessboardPlaneFromCalibrationJson(
+    const char* calibrationJsonUtf8,
+    int viewIndex,
+    const Point2D* pixels,
+    Point2D* worldXYOut,
+    int count);
 
 // ================================================================
 // Calibration

@@ -1,0 +1,94 @@
+{
+  "Nodes": [
+    {
+      "Id": "cb-traj-1000-4000-8000-000000000001",
+      "TypeId": "chessboard_calibrate_intrinsics",
+      "X": 60,
+      "Y": 120,
+      "Params": {
+        "imagePaths": "../../../../../test_images/chessboard_view1.png;../../../../../test_images/chessboard_view2.png;../../../../../test_images/chessboard_view3.png",
+        "cols": "9",
+        "rows": "6",
+        "squareSizeMm": "25"
+      }
+    },
+    {
+      "Id": "cb-traj-1000-4000-8000-000000000002",
+      "TypeId": "load_image",
+      "X": 60,
+      "Y": 320,
+      "Params": {
+        "filePath": "../../../../../test_images/chessboard_view1.png"
+      }
+    },
+    {
+      "Id": "cb-traj-1000-4000-8000-000000000003",
+      "TypeId": "chessboard_find_corners",
+      "X": 280,
+      "Y": 320,
+      "Params": {
+        "cols": "9",
+        "rows": "6"
+      }
+    },
+    {
+      "Id": "cb-traj-1000-4000-8000-000000000004",
+      "TypeId": "chessboard_pixels_to_world",
+      "X": 520,
+      "Y": 220,
+      "Params": {
+        "viewIndex": "0"
+      }
+    },
+    {
+      "Id": "cb-traj-1000-4000-8000-000000000005",
+      "TypeId": "points_to_text",
+      "X": 760,
+      "Y": 220,
+      "Params": {
+        "lineSeparator": "lf"
+      }
+    },
+    {
+      "Id": "cb-traj-1000-4000-8000-000000000006",
+      "TypeId": "save_text",
+      "X": 980,
+      "Y": 220,
+      "Params": {
+        "filePath": "../../../../../test_images/chessboard_corners_world_mm.txt"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "cb-traj-1000-4000-8000-000000000001",
+      "FromPort": "CalibrationJson",
+      "ToNodeId": "cb-traj-1000-4000-8000-000000000004",
+      "ToPort": "CalibrationJson"
+    },
+    {
+      "FromNodeId": "cb-traj-1000-4000-8000-000000000002",
+      "FromPort": "Image",
+      "ToNodeId": "cb-traj-1000-4000-8000-000000000003",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "cb-traj-1000-4000-8000-000000000003",
+      "FromPort": "Points",
+      "ToNodeId": "cb-traj-1000-4000-8000-000000000004",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "cb-traj-1000-4000-8000-000000000004",
+      "FromPort": "World",
+      "ToNodeId": "cb-traj-1000-4000-8000-000000000005",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "cb-traj-1000-4000-8000-000000000005",
+      "FromPort": "Text",
+      "ToNodeId": "cb-traj-1000-4000-8000-000000000006",
+      "ToPort": "Text"
+    }
+  ]
+}

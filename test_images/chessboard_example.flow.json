@@ -1,0 +1,63 @@
+{
+  "Nodes": [
+    {
+      "Id": "cba51001-1000-4000-8000-000000000001",
+      "TypeId": "load_image",
+      "X": 60,
+      "Y": 120,
+      "Params": {
+        "filePath": "../../../../../test_images/chessboard_sample.png"
+      }
+    },
+    {
+      "Id": "cba51001-1000-4000-8000-000000000002",
+      "TypeId": "chessboard_find_corners",
+      "X": 320,
+      "Y": 120,
+      "Params": {
+        "cols": "9",
+        "rows": "6",
+        "refine": "true",
+        "fastCheck": "true"
+      }
+    },
+    {
+      "Id": "cba51001-1000-4000-8000-000000000003",
+      "TypeId": "display",
+      "X": 580,
+      "Y": 80,
+      "Params": {
+        "dotRadius": "4"
+      }
+    },
+    {
+      "Id": "cba51001-1000-4000-8000-000000000004",
+      "TypeId": "save_image",
+      "X": 580,
+      "Y": 200,
+      "Params": {
+        "filePath": "../../../../../test_images/chessboard_corners_vis.bmp"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "cba51001-1000-4000-8000-000000000001",
+      "FromPort": "Image",
+      "ToNodeId": "cba51001-1000-4000-8000-000000000002",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "cba51001-1000-4000-8000-000000000002",
+      "FromPort": "Vis",
+      "ToNodeId": "cba51001-1000-4000-8000-000000000003",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "cba51001-1000-4000-8000-000000000002",
+      "FromPort": "Vis",
+      "ToNodeId": "cba51001-1000-4000-8000-000000000004",
+      "ToPort": "Image"
+    }
+  ]
+}

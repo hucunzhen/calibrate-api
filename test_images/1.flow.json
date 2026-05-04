@@ -1,0 +1,196 @@
+{
+  "Nodes": [
+    {
+      "Id": "5418e528-d7f2-4677-99b0-69b7572662d1",
+      "TypeId": "load_image",
+      "X": 168,
+      "Y": 66,
+      "Params": {
+        "filePath": "../../../../../test_auto.bmp"
+      }
+    },
+    {
+      "Id": "bfea398c-921a-4f6d-b561-a779b55e9227",
+      "TypeId": "grayscale",
+      "X": 176,
+      "Y": 185,
+      "Params": {}
+    },
+    {
+      "Id": "fa4e1338-99a4-440a-9ab0-de8c4ce3653b",
+      "TypeId": "binarize",
+      "X": 174,
+      "Y": 325,
+      "Params": {
+        "blurSize": "9",
+        "morphSize": "7"
+      }
+    },
+    {
+      "Id": "38c7fa95-db4e-4c06-ba9a-7e37330dde94",
+      "TypeId": "find_contours",
+      "X": 180,
+      "Y": 445,
+      "Params": {}
+    },
+    {
+      "Id": "63961c06-2c17-420c-99e8-a0686babad7e",
+      "TypeId": "create_mask",
+      "X": 186,
+      "Y": 558,
+      "Params": {
+        "contourIdx": "-1"
+      }
+    },
+    {
+      "Id": "878d815c-d762-49a1-99f7-c3f1451b53d5",
+      "TypeId": "gray_range_binary",
+      "X": 477,
+      "Y": 270,
+      "Params": {
+        "grayLow": "2",
+        "grayHigh": "55"
+      }
+    },
+    {
+      "Id": "c1b4a7c2-3c95-4fa2-aeef-bf8e0c8cd5de",
+      "TypeId": "clahe",
+      "X": 330,
+      "Y": 270,
+      "Params": {
+        "clipLimit": "3.0",
+        "tileSize": "8"
+      }
+    },
+    {
+      "Id": "124c209a-961d-4a0d-bfdf-78ca90a80db2",
+      "TypeId": "display",
+      "X": 1229,
+      "Y": 490,
+      "Params": {
+        "dotRadius": "3"
+      }
+    },
+    {
+      "Id": "14655e91-1b15-45de-93c2-9296a57192cf",
+      "TypeId": "apply_mask",
+      "X": 489,
+      "Y": 405,
+      "Params": {}
+    },
+    {
+      "Id": "4ac39e44-caee-4197-8710-55bd8d0d2d3b",
+      "TypeId": "morphology",
+      "X": 478,
+      "Y": 542,
+      "Params": {
+        "kernelSize": "5",
+        "blurKsize": "9",
+        "blurSigma": "2.5"
+      }
+    },
+    {
+      "Id": "33a864ef-f15d-4fde-9091-2cc65c4b8305",
+      "TypeId": "find_contours",
+      "X": 789,
+      "Y": 288,
+      "Params": {}
+    },
+    {
+      "Id": "def8d20e-ec2b-4a36-af2c-545c362b7168",
+      "TypeId": "sample",
+      "X": 812,
+      "Y": 489,
+      "Params": {
+        "targetBars": "16",
+        "spacing": "4"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "5418e528-d7f2-4677-99b0-69b7572662d1",
+      "FromPort": "Image",
+      "ToNodeId": "bfea398c-921a-4f6d-b561-a779b55e9227",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "bfea398c-921a-4f6d-b561-a779b55e9227",
+      "FromPort": "Out",
+      "ToNodeId": "fa4e1338-99a4-440a-9ab0-de8c4ce3653b",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "fa4e1338-99a4-440a-9ab0-de8c4ce3653b",
+      "FromPort": "Out",
+      "ToNodeId": "38c7fa95-db4e-4c06-ba9a-7e37330dde94",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "38c7fa95-db4e-4c06-ba9a-7e37330dde94",
+      "FromPort": "Out",
+      "ToNodeId": "63961c06-2c17-420c-99e8-a0686babad7e",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "38c7fa95-db4e-4c06-ba9a-7e37330dde94",
+      "FromPort": "Contours",
+      "ToNodeId": "63961c06-2c17-420c-99e8-a0686babad7e",
+      "ToPort": "Contours"
+    },
+    {
+      "FromNodeId": "bfea398c-921a-4f6d-b561-a779b55e9227",
+      "FromPort": "Out",
+      "ToNodeId": "c1b4a7c2-3c95-4fa2-aeef-bf8e0c8cd5de",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "c1b4a7c2-3c95-4fa2-aeef-bf8e0c8cd5de",
+      "FromPort": "Out",
+      "ToNodeId": "878d815c-d762-49a1-99f7-c3f1451b53d5",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "63961c06-2c17-420c-99e8-a0686babad7e",
+      "FromPort": "Mask",
+      "ToNodeId": "14655e91-1b15-45de-93c2-9296a57192cf",
+      "ToPort": "Mask"
+    },
+    {
+      "FromNodeId": "878d815c-d762-49a1-99f7-c3f1451b53d5",
+      "FromPort": "Out",
+      "ToNodeId": "14655e91-1b15-45de-93c2-9296a57192cf",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "14655e91-1b15-45de-93c2-9296a57192cf",
+      "FromPort": "Out",
+      "ToNodeId": "4ac39e44-caee-4197-8710-55bd8d0d2d3b",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "4ac39e44-caee-4197-8710-55bd8d0d2d3b",
+      "FromPort": "Out",
+      "ToNodeId": "33a864ef-f15d-4fde-9091-2cc65c4b8305",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "33a864ef-f15d-4fde-9091-2cc65c4b8305",
+      "FromPort": "Out",
+      "ToNodeId": "124c209a-961d-4a0d-bfdf-78ca90a80db2",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "33a864ef-f15d-4fde-9091-2cc65c4b8305",
+      "FromPort": "Contours",
+      "ToNodeId": "def8d20e-ec2b-4a36-af2c-545c362b7168",
+      "ToPort": "Contours"
+    },
+    {
+      "FromNodeId": "def8d20e-ec2b-4a36-af2c-545c362b7168",
+      "FromPort": "Points",
+      "ToNodeId": "124c209a-961d-4a0d-bfdf-78ca90a80db2",
+      "ToPort": "Points"
+    }
+  ]
+}

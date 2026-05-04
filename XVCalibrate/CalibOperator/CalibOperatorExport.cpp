@@ -65,6 +65,10 @@ CALIB_API int CALIB_LoadBMP(const char* filename, Image* img) {
     return ::LoadBMP(filename, img);
 }
 
+CALIB_API int CALIB_LoadImageFile(const char* filename, Image* img) {
+    return ::LoadImageFile(filename, img);
+}
+
 // ================================================================
 // Circle Detection
 // ================================================================
@@ -78,6 +82,51 @@ CALIB_API int CALIB_DetectCircles(Image* img, Point2D* pts, int* count, int maxC
 
 CALIB_API void CALIB_DrawDetectedCircles(Image* img, Point2D* pts, int count, int gray) {
     ::DrawDetectedCircles(img, pts, count, gray);
+}
+
+CALIB_API int CALIB_FindChessboardCorners(Image* img, int boardCols, int boardRows,
+    Point2D* outPts, int* outCount, int maxPts, int refineSubPix, int fastCheck) {
+    return ::FindChessboardCorners(img, boardCols, boardRows, outPts, outCount, maxPts, refineSubPix, fastCheck);
+}
+
+CALIB_API void CALIB_DrawChessboardCorners(Image* img, Point2D* pts, int count, int boardCols, int boardRows) {
+    ::DrawChessboardCorners(img, pts, count, boardCols, boardRows);
+}
+
+CALIB_API int CALIB_CalibrateCameraChessboard(const char* pathsDelimited, int boardCols, int boardRows,
+    double squareSizeMm, CALIB_CameraIntrinsics* outIntrinsics,
+    char* fullCalibrationJsonOut, int fullCalibrationJsonOutSize) {
+    if (!outIntrinsics) return -1;
+    outIntrinsics->fx = outIntrinsics->fy = outIntrinsics->cx = outIntrinsics->cy = 0.0;
+    outIntrinsics->k1 = outIntrinsics->k2 = outIntrinsics->p1 = outIntrinsics->p2 = outIntrinsics->k3 = 0.0;
+    outIntrinsics->rms = 0.0;
+    outIntrinsics->success = 0;
+    double fx, fy, cx, cy, k1, k2, p1, p2, k3, rms;
+    int rc = ::CalibrateCameraChessboardMultiview(pathsDelimited, boardCols, boardRows, squareSizeMm,
+        &fx, &fy, &cx, &cy, &k1, &k2, &p1, &p2, &k3, &rms,
+        fullCalibrationJsonOut, fullCalibrationJsonOutSize);
+    if (rc != 0) return rc;
+    outIntrinsics->fx = fx;
+    outIntrinsics->fy = fy;
+    outIntrinsics->cx = cx;
+    outIntrinsics->cy = cy;
+    outIntrinsics->k1 = k1;
+    outIntrinsics->k2 = k2;
+    outIntrinsics->p1 = p1;
+    outIntrinsics->p2 = p2;
+    outIntrinsics->k3 = k3;
+    outIntrinsics->rms = rms;
+    outIntrinsics->success = 1;
+    return 0;
+}
+
+CALIB_API int CALIB_PixelsToChessboardPlaneFromCalibrationJson(
+    const char* calibrationJsonUtf8,
+    int viewIndex,
+    const Point2D* pixels,
+    Point2D* worldXYOut,
+    int count) {
+    return ::PixelsToChessboardPlaneXYFromCalibrationJson(calibrationJsonUtf8, viewIndex, pixels, worldXYOut, count);
 }
 
 // ================================================================

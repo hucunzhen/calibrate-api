@@ -1,0 +1,54 @@
+{
+  "Nodes": [
+    {
+      "Id": "cba53100-1000-4000-8000-000000000001",
+      "TypeId": "load_image",
+      "X": 60,
+      "Y": 140,
+      "Params": {
+        "filePath": "../../../../../test_images/chessboard_sample.png"
+      }
+    },
+    {
+      "Id": "cba53100-1000-4000-8000-000000000002",
+      "TypeId": "chessboard_find_corners",
+      "X": 300,
+      "Y": 140,
+      "Params": {
+        "cols": "9",
+        "rows": "6",
+        "refine": "true",
+        "fastCheck": "true"
+      }
+    },
+    {
+      "Id": "cba53100-1000-4000-8000-000000000003",
+      "TypeId": "display",
+      "X": 560,
+      "Y": 140,
+      "Params": {
+        "dotRadius": "5"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "cba53100-1000-4000-8000-000000000001",
+      "FromPort": "Image",
+      "ToNodeId": "cba53100-1000-4000-8000-000000000002",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "cba53100-1000-4000-8000-000000000002",
+      "FromPort": "Vis",
+      "ToNodeId": "cba53100-1000-4000-8000-000000000003",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "cba53100-1000-4000-8000-000000000002",
+      "FromPort": "Points",
+      "ToNodeId": "cba53100-1000-4000-8000-000000000003",
+      "ToPort": "Points"
+    }
+  ]
+}

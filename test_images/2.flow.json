@@ -1,0 +1,390 @@
+{
+  "Nodes": [
+    {
+      "Id": "e875b0cb-0410-4d90-89dd-8cf9ed9839d6",
+      "TypeId": "load_image",
+      "X": 120,
+      "Y": 80,
+      "Params": {
+        "filePath": "../../../../../test_auto.bmp"
+      }
+    },
+    {
+      "Id": "8f1f6364-9bf9-4ee8-8c36-70be2a154692",
+      "TypeId": "grayscale",
+      "X": 120,
+      "Y": 190,
+      "Params": {}
+    },
+    {
+      "Id": "e37fa7de-11c6-462b-ba5a-3714f419ba32",
+      "TypeId": "binarize",
+      "X": 120,
+      "Y": 300,
+      "Params": {
+        "blurSize": "9",
+        "morphSize": "7"
+      }
+    },
+    {
+      "Id": "e19856a9-ce78-4bb2-8af6-1cc191d0595c",
+      "TypeId": "find_contours",
+      "X": 120,
+      "Y": 410,
+      "Params": {}
+    },
+    {
+      "Id": "d3b68e8c-4915-4d9b-a56b-7b31c4849ef7",
+      "TypeId": "create_mask",
+      "X": 120,
+      "Y": 520,
+      "Params": {
+        "contourIdx": "-1"
+      }
+    },
+    {
+      "Id": "7600e8ea-08fb-478f-a26f-c442071e3535",
+      "TypeId": "sobel",
+      "X": 600,
+      "Y": 116,
+      "Params": {
+        "threshold": "66"
+      }
+    },
+    {
+      "Id": "8f2f2f0e-57a2-4fbd-8623-31261e943e50",
+      "TypeId": "clahe",
+      "X": 250,
+      "Y": 250,
+      "Params": {
+        "clipLimit": "3.0",
+        "tileSize": "8"
+      }
+    },
+    {
+      "Id": "8b192709-b535-42f0-b41f-1e6207690293",
+      "TypeId": "pre_filter",
+      "X": 329,
+      "Y": 71,
+      "Params": {
+        "mode": "median",
+        "ksize": "7"
+      }
+    },
+    {
+      "Id": "c6180170-0ff2-4966-a096-ca9d977abc0b",
+      "TypeId": "apply_mask",
+      "X": 560,
+      "Y": 290,
+      "Params": {}
+    },
+    {
+      "Id": "49a967ab-6241-43b5-af5a-f8557287b7e7",
+      "TypeId": "detect_dark",
+      "X": 560,
+      "Y": 430,
+      "Params": {
+        "darkThreshold": "50"
+      }
+    },
+    {
+      "Id": "f0b2faa5-310e-4335-a675-7742fcdf338d",
+      "TypeId": "expand_edge",
+      "X": 891,
+      "Y": 419,
+      "Params": {
+        "expandDist": "12"
+      }
+    },
+    {
+      "Id": "ca60c291-562c-44c3-b31f-9a89488d3837",
+      "TypeId": "find_contours",
+      "X": 960,
+      "Y": 290,
+      "Params": {}
+    },
+    {
+      "Id": "83e39cac-6e0e-4cae-9d68-ba16d2a0794c",
+      "TypeId": "sample",
+      "X": 1160,
+      "Y": 420,
+      "Params": {
+        "targetBars": "15",
+        "spacing": "5"
+      }
+    },
+    {
+      "Id": "4349a843-8a37-4ab8-b3e5-db585b034ef0",
+      "TypeId": "filter_contours",
+      "X": 1190,
+      "Y": 286,
+      "Params": {
+        "minArea": "8000",
+        "maxArea": "4000000",
+        "minAspect": "0.2",
+        "maxAspect": "5.0",
+        "minCircularity": "0.02",
+        "targetCount": "16"
+      }
+    },
+    {
+      "Id": "d4bb5e7f-fdf0-46db-85b5-d2c48e9f9d79",
+      "TypeId": "match_contours",
+      "X": 1391,
+      "Y": 262,
+      "Params": {
+        "templateIndex": "-1",
+        "maxDistance": "0.22",
+        "samplePoints": "96",
+        "targetCount": "15"
+      }
+    },
+    {
+      "Id": "b38cb7d0-cb50-4e60-a09e-f0b30f0a9923",
+      "TypeId": "fit_shape",
+      "X": 1360,
+      "Y": 420,
+      "Params": {
+        "mode": "hybrid",
+        "windowRadius": "3",
+        "epsilon": "3.0",
+        "splitGapFactor": "3.0",
+        "minRegionPoints": "16"
+      }
+    },
+    {
+      "Id": "db6f3c9b-32eb-43f4-bb6b-29ed9e3e5d8a",
+      "TypeId": "display",
+      "X": 1560,
+      "Y": 420,
+      "Params": {
+        "dotRadius": "3"
+      }
+    },
+    {
+      "Id": "81b3e326-4372-44f3-be15-ac78ce3a30fd",
+      "TypeId": "shape_match_global",
+      "X": 980,
+      "Y": 140,
+      "Params": {
+        "templatePath": "",
+        "topN": "16",
+        "minScore": "0.01",
+        "areaWeight": "0.6",
+        "step": "2",
+        "downsample": "5",
+        "maxTemplateSize": "120",
+        "templateBars": "16",
+        "templateConsensus": "0.55",
+        "edgeMinComponent": "20",
+        "edgeOpenRadius": "0"
+      }
+    },
+    {
+      "Id": "23c6f1c9-32eb-483f-b9b9-0f5631a8b04c",
+      "TypeId": "fuse_contours_template",
+      "X": 1242,
+      "Y": 116,
+      "Params": {
+        "templateBars": "16",
+        "canvasSize": "120",
+        "templateConsensus": "0.55",
+        "samplePoints": "96",
+        "fusionMode": "mutual",
+        "centerlineMode": "off"
+      }
+    },
+    {
+      "Id": "ecb7f22f-33e9-4402-a0c3-621be42c35e7",
+      "TypeId": "morphology",
+      "X": 665,
+      "Y": 635,
+      "Params": {
+        "kernelSize": "5",
+        "blurKsize": "9",
+        "blurSigma": "2.0"
+      }
+    },
+    {
+      "Id": "a21ddbd1-710e-4dd7-b2d2-1368d4232951",
+      "TypeId": "phase_congruency",
+      "X": 743,
+      "Y": 15,
+      "Params": {
+        "threshold": "0.45",
+        "noiseSigma": "0.12",
+        "blurKsize": "3"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "e875b0cb-0410-4d90-89dd-8cf9ed9839d6",
+      "FromPort": "Image",
+      "ToNodeId": "8f1f6364-9bf9-4ee8-8c36-70be2a154692",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "8f1f6364-9bf9-4ee8-8c36-70be2a154692",
+      "FromPort": "Out",
+      "ToNodeId": "e37fa7de-11c6-462b-ba5a-3714f419ba32",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "e37fa7de-11c6-462b-ba5a-3714f419ba32",
+      "FromPort": "Out",
+      "ToNodeId": "e19856a9-ce78-4bb2-8af6-1cc191d0595c",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "e19856a9-ce78-4bb2-8af6-1cc191d0595c",
+      "FromPort": "Out",
+      "ToNodeId": "d3b68e8c-4915-4d9b-a56b-7b31c4849ef7",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "e19856a9-ce78-4bb2-8af6-1cc191d0595c",
+      "FromPort": "Contours",
+      "ToNodeId": "d3b68e8c-4915-4d9b-a56b-7b31c4849ef7",
+      "ToPort": "Contours"
+    },
+    {
+      "FromNodeId": "8f1f6364-9bf9-4ee8-8c36-70be2a154692",
+      "FromPort": "Out",
+      "ToNodeId": "8f2f2f0e-57a2-4fbd-8623-31261e943e50",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "8f2f2f0e-57a2-4fbd-8623-31261e943e50",
+      "FromPort": "Out",
+      "ToNodeId": "8b192709-b535-42f0-b41f-1e6207690293",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "8b192709-b535-42f0-b41f-1e6207690293",
+      "FromPort": "Out",
+      "ToNodeId": "7600e8ea-08fb-478f-a26f-c442071e3535",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "d3b68e8c-4915-4d9b-a56b-7b31c4849ef7",
+      "FromPort": "Mask",
+      "ToNodeId": "c6180170-0ff2-4966-a096-ca9d977abc0b",
+      "ToPort": "Mask"
+    },
+    {
+      "FromNodeId": "8f1f6364-9bf9-4ee8-8c36-70be2a154692",
+      "FromPort": "Out",
+      "ToNodeId": "49a967ab-6241-43b5-af5a-f8557287b7e7",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "d3b68e8c-4915-4d9b-a56b-7b31c4849ef7",
+      "FromPort": "Mask",
+      "ToNodeId": "49a967ab-6241-43b5-af5a-f8557287b7e7",
+      "ToPort": "Mask"
+    },
+    {
+      "FromNodeId": "f0b2faa5-310e-4335-a675-7742fcdf338d",
+      "FromPort": "Out",
+      "ToNodeId": "ca60c291-562c-44c3-b31f-9a89488d3837",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "ca60c291-562c-44c3-b31f-9a89488d3837",
+      "FromPort": "Contours",
+      "ToNodeId": "4349a843-8a37-4ab8-b3e5-db585b034ef0",
+      "ToPort": "Contours"
+    },
+    {
+      "FromNodeId": "4349a843-8a37-4ab8-b3e5-db585b034ef0",
+      "FromPort": "Contours",
+      "ToNodeId": "d4bb5e7f-fdf0-46db-85b5-d2c48e9f9d79",
+      "ToPort": "Contours"
+    },
+    {
+      "FromNodeId": "b38cb7d0-cb50-4e60-a09e-f0b30f0a9923",
+      "FromPort": "Out",
+      "ToNodeId": "db6f3c9b-32eb-43f4-bb6b-29ed9e3e5d8a",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "ca60c291-562c-44c3-b31f-9a89488d3837",
+      "FromPort": "Contours",
+      "ToNodeId": "23c6f1c9-32eb-483f-b9b9-0f5631a8b04c",
+      "ToPort": "Contours"
+    },
+    {
+      "FromNodeId": "23c6f1c9-32eb-483f-b9b9-0f5631a8b04c",
+      "FromPort": "Template",
+      "ToNodeId": "81b3e326-4372-44f3-be15-ac78ce3a30fd",
+      "ToPort": "Template"
+    },
+    {
+      "FromNodeId": "81b3e326-4372-44f3-be15-ac78ce3a30fd",
+      "FromPort": "Contours",
+      "ToNodeId": "83e39cac-6e0e-4cae-9d68-ba16d2a0794c",
+      "ToPort": "Contours"
+    },
+    {
+      "FromNodeId": "83e39cac-6e0e-4cae-9d68-ba16d2a0794c",
+      "FromPort": "Points",
+      "ToNodeId": "b38cb7d0-cb50-4e60-a09e-f0b30f0a9923",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "83e39cac-6e0e-4cae-9d68-ba16d2a0794c",
+      "FromPort": "BarIds",
+      "ToNodeId": "b38cb7d0-cb50-4e60-a09e-f0b30f0a9923",
+      "ToPort": "BarIds"
+    },
+    {
+      "FromNodeId": "ca60c291-562c-44c3-b31f-9a89488d3837",
+      "FromPort": "Out",
+      "ToNodeId": "db6f3c9b-32eb-43f4-bb6b-29ed9e3e5d8a",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "e875b0cb-0410-4d90-89dd-8cf9ed9839d6",
+      "FromPort": "Image",
+      "ToNodeId": "db6f3c9b-32eb-43f4-bb6b-29ed9e3e5d8a",
+      "ToPort": "Img"
+    },
+    {
+      "FromNodeId": "c6180170-0ff2-4966-a096-ca9d977abc0b",
+      "FromPort": "Out",
+      "ToNodeId": "81b3e326-4372-44f3-be15-ac78ce3a30fd",
+      "ToPort": "Edge"
+    },
+    {
+      "FromNodeId": "49a967ab-6241-43b5-af5a-f8557287b7e7",
+      "FromPort": "Dark",
+      "ToNodeId": "ecb7f22f-33e9-4402-a0c3-621be42c35e7",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "ecb7f22f-33e9-4402-a0c3-621be42c35e7",
+      "FromPort": "Out",
+      "ToNodeId": "f0b2faa5-310e-4335-a675-7742fcdf338d",
+      "ToPort": "Dark"
+    },
+    {
+      "FromNodeId": "8b192709-b535-42f0-b41f-1e6207690293",
+      "FromPort": "Out",
+      "ToNodeId": "a21ddbd1-710e-4dd7-b2d2-1368d4232951",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "a21ddbd1-710e-4dd7-b2d2-1368d4232951",
+      "FromPort": "Edge",
+      "ToNodeId": "c6180170-0ff2-4966-a096-ca9d977abc0b",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "a21ddbd1-710e-4dd7-b2d2-1368d4232951",
+      "FromPort": "Edge",
+      "ToNodeId": "f0b2faa5-310e-4335-a675-7742fcdf338d",
+      "ToPort": "Edge"
+    }
+  ]
+}

@@ -1,8 +1,12 @@
 #include "FlowEngineNative.h"
+#include <cstring>
+#include <fstream>
 #include <opencv2/opencv.hpp>
 #include <unordered_map>
 #include <queue>
 #include <sstream>
+#include <iomanip>
+#include <vector>
 
 namespace {
 
@@ -14,7 +18,7 @@ struct ContoursData {
 };
 
 struct Value {
-    enum class Kind { None, Int, Double, Image, Points, Contours, Transform } kind = Kind::None;
+    enum class Kind { None, Int, Double, Image, Points, Contours, Transform, String } kind = Kind::None;
     int i = 0;
     double d = 0.0;
     cv::Mat img;
@@ -22,6 +26,7 @@ struct Value {
     std::vector<int> barIds;
     ContoursData contours;
     AffineTransform trans{};
+    std::string str;
 };
 
 struct NodeDef {
@@ -570,6 +575,85 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         out["World"] = outPts;
         return true;
     }
+    if (n.type == "chessboard_find_corners") {
+        Value vin = InputOf(e, n.id, "Image");
+        if (vin.kind != Value::Kind::Image) { err = "chessboard_find_corners: missing Image"; return false; }
+        int cols = ToInt(NodeParam(n, "cols", "9"), 9);
+        int rows = ToInt(NodeParam(n, "rows", "6"), 6);
+        int refine = ToInt(NodeParam(n, "refine", "1"), 1);
+        int fast = ToInt(NodeParam(n, "fastCheck", "1"), 1);
+        if (cols < 2 || rows < 2) { err = "chessboard_find_corners: cols/rows must be >=2"; return false; }
+        cv::Mat gray = EnsureGray(vin.img);
+        std::vector<unsigned char> buf((size_t)gray.cols * gray.rows);
+        if (gray.isContinuous())
+            memcpy(buf.data(), gray.ptr(), buf.size());
+        else {
+            for (int y = 0; y < gray.rows; ++y)
+                memcpy(buf.data() + (size_t)y * gray.cols, gray.ptr(y), gray.cols);
+        }
+        int maxPts = cols * rows;
+        std::vector<Point2D> pts((size_t)maxPts);
+        int count = 0;
+        FindChessboardCornersGrayBuffer(buf.data(), gray.cols, gray.rows, cols, rows, pts.data(), &count, maxPts, refine, fast);
+        Value vpts; vpts.kind = Value::Kind::Points;
+        if (count > 0) vpts.points.assign(pts.begin(), pts.begin() + count);
+        out["Points"] = vpts;
+        Value vf; vf.kind = Value::Kind::Int; vf.i = count > 0 ? 1 : 0; out["Found"] = vf;
+        cv::Mat bgr = EnsureBgr(vin.img);
+        std::vector<cv::Point2f> cvPts;
+        cvPts.reserve((size_t)count);
+        for (int i = 0; i < count; ++i) cvPts.emplace_back((float)vpts.points[(size_t)i].x, (float)vpts.points[(size_t)i].y);
+        cv::drawChessboardCorners(bgr, cv::Size(cols, rows), cvPts, count == cols * rows);
+        out["Vis"] = MakeImage(bgr);
+        return true;
+    }
+    if (n.type == "chessboard_calibrate_intrinsics") {
+        std::string paths = NodeParam(n, "imagePaths", "");
+        int cols = ToInt(NodeParam(n, "cols", "9"), 9);
+        int rows = ToInt(NodeParam(n, "rows", "6"), 6);
+        double sq = ToDouble(NodeParam(n, "squareSizeMm", "25"), 25.0);
+        double fx, fy, cx, cy, k1, k2, p1, p2, k3, rms;
+        std::vector<char> jbuf(393216);
+        int crc = CalibrateCameraChessboardMultiview(paths.c_str(), cols, rows, sq, &fx, &fy, &cx, &cy, &k1, &k2, &p1, &p2, &k3, &rms,
+            jbuf.data(), (int)jbuf.size());
+        if (crc != 0) { err = "chessboard_calibrate_intrinsics failed (need >=3 views with detected board)"; return false; }
+        std::ostringstream j;
+        j << std::fixed << std::setprecision(6);
+        j << "{\"fx\":" << fx << ",\"fy\":" << fy << ",\"cx\":" << cx << ",\"cy\":" << cy
+          << ",\"k1\":" << k1 << ",\"k2\":" << k2 << ",\"p1\":" << p1 << ",\"p2\":" << p2 << ",\"k3\":" << k3 << ",\"rms\":" << rms << "}";
+        Value vs; vs.kind = Value::Kind::String; vs.str = j.str(); out["IntrinsicsJson"] = vs;
+        Value vfull; vfull.kind = Value::Kind::String; vfull.str.assign(jbuf.data()); out["CalibrationJson"] = vfull;
+        Value vd; vd.kind = Value::Kind::Double; vd.d = rms; out["Rms"] = vd;
+        return true;
+    }
+    if (n.type == "chessboard_pixels_to_world") {
+        Value ptsIn = InputOf(e, n.id, "Points");
+        Value cal = InputOf(e, n.id, "CalibrationJson");
+        if (ptsIn.kind != Value::Kind::Points) { err = "chessboard_pixels_to_world: missing Points"; return false; }
+        if (cal.kind != Value::Kind::String || cal.str.empty()) { err = "chessboard_pixels_to_world: missing CalibrationJson"; return false; }
+        if (ptsIn.points.empty()) { err = "chessboard_pixels_to_world: empty Points"; return false; }
+        int viewIdx = ToInt(NodeParam(n, "viewIndex", "0"), 0);
+        std::vector<Point2D> outw(ptsIn.points.size());
+        int rc = PixelsToChessboardPlaneXYFromCalibrationJson(cal.str.c_str(), viewIdx,
+            ptsIn.points.data(), outw.data(), (int)ptsIn.points.size());
+        if (rc != 0) { err = "chessboard_pixels_to_world failed (code " + std::to_string(rc) + ")"; return false; }
+        Value vout; vout.kind = Value::Kind::Points; vout.points = std::move(outw);
+        out["World"] = vout;
+        return true;
+    }
+    if (n.type == "points_to_text") {
+        Value ptsIn = InputOf(e, n.id, "Points");
+        if (ptsIn.kind != Value::Kind::Points) { err = "points_to_text: missing Points"; return false; }
+        std::ostringstream sb;
+        sb << std::setprecision(9);
+        for (size_t i = 0; i < ptsIn.points.size(); ++i) {
+            if (i) sb << "\n";
+            sb << ptsIn.points[i].x << "," << ptsIn.points[i].y;
+        }
+        Value vt; vt.kind = Value::Kind::String; vt.str = sb.str();
+        out["Text"] = vt;
+        return true;
+    }
     if (n.type == "detect_circles") {
         Value in = InputOf(e, n.id, "In");
         if (in.kind != Value::Kind::Image) { err = "detect_circles: missing In"; return false; }
@@ -613,6 +697,17 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         std::string path = NodeParam(n, "filePath", "flow_output.bmp");
         if (!cv::imwrite(path, img.img)) { err = "save_image: failed " + path; return false; }
         out["Out"] = img;
+        return true;
+    }
+    if (n.type == "save_text") {
+        Value v = InputOf(e, n.id, "Text");
+        if (v.kind != Value::Kind::String) { err = "save_text: missing Text"; return false; }
+        std::string path = NodeParam(n, "filePath", "flow_output.txt");
+        std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+        if (!ofs) { err = "save_text: cannot open " + path; return false; }
+        ofs.write(v.str.data(), (std::streamsize)v.str.size());
+        if (!ofs.good()) { err = "save_text: write failed " + path; return false; }
+        Value ov; ov.kind = Value::Kind::String; ov.str = v.str; out["Out"] = ov;
         return true;
     }
 
