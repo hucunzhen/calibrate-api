@@ -1,34 +1,37 @@
 <Page x:Class="CalibOperatorCLI_Example.CalibrationPage"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-      Title="Calibration">
+      Title="圆点标定">
     <Grid Margin="10">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="150"/>
         </Grid.RowDefinitions>
 
-        <!-- Buttons -->
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
-            <Button x:Name="BtnGenerateImage" Content="1. Generate Image" Width="150" Height="32" Margin="0,0,10,0" Click="BtnGenerateImage_Click"/>
-            <Button x:Name="BtnLoadImage" Content="2. Load Image" Width="150" Height="32" Margin="0,0,10,0" Click="BtnLoadImage_Click"/>
-            <Button x:Name="BtnGrabImage" Content="📷 Grab Image" Width="150" Height="32" Margin="0,0,10,0" Click="BtnGrabImage_Click" ToolTip="从相机采集一帧图像"/>
-            <Button x:Name="BtnConnectCamera" Content="🔌 Connect" Width="100" Height="32" Margin="0,0,10,0" Click="BtnConnectCamera_Click" ToolTip="连接/断开相机"/>
-            <Button x:Name="BtnDetectCircles" Content="3. Detect Circles" Width="150" Height="32" Margin="0,0,10,0" Click="BtnDetectCircles_Click"/>
-            <Button x:Name="BtnCalibrate" Content="4. Calibrate" Width="150" Height="32" Click="BtnCalibrate_Click"/>
-        </StackPanel>
-
-        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
-            <Button x:Name="BtnSaveResults" Content="5. Save Results" Width="150" Height="32" Margin="0,0,10,0" Click="BtnSaveResults_Click"/>
-            <Button x:Name="BtnTestTransform" Content="6. Test Transform" Width="150" Height="32" Margin="0,0,10,0" Click="BtnTestTransform_Click"/>
-            <Button x:Name="BtnAutoTrajTest" Content="7. AutoTrajTest" Width="150" Height="32" Margin="0,0,10,0" Click="BtnAutoTrajTest_Click"/>
-        </StackPanel>
+        <!-- 窄屏时自动换行 -->
+        <WrapPanel Grid.Row="0" Margin="0,0,0,10">
+            <Button x:Name="BtnGenerateImage" Content="① 生成标定图" MinWidth="130" Height="32" Margin="0,0,8,8" Padding="10,0" Click="BtnGenerateImage_Click"
+                    ToolTip="生成九宫格圆点标定图案"/>
+            <Button x:Name="BtnLoadImage" Content="② 加载图像" MinWidth="120" Height="32" Margin="0,0,8,8" Padding="10,0" Click="BtnLoadImage_Click"
+                    ToolTip="从文件加载 BMP 等图像"/>
+            <Button x:Name="BtnGrabImage" Content="③ 相机采图" MinWidth="120" Height="32" Margin="0,0,8,8" Padding="10,0" Click="BtnGrabImage_Click" ToolTip="从相机采集一帧图像"/>
+            <Button x:Name="BtnConnectCamera" Content="连接相机" MinWidth="100" Height="32" Margin="0,0,8,8" Padding="10,0" Click="BtnConnectCamera_Click" ToolTip="连接或断开相机"/>
+            <Button x:Name="BtnDetectCircles" Content="④ 检测圆点" MinWidth="120" Height="32" Margin="0,0,8,8" Padding="10,0" Click="BtnDetectCircles_Click"
+                    ToolTip="检测标定圆并提取圆心"/>
+            <Button x:Name="BtnCalibrate" Content="⑤ 执行标定" MinWidth="120" Height="32" Margin="0,0,8,8" Padding="10,0" Click="BtnCalibrate_Click"
+                    ToolTip="根据图像点与世界点求解仿射变换"/>
+            <Button x:Name="BtnSaveResults" Content="⑥ 保存结果" MinWidth="120" Height="32" Margin="0,0,8,8" Padding="10,0" Click="BtnSaveResults_Click"
+                    ToolTip="保存标定矩阵等到文件"/>
+            <Button x:Name="BtnTestTransform" Content="⑦ 验证变换" MinWidth="120" Height="32" Margin="0,0,8,8" Padding="10,0" Click="BtnTestTransform_Click"
+                    ToolTip="使用当前变换测试像素→世界坐标"/>
+            <Button x:Name="BtnAutoTrajTest" Content="⑧ 自动轨迹测试" MinWidth="140" Height="32" Margin="0,0,8,8" Padding="10,0" Click="BtnAutoTrajTest_Click"
+                    ToolTip="自动运行轨迹相关测试流程"/>
+        </WrapPanel>
 
         <!-- Image display -->
-        <Border Grid.Row="2" BorderBrush="Black" BorderThickness="1" Background="Black" Margin="0,0,0,10"
+        <Border Grid.Row="1" BorderBrush="Black" BorderThickness="1" Background="Black" Margin="0,0,0,10"
                 ClipToBounds="True">
             <ScrollViewer x:Name="ImageScrollViewer"
                           HorizontalScrollBarVisibility="Auto"
@@ -54,12 +57,12 @@
         </Border>
 
         <!-- Status bar -->
-        <Border Grid.Row="3" Background="#E0E0E0" Padding="5" Margin="0,0,0,10">
-            <TextBlock x:Name="StatusText" Text="Ready" VerticalAlignment="Center"/>
+        <Border Grid.Row="2" Background="#2D2D30" Padding="8,6" Margin="0,0,0,10" BorderBrush="#3F3F46" BorderThickness="1">
+            <TextBlock x:Name="StatusText" Text="就绪" Foreground="#CCCCCC" VerticalAlignment="Center"/>
         </Border>
 
         <!-- Log -->
-        <TextBox x:Name="LogTextBox" Grid.Row="4"
+        <TextBox x:Name="LogTextBox" Grid.Row="3"
                  IsReadOnly="True"
                  FontFamily="Consolas" FontSize="11"
                  VerticalScrollBarVisibility="Auto"
