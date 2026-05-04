@@ -1,7 +1,8 @@
 <Page x:Class="CalibOperatorCLI_Example.HistogramPage"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-      Title="Histogram Analysis">
+      Title="直方图分析"
+      Background="{StaticResource Ui.PageBackground}">
     <Grid Margin="8">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -43,7 +44,7 @@
         </WrapPanel>
 
         <!-- Statistics panel -->
-        <Border x:Name="StatsPanel" Grid.Row="2" Background="#F5F5F5" BorderBrush="#CCCCCC" BorderThickness="1" Padding="6" Margin="0,0,0,4" CornerRadius="3">
+        <Border x:Name="StatsPanel" Grid.Row="2" Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Padding="6" Margin="0,0,0,4" CornerRadius="3">
             <WrapPanel>
                 <TextBlock FontWeight="Bold" Text="统计：" Margin="0,0,8,0" FontSize="12"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,16,0">

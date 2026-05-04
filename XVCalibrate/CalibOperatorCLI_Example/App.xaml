@@ -1,4 +1,14 @@
 <Application x:Class="CalibOperatorCLI_Example.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Application.Resources>
+        <SolidColorBrush x:Key="Ui.PageBackground" Color="#F3F3F3"/>
+        <SolidColorBrush x:Key="Ui.CardBackground" Color="#F5F5F5"/>
+        <SolidColorBrush x:Key="Ui.CardBorder" Color="#CCCCCC"/>
+        <SolidColorBrush x:Key="Ui.StatusBarBg" Color="#2D2D30"/>
+        <SolidColorBrush x:Key="Ui.StatusBarFg" Color="#CCCCCC"/>
+        <SolidColorBrush x:Key="Ui.StatusBarBorder" Color="#3F3F46"/>
+        <SolidColorBrush x:Key="Ui.LogConsoleFg" Color="#CCCCCC"/>
+        <SolidColorBrush x:Key="Ui.Accent" Color="#007ACC"/>
+    </Application.Resources>
 </Application>

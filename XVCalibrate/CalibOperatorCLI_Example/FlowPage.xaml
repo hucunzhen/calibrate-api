@@ -1,8 +1,8 @@
 ﻿<Page x:Class="CalibOperatorCLI_Example.FlowPage"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-      Title="组态">
-    <Grid>
+      Title="组态流程">
+    <Grid Background="#252526">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="220" MinWidth="180"/>
             <ColumnDefinition Width="Auto"/>
@@ -90,6 +90,8 @@
                     <Separator Width="1" Background="#555" Margin="8,2"/>
                     <TextBlock x:Name="StatusText" Text="就绪" Foreground="#9CDCFE"
                                VerticalAlignment="Center" FontSize="12" Margin="4,0,0,0"/>
+                    <TextBlock Text="（图标按钮悬停查看说明）" Foreground="#858585" VerticalAlignment="Center"
+                               FontSize="11" Margin="12,0,0,0"/>
                     <Separator Width="1" Background="#555" Margin="8,2"/>
                     <Button Content="&#xE8B9;" FontFamily="Segoe MDL2 Assets" Width="32" Height="28"
                             ToolTip="清空日志" Background="#2D2D2D" Foreground="#AAA"

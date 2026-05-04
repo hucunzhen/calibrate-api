@@ -1,7 +1,8 @@
 <Page x:Class="CalibOperatorCLI_Example.PlcPage"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-      Title="PLC Communication">
+      Title="PLC 通讯"
+      Background="{StaticResource Ui.PageBackground}">
     <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -12,23 +13,23 @@
         </Grid.RowDefinitions>
 
         <!-- Connection -->
-        <Border Grid.Row="0" Background="#F5F5F5" BorderBrush="#CCCCCC" BorderThickness="1" Padding="10" Margin="0,0,0,10" CornerRadius="3">
+        <Border Grid.Row="0" Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Padding="10" Margin="0,0,0,10" CornerRadius="3">
             <StackPanel>
-                <TextBlock Text="PLC Connection" FontWeight="Bold" Margin="0,0,0,8"/>
+                <TextBlock Text="PLC 连接" FontWeight="Bold" Margin="0,0,0,8"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
                     <TextBlock Text="IP:" VerticalAlignment="Center" Margin="0,0,4,0"/>
                     <TextBox x:Name="TxtPlcIp" Text="192.168.6.6" Width="120" Height="26" VerticalContentAlignment="Center" Margin="0,0,10,0"/>
-                    <TextBlock Text="Port:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <TextBlock Text="端口:" VerticalAlignment="Center" Margin="0,0,4,0"/>
                     <TextBox x:Name="TxtPlcPort" Text="502" Width="55" Height="26" VerticalContentAlignment="Center" Margin="0,0,10,0"/>
-                    <Button x:Name="BtnPlcConnect" Content="Connect" Width="75" Height="28" Margin="0,0,5,0" Click="BtnPlcConnect_Click"/>
-                    <Button x:Name="BtnPlcDisconnect" Content="Disconnect" Width="80" Height="28" IsEnabled="False" Click="BtnPlcDisconnect_Click"/>
-                    <TextBlock x:Name="TxtPlcStatus" Text="[Disconnected]" Foreground="Gray" FontWeight="Bold" VerticalAlignment="Center" Margin="15,0,0,0" FontFamily="Consolas"/>
+                    <Button x:Name="BtnPlcConnect" Content="连接" Width="75" Height="28" Margin="0,0,5,0" Click="BtnPlcConnect_Click"/>
+                    <Button x:Name="BtnPlcDisconnect" Content="断开" Width="80" Height="28" IsEnabled="False" Click="BtnPlcDisconnect_Click"/>
+                    <TextBlock x:Name="TxtPlcStatus" Text="[未连接]" Foreground="Gray" FontWeight="Bold" VerticalAlignment="Center" Margin="15,0,0,0" FontFamily="Consolas"/>
                 </StackPanel>
             </StackPanel>
         </Border>
 
         <!-- Axis Position Display -->
-        <Border Grid.Row="1" Background="#FAFAFA" BorderBrush="#DDDDDD" BorderThickness="1" Padding="10" Margin="0,0,0,10" CornerRadius="3">
+        <Border Grid.Row="1" Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Padding="10" Margin="0,0,0,10" CornerRadius="3">
             <StackPanel>
                 <TextBlock Text="Axis Position" FontWeight="Bold" Margin="0,0,0,8"/>
                 <!-- 寄存器地址配置 -->

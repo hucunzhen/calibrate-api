@@ -883,7 +883,7 @@ namespace CalibOperatorCLI_Example
                     BtnPlcDisconnect.IsEnabled = true;
                     TxtPlcIp.IsEnabled = false;
                     TxtPlcPort.IsEnabled = false;
-                    TxtPlcStatus.Text = "[Connected]";
+                    TxtPlcStatus.Text = "[已连接]";
                     TxtPlcStatus.Foreground = new SolidColorBrush(Colors.Green);
                     UpdatePositionDisplay(double.NaN, double.NaN, double.NaN, double.NaN);
                 }
@@ -925,7 +925,7 @@ namespace CalibOperatorCLI_Example
                 BtnPlcDisconnect.IsEnabled = false;
                 TxtPlcIp.IsEnabled = true;
                 TxtPlcPort.IsEnabled = true;
-                TxtPlcStatus.Text = "[Disconnected]";
+                TxtPlcStatus.Text = "[未连接]";
                 TxtPlcStatus.Foreground = new SolidColorBrush(Colors.Gray);
                 UpdatePositionDisplay(double.NaN, double.NaN, double.NaN, double.NaN);
                 Log("[PLC] Disconnected");
