@@ -65,6 +65,9 @@ test_opencv.vcxproj
 test_opencv_minimal.cpp
 tiny_test.cpp
 
+# SAM ONNX exports（体积大，用 SAM_Inference/export_sam_onnx.py 本地生成）
+models/onnx/*.onnx
+
 # Third-party binary libs
 第三方库_调用算法需要/
 兴族图片.rar

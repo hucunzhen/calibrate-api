@@ -1,7 +1,7 @@
 {
   "Nodes": [
     {
-      "Id": "e875b0cb-0410-4d90-89dd-8cf9ed9839d6",
+      "Id": "98a71939-df25-4ac7-ac5a-db7de62b1f00",
       "TypeId": "load_image",
       "X": 120,
       "Y": 80,
@@ -10,14 +10,14 @@
       }
     },
     {
-      "Id": "8f1f6364-9bf9-4ee8-8c36-70be2a154692",
+      "Id": "0ee77719-8a1f-462d-b4c2-7f9dcff3aeb7",
       "TypeId": "grayscale",
       "X": 120,
       "Y": 190,
       "Params": {}
     },
     {
-      "Id": "e37fa7de-11c6-462b-ba5a-3714f419ba32",
+      "Id": "0de4e7fc-5217-4e4a-ae3f-645e03dcf04a",
       "TypeId": "binarize",
       "X": 120,
       "Y": 300,
@@ -27,14 +27,14 @@
       }
     },
     {
-      "Id": "e19856a9-ce78-4bb2-8af6-1cc191d0595c",
+      "Id": "a0f77b9c-5053-448f-9a07-747e5bf7cf75",
       "TypeId": "find_contours",
       "X": 120,
       "Y": 410,
       "Params": {}
     },
     {
-      "Id": "d3b68e8c-4915-4d9b-a56b-7b31c4849ef7",
+      "Id": "24e0b959-6636-437b-8bbf-acc326ac9cdd",
       "TypeId": "create_mask",
       "X": 120,
       "Y": 520,
@@ -43,7 +43,7 @@
       }
     },
     {
-      "Id": "7600e8ea-08fb-478f-a26f-c442071e3535",
+      "Id": "cc76f6ed-e16c-4b32-bcc4-3661ef55dd95",
       "TypeId": "sobel",
       "X": 600,
       "Y": 116,
@@ -52,7 +52,7 @@
       }
     },
     {
-      "Id": "8f2f2f0e-57a2-4fbd-8623-31261e943e50",
+      "Id": "964db1ea-b6f7-40cf-a471-7c10283747cc",
       "TypeId": "clahe",
       "X": 250,
       "Y": 250,
@@ -62,7 +62,7 @@
       }
     },
     {
-      "Id": "8b192709-b535-42f0-b41f-1e6207690293",
+      "Id": "80065cc5-0d82-466a-ad88-8311a5395eb7",
       "TypeId": "pre_filter",
       "X": 329,
       "Y": 71,
@@ -72,14 +72,14 @@
       }
     },
     {
-      "Id": "c6180170-0ff2-4966-a096-ca9d977abc0b",
+      "Id": "691d87d9-69c4-48fc-80b1-081a847e74ec",
       "TypeId": "apply_mask",
       "X": 560,
       "Y": 290,
       "Params": {}
     },
     {
-      "Id": "49a967ab-6241-43b5-af5a-f8557287b7e7",
+      "Id": "3a6e02fa-3a11-4988-a20b-286b66932f64",
       "TypeId": "detect_dark",
       "X": 560,
       "Y": 430,
@@ -88,7 +88,7 @@
       }
     },
     {
-      "Id": "f0b2faa5-310e-4335-a675-7742fcdf338d",
+      "Id": "49f788ef-a0b8-4588-8ca4-9e739a9e511a",
       "TypeId": "expand_edge",
       "X": 891,
       "Y": 419,
@@ -97,14 +97,14 @@
       }
     },
     {
-      "Id": "ca60c291-562c-44c3-b31f-9a89488d3837",
+      "Id": "2a61dd9d-ce8e-4afc-9312-9fce66cd4fc3",
       "TypeId": "find_contours",
       "X": 960,
       "Y": 290,
       "Params": {}
     },
     {
-      "Id": "83e39cac-6e0e-4cae-9d68-ba16d2a0794c",
+      "Id": "d09edc42-4855-4f11-9e79-89931fe813d1",
       "TypeId": "sample",
       "X": 1160,
       "Y": 420,
@@ -114,7 +114,7 @@
       }
     },
     {
-      "Id": "4349a843-8a37-4ab8-b3e5-db585b034ef0",
+      "Id": "9a35db06-78eb-4752-8140-f4a54341ad95",
       "TypeId": "filter_contours",
       "X": 1190,
       "Y": 286,
@@ -128,7 +128,7 @@
       }
     },
     {
-      "Id": "d4bb5e7f-fdf0-46db-85b5-d2c48e9f9d79",
+      "Id": "f56a478c-c65f-4f38-aded-de016b0c94cb",
       "TypeId": "match_contours",
       "X": 1391,
       "Y": 262,
@@ -140,7 +140,7 @@
       }
     },
     {
-      "Id": "b38cb7d0-cb50-4e60-a09e-f0b30f0a9923",
+      "Id": "885b3eac-2b12-4f57-a8d8-64c87061add7",
       "TypeId": "fit_shape",
       "X": 1360,
       "Y": 420,
@@ -153,7 +153,7 @@
       }
     },
     {
-      "Id": "db6f3c9b-32eb-43f4-bb6b-29ed9e3e5d8a",
+      "Id": "ec4ae0c4-9c02-4525-83b2-1dfba73bd522",
       "TypeId": "display",
       "X": 1560,
       "Y": 420,
@@ -162,7 +162,7 @@
       }
     },
     {
-      "Id": "81b3e326-4372-44f3-be15-ac78ce3a30fd",
+      "Id": "13b0b794-8bd9-4e05-b6d0-9e16bea4576f",
       "TypeId": "shape_match_global",
       "X": 980,
       "Y": 140,
@@ -181,7 +181,7 @@
       }
     },
     {
-      "Id": "23c6f1c9-32eb-483f-b9b9-0f5631a8b04c",
+      "Id": "38a491fd-1723-4788-ad78-464f287fce4d",
       "TypeId": "fuse_contours_template",
       "X": 1242,
       "Y": 116,
@@ -195,10 +195,10 @@
       }
     },
     {
-      "Id": "ecb7f22f-33e9-4402-a0c3-621be42c35e7",
+      "Id": "6dcf1cbb-5083-4121-8173-535f6caee7e1",
       "TypeId": "morphology",
-      "X": 665,
-      "Y": 635,
+      "X": 934.7685981348113,
+      "Y": 586.1288771494907,
       "Params": {
         "kernelSize": "5",
         "blurKsize": "9",
@@ -206,185 +206,227 @@
       }
     },
     {
-      "Id": "a21ddbd1-710e-4dd7-b2d2-1368d4232951",
+      "Id": "ff4770dd-1d0e-4cbd-b167-fc5736172f3f",
       "TypeId": "phase_congruency",
       "X": 743,
       "Y": 15,
       "Params": {
         "threshold": "0.45",
         "noiseSigma": "0.12",
-        "blurKsize": "3"
+        "blurKsize": "3",
+        "debugDumpPrefix": ""
+      }
+    },
+    {
+      "Id": "7b103fb6-35e5-4d0a-88f6-05ad2bec14ab",
+      "TypeId": "sam_onnx_segment",
+      "X": 376.16584537690653,
+      "Y": 588.9209471245315,
+      "Params": {
+        "encoderPath": "models/onnx/sam_vit_b_encoder.onnx",
+        "decoderPath": "models/onnx/sam_vit_b_decoder.onnx",
+        "textPrompt": "a pic of ellipse",
+        "textThreshold": "0.01",
+        "textRawQuery": "true",
+        "pythonPath": "",
+        "groundingScript": "SAM_Inference/grounded_text_to_box.py",
+        "groundingTimeoutSec": "180",
+        "clickX": "512",
+        "clickY": "512",
+        "maskThreshold": "0",
+        "useGpu": "false"
+      }
+    },
+    {
+      "Id": "b2d1c627-0a65-482a-bcc8-0142031a434b",
+      "TypeId": "display",
+      "X": 681.1216519640848,
+      "Y": 584.0338348394805,
+      "Params": {
+        "dotRadius": "3"
       }
     }
   ],
   "Connections": [
     {
-      "FromNodeId": "e875b0cb-0410-4d90-89dd-8cf9ed9839d6",
+      "FromNodeId": "98a71939-df25-4ac7-ac5a-db7de62b1f00",
       "FromPort": "Image",
-      "ToNodeId": "8f1f6364-9bf9-4ee8-8c36-70be2a154692",
+      "ToNodeId": "0ee77719-8a1f-462d-b4c2-7f9dcff3aeb7",
       "ToPort": "In"
     },
     {
-      "FromNodeId": "8f1f6364-9bf9-4ee8-8c36-70be2a154692",
+      "FromNodeId": "0ee77719-8a1f-462d-b4c2-7f9dcff3aeb7",
       "FromPort": "Out",
-      "ToNodeId": "e37fa7de-11c6-462b-ba5a-3714f419ba32",
+      "ToNodeId": "0de4e7fc-5217-4e4a-ae3f-645e03dcf04a",
       "ToPort": "In"
     },
     {
-      "FromNodeId": "e37fa7de-11c6-462b-ba5a-3714f419ba32",
+      "FromNodeId": "0de4e7fc-5217-4e4a-ae3f-645e03dcf04a",
       "FromPort": "Out",
-      "ToNodeId": "e19856a9-ce78-4bb2-8af6-1cc191d0595c",
+      "ToNodeId": "a0f77b9c-5053-448f-9a07-747e5bf7cf75",
       "ToPort": "In"
     },
     {
-      "FromNodeId": "e19856a9-ce78-4bb2-8af6-1cc191d0595c",
+      "FromNodeId": "a0f77b9c-5053-448f-9a07-747e5bf7cf75",
       "FromPort": "Out",
-      "ToNodeId": "d3b68e8c-4915-4d9b-a56b-7b31c4849ef7",
+      "ToNodeId": "24e0b959-6636-437b-8bbf-acc326ac9cdd",
       "ToPort": "In"
     },
     {
-      "FromNodeId": "e19856a9-ce78-4bb2-8af6-1cc191d0595c",
+      "FromNodeId": "a0f77b9c-5053-448f-9a07-747e5bf7cf75",
       "FromPort": "Contours",
-      "ToNodeId": "d3b68e8c-4915-4d9b-a56b-7b31c4849ef7",
+      "ToNodeId": "24e0b959-6636-437b-8bbf-acc326ac9cdd",
       "ToPort": "Contours"
     },
     {
-      "FromNodeId": "8f1f6364-9bf9-4ee8-8c36-70be2a154692",
+      "FromNodeId": "0ee77719-8a1f-462d-b4c2-7f9dcff3aeb7",
       "FromPort": "Out",
-      "ToNodeId": "8f2f2f0e-57a2-4fbd-8623-31261e943e50",
+      "ToNodeId": "964db1ea-b6f7-40cf-a471-7c10283747cc",
       "ToPort": "In"
     },
     {
-      "FromNodeId": "8f2f2f0e-57a2-4fbd-8623-31261e943e50",
+      "FromNodeId": "964db1ea-b6f7-40cf-a471-7c10283747cc",
       "FromPort": "Out",
-      "ToNodeId": "8b192709-b535-42f0-b41f-1e6207690293",
+      "ToNodeId": "80065cc5-0d82-466a-ad88-8311a5395eb7",
       "ToPort": "In"
     },
     {
-      "FromNodeId": "8b192709-b535-42f0-b41f-1e6207690293",
+      "FromNodeId": "80065cc5-0d82-466a-ad88-8311a5395eb7",
       "FromPort": "Out",
-      "ToNodeId": "7600e8ea-08fb-478f-a26f-c442071e3535",
+      "ToNodeId": "cc76f6ed-e16c-4b32-bcc4-3661ef55dd95",
       "ToPort": "In"
     },
     {
-      "FromNodeId": "d3b68e8c-4915-4d9b-a56b-7b31c4849ef7",
+      "FromNodeId": "24e0b959-6636-437b-8bbf-acc326ac9cdd",
       "FromPort": "Mask",
-      "ToNodeId": "c6180170-0ff2-4966-a096-ca9d977abc0b",
+      "ToNodeId": "691d87d9-69c4-48fc-80b1-081a847e74ec",
       "ToPort": "Mask"
     },
     {
-      "FromNodeId": "8f1f6364-9bf9-4ee8-8c36-70be2a154692",
+      "FromNodeId": "0ee77719-8a1f-462d-b4c2-7f9dcff3aeb7",
       "FromPort": "Out",
-      "ToNodeId": "49a967ab-6241-43b5-af5a-f8557287b7e7",
+      "ToNodeId": "3a6e02fa-3a11-4988-a20b-286b66932f64",
       "ToPort": "In"
     },
     {
-      "FromNodeId": "d3b68e8c-4915-4d9b-a56b-7b31c4849ef7",
+      "FromNodeId": "24e0b959-6636-437b-8bbf-acc326ac9cdd",
       "FromPort": "Mask",
-      "ToNodeId": "49a967ab-6241-43b5-af5a-f8557287b7e7",
+      "ToNodeId": "3a6e02fa-3a11-4988-a20b-286b66932f64",
       "ToPort": "Mask"
     },
     {
-      "FromNodeId": "f0b2faa5-310e-4335-a675-7742fcdf338d",
+      "FromNodeId": "49f788ef-a0b8-4588-8ca4-9e739a9e511a",
       "FromPort": "Out",
-      "ToNodeId": "ca60c291-562c-44c3-b31f-9a89488d3837",
+      "ToNodeId": "2a61dd9d-ce8e-4afc-9312-9fce66cd4fc3",
       "ToPort": "In"
     },
     {
-      "FromNodeId": "ca60c291-562c-44c3-b31f-9a89488d3837",
+      "FromNodeId": "2a61dd9d-ce8e-4afc-9312-9fce66cd4fc3",
       "FromPort": "Contours",
-      "ToNodeId": "4349a843-8a37-4ab8-b3e5-db585b034ef0",
+      "ToNodeId": "9a35db06-78eb-4752-8140-f4a54341ad95",
       "ToPort": "Contours"
     },
     {
-      "FromNodeId": "4349a843-8a37-4ab8-b3e5-db585b034ef0",
+      "FromNodeId": "9a35db06-78eb-4752-8140-f4a54341ad95",
       "FromPort": "Contours",
-      "ToNodeId": "d4bb5e7f-fdf0-46db-85b5-d2c48e9f9d79",
+      "ToNodeId": "f56a478c-c65f-4f38-aded-de016b0c94cb",
       "ToPort": "Contours"
     },
     {
-      "FromNodeId": "b38cb7d0-cb50-4e60-a09e-f0b30f0a9923",
+      "FromNodeId": "885b3eac-2b12-4f57-a8d8-64c87061add7",
       "FromPort": "Out",
-      "ToNodeId": "db6f3c9b-32eb-43f4-bb6b-29ed9e3e5d8a",
+      "ToNodeId": "ec4ae0c4-9c02-4525-83b2-1dfba73bd522",
       "ToPort": "Points"
     },
     {
-      "FromNodeId": "ca60c291-562c-44c3-b31f-9a89488d3837",
+      "FromNodeId": "2a61dd9d-ce8e-4afc-9312-9fce66cd4fc3",
       "FromPort": "Contours",
-      "ToNodeId": "23c6f1c9-32eb-483f-b9b9-0f5631a8b04c",
+      "ToNodeId": "38a491fd-1723-4788-ad78-464f287fce4d",
       "ToPort": "Contours"
     },
     {
-      "FromNodeId": "23c6f1c9-32eb-483f-b9b9-0f5631a8b04c",
+      "FromNodeId": "38a491fd-1723-4788-ad78-464f287fce4d",
       "FromPort": "Template",
-      "ToNodeId": "81b3e326-4372-44f3-be15-ac78ce3a30fd",
+      "ToNodeId": "13b0b794-8bd9-4e05-b6d0-9e16bea4576f",
       "ToPort": "Template"
     },
     {
-      "FromNodeId": "81b3e326-4372-44f3-be15-ac78ce3a30fd",
+      "FromNodeId": "13b0b794-8bd9-4e05-b6d0-9e16bea4576f",
       "FromPort": "Contours",
-      "ToNodeId": "83e39cac-6e0e-4cae-9d68-ba16d2a0794c",
+      "ToNodeId": "d09edc42-4855-4f11-9e79-89931fe813d1",
       "ToPort": "Contours"
     },
     {
-      "FromNodeId": "83e39cac-6e0e-4cae-9d68-ba16d2a0794c",
+      "FromNodeId": "d09edc42-4855-4f11-9e79-89931fe813d1",
       "FromPort": "Points",
-      "ToNodeId": "b38cb7d0-cb50-4e60-a09e-f0b30f0a9923",
+      "ToNodeId": "885b3eac-2b12-4f57-a8d8-64c87061add7",
       "ToPort": "In"
     },
     {
-      "FromNodeId": "83e39cac-6e0e-4cae-9d68-ba16d2a0794c",
+      "FromNodeId": "d09edc42-4855-4f11-9e79-89931fe813d1",
       "FromPort": "BarIds",
-      "ToNodeId": "b38cb7d0-cb50-4e60-a09e-f0b30f0a9923",
+      "ToNodeId": "885b3eac-2b12-4f57-a8d8-64c87061add7",
       "ToPort": "BarIds"
     },
     {
-      "FromNodeId": "ca60c291-562c-44c3-b31f-9a89488d3837",
+      "FromNodeId": "2a61dd9d-ce8e-4afc-9312-9fce66cd4fc3",
       "FromPort": "Out",
-      "ToNodeId": "db6f3c9b-32eb-43f4-bb6b-29ed9e3e5d8a",
+      "ToNodeId": "ec4ae0c4-9c02-4525-83b2-1dfba73bd522",
       "ToPort": "Image"
     },
     {
-      "FromNodeId": "e875b0cb-0410-4d90-89dd-8cf9ed9839d6",
+      "FromNodeId": "98a71939-df25-4ac7-ac5a-db7de62b1f00",
       "FromPort": "Image",
-      "ToNodeId": "db6f3c9b-32eb-43f4-bb6b-29ed9e3e5d8a",
+      "ToNodeId": "ec4ae0c4-9c02-4525-83b2-1dfba73bd522",
       "ToPort": "Img"
     },
     {
-      "FromNodeId": "c6180170-0ff2-4966-a096-ca9d977abc0b",
+      "FromNodeId": "691d87d9-69c4-48fc-80b1-081a847e74ec",
       "FromPort": "Out",
-      "ToNodeId": "81b3e326-4372-44f3-be15-ac78ce3a30fd",
+      "ToNodeId": "13b0b794-8bd9-4e05-b6d0-9e16bea4576f",
       "ToPort": "Edge"
     },
     {
-      "FromNodeId": "49a967ab-6241-43b5-af5a-f8557287b7e7",
+      "FromNodeId": "3a6e02fa-3a11-4988-a20b-286b66932f64",
       "FromPort": "Dark",
-      "ToNodeId": "ecb7f22f-33e9-4402-a0c3-621be42c35e7",
+      "ToNodeId": "6dcf1cbb-5083-4121-8173-535f6caee7e1",
       "ToPort": "In"
     },
     {
-      "FromNodeId": "ecb7f22f-33e9-4402-a0c3-621be42c35e7",
+      "FromNodeId": "6dcf1cbb-5083-4121-8173-535f6caee7e1",
       "FromPort": "Out",
-      "ToNodeId": "f0b2faa5-310e-4335-a675-7742fcdf338d",
+      "ToNodeId": "49f788ef-a0b8-4588-8ca4-9e739a9e511a",
       "ToPort": "Dark"
     },
     {
-      "FromNodeId": "8b192709-b535-42f0-b41f-1e6207690293",
+      "FromNodeId": "80065cc5-0d82-466a-ad88-8311a5395eb7",
       "FromPort": "Out",
-      "ToNodeId": "a21ddbd1-710e-4dd7-b2d2-1368d4232951",
+      "ToNodeId": "ff4770dd-1d0e-4cbd-b167-fc5736172f3f",
       "ToPort": "In"
     },
     {
-      "FromNodeId": "a21ddbd1-710e-4dd7-b2d2-1368d4232951",
+      "FromNodeId": "ff4770dd-1d0e-4cbd-b167-fc5736172f3f",
       "FromPort": "Edge",
-      "ToNodeId": "c6180170-0ff2-4966-a096-ca9d977abc0b",
+      "ToNodeId": "691d87d9-69c4-48fc-80b1-081a847e74ec",
       "ToPort": "Image"
     },
     {
-      "FromNodeId": "a21ddbd1-710e-4dd7-b2d2-1368d4232951",
+      "FromNodeId": "ff4770dd-1d0e-4cbd-b167-fc5736172f3f",
       "FromPort": "Edge",
-      "ToNodeId": "f0b2faa5-310e-4335-a675-7742fcdf338d",
+      "ToNodeId": "49f788ef-a0b8-4588-8ca4-9e739a9e511a",
       "ToPort": "Edge"
+    },
+    {
+      "FromNodeId": "3a6e02fa-3a11-4988-a20b-286b66932f64",
+      "FromPort": "Dark",
+      "ToNodeId": "7b103fb6-35e5-4d0a-88f6-05ad2bec14ab",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "7b103fb6-35e5-4d0a-88f6-05ad2bec14ab",
+      "FromPort": "Mask",
+      "ToNodeId": "b2d1c627-0a65-482a-bcc8-0142031a434b",
+      "ToPort": "Img"
     }
   ]
 }

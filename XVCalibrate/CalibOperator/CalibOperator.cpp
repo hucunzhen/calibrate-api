@@ -8,6 +8,7 @@
 #include <stdarg.h>
 #include <time.h>
 #include <string>
+#include <vector>
 #include <cstdio>
 
 using namespace cv;
@@ -167,11 +168,14 @@ int SaveBMP(const char* filename, Image* img) {
     if (!fp) return 0;
 #endif
 
+    // 内存中的行是紧凑的 width*channels；BMP 要求每行字节数为 4 的倍数。
+    // 错误地对整块 fwrite(rowSize*height) 会在 stride 不一致时写出损坏文件（PIL 报 truncated 等）。
     int bitCount = img->channels * 8;
-    int rowSize = ((img->width * img->channels + 3) / 4) * 4;
+    int srcRowBytes = img->width * img->channels;
+    int bmpRowBytes = ((srcRowBytes + 3) / 4) * 4;
     BMPHeader header = { 0 };
     header.type = 0x4D42;
-    header.size = sizeof(BMPHeader) + sizeof(BMPInfoHeader) + rowSize * img->height;
+    header.size = sizeof(BMPHeader) + sizeof(BMPInfoHeader) + bmpRowBytes * img->height;
     header.offset = sizeof(BMPHeader) + sizeof(BMPInfoHeader);
 
     BMPInfoHeader info = { 0 };
@@ -180,11 +184,23 @@ int SaveBMP(const char* filename, Image* img) {
     info.height = img->height;
     info.planes = 1;
     info.bitCount = (unsigned short)bitCount;
-    info.imageSize = rowSize * img->height;
+    info.imageSize = bmpRowBytes * img->height;
 
     fwrite(&header, sizeof(header), 1, fp);
     fwrite(&info, sizeof(info), 1, fp);
-    fwrite(img->data, 1, rowSize * img->height, fp);
+
+    std::vector<unsigned char> row(static_cast<size_t>(bmpRowBytes));
+    const unsigned char* src = img->data;
+    for (int y = 0; y < img->height; y++) {
+        memcpy(row.data(), src, static_cast<size_t>(srcRowBytes));
+        if (bmpRowBytes > srcRowBytes)
+            memset(row.data() + srcRowBytes, 0, static_cast<size_t>(bmpRowBytes - srcRowBytes));
+        if (fwrite(row.data(), 1, static_cast<size_t>(bmpRowBytes), fp) != static_cast<size_t>(bmpRowBytes)) {
+            fclose(fp);
+            return 0;
+        }
+        src += srcRowBytes;
+    }
     fclose(fp);
     return 1;
 }

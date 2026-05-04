@@ -107,8 +107,9 @@
                     MouseLeftButtonDown="FlowCanvas_MouseLeftButtonDown"
                     MouseMove="FlowCanvas_MouseMove"
                     MouseLeftButtonUp="FlowCanvas_MouseLeftButtonUp"
-                    MouseRightButtonDown="FlowCanvas_MouseRightButtonDown"
-                    MouseRightButtonUp="FlowCanvas_MouseRightButtonUp"
+                    PreviewMouseRightButtonDown="FlowCanvas_PreviewMouseRightButtonDown"
+                    PreviewMouseMove="FlowCanvas_PreviewMouseMove"
+                    PreviewMouseRightButtonUp="FlowCanvas_PreviewMouseRightButtonUp"
                     MouseWheel="FlowCanvas_MouseWheel">
                 <Canvas.Resources>
                     <Style TargetType="Path">

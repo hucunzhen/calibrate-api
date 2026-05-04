@@ -1,0 +1,6 @@
+# OWLv2 text-to-box for grounded_text_to_box.py (downloads HF weights on first run)
+torch>=2.1.0
+torchvision>=0.16.0
+transformers>=4.38.0
+Pillow>=10.0.0
+safetensors>=0.4.0

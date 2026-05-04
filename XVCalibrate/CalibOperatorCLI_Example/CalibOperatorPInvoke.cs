@@ -595,11 +595,11 @@ namespace CalibOperatorPInvoke
         }
 
         /// <summary>
-        /// 保存图像到文件
+        /// 保存图像到文件（原生 SaveBMP 成功返回 1，失败返回 0，与 LoadImageFile 一致）
         /// </summary>
         public bool Save(string filename)
         {
-            return NativeAPI.CALIB_SaveBMP(filename, _nativePtr) == 0;
+            return NativeAPI.CALIB_SaveBMP(filename, _nativePtr) == 1;
         }
 
         internal void RefreshProperties()

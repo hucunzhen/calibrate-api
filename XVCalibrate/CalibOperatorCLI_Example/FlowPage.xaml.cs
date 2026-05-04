@@ -970,6 +970,39 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "sam_onnx_segment",
+                DisplayName = "SAM 图像分割",
+                Description = "Segment Anything ONNX：点提示或文本提示（OWLv2→框→SAM box prompt）。填写 textPrompt 时优先走文本选物体；否则用 Points 或默认点击。输出 Mask 为 IoU 最优候选；Mask2–Mask4 为其余候选（decoder 导出勿使用 --return-single-mask）。GroundingJson 为 grounding 元数据。需 Python：pip install -r SAM_Inference/requirements-grounded.txt。默认 FP32 ONNX；int8 请用 quantize_sam_onnx.py --matmul-only。",
+                Category = "分割",
+                Params =
+                {
+                    new OperatorParam { Name = "encoderPath", DisplayName = "Encoder ONNX", DefaultValue = SamOnnxSegmentation.DefaultEncoderRepoRelative, Description = "相对源码树 models/onnx（或 exe 目录）；不存在时自动向上查找仓库根；可为绝对路径" },
+                    new OperatorParam { Name = "decoderPath", DisplayName = "Decoder ONNX", DefaultValue = SamOnnxSegmentation.DefaultDecoderRepoRelative, Description = "相对源码树 models/onnx（或 exe 目录）；不存在时自动向上查找仓库根；可为绝对路径" },
+                    new OperatorParam { Name = "textPrompt", DisplayName = "文本选物体", DefaultValue = "", Description = "非空时调用 OWLv2 生成框再 SAM；优先于 Points。模型单次查询约 16 英文词元，脚本会自动截断；中文建议尽量短或 textRawQuery=true" },
+                    new OperatorParam { Name = "textThreshold", DisplayName = "文本检测阈值", DefaultValue = "0.25", Description = "OWLv2 post_process_object_detection threshold；无框时可调低" },
+                    new OperatorParam { Name = "textRawQuery", DisplayName = "文本不加前缀", DefaultValue = "false", Description = "true 时直接把 textPrompt 送入模型；false 时使用「a photo of …」模板" },
+                    new OperatorParam { Name = "pythonPath", DisplayName = "Python", DefaultValue = "", Description = "空则使用 python（需在 PATH 中）" },
+                    new OperatorParam { Name = "groundingScript", DisplayName = "Grounding 脚本", DefaultValue = GroundedTextToBoxBridge.DefaultScriptRepoRelative, Description = "相对仓库根或绝对路径；默认同 ResolveModelPath 查找规则" },
+                    new OperatorParam { Name = "groundingTimeoutSec", DisplayName = "Grounding 超时(秒)", DefaultValue = "180", Description = "子进程超时；首次下载 HF 权重时需足够大" },
+                    new OperatorParam { Name = "clickX", DisplayName = "默认点击 X", DefaultValue = "512", Description = "未连接 Points 且无文本时使用，原图像素坐标" },
+                    new OperatorParam { Name = "clickY", DisplayName = "默认点击 Y", DefaultValue = "512", Description = "未连接 Points 且无文本时使用，原图像素坐标" },
+                    new OperatorParam { Name = "maskThreshold", DisplayName = "掩码 logit 阈值", DefaultValue = "0", Description = "decoder 输出 logits，大于阈值视为前景（通常 0）" },
+                    new OperatorParam { Name = "useGpu", DisplayName = "尝试 CUDA", DefaultValue = "false", Description = "需要 onnxruntime GPU 与 CUDA；失败则自动用 CPU" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Mask", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Mask2", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#66BB6A" },
+                    new PortDef { Name = "Mask3", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#81C784" },
+                    new PortDef { Name = "Mask4", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#A5D6A7" },
+                    new PortDef { Name = "Vis", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "GroundingJson", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "chessboard_find_corners",
                 DisplayName = "棋盘格角点",
                 Description = "OpenCV 棋盘格内侧角点检测与可视化",
@@ -1192,6 +1225,11 @@ namespace CalibOperatorCLI_Example
         private Point _canvasPanStart;
         private double _canvasPanX0;
         private double _canvasPanY0;
+        /// <summary>右键落在算子/连线上时不立刻平移，避免抢走 ContextMenu；超过阈值后才平移。</summary>
+        private bool _canvasRightPanDeferred;
+        private bool _canvasRightPanCommitted;
+        private Point _canvasRightPanDownCanvasPoint;
+        private const double CanvasRightPanThresholdSquared = 36.0;
         private readonly TranslateTransform _canvasTranslate = new TranslateTransform(0, 0);
         private readonly ScaleTransform _canvasScale = new ScaleTransform(1, 1);
         private readonly TransformGroup _canvasTransform = new TransformGroup();
@@ -1214,6 +1252,64 @@ namespace CalibOperatorCLI_Example
         {
             if (_runCts?.IsCancellationRequested == true)
                 throw new OperationCanceledException("用户停止执行");
+        }
+
+        /// <summary>已在 UI 提示用户（如 MessageBox），托管 Flow 应中止且不当作未处理崩溃。</summary>
+        private sealed class FlowExecutionGracefulStopException : Exception
+        {
+            public FlowExecutionGracefulStopException(string message, Exception? innerException = null)
+                : base(message, innerException)
+            {
+            }
+        }
+
+        /// <summary>
+        /// OpenFileDialog 须在 UI 线程；其余算子在专用 STA 后台线程执行：避免阻塞 UI，且满足 System.Drawing/GDI+（SAM 等）对 STA 的要求——若用线程池 MTA 易出现卡住且 CPU 空闲。
+        /// </summary>
+        private static bool ExecuteNodeRequiresUiDispatcher(FlowNode node)
+        {
+            if (node.Def.TypeId != "load_image")
+                return false;
+            string configuredPath = node.Params.GetValueOrDefault("filePath", "")?.Trim() ?? "";
+            return string.IsNullOrWhiteSpace(configuredPath);
+        }
+
+        private async System.Threading.Tasks.Task ExecuteNodeForRunAsync(FlowNode node)
+        {
+            ThrowIfExecutionCancelled();
+            try
+            {
+                if (ExecuteNodeRequiresUiDispatcher(node))
+                {
+                    await System.Threading.Tasks.Task.Yield();
+                    ExecuteNode(node);
+                    return;
+                }
+
+                await System.Threading.Tasks.Task.Factory.StartNew(
+                    () =>
+                    {
+                        ThrowIfExecutionCancelled();
+                        ExecuteNode(node);
+                    },
+                    _runCts?.Token ?? System.Threading.CancellationToken.None,
+                    System.Threading.Tasks.TaskCreationOptions.None,
+                    FlowStaTaskScheduler.Default);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (FlowExecutionGracefulStopException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new FlowExecutionGracefulStopException(
+                    $"节点「{node.Def.DisplayName}」执行失败，流程已中止。",
+                    ex);
+            }
         }
 
         private void InitializeToolbox()
@@ -1727,18 +1823,64 @@ namespace CalibOperatorCLI_Example
             }
         }
 
-        private void FlowCanvas_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
+        /// <summary>算子节点、连线：右键单击保留菜单/删除连线；移动超过阈值后才拖动画布。</summary>
+        private static bool ShouldDeferCanvasRightPanImmediate(DependencyObject? src)
+        {
+            while (src != null)
+            {
+                if (src is Border b && b.Tag is FlowNode)
+                    return true;
+                if (src is Path p && p.Tag is FlowConnection)
+                    return true;
+                src = VisualTreeHelper.GetParent(src);
+            }
+
+            return false;
+        }
+
+        private void StartCanvasRightPan(Point screenPos)
         {
             _isPanningCanvas = true;
-            _canvasPanStart = e.GetPosition(this);
+            _canvasPanStart = screenPos;
             _canvasPanX0 = _canvasTranslate.X;
             _canvasPanY0 = _canvasTranslate.Y;
             FlowCanvas.CaptureMouse();
             FlowCanvas.Cursor = Cursors.ScrollAll;
-            e.Handled = true;
         }
 
-        private void FlowCanvas_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
+        private void FlowCanvas_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            bool defer = ShouldDeferCanvasRightPanImmediate(e.OriginalSource as DependencyObject);
+            _canvasRightPanDownCanvasPoint = e.GetPosition(FlowCanvas);
+            _canvasRightPanDeferred = defer;
+            _canvasRightPanCommitted = false;
+
+            if (!defer)
+            {
+                StartCanvasRightPan(e.GetPosition(this));
+                _canvasRightPanCommitted = true;
+                e.Handled = true;
+            }
+        }
+
+        private void FlowCanvas_PreviewMouseMove(object sender, MouseEventArgs e)
+        {
+            if (!_canvasRightPanDeferred || _canvasRightPanCommitted || e.RightButton != MouseButtonState.Pressed)
+                return;
+
+            var pos = e.GetPosition(FlowCanvas);
+            double dx = pos.X - _canvasRightPanDownCanvasPoint.X;
+            double dy = pos.Y - _canvasRightPanDownCanvasPoint.Y;
+            if (dx * dx + dy * dy >= CanvasRightPanThresholdSquared)
+            {
+                StartCanvasRightPan(Mouse.GetPosition(this));
+                _canvasRightPanCommitted = true;
+                _canvasRightPanDeferred = false;
+                e.Handled = true;
+            }
+        }
+
+        private void FlowCanvas_PreviewMouseRightButtonUp(object sender, MouseButtonEventArgs e)
         {
             if (_isPanningCanvas)
             {
@@ -1747,6 +1889,9 @@ namespace CalibOperatorCLI_Example
                 FlowCanvas.Cursor = null;
                 e.Handled = true;
             }
+
+            _canvasRightPanDeferred = false;
+            _canvasRightPanCommitted = false;
         }
 
         private void FlowCanvas_MouseWheel(object sender, MouseWheelEventArgs e)
@@ -5504,6 +5649,106 @@ namespace CalibOperatorCLI_Example
                         break;
                     }
 
+                    case "sam_onnx_segment":
+                    {
+                        var samImg = inputs["Image"] as CalibImage;
+                        if (samImg == null) throw new InvalidOperationException("SAM 分割: 缺少输入图像 Image");
+                        Point2D[]? promptPts = null;
+                        if (inputs.TryGetValue("Points", out var ptObj) && ptObj is Point2D[] arr && arr.Length > 0)
+                            promptPts = arr;
+                        double fx = double.TryParse(node.Params.GetValueOrDefault("clickX"), out var cxx) ? cxx : 512;
+                        double fy = double.TryParse(node.Params.GetValueOrDefault("clickY"), out var cyy) ? cyy : 512;
+                        float th = float.TryParse(node.Params.GetValueOrDefault("maskThreshold"), out var thv) ? thv : 0f;
+                        bool useGpu = bool.TryParse(node.Params.GetValueOrDefault("useGpu"), out var ug) && ug;
+                        string enc = node.Params.GetValueOrDefault("encoderPath", "") ?? "";
+                        string dec = node.Params.GetValueOrDefault("decoderPath", "") ?? "";
+                        string encAbs = SamOnnxSegmentation.ResolveModelPath(string.IsNullOrWhiteSpace(enc) ? SamOnnxSegmentation.DefaultEncoderRepoRelative : enc);
+                        string decAbs = SamOnnxSegmentation.ResolveModelPath(string.IsNullOrWhiteSpace(dec) ? SamOnnxSegmentation.DefaultDecoderRepoRelative : dec);
+
+                        SamOnnxSegmentation.OrigBoxPrompt? boxOrig = null;
+                        string groundingJson;
+                        string textPrompt = (node.Params.GetValueOrDefault("textPrompt", "") ?? "").Trim();
+                        if (textPrompt.Length > 0)
+                        {
+                            double tthr = double.TryParse(
+                                node.Params.GetValueOrDefault("textThreshold"),
+                                System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                out var tt)
+                                ? tt
+                                : 0.25;
+                            string py = (node.Params.GetValueOrDefault("pythonPath", "") ?? "").Trim();
+                            if (string.IsNullOrEmpty(py))
+                                py = "python";
+                            string scriptRel = (node.Params.GetValueOrDefault("groundingScript", "") ?? "").Trim();
+                            if (string.IsNullOrEmpty(scriptRel))
+                                scriptRel = GroundedTextToBoxBridge.DefaultScriptRepoRelative;
+                            string scriptAbs = SamOnnxSegmentation.ResolveModelPath(scriptRel);
+                            int timeoutMs = int.TryParse(
+                                node.Params.GetValueOrDefault("groundingTimeoutSec"),
+                                System.Globalization.NumberStyles.Integer,
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                out var gts)
+                                ? System.Math.Max(1, gts) * 1000
+                                : 180000;
+                            bool rawQ = bool.TryParse(node.Params.GetValueOrDefault("textRawQuery"), out var trq) && trq;
+                            (SamOnnxSegmentation.OrigBoxPrompt box, double score) pair;
+                            try
+                            {
+                                pair = GroundedTextToBoxBridge.QueryBestBoxOrThrow(
+                                    samImg, textPrompt, tthr, py, scriptAbs, timeoutMs, rawQ);
+                            }
+                            catch (Exception ex)
+                            {
+                                void ShowGroundingAlert()
+                                {
+                                    MessageBox.Show(
+                                        "文本 grounding 失败：\n\n" + ex.Message +
+                                        "\n\n提示：OWLv2 单次查询约 16 个英文词元上限；中文更易超长（已自动截断）。仍失败时请缩短描述、" +
+                                        "开启「文本不加前缀」，或改用简短英文。",
+                                        "SAM 图像分割",
+                                        MessageBoxButton.OK,
+                                        MessageBoxImage.Warning);
+                                }
+
+                                if (Dispatcher.CheckAccess())
+                                    ShowGroundingAlert();
+                                else
+                                    Dispatcher.Invoke(ShowGroundingAlert);
+                                throw new FlowExecutionGracefulStopException("文本 grounding 失败，流程已中止。", ex);
+                            }
+
+                            boxOrig = pair.box;
+                            groundingJson = JsonSerializer.Serialize(new
+                            {
+                                mode = "text",
+                                query = textPrompt,
+                                score = pair.score,
+                                box = new { x1 = pair.box.X1, y1 = pair.box.Y1, x2 = pair.box.X2, y2 = pair.box.Y2 },
+                            });
+                        }
+                        else if (promptPts != null && promptPts.Length > 0)
+                        {
+                            groundingJson = JsonSerializer.Serialize(new { mode = "points", count = promptPts.Length });
+                        }
+                        else
+                        {
+                            groundingJson = JsonSerializer.Serialize(new { mode = "fallback_click", x = fx, y = fy });
+                        }
+
+                        var seg = SamOnnxSegmentation.Run(samImg, promptPts, fx, fy, encAbs, decAbs, th, useGpu, boxOrig);
+                        node.Outputs["Mask"] = seg.Mask;
+                        if (seg.Mask2 != null) node.Outputs["Mask2"] = seg.Mask2;
+                        if (seg.Mask3 != null) node.Outputs["Mask3"] = seg.Mask3;
+                        if (seg.Mask4 != null) node.Outputs["Mask4"] = seg.Mask4;
+                        node.Outputs["Vis"] = seg.Vis;
+                        node.Outputs["GroundingJson"] = groundingJson;
+                        node.ResultSummary = textPrompt.Length > 0
+                            ? $"SAM 文本→框「{textPrompt}」，候选×{seg.MaskCandidateCount}，最佳 IoU≈{seg.IouPrediction:F3}"
+                            : $"SAM 候选×{seg.MaskCandidateCount}，最佳 IoU≈{seg.IouPrediction:F3}";
+                        break;
+                    }
+
                     case "chessboard_find_corners":
                     {
                         var chessImg = inputs["Image"] as CalibImage;
@@ -5889,6 +6134,15 @@ namespace CalibOperatorCLI_Example
                 SetNodeStatus(node, false);
                 UpdateNodeSummary(node);
             }
+            catch (FlowExecutionGracefulStopException ex)
+            {
+                node.ErrorMessage = ex.InnerException != null
+                    ? $"{ex.Message} {ex.InnerException.Message}"
+                    : ex.Message;
+                node.Executed = false;
+                SetNodeStatus(node, false, true);
+                throw;
+            }
             catch (Exception ex)
             {
                 node.ErrorMessage = ex.Message;
@@ -6220,7 +6474,7 @@ namespace CalibOperatorCLI_Example
 
         /// <summary>
         /// 显示图像预览窗口，支持缩放和平移，可选叠加点位
-        /// 滚轮缩放，左键拖拽平移，右键/F 适应窗口，1 重置100%
+        /// 滚轮缩放；右键按住拖拽平移（轻微移动仍可弹出菜单）；右键菜单或 F 适应窗口，1 重置100%
         /// </summary>
         private void ShowImagePreview(CalibImage? img, Point2D[]? overlayPoints = null, int dotRadius = 3, CalibImage? backgroundImg = null)
         {
@@ -6292,180 +6546,217 @@ namespace CalibOperatorCLI_Example
             bmp.Dispose();
 
             string previewTitle = overlayPoints != null ? $"图像预览 ({overlayPoints.Length} 个点)" : "图像预览";
-            if (_livePreviewWindow != null && _livePreviewWindow.IsVisible && _livePreviewImageCtrl != null)
+            int imgW = baseSource.Width;
+            int imgH = baseSource.Height;
+
+            void OpenOrUpdateLivePreviewOnUiThread()
             {
-                _livePreviewWindow.Title = previewTitle;
-                _livePreviewImageCtrl.Source = bitmapSource;
-                return;
-            }
-
-            var win = new Window
-            {
-                Title = previewTitle,
-                Width = Math.Min(baseSource.Width + 40, 1400),
-                Height = Math.Min(baseSource.Height + 60, 950),
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Owner = Window.GetWindow(this),
-                Background = SystemColors.ControlDarkDarkBrush
-            };
-
-            // ---- 缩放/平移核心 ----
-            var scaleTransform = new ScaleTransform(1.0, 1.0);
-            var translateTransform = new TranslateTransform(0, 0);
-            var transformGroup = new TransformGroup();
-            transformGroup.Children.Add(scaleTransform);
-            transformGroup.Children.Add(translateTransform);
-
-            // 外层：剪裁区域（防止图像超出窗口）
-            var border = new Border { ClipToBounds = true };
-            // 内层：承载图像，应用变换
-            var canvas = new System.Windows.Controls.Canvas { RenderTransform = transformGroup, RenderTransformOrigin = new Point(0, 0) };
-            var imageCtrl = new System.Windows.Controls.Image { Source = bitmapSource, Width = baseSource.Width, Height = baseSource.Height };
-            _livePreviewImageCtrl = imageCtrl;
-            canvas.Children.Add(imageCtrl);
-            border.Child = canvas;
-
-            // 缩放比例标签
-            var zoomText = new TextBlock
-            {
-                Text = "100%",
-                Foreground = Brushes.White,
-                FontSize = 14,
-                FontWeight = FontWeights.Bold,
-                Padding = new Thickness(8, 4, 8, 4),
-                Background = new SolidColorBrush(Color.FromArgb(160, 0, 0, 0)),
-                HorizontalAlignment = HorizontalAlignment.Right,
-                VerticalAlignment = VerticalAlignment.Top
-            };
-
-            var rootPanel = new Grid();
-            rootPanel.Children.Add(border);
-            rootPanel.Children.Add(zoomText);
-
-            win.Content = rootPanel;
-
-            // ---- 状态 ----
-            bool isPanning = false;
-            Point panStart = default;
-            double panOffsetX0 = 0, panOffsetY0 = 0;
-
-            // ---- 鼠标滚轮缩放（以鼠标位置为中心） ----
-            border.MouseWheel += (_, e) =>
-            {
-                var pos = e.GetPosition(border);
-                double factor = e.Delta > 0 ? 1.15 : 1.0 / 1.15;
-                double newScale = scaleTransform.ScaleX * factor;
-                newScale = Math.Max(0.05, Math.Min(newScale, 50.0));
-
-                // 以鼠标位置为锚点缩放
-                translateTransform.X = pos.X - (pos.X - translateTransform.X) * (newScale / scaleTransform.ScaleX);
-                translateTransform.Y = pos.Y - (pos.Y - translateTransform.Y) * (newScale / scaleTransform.ScaleY);
-                scaleTransform.ScaleX = newScale;
-                scaleTransform.ScaleY = newScale;
-
-                zoomText.Text = $"{(int)(newScale * 100)}%";
-            };
-
-            // ---- 左键拖拽平移 ----
-            border.MouseLeftButtonDown += (_, e) =>
-            {
-                if (e.LeftButton == MouseButtonState.Pressed)
+                if (_livePreviewWindow != null && _livePreviewWindow.IsVisible && _livePreviewImageCtrl != null)
                 {
-                    isPanning = true;
-                    panStart = e.GetPosition(border);
-                    panOffsetX0 = translateTransform.X;
-                    panOffsetY0 = translateTransform.Y;
-                    border.Cursor = Cursors.ScrollAll;
-                    border.CaptureMouse();
-                    e.Handled = true;
+                    _livePreviewWindow.Title = previewTitle;
+                    _livePreviewImageCtrl.Source = bitmapSource;
+                    return;
                 }
-            };
-            border.MouseMove += (_, e) =>
-            {
-                if (isPanning)
-                {
-                    var cur = e.GetPosition(border);
-                    translateTransform.X = panOffsetX0 + (cur.X - panStart.X);
-                    translateTransform.Y = panOffsetY0 + (cur.Y - panStart.Y);
-                }
-            };
-            border.MouseLeftButtonUp += (_, e) =>
-            {
-                if (isPanning)
-                {
-                    isPanning = false;
-                    border.ReleaseMouseCapture();
-                    border.Cursor = null;
-                }
-            };
 
-            // ---- 中键/右键双击 适应窗口 ----
-            void FitToView()
-            {
-                double scaleX = border.ActualWidth / baseSource.Width;
-                double scaleY = border.ActualHeight / baseSource.Height;
-                double fitScale = Math.Min(scaleX, scaleY) * 0.95;
-                fitScale = Math.Max(fitScale, 0.05);
-                scaleTransform.ScaleX = fitScale;
-                scaleTransform.ScaleY = fitScale;
-                double offsetX = (border.ActualWidth - baseSource.Width * fitScale) / 2;
-                double offsetY = (border.ActualHeight - baseSource.Height * fitScale) / 2;
-                translateTransform.X = offsetX;
-                translateTransform.Y = offsetY;
-                zoomText.Text = $"{(int)(fitScale * 100)}%";
-            }
-
-            border.MouseRightButtonDown += (_, e) => { e.Handled = true; };
-
-            // 键盘快捷键
-            win.KeyDown += (_, e) =>
-            {
-                if (e.Key == Key.F)
+                var win = new Window
                 {
-                    FitToView();
-                    e.Handled = true;
-                }
-                else if (e.Key == Key.D1 || e.Key == Key.NumPad1)
+                    Title = previewTitle,
+                    Width = Math.Min(imgW + 40, 1400),
+                    Height = Math.Min(imgH + 60, 950),
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    Owner = Window.GetWindow(this),
+                    Background = SystemColors.ControlDarkDarkBrush
+                };
+
+                // ---- 缩放/平移核心 ----
+                var scaleTransform = new ScaleTransform(1.0, 1.0);
+                var translateTransform = new TranslateTransform(0, 0);
+                var transformGroup = new TransformGroup();
+                transformGroup.Children.Add(scaleTransform);
+                transformGroup.Children.Add(translateTransform);
+
+                // 外层：剪裁区域（防止图像超出窗口）
+                var border = new Border { ClipToBounds = true };
+                // 内层：承载图像，应用变换
+                var canvas = new System.Windows.Controls.Canvas { RenderTransform = transformGroup, RenderTransformOrigin = new Point(0, 0) };
+                var imageCtrl = new System.Windows.Controls.Image { Source = bitmapSource, Width = imgW, Height = imgH };
+                _livePreviewImageCtrl = imageCtrl;
+                canvas.Children.Add(imageCtrl);
+                border.Child = canvas;
+
+                // 缩放比例标签
+                var zoomText = new TextBlock
+                {
+                    Text = "100%",
+                    Foreground = Brushes.White,
+                    FontSize = 14,
+                    FontWeight = FontWeights.Bold,
+                    Padding = new Thickness(8, 4, 8, 4),
+                    Background = new SolidColorBrush(Color.FromArgb(160, 0, 0, 0)),
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Top
+                };
+
+                var rootPanel = new Grid();
+                rootPanel.Children.Add(border);
+                rootPanel.Children.Add(zoomText);
+
+                win.Content = rootPanel;
+
+                // ---- 右键拖拽平移（超过阈值才捕获，单击保留 ContextMenu）----
+                bool rightPanAwait = false;
+                Point rightPanDownPos = default;
+                bool rightPanning = false;
+                Point rightPanGrabPos = default;
+                double rightPanTx0 = 0, rightPanTy0 = 0;
+
+                var previewContextMenu = new ContextMenu();
+                var miFit = new MenuItem { Header = "适应窗口" };
+                miFit.Click += (_, _) => FitToView();
+                var mi100 = new MenuItem { Header = "实际大小 (100%)" };
+                mi100.Click += (_, _) =>
                 {
                     scaleTransform.ScaleX = 1.0;
                     scaleTransform.ScaleY = 1.0;
                     translateTransform.X = 0;
                     translateTransform.Y = 0;
                     zoomText.Text = "100%";
-                    e.Handled = true;
-                }
-                else if (e.Key == Key.OemPlus || e.Key == Key.Add)
-                {
-                    double newScale = Math.Min(scaleTransform.ScaleX * 1.2, 50.0);
-                    double cx = border.ActualWidth / 2, cy = border.ActualHeight / 2;
-                    translateTransform.X = cx - (cx - translateTransform.X) * (newScale / scaleTransform.ScaleX);
-                    translateTransform.Y = cy - (cy - translateTransform.Y) * (newScale / scaleTransform.ScaleY);
-                    scaleTransform.ScaleX = scaleTransform.ScaleY = newScale;
-                    zoomText.Text = $"{(int)(newScale * 100)}%";
-                    e.Handled = true;
-                }
-                else if (e.Key == Key.OemMinus || e.Key == Key.Subtract)
-                {
-                    double newScale = Math.Max(scaleTransform.ScaleX / 1.2, 0.05);
-                    double cx = border.ActualWidth / 2, cy = border.ActualHeight / 2;
-                    translateTransform.X = cx - (cx - translateTransform.X) * (newScale / scaleTransform.ScaleX);
-                    translateTransform.Y = cy - (cy - translateTransform.Y) * (newScale / scaleTransform.ScaleY);
-                    scaleTransform.ScaleX = scaleTransform.ScaleY = newScale;
-                    zoomText.Text = $"{(int)(newScale * 100)}%";
-                    e.Handled = true;
-                }
-            };
+                };
+                previewContextMenu.Items.Add(miFit);
+                previewContextMenu.Items.Add(mi100);
+                border.ContextMenu = previewContextMenu;
 
-            // 窗口打开后自适应
-            win.ContentRendered += (_, _) => FitToView();
-            win.Closed += (_, _) =>
-            {
-                _livePreviewWindow = null;
-                _livePreviewImageCtrl = null;
-            };
+                // ---- 鼠标滚轮缩放（以鼠标位置为中心） ----
+                border.MouseWheel += (_, e) =>
+                {
+                    var pos = e.GetPosition(border);
+                    double factor = e.Delta > 0 ? 1.15 : 1.0 / 1.15;
+                    double newScale = scaleTransform.ScaleX * factor;
+                    newScale = Math.Max(0.05, Math.Min(newScale, 50.0));
 
-            _livePreviewWindow = win;
-            win.Show();
+                    translateTransform.X = pos.X - (pos.X - translateTransform.X) * (newScale / scaleTransform.ScaleX);
+                    translateTransform.Y = pos.Y - (pos.Y - translateTransform.Y) * (newScale / scaleTransform.ScaleY);
+                    scaleTransform.ScaleX = newScale;
+                    scaleTransform.ScaleY = newScale;
+
+                    zoomText.Text = $"{(int)(newScale * 100)}%";
+                };
+
+                border.PreviewMouseRightButtonDown += (_, e) =>
+                {
+                    rightPanAwait = true;
+                    rightPanDownPos = e.GetPosition(border);
+                    rightPanning = false;
+                };
+                border.PreviewMouseMove += (_, e) =>
+                {
+                    if (!rightPanAwait || e.RightButton != MouseButtonState.Pressed)
+                        return;
+
+                    var cur = e.GetPosition(border);
+                    if (!rightPanning)
+                    {
+                        double rdx = cur.X - rightPanDownPos.X;
+                        double rdy = cur.Y - rightPanDownPos.Y;
+                        if (rdx * rdx + rdy * rdy < 36)
+                            return;
+                        rightPanning = true;
+                        rightPanGrabPos = cur;
+                        rightPanTx0 = translateTransform.X;
+                        rightPanTy0 = translateTransform.Y;
+                        border.CaptureMouse();
+                        border.Cursor = Cursors.ScrollAll;
+                        e.Handled = true;
+                        return;
+                    }
+
+                    translateTransform.X = rightPanTx0 + (cur.X - rightPanGrabPos.X);
+                    translateTransform.Y = rightPanTy0 + (cur.Y - rightPanGrabPos.Y);
+                    e.Handled = true;
+                };
+                border.PreviewMouseRightButtonUp += (_, e) =>
+                {
+                    if (rightPanning)
+                    {
+                        border.ReleaseMouseCapture();
+                        border.Cursor = null;
+                        rightPanning = false;
+                        e.Handled = true;
+                    }
+
+                    rightPanAwait = false;
+                };
+
+                void FitToView()
+                {
+                    double scaleX = border.ActualWidth / imgW;
+                    double scaleY = border.ActualHeight / imgH;
+                    double fitScale = Math.Min(scaleX, scaleY) * 0.95;
+                    fitScale = Math.Max(fitScale, 0.05);
+                    scaleTransform.ScaleX = fitScale;
+                    scaleTransform.ScaleY = fitScale;
+                    double offsetX = (border.ActualWidth - imgW * fitScale) / 2;
+                    double offsetY = (border.ActualHeight - imgH * fitScale) / 2;
+                    translateTransform.X = offsetX;
+                    translateTransform.Y = offsetY;
+                    zoomText.Text = $"{(int)(fitScale * 100)}%";
+                }
+
+                // 键盘快捷键
+                win.KeyDown += (_, e) =>
+                {
+                    if (e.Key == Key.F)
+                    {
+                        FitToView();
+                        e.Handled = true;
+                    }
+                    else if (e.Key == Key.D1 || e.Key == Key.NumPad1)
+                    {
+                        scaleTransform.ScaleX = 1.0;
+                        scaleTransform.ScaleY = 1.0;
+                        translateTransform.X = 0;
+                        translateTransform.Y = 0;
+                        zoomText.Text = "100%";
+                        e.Handled = true;
+                    }
+                    else if (e.Key == Key.OemPlus || e.Key == Key.Add)
+                    {
+                        double newScale = Math.Min(scaleTransform.ScaleX * 1.2, 50.0);
+                        double cx = border.ActualWidth / 2, cy = border.ActualHeight / 2;
+                        translateTransform.X = cx - (cx - translateTransform.X) * (newScale / scaleTransform.ScaleX);
+                        translateTransform.Y = cy - (cy - translateTransform.Y) * (newScale / scaleTransform.ScaleY);
+                        scaleTransform.ScaleX = scaleTransform.ScaleY = newScale;
+                        zoomText.Text = $"{(int)(newScale * 100)}%";
+                        e.Handled = true;
+                    }
+                    else if (e.Key == Key.OemMinus || e.Key == Key.Subtract)
+                    {
+                        double newScale = Math.Max(scaleTransform.ScaleX / 1.2, 0.05);
+                        double cx = border.ActualWidth / 2, cy = border.ActualHeight / 2;
+                        translateTransform.X = cx - (cx - translateTransform.X) * (newScale / scaleTransform.ScaleX);
+                        translateTransform.Y = cy - (cy - translateTransform.Y) * (newScale / scaleTransform.ScaleY);
+                        scaleTransform.ScaleX = scaleTransform.ScaleY = newScale;
+                        zoomText.Text = $"{(int)(newScale * 100)}%";
+                        e.Handled = true;
+                    }
+                };
+
+                // 窗口打开后自适应
+                win.ContentRendered += (_, _) => FitToView();
+                win.Closed += (_, _) =>
+                {
+                    _livePreviewWindow = null;
+                    _livePreviewImageCtrl = null;
+                };
+
+                _livePreviewWindow = win;
+                win.Show();
+            }
+
+            if (Dispatcher.CheckAccess())
+                OpenOrUpdateLivePreviewOnUiThread();
+            else
+                Dispatcher.Invoke(OpenOrUpdateLivePreviewOnUiThread);
         }
 
         private void ShowContoursPreview(ValueTuple<int[], int[], int[], int> contourData, CalibImage? baseImg = null)
@@ -6706,8 +6997,21 @@ namespace CalibOperatorCLI_Example
                         StatusText.Text = $"执行前置 [{i + 1}/{preNodes.Count}] {node.Def.DisplayName}...";
                         AppendLog($"[PRE {i + 1}/{preNodes.Count}] 执行: {node.Def.DisplayName}");
                         await System.Threading.Tasks.Task.Yield();
-                        ExecuteNode(node);
-                        successCountPre++;
+                        try
+                        {
+                            await ExecuteNodeForRunAsync(node);
+                            successCountPre++;
+                        }
+                        catch (FlowExecutionGracefulStopException ex)
+                        {
+                            AppendLog($"[PRE][STOP] {node.Def.DisplayName}: {ex.Message}", true);
+                            if (ex.InnerException != null)
+                                AppendLog($"  {ex.InnerException.Message}", true);
+                            StatusText.Text = ex.Message;
+                            StatusText.Foreground = new SolidColorBrush(Colors.Orange);
+                            AppendLog("========== 执行中止 ==========");
+                            return false;
+                        }
                     }
 
                     int deviceIndex = int.TryParse(loopNode.Params.GetValueOrDefault("deviceIndex"), out var di) ? di : 0;
@@ -6753,7 +7057,20 @@ namespace CalibOperatorCLI_Example
                             node.Executed = false;
                             StatusText.Text = $"Frame[{fi + 1}/{frameCount}] 执行 [{j + 1}/{postNodes.Count}] {node.Def.DisplayName}...";
                             await System.Threading.Tasks.Task.Yield();
-                            ExecuteNode(node);
+                            try
+                            {
+                                await ExecuteNodeForRunAsync(node);
+                            }
+                            catch (FlowExecutionGracefulStopException ex)
+                            {
+                                AppendLog($"[FRAME][STOP] {node.Def.DisplayName}: {ex.Message}", true);
+                                if (ex.InnerException != null)
+                                    AppendLog($"  {ex.InnerException.Message}", true);
+                                StatusText.Text = ex.Message;
+                                StatusText.Foreground = new SolidColorBrush(Colors.Orange);
+                                AppendLog("========== 执行中止 ==========");
+                                return false;
+                            }
                         }
 
                         if (intervalMs > 0 && fi < frameCount - 1)
@@ -6780,9 +7097,19 @@ namespace CalibOperatorCLI_Example
                     await System.Threading.Tasks.Task.Yield();
                     try
                     {
-                        ExecuteNode(node);
+                        await ExecuteNodeForRunAsync(node);
                         successCount++;
                         AppendLog($"  -> OK: {node.Def.DisplayName}");
+                    }
+                    catch (FlowExecutionGracefulStopException ex)
+                    {
+                        AppendLog($"  -> [STOP] {node.Def.DisplayName}: {ex.Message}", true);
+                        if (ex.InnerException != null)
+                            AppendLog($"     {ex.InnerException.Message}", true);
+                        StatusText.Text = ex.Message;
+                        StatusText.Foreground = new SolidColorBrush(Colors.Orange);
+                        AppendLog("========== 执行中止 ==========");
+                        return false;
                     }
                     catch (Exception ex)
                     {
@@ -6797,6 +7124,16 @@ namespace CalibOperatorCLI_Example
                 StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
                 AppendLog($"========== 执行完成(托管回退): {successCount}/{sorted.Count} ==========");
                 return true;
+            }
+            catch (FlowExecutionGracefulStopException ex)
+            {
+                StatusText.Text = ex.Message;
+                StatusText.Foreground = new SolidColorBrush(Colors.Orange);
+                AppendLog($"[STOP] {ex.Message}", true);
+                if (ex.InnerException != null)
+                    AppendLog($"  {ex.InnerException.Message}", true);
+                AppendLog("========== 执行中止 ==========");
+                return false;
             }
             catch (Exception ex)
             {
