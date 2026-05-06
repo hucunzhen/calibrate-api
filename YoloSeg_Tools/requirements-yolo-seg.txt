@@ -1,3 +1,4 @@
-# YOLO-Seg 自动标注与训练（Ultralytics）；需 Python 3.9+
-ultralytics>=8.3.0
+# YOLO-Seg auto-label + train (Ultralytics). Python 3.9+.
+# YOLO11 weights (yolo11*-seg.pt) need a recent ultralytics release.
+ultralytics>=8.3.40
 PyYAML>=6.0

@@ -5,7 +5,7 @@ Ultralytics YOLO-Seg 训练入口（便于从工具界面调用）。
 若 data.yaml 中含顶层键 ``augment``（几何/颜色增强），将一并传入 ``model.train()``，
 与 Ultralytics 默认参数合并（后者可被覆盖）。
 
-  python train_seg.py --data .../data.yaml --weights yolov8m-seg.pt --epochs 100 --imgsz 640 --batch 4
+  python train_seg.py --data .../data.yaml --weights yolo11m-seg.pt --epochs 100 --imgsz 640 --batch 4
 
 工作目录建议设为数据集根目录，runs 会生成在当前目录下。
 """
@@ -67,7 +67,12 @@ def _load_augment_from_data_yaml(data_path: Path) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser(description="YOLO-Seg 训练")
     ap.add_argument("--data", required=True, type=Path, help="data.yaml 路径")
-    ap.add_argument("--weights", type=str, default="yolov8m-seg.pt")
+    ap.add_argument(
+        "--weights",
+        type=str,
+        default="yolo11m-seg.pt",
+        help="预训练分割权重（YOLO11：yolo11n/s/m/l/x-seg.pt；仍可用 yolov8m-seg.pt 等）",
+    )
     ap.add_argument("--epochs", type=int, default=100)
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--batch", type=int, default=8)

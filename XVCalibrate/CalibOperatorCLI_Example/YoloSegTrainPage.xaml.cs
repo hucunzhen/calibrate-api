@@ -34,7 +34,7 @@ namespace CalibOperatorCLI_Example
         {
             InitializeComponent();
             Loaded += (_, _) => RefreshAnnotClassCombo();
-            AppendLog("提示：请先在本机执行 pip install ultralytics（或 pip install -r YoloSeg_Tools/requirements-yolo-seg.txt）。");
+            AppendLog("提示：默认使用 YOLO11 预训练名（如 yolo11m-seg.pt）；请先 pip install -U -r YoloSeg_Tools/requirements-yolo-seg.txt。");
         }
 
         private void AppendLog(string line)
@@ -719,7 +719,7 @@ namespace CalibOperatorCLI_Example
                 string scriptAbs = ResolveScriptOrThrow(TxtAutoLabelScript.Text);
                 string weights = TxtWeights.Text.Trim();
                 if (string.IsNullOrWhiteSpace(weights))
-                    weights = "yolov8m-seg.pt";
+                    weights = "yolo11m-seg.pt";
 
                 if (!double.TryParse(TxtConf.Text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double conf))
                     conf = 0.25;
@@ -785,7 +785,7 @@ namespace CalibOperatorCLI_Example
                 string trainScript = ResolveScriptOrThrow(TxtTrainScript.Text);
                 string weights = TxtWeights.Text.Trim();
                 if (string.IsNullOrWhiteSpace(weights))
-                    weights = "yolov8m-seg.pt";
+                    weights = "yolo11m-seg.pt";
 
                 int epochs = int.TryParse(TxtEpochs.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var ep) ? ep : 100;
                 int imgsz = int.TryParse(TxtImgSz.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var iz) ? iz : 640;

@@ -7,7 +7,7 @@
         <StackPanel MaxWidth="980">
             <TextBlock Text="YOLO-Seg 数据集与训练" FontSize="18" FontWeight="Bold" Margin="0,0,0,8"/>
             <TextBlock TextWrapping="Wrap" Foreground="#444" Margin="0,0,0,12"
-                       Text="流程：① 路径与导入图像 → ② 填写类别并生成 data.yaml（含 augment 训练增强）→ ③ 自动标注 → ④ 画布校对 → ⑤ 训练（train_seg.py 会读取 augment）。自动标注需 pip install ultralytics。"/>
+                       Text="流程：① 路径与导入图像 → ② 填写类别并生成 data.yaml（含 augment 训练增强）→ ③ 自动标注 → ④ 画布校对 → ⑤ 训练（train_seg.py 会读取 augment）。默认预训练为 Ultralytics YOLO11（yolo11m-seg.pt）；请 pip install -U -r YoloSeg_Tools/requirements-yolo-seg.txt。"/>
 
             <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
                 <StackPanel>
@@ -135,8 +135,8 @@
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Python" VerticalAlignment="Center" Margin="0,4"/>
                         <TextBox x:Name="TxtPython" Grid.Row="0" Grid.Column="1" Text="python" Height="24" VerticalContentAlignment="Center" Margin="4,4,0,4"/>
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="预训练权重" VerticalAlignment="Center" Margin="0,4"/>
-                        <TextBox x:Name="TxtWeights" Grid.Row="1" Grid.Column="1" Text="yolov8m-seg.pt" Height="24" VerticalContentAlignment="Center" Margin="4,4,0,4"
-                                 ToolTip="Ultralytics 预训练分割权重；更大可用 yolov8l-seg.pt / yolov8x-seg.pt（显存占用更高）"/>
+                        <TextBox x:Name="TxtWeights" Grid.Row="1" Grid.Column="1" Text="yolo11m-seg.pt" Height="24" VerticalContentAlignment="Center" Margin="4,4,0,4"
+                                 ToolTip="Ultralytics YOLO11 预训练分割权重（首次会自动下载）。更大：yolo11l-seg.pt / yolo11x-seg.pt；沿用旧版可填 yolov8m-seg.pt"/>
                         <TextBlock Grid.Row="2" Grid.Column="0" Text="置信度 conf" VerticalAlignment="Center" Margin="0,4"/>
                         <TextBox x:Name="TxtConf" Grid.Row="2" Grid.Column="1" Text="0.25" Width="80" HorizontalAlignment="Left" Height="24" VerticalContentAlignment="Center" Margin="4,4,0,4"/>
                         <TextBlock Grid.Row="3" Grid.Column="0" Text="单一类别 id" VerticalAlignment="Center" Margin="0,4"/>
