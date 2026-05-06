@@ -208,6 +208,38 @@
 
             <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
                 <StackPanel>
+                    <TextBlock FontWeight="Bold" Text="单张推理（predict_seg）" Margin="0,0,0,6"/>
+                    <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="#555" Margin="0,0,0,8"
+                               Text="调用上方 Python 与预训练/自定义权重，运行 YoloSeg_Tools/predict_seg.py。推理 imgsz 可与训练不同：更大往往轮廓更细但更慢、更占显存；与 Flow 里「YOLO分割推理」节点的 imgsz 含义相同。"/>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="推理 imgsz" VerticalAlignment="Center" Margin="0,4"/>
+                        <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Margin="4,4,0,4">
+                            <TextBox x:Name="TxtInferImgsz" Text="640" Width="56" Height="24" VerticalContentAlignment="Center"
+                                     ToolTip="0 = Ultralytics 使用模型默认；常用 640 / 960 / 1280"/>
+                            <TextBlock Text="0=默认" VerticalAlignment="Center" Margin="10,0,0,0" FontSize="11" Foreground="#666"/>
+                        </StackPanel>
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="输入图像" VerticalAlignment="Center" Margin="0,4"/>
+                        <TextBox x:Name="TxtInferImagePath" Grid.Row="1" Grid.Column="1" Height="24" VerticalContentAlignment="Center" Margin="4,4"/>
+                        <Button x:Name="BtnBrowseInferImage" Grid.Row="1" Grid.Column="2" Content="浏览…" Width="72" Height="26" Margin="4,4,0,4" Click="BtnBrowseInferImage_Click"/>
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="推理脚本" VerticalAlignment="Center" Margin="0,4"/>
+                        <TextBox x:Name="TxtInferScript" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Text="YoloSeg_Tools/predict_seg.py" Height="24" VerticalContentAlignment="Center" Margin="4,4,0,4"/>
+                    </Grid>
+                    <Button x:Name="BtnRunInferSeg" Content="运行单张推理" Width="140" Height="30" HorizontalAlignment="Left" Click="BtnRunInferSeg_Click"/>
+                </StackPanel>
+            </Border>
+
+            <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                <StackPanel>
                     <TextBlock FontWeight="Bold" Text="单张画布标注（YOLO-Seg 多边形）" Margin="0,0,0,4"/>
                     <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="#555"
                                Text="左键点击加点，右键撤销一点；点数≥3 后点「闭合当前多边形」形成实例。标签写入数据集根目录下 labels/train，主文件名与图像相同（.txt）。打开图像时若已有标签会自动加载。"/>

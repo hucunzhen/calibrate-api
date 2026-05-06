@@ -438,7 +438,13 @@ namespace CalibOperatorCLI_Example
                         Description = "best.pt 或 last.pt；相对路径从 exe 向上查找仓库根"
                     },
                     new OperatorParam { Name = "conf", DisplayName = "置信度阈值", DefaultValue = "0.25", Description = "与 Ultralytics predict conf 一致" },
-                    new OperatorParam { Name = "imgsz", DisplayName = "推理边长", DefaultValue = "0", Description = "0=模型默认；否则如 640" },
+                    new OperatorParam
+                    {
+                        Name = "imgsz",
+                        DisplayName = "推理 imgsz",
+                        DefaultValue = "640",
+                        Description = "predict 输入缩放边长；0=Ultralytics 模型默认。可与训练 imgsz 不同，常用 640/960/1280（越大越细越慢占显存）"
+                    },
                     new OperatorParam { Name = "useGpu", DisplayName = "使用 CUDA", DefaultValue = "false", Description = "true 时 device=cuda:0" },
                     new OperatorParam { Name = "timeoutSec", DisplayName = "超时(秒)", DefaultValue = "120", Description = "单张推理超时，至少 15" },
                     new OperatorParam

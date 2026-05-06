@@ -19,7 +19,7 @@
         "scriptPath": "YoloSeg_Tools/predict_seg.py",
         "weightsPath": "yolo_data/runs/segment/train-2/weights/best.pt",
         "conf": "0.25",
-        "imgsz": "0",
+        "imgsz": "640",
         "useGpu": "false",
         "timeoutSec": "120"
       }

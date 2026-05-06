@@ -984,5 +984,109 @@ namespace CalibOperatorCLI_Example
                 BtnTrain.IsEnabled = true;
             }
         }
+
+        private void BtnBrowseInferImage_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new Microsoft.Win32.OpenFileDialog
+            {
+                Filter = "图像|*.bmp;*.png;*.jpg;*.jpeg;*.tif;*.tiff;*.webp|所有文件|*.*",
+                Title = "选择推理输入图像",
+            };
+            if (dlg.ShowDialog() == true)
+                TxtInferImagePath.Text = dlg.FileName;
+        }
+
+        private async void BtnRunInferSeg_Click(object sender, RoutedEventArgs e)
+        {
+            BtnRunInferSeg.IsEnabled = false;
+            try
+            {
+                string imgPath = TxtInferImagePath.Text.Trim();
+                if (string.IsNullOrWhiteSpace(imgPath) || !File.Exists(imgPath))
+                    throw new InvalidOperationException("请选择存在的输入图像文件。");
+
+                string py = TxtPython.Text.Trim();
+                if (string.IsNullOrWhiteSpace(py))
+                    throw new InvalidOperationException("请填写 Python 可执行文件。");
+
+                string scriptAbs = ResolveScriptOrThrow(TxtInferScript.Text);
+                string weightsRel = TxtWeights.Text.Trim();
+                if (string.IsNullOrWhiteSpace(weightsRel))
+                    weightsRel = "yolo11m-seg.pt";
+                string weightsAbs = SamOnnxSegmentation.ResolveModelPath(weightsRel);
+
+                if (!double.TryParse(TxtConf.Text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double conf))
+                    conf = 0.25;
+                conf = Math.Clamp(conf, 0.01, 1.0);
+
+                int inferImgsz = int.TryParse(TxtInferImgsz.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var infIz)
+                    ? infIz
+                    : 640;
+                inferImgsz = Math.Max(0, inferImgsz);
+
+                string device = TxtDevice.Text.Trim();
+
+                string tmpDir = IoPath.Combine(IoPath.GetTempPath(), "calibrate_yoloseg_infer_" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(tmpDir);
+                string outVis = IoPath.Combine(tmpDir, "infer_vis.bmp");
+                string outJson = IoPath.Combine(tmpDir, "infer_det.json");
+
+                AppendLog($"单张推理… imgsz={(inferImgsz == 0 ? "默认" : inferImgsz.ToString(CultureInfo.InvariantCulture))}");
+
+                var argsList = new List<string>
+                {
+                    scriptAbs,
+                    "--input",
+                    IoPath.GetFullPath(imgPath),
+                    "--weights",
+                    weightsAbs,
+                    "--output-vis",
+                    outVis,
+                    "--output-json",
+                    outJson,
+                    "--conf",
+                    conf.ToString(CultureInfo.InvariantCulture),
+                };
+                if (inferImgsz > 0)
+                {
+                    argsList.Add("--imgsz");
+                    argsList.Add(inferImgsz.ToString(CultureInfo.InvariantCulture));
+                }
+
+                if (!string.IsNullOrEmpty(device))
+                {
+                    argsList.Add("--device");
+                    argsList.Add(device);
+                }
+
+                string workDir = IoPath.GetDirectoryName(scriptAbs) ?? Environment.CurrentDirectory;
+                int exit = await RunPythonStreamingAsync(py, workDir, argsList).ConfigureAwait(true);
+
+                if (exit == 0)
+                {
+                    AppendLog($"推理完成: {outVis}");
+                    AppendLog($"JSON: {outJson}");
+                    System.Windows.MessageBox.Show(
+                        $"可视化已写入:\n{outVis}\n\n检测 JSON:\n{outJson}",
+                        "单张推理",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                }
+                else
+                {
+                    AppendLog($"推理退出码: {exit}");
+                    System.Windows.MessageBox.Show($"Python 退出码 {exit}，详见日志。", "单张推理", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog("推理错误: " + ex.Message);
+                System.Windows.MessageBox.Show(ex.Message, "单张推理", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                BtnRunInferSeg.IsEnabled = true;
+            }
+        }
     }
 }
