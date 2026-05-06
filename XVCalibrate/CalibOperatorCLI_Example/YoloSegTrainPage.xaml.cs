@@ -12,6 +12,7 @@ using System.Windows.Forms;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using IoPath = System.IO.Path;
 
 namespace CalibOperatorCLI_Example
@@ -30,6 +31,9 @@ namespace CalibOperatorCLI_Example
         private readonly List<System.Windows.Point> _annotDraft = new List<System.Windows.Point>();
         private readonly List<(int ClassId, List<System.Windows.Point> Points)> _annotInstances = new List<(int, List<System.Windows.Point>)>();
 
+        private ScrollViewer? _logScrollViewer;
+        private bool _logStickToEnd = true;
+
         public YoloSegTrainPage()
         {
             InitializeComponent();
@@ -37,12 +41,54 @@ namespace CalibOperatorCLI_Example
             AppendLog("提示：默认使用 YOLO11 预训练名（如 yolo11m-seg.pt）；请先 pip install -U -r YoloSeg_Tools/requirements-yolo-seg.txt。");
         }
 
+        private void TxtLog_Loaded(object sender, RoutedEventArgs e)
+        {
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(TryAttachLogScrollViewer));
+        }
+
+        private void TryAttachLogScrollViewer()
+        {
+            if (_logScrollViewer != null)
+                return;
+            _logScrollViewer = FindScrollViewer(TxtLog);
+            if (_logScrollViewer != null)
+                _logScrollViewer.ScrollChanged += LogScrollViewer_ScrollChanged;
+        }
+
+        private void LogScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
+        {
+            if (_logScrollViewer == null || e.ExtentHeight <= 0)
+                return;
+            const double slack = 6.0;
+            _logStickToEnd = e.VerticalOffset >= e.ExtentHeight - e.ViewportHeight - slack;
+        }
+
+        private static ScrollViewer? FindScrollViewer(DependencyObject root)
+        {
+            int n = VisualTreeHelper.GetChildrenCount(root);
+            for (int i = 0; i < n; i++)
+            {
+                var child = VisualTreeHelper.GetChild(root, i);
+                if (child is ScrollViewer sv)
+                    return sv;
+                var nested = FindScrollViewer(child);
+                if (nested != null)
+                    return nested;
+            }
+
+            return null;
+        }
+
         private void AppendLog(string line)
         {
             if (string.IsNullOrEmpty(line)) return;
             string ts = DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
             TxtLog.AppendText($"[{ts}] {line}\r\n");
-            TxtLog.ScrollToEnd();
+            if (_logStickToEnd)
+            {
+                TxtLog.CaretIndex = TxtLog.Text.Length;
+                TxtLog.ScrollToEnd();
+            }
         }
 
         private string RequireDatasetRoot()

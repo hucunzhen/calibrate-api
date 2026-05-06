@@ -3,8 +3,13 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       Title="YOLO分割训练"
       Background="{StaticResource Ui.PageBackground}">
-    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="8">
-        <StackPanel MaxWidth="980">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="3*" MinHeight="160"/>
+            <RowDefinition Height="1*" MinHeight="120"/>
+        </Grid.RowDefinitions>
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="8">
+        <StackPanel HorizontalAlignment="Stretch">
             <TextBlock Text="YOLO-Seg 数据集与训练" FontSize="18" FontWeight="Bold" Margin="0,0,0,8"/>
             <TextBlock TextWrapping="Wrap" Foreground="#444" Margin="0,0,0,12"
                        Text="流程：① 路径与导入图像 → ② 填写类别并生成 data.yaml（含 augment 训练增强）→ ③ 自动标注 → ④ 画布校对 → ⑤ 训练（train_seg.py 会读取 augment）。默认预训练为 Ultralytics YOLO11（yolo11m-seg.pt）；请 pip install -U -r YoloSeg_Tools/requirements-yolo-seg.txt。"/>
@@ -158,17 +163,32 @@
             <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
                 <StackPanel>
                     <TextBlock FontWeight="Bold" Text="训练" Margin="0,0,0,6"/>
-                    <WrapPanel Margin="0,0,0,6">
-                        <TextBlock Text="epochs" VerticalAlignment="Center" Margin="0,0,6,4"/>
-                        <TextBox x:Name="TxtEpochs" Text="100" Width="56" Height="24" VerticalContentAlignment="Center" Margin="0,0,16,4"/>
-                        <TextBlock Text="imgsz" VerticalAlignment="Center" Margin="0,0,6,4"/>
-                        <TextBox x:Name="TxtImgSz" Text="640" Width="56" Height="24" VerticalContentAlignment="Center" Margin="0,0,16,4"/>
-                        <TextBlock Text="batch" VerticalAlignment="Center" Margin="0,0,6,4"/>
-                        <TextBox x:Name="TxtBatch" Text="4" Width="48" Height="24" VerticalContentAlignment="Center" Margin="0,0,16,4"
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Column="0" Text="epochs" VerticalAlignment="Center" Margin="0,0,6,4"/>
+                        <TextBox x:Name="TxtEpochs" Grid.Column="1" Text="100" Width="56" Height="24" VerticalContentAlignment="Center" Margin="0,0,16,4"/>
+                        <TextBlock Grid.Column="2" Text="imgsz" VerticalAlignment="Center" Margin="0,0,6,4"/>
+                        <TextBox x:Name="TxtImgSz" Grid.Column="3" Text="640" Width="56" Height="24" VerticalContentAlignment="Center" Margin="0,0,16,4"/>
+                        <TextBlock Grid.Column="4" Text="batch" VerticalAlignment="Center" Margin="0,0,6,4"/>
+                        <TextBox x:Name="TxtBatch" Grid.Column="5" Text="4" Width="48" Height="24" VerticalContentAlignment="Center" Margin="0,0,16,4"
                                  ToolTip="medium 模型显存占用高于 nano；OOM 时可降到 2"/>
-                        <TextBlock Text="train 脚本" VerticalAlignment="Center" Margin="0,0,6,4"/>
-                        <TextBox x:Name="TxtTrainScript" Text="YoloSeg_Tools/train_seg.py" Width="220" Height="24" VerticalContentAlignment="Center"/>
-                    </WrapPanel>
+                        <TextBlock Grid.Column="6" Text="train 脚本" VerticalAlignment="Center" Margin="0,0,6,4"/>
+                        <TextBox x:Name="TxtTrainScript" Grid.Column="7" Grid.ColumnSpan="3" Text="YoloSeg_Tools/train_seg.py" MinWidth="160" Height="24" VerticalContentAlignment="Center" Margin="0,0,0,4"/>
+                    </Grid>
                     <Button x:Name="BtnTrain" Content="开始训练（工作目录=数据集根目录）" Width="260" Height="30" HorizontalAlignment="Left" Click="BtnTrain_Click"/>
                     <TextBlock Text="权重与曲线默认保存在数据集根目录下的 runs 文件夹。" FontSize="11" Foreground="#666" Margin="0,8,0,0"/>
                 </StackPanel>
@@ -179,15 +199,23 @@
                     <TextBlock FontWeight="Bold" Text="单张画布标注（YOLO-Seg 多边形）" Margin="0,0,0,4"/>
                     <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="#555"
                                Text="左键点击加点，右键撤销一点；点数≥3 后点「闭合当前多边形」形成实例。标签写入数据集根目录下 labels/train，主文件名与图像相同（.txt）。打开图像时若已有标签会自动加载。"/>
-                    <StackPanel Orientation="Horizontal" Margin="0,6,0,4">
-                        <TextBlock Text="视图缩放" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <Button Content="−" Width="28" Height="26" Margin="0,0,4,0" Click="BtnAnnotZoomOut_Click" ToolTip="缩小"/>
-                        <Slider x:Name="AnnotZoomSlider" Width="200" Minimum="0.25" Maximum="8" Value="1" LargeChange="0.25" SmallChange="0.05"
-                                VerticalAlignment="Center" ValueChanged="AnnotZoomSlider_ValueChanged" ToolTip="25%～800%"/>
-                        <Button Content="+" Width="28" Height="26" Margin="4,0,8,0" Click="BtnAnnotZoomIn_Click" ToolTip="放大"/>
-                        <Button Content="1:1" Width="44" Height="26" Margin="0,0,8,0" Click="BtnAnnotZoomReset_Click" ToolTip="重置为 100%"/>
-                        <TextBlock x:Name="TxtAnnotZoomPct" Text="100%" VerticalAlignment="Center" MinWidth="44" Foreground="#444"/>
-                    </StackPanel>
+                    <Grid Margin="0,6,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="视图缩放" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <Button Grid.Column="1" Content="−" Width="28" Height="26" Margin="0,0,4,0" Click="BtnAnnotZoomOut_Click" ToolTip="缩小"/>
+                        <Slider x:Name="AnnotZoomSlider" Grid.Column="2" Minimum="0.25" Maximum="8" Value="1" LargeChange="0.25" SmallChange="0.05"
+                                VerticalAlignment="Center" Margin="0,0,8,0" ValueChanged="AnnotZoomSlider_ValueChanged" ToolTip="25%～800%"/>
+                        <Button Grid.Column="3" Content="+" Width="28" Height="26" Margin="0,0,8,0" Click="BtnAnnotZoomIn_Click" ToolTip="放大"/>
+                        <Button Grid.Column="4" Content="1:1" Width="44" Height="26" Margin="0,0,8,0" Click="BtnAnnotZoomReset_Click" ToolTip="重置为 100%"/>
+                        <TextBlock x:Name="TxtAnnotZoomPct" Grid.Column="5" Text="100%" VerticalAlignment="Center" MinWidth="44" Foreground="#444"/>
+                    </Grid>
                     <TextBlock Text="在画布上按住 Ctrl 并滚轮缩放；放大后可拖动滚动条平移，便于抠细边。" FontSize="10" Foreground="#888" Margin="0,0,0,4"/>
                     <WrapPanel Margin="0,8,0,4">
                         <Button Content="打开图像…" Width="96" Height="26" Margin="0,0,8,4" Click="BtnAnnotLoadImage_Click"/>
@@ -203,8 +231,8 @@
                         <ComboBox x:Name="CmbAnnotClass" Width="220" Margin="8,0,0,0" VerticalContentAlignment="Center"/>
                     </StackPanel>
                     <TextBlock x:Name="TxtAnnotImageInfo" Text="未加载图像" FontSize="11" Foreground="#666" Margin="0,0,0,4"/>
-                    <Border BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Background="#2A2A2A" HorizontalAlignment="Left"
-                            Width="920" Height="560" ClipToBounds="True">
+                    <Border BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Background="#2A2A2A" HorizontalAlignment="Stretch"
+                            MinHeight="360" MinWidth="320" ClipToBounds="True">
                         <ScrollViewer x:Name="AnnotScrollViewer" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
                                       PreviewMouseWheel="AnnotScrollViewer_PreviewMouseWheel" Focusable="False">
                             <Grid x:Name="AnnotZoomGrid">
@@ -220,11 +248,15 @@
                 </StackPanel>
             </Border>
 
-            <TextBlock FontWeight="Bold" Text="日志" Margin="0,4,0,4"/>
-            <Border BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Background="#1E1E1E" Padding="6">
-                <TextBox x:Name="TxtLog" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
-                         MinHeight="180" FontFamily="Consolas" FontSize="12" Foreground="#D4D4D4" Background="Transparent" BorderThickness="0"/>
-            </Border>
         </StackPanel>
-    </ScrollViewer>
+        </ScrollViewer>
+        <DockPanel Grid.Row="1" Margin="8,0,8,8" LastChildFill="True">
+            <TextBlock DockPanel.Dock="Top" FontWeight="Bold" Text="日志" Margin="0,0,0,4"/>
+            <Border BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Background="#1E1E1E" Padding="6">
+                <TextBox x:Name="TxtLog" Loaded="TxtLog_Loaded" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                         VerticalAlignment="Stretch" VerticalContentAlignment="Top"
+                         FontFamily="Consolas" FontSize="12" Foreground="#D4D4D4" Background="Transparent" BorderThickness="0"/>
+            </Border>
+        </DockPanel>
+    </Grid>
 </Page>
