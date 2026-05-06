@@ -57,6 +57,8 @@
                         <Button Content="预设·中度" Width="88" Height="28" Margin="0,0,8,4" Click="BtnAugPresetMedium_Click"/>
                         <Button Content="预设·仅翻转+HSV" Width="130" Height="28" Margin="0,0,8,4" Click="BtnAugPresetFlipHsv_Click"
                                 ToolTip="关闭旋转/平移/缩放等几何随机增强"/>
+                        <Button Content="预设·激进" Width="88" Height="28" Margin="0,0,8,4" Click="BtnAugPresetAggressive_Click"
+                                ToolTip="强几何+mixup+copy_paste+更强 HSV，适合极少图（标签需准，可能更难收敛）"/>
                     </WrapPanel>
                 </StackPanel>
             </Border>
@@ -65,7 +67,7 @@
                 <StackPanel>
                     <TextBlock FontWeight="Bold" Text="训练增强（写入 data.yaml → augment）" Margin="0,0,0,4"/>
                     <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="#555"
-                               Text="以下为 Ultralytics train 的几何/合成/颜色增强参数；点击「生成 data.yaml」或「仅更新 augment 段」写入。训练时 train_seg.py 会读取并传入 model.train()。"/>
+                               Text="以下为 Ultralytics train 的几何/合成/颜色增强；默认已偏强（与「预设·激进」一致），利于极少样本；点「仅更新 augment 段」可重写 data.yaml 中 augment。train_seg.py 会读入并传入 model.train()。"/>
                     <Grid Margin="0,8,0,4">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
@@ -84,19 +86,20 @@
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="degrees°" VerticalAlignment="Center" Margin="0,4"/>
-                        <TextBox x:Name="TxtAugDegrees" Grid.Row="0" Grid.Column="1" Text="10" Height="24" Margin="4,4" VerticalContentAlignment="Center"
+                        <TextBox x:Name="TxtAugDegrees" Grid.Row="0" Grid.Column="1" Text="20" Height="24" Margin="4,4" VerticalContentAlignment="Center"
                                  ToolTip="随机旋转角度 ±degrees"/>
                         <TextBlock Grid.Row="0" Grid.Column="3" Text="translate" VerticalAlignment="Center" Margin="12,4,0,4"/>
-                        <TextBox x:Name="TxtAugTranslate" Grid.Row="0" Grid.Column="4" Text="0.1" Height="24" Margin="4,4" VerticalContentAlignment="Center"
+                        <TextBox x:Name="TxtAugTranslate" Grid.Row="0" Grid.Column="4" Text="0.2" Height="24" Margin="4,4" VerticalContentAlignment="Center"
                                  ToolTip="平移幅度（相对尺寸比例）"/>
                         <TextBlock Grid.Row="0" Grid.Column="6" Text="scale" VerticalAlignment="Center" Margin="12,4,0,4"/>
-                        <TextBox x:Name="TxtAugScale" Grid.Row="0" Grid.Column="7" Text="0.5" Height="24" Margin="4,4" VerticalContentAlignment="Center"
+                        <TextBox x:Name="TxtAugScale" Grid.Row="0" Grid.Column="7" Text="0.8" Height="24" Margin="4,4" VerticalContentAlignment="Center"
                                  ToolTip="缩放抖动幅度"/>
 
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="shear°" VerticalAlignment="Center" Margin="0,4"/>
-                        <TextBox x:Name="TxtAugShear" Grid.Row="1" Grid.Column="1" Text="0" Height="24" Margin="4,4" VerticalContentAlignment="Center"/>
+                        <TextBox x:Name="TxtAugShear" Grid.Row="1" Grid.Column="1" Text="5" Height="24" Margin="4,4" VerticalContentAlignment="Center"/>
                         <TextBlock Grid.Row="1" Grid.Column="3" Text="perspective" VerticalAlignment="Center" Margin="12,4,0,4"/>
-                        <TextBox x:Name="TxtAugPerspective" Grid.Row="1" Grid.Column="4" Text="0" Height="24" Margin="4,4" VerticalContentAlignment="Center"/>
+                        <TextBox x:Name="TxtAugPerspective" Grid.Row="1" Grid.Column="4" Text="0.0008" Height="24" Margin="4,4" VerticalContentAlignment="Center"
+                                 ToolTip="随机透视强度，Ultralytics 为小数值"/>
                         <TextBlock Grid.Row="1" Grid.Column="6" Text="fliplr" VerticalAlignment="Center" Margin="12,4,0,4"/>
                         <TextBox x:Name="TxtAugFliplr" Grid.Row="1" Grid.Column="7" Text="0.5" Height="24" Margin="4,4" VerticalContentAlignment="Center"
                                  ToolTip="水平翻转概率"/>
@@ -107,16 +110,18 @@
                         <TextBox x:Name="TxtAugMosaic" Grid.Row="2" Grid.Column="4" Text="1" Height="24" Margin="4,4" VerticalContentAlignment="Center"
                                  ToolTip="Mosaic 增强概率，1=几乎总启用"/>
                         <TextBlock Grid.Row="2" Grid.Column="6" Text="mixup" VerticalAlignment="Center" Margin="12,4,0,4"/>
-                        <TextBox x:Name="TxtAugMixup" Grid.Row="2" Grid.Column="7" Text="0" Height="24" Margin="4,4" VerticalContentAlignment="Center"/>
+                        <TextBox x:Name="TxtAugMixup" Grid.Row="2" Grid.Column="7" Text="0.15" Height="24" Margin="4,4" VerticalContentAlignment="Center"
+                                 ToolTip="MixUp 概率；分割任务标签需干净"/>
 
                         <TextBlock Grid.Row="3" Grid.Column="0" Text="copy_paste" VerticalAlignment="Center" Margin="0,4"/>
-                        <TextBox x:Name="TxtAugCopyPaste" Grid.Row="3" Grid.Column="1" Text="0" Height="24" Margin="4,4" VerticalContentAlignment="Center"/>
+                        <TextBox x:Name="TxtAugCopyPaste" Grid.Row="3" Grid.Column="1" Text="0.3" Height="24" Margin="4,4" VerticalContentAlignment="Center"
+                                 ToolTip="实例分割常用，随机粘贴实例增加多样性"/>
                         <TextBlock Grid.Row="3" Grid.Column="3" Text="hsv_h" VerticalAlignment="Center" Margin="12,4,0,4"/>
-                        <TextBox x:Name="TxtAugHsvH" Grid.Row="3" Grid.Column="4" Text="0.015" Height="24" Margin="4,4" VerticalContentAlignment="Center"/>
+                        <TextBox x:Name="TxtAugHsvH" Grid.Row="3" Grid.Column="4" Text="0.02" Height="24" Margin="4,4" VerticalContentAlignment="Center"/>
                         <TextBlock Grid.Row="3" Grid.Column="6" Text="hsv_s / hsv_v" VerticalAlignment="Center" Margin="12,4,0,4"/>
                         <StackPanel Grid.Row="3" Grid.Column="7" Orientation="Horizontal" Margin="4,4,0,4">
-                            <TextBox x:Name="TxtAugHsvS" Text="0.7" Width="52" Height="24" VerticalContentAlignment="Center" Margin="0,0,6,0"/>
-                            <TextBox x:Name="TxtAugHsvV" Text="0.4" Width="52" Height="24" VerticalContentAlignment="Center"/>
+                            <TextBox x:Name="TxtAugHsvS" Text="0.9" Width="52" Height="24" VerticalContentAlignment="Center" Margin="0,0,6,0"/>
+                            <TextBox x:Name="TxtAugHsvV" Text="0.55" Width="52" Height="24" VerticalContentAlignment="Center"/>
                         </StackPanel>
                     </Grid>
                 </StackPanel>

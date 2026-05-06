@@ -221,19 +221,36 @@ namespace CalibOperatorCLI_Example
 
         private void BtnAugPresetMedium_Click(object sender, RoutedEventArgs e)
         {
-            TxtAugDegrees.Text = "10";
-            TxtAugTranslate.Text = "0.1";
-            TxtAugScale.Text = "0.5";
-            TxtAugShear.Text = "0";
-            TxtAugPerspective.Text = "0";
+            TxtAugDegrees.Text = "12";
+            TxtAugTranslate.Text = "0.12";
+            TxtAugScale.Text = "0.55";
+            TxtAugShear.Text = "2";
+            TxtAugPerspective.Text = "0.0003";
             TxtAugFliplr.Text = "0.5";
             TxtAugFlipud.Text = "0";
             TxtAugMosaic.Text = "1";
-            TxtAugMixup.Text = "0";
-            TxtAugCopyPaste.Text = "0";
+            TxtAugMixup.Text = "0.08";
+            TxtAugCopyPaste.Text = "0.15";
             TxtAugHsvH.Text = "0.015";
-            TxtAugHsvS.Text = "0.7";
-            TxtAugHsvV.Text = "0.4";
+            TxtAugHsvS.Text = "0.75";
+            TxtAugHsvV.Text = "0.45";
+        }
+
+        private void BtnAugPresetAggressive_Click(object sender, RoutedEventArgs e)
+        {
+            TxtAugDegrees.Text = "20";
+            TxtAugTranslate.Text = "0.2";
+            TxtAugScale.Text = "0.8";
+            TxtAugShear.Text = "5";
+            TxtAugPerspective.Text = "0.0008";
+            TxtAugFliplr.Text = "0.5";
+            TxtAugFlipud.Text = "0";
+            TxtAugMosaic.Text = "1";
+            TxtAugMixup.Text = "0.15";
+            TxtAugCopyPaste.Text = "0.3";
+            TxtAugHsvH.Text = "0.02";
+            TxtAugHsvS.Text = "0.9";
+            TxtAugHsvV.Text = "0.55";
         }
 
         private void BtnAugPresetFlipHsv_Click(object sender, RoutedEventArgs e)
