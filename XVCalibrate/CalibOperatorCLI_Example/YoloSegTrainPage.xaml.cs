@@ -719,7 +719,7 @@ namespace CalibOperatorCLI_Example
                 string scriptAbs = ResolveScriptOrThrow(TxtAutoLabelScript.Text);
                 string weights = TxtWeights.Text.Trim();
                 if (string.IsNullOrWhiteSpace(weights))
-                    weights = "yolov8n-seg.pt";
+                    weights = "yolov8m-seg.pt";
 
                 if (!double.TryParse(TxtConf.Text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double conf))
                     conf = 0.25;
@@ -785,11 +785,11 @@ namespace CalibOperatorCLI_Example
                 string trainScript = ResolveScriptOrThrow(TxtTrainScript.Text);
                 string weights = TxtWeights.Text.Trim();
                 if (string.IsNullOrWhiteSpace(weights))
-                    weights = "yolov8n-seg.pt";
+                    weights = "yolov8m-seg.pt";
 
                 int epochs = int.TryParse(TxtEpochs.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var ep) ? ep : 100;
                 int imgsz = int.TryParse(TxtImgSz.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var iz) ? iz : 640;
-                int batch = int.TryParse(TxtBatch.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var bt) ? bt : 8;
+                int batch = int.TryParse(TxtBatch.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var bt) ? bt : 4;
                 epochs = Math.Max(1, epochs);
                 imgsz = Math.Max(32, imgsz);
                 batch = Math.Max(1, batch);

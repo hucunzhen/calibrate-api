@@ -22,6 +22,11 @@ def main() -> int:
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--device", type=str, default="", help="cuda:0 / cpu / 空为自动")
     ap.add_argument("--imgsz", type=int, default=0, help="0 表示使用模型默认 stride")
+    ap.add_argument(
+        "--vis-no-boxes",
+        action="store_true",
+        help="可视化不画检测框，仅叠加分割掩码（类别文字仍可能显示，见 Ultralytics plot）",
+    )
     args = ap.parse_args()
 
     if not args.input.is_file():
@@ -77,7 +82,7 @@ def main() -> int:
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
     args.output_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    plot_bgr = r.plot()
+    plot_bgr = r.plot(boxes=False) if args.vis_no_boxes else r.plot()
     args.output_vis.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(args.output_vis), plot_bgr)
 

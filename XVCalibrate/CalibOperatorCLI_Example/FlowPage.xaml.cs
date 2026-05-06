@@ -440,7 +440,14 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "conf", DisplayName = "置信度阈值", DefaultValue = "0.25", Description = "与 Ultralytics predict conf 一致" },
                     new OperatorParam { Name = "imgsz", DisplayName = "推理边长", DefaultValue = "0", Description = "0=模型默认；否则如 640" },
                     new OperatorParam { Name = "useGpu", DisplayName = "使用 CUDA", DefaultValue = "false", Description = "true 时 device=cuda:0" },
-                    new OperatorParam { Name = "timeoutSec", DisplayName = "超时(秒)", DefaultValue = "120", Description = "单张推理超时，至少 15" }
+                    new OperatorParam { Name = "timeoutSec", DisplayName = "超时(秒)", DefaultValue = "120", Description = "单张推理超时，至少 15" },
+                    new OperatorParam
+                    {
+                        Name = "visNoBoxes",
+                        DisplayName = "可视化不画框",
+                        DefaultValue = "false",
+                        Description = "true 时 Vis 仅叠加分割掩码，不绘制检测框（JSON 仍含 xyxy）"
+                    }
                 }
             },
             new OperatorDef
@@ -5549,6 +5556,10 @@ namespace CalibOperatorCLI_Example
                             StringComparison.OrdinalIgnoreCase);
                         int timeoutSec = int.TryParse(node.Params.GetValueOrDefault("timeoutSec"), out var yTs) ? yTs : 120;
                         timeoutSec = Math.Max(15, timeoutSec);
+                        bool visNoBoxes = string.Equals(
+                            (node.Params.GetValueOrDefault("visNoBoxes", "false") ?? "false").Trim(),
+                            "true",
+                            StringComparison.OrdinalIgnoreCase);
                         var yr = YoloSegInferenceBridge.Run(
                             srcImg,
                             py.Trim(),
@@ -5557,7 +5568,8 @@ namespace CalibOperatorCLI_Example
                             conf,
                             useGpu,
                             timeoutSec * 1000,
-                            imgsz);
+                            imgsz,
+                            visNoBoxes);
                         node.Outputs["Out"] = yr.Passthrough;
                         node.Outputs["Vis"] = yr.Visualization;
                         node.Outputs["DetectJson"] = yr.DetectJson;

@@ -1,17 +1,16 @@
 {
-  "__comment": "测试 yolo_seg_infer：需 pip install ultralytics；weightsPath 指向训练产物 best.pt（默认 yolo_data/runs/segment/train-2/weights/best.pt）。load_image 填本地图或留空运行弹窗。Vis=Ultralytics 叠加可视化；Out=原图透传；DetectJson 含 detection_count、polygon_norm。",
   "Nodes": [
     {
-      "Id": "b2111111-1111-1111-1111-111111111101",
+      "Id": "40501588-5902-4b93-9cbf-c4ec53fc5d6e",
       "TypeId": "load_image",
       "X": 100,
       "Y": 180,
       "Params": {
-        "filePath": ""
+        "filePath": "D:\\work\\calibrate-api\\test_images\\Image_20260417090805351.bmp"
       }
     },
     {
-      "Id": "b2111111-1111-1111-1111-111111111102",
+      "Id": "691c734b-ec0c-42b0-8cfd-13d06a7947e6",
       "TypeId": "yolo_seg_infer",
       "X": 360,
       "Y": 180,
@@ -26,7 +25,7 @@
       }
     },
     {
-      "Id": "b2111111-1111-1111-1111-111111111103",
+      "Id": "055465c3-c8c5-43f2-9158-0d0919446334",
       "TypeId": "display",
       "X": 620,
       "Y": 120,
@@ -35,7 +34,7 @@
       }
     },
     {
-      "Id": "b2111111-1111-1111-1111-111111111104",
+      "Id": "b49dc277-e031-47af-822a-b4e6a9d2e8ce",
       "TypeId": "save_text",
       "X": 620,
       "Y": 260,
@@ -46,21 +45,21 @@
   ],
   "Connections": [
     {
-      "FromNodeId": "b2111111-1111-1111-1111-111111111101",
+      "FromNodeId": "40501588-5902-4b93-9cbf-c4ec53fc5d6e",
       "FromPort": "Image",
-      "ToNodeId": "b2111111-1111-1111-1111-111111111102",
+      "ToNodeId": "691c734b-ec0c-42b0-8cfd-13d06a7947e6",
       "ToPort": "In"
     },
     {
-      "FromNodeId": "b2111111-1111-1111-1111-111111111102",
+      "FromNodeId": "691c734b-ec0c-42b0-8cfd-13d06a7947e6",
       "FromPort": "Vis",
-      "ToNodeId": "b2111111-1111-1111-1111-111111111103",
+      "ToNodeId": "055465c3-c8c5-43f2-9158-0d0919446334",
       "ToPort": "Image"
     },
     {
-      "FromNodeId": "b2111111-1111-1111-1111-111111111102",
+      "FromNodeId": "691c734b-ec0c-42b0-8cfd-13d06a7947e6",
       "FromPort": "DetectJson",
-      "ToNodeId": "b2111111-1111-1111-1111-111111111104",
+      "ToNodeId": "b49dc277-e031-47af-822a-b4e6a9d2e8ce",
       "ToPort": "Text"
     }
   ]

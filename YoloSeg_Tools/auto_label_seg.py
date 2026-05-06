@@ -4,7 +4,7 @@
 
 用法:
   pip install -r YoloSeg_Tools/requirements-yolo-seg.txt
-  python auto_label_seg.py --images-dir .../images/train --labels-dir .../labels/train --weights yolov8n-seg.pt
+  python auto_label_seg.py --images-dir .../images/train --labels-dir .../labels/train --weights yolov8m-seg.pt
 
 --single-class N: 将所有实例类别重写为 N（工业单类常用）；默认 -1 保留预训练模型的类别 id（需与 data.yaml 中 nc/names 一致）。
 """
@@ -22,7 +22,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="YOLO-Seg 自动标注（Ultralytics）")
     ap.add_argument("--images-dir", required=True, type=Path, help="训练图像目录（通常为 dataset/images/train）")
     ap.add_argument("--labels-dir", required=True, type=Path, help="输出标签目录（通常为 dataset/labels/train）")
-    ap.add_argument("--weights", type=str, default="yolov8n-seg.pt", help="分割权重路径或名称（如 yolov8s-seg.pt）")
+    ap.add_argument("--weights", type=str, default="yolov8m-seg.pt", help="分割权重路径或名称（如 yolov8s-seg.pt、yolov8l-seg.pt）")
     ap.add_argument("--conf", type=float, default=0.25, help="置信度阈值")
     ap.add_argument("--device", type=str, default="", help="cuda:0 / cpu / 空=自动")
     ap.add_argument("--single-class", type=int, default=-1, dest="single_class", help=">=0 时所有实例改为该类别 id；-1 保留模型原始类别")

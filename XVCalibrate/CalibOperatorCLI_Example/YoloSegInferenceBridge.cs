@@ -25,7 +25,7 @@ namespace CalibOperatorCLI_Example
             }
 
             public CalibImage Passthrough { get; }
-            /// <summary>Ultralytics plot：框与掩码叠加。</summary>
+            /// <summary>Ultralytics plot：掩码叠加（可选是否绘制检测框）。</summary>
             public CalibImage Visualization { get; }
             public string DetectJson { get; }
         }
@@ -41,7 +41,8 @@ namespace CalibOperatorCLI_Example
             double conf,
             bool preferCuda,
             int timeoutMilliseconds,
-            int imgsz)
+            int imgsz,
+            bool visNoBoxes)
         {
             if (input == null) throw new ArgumentNullException(nameof(input));
             if (string.IsNullOrWhiteSpace(pythonExecutable))
@@ -106,6 +107,9 @@ namespace CalibOperatorCLI_Example
                     psi.ArgumentList.Add("--imgsz");
                     psi.ArgumentList.Add(imgsz.ToString(CultureInfo.InvariantCulture));
                 }
+
+                if (visNoBoxes)
+                    psi.ArgumentList.Add("--vis-no-boxes");
 
                 using var proc = Process.Start(psi);
                 if (proc == null)

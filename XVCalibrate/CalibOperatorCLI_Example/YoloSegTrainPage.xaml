@@ -135,7 +135,8 @@
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Python" VerticalAlignment="Center" Margin="0,4"/>
                         <TextBox x:Name="TxtPython" Grid.Row="0" Grid.Column="1" Text="python" Height="24" VerticalContentAlignment="Center" Margin="4,4,0,4"/>
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="预训练权重" VerticalAlignment="Center" Margin="0,4"/>
-                        <TextBox x:Name="TxtWeights" Grid.Row="1" Grid.Column="1" Text="yolov8n-seg.pt" Height="24" VerticalContentAlignment="Center" Margin="4,4,0,4"/>
+                        <TextBox x:Name="TxtWeights" Grid.Row="1" Grid.Column="1" Text="yolov8m-seg.pt" Height="24" VerticalContentAlignment="Center" Margin="4,4,0,4"
+                                 ToolTip="Ultralytics 预训练分割权重；更大可用 yolov8l-seg.pt / yolov8x-seg.pt（显存占用更高）"/>
                         <TextBlock Grid.Row="2" Grid.Column="0" Text="置信度 conf" VerticalAlignment="Center" Margin="0,4"/>
                         <TextBox x:Name="TxtConf" Grid.Row="2" Grid.Column="1" Text="0.25" Width="80" HorizontalAlignment="Left" Height="24" VerticalContentAlignment="Center" Margin="4,4,0,4"/>
                         <TextBlock Grid.Row="3" Grid.Column="0" Text="单一类别 id" VerticalAlignment="Center" Margin="0,4"/>
@@ -163,7 +164,8 @@
                         <TextBlock Text="imgsz" VerticalAlignment="Center" Margin="0,0,6,4"/>
                         <TextBox x:Name="TxtImgSz" Text="640" Width="56" Height="24" VerticalContentAlignment="Center" Margin="0,0,16,4"/>
                         <TextBlock Text="batch" VerticalAlignment="Center" Margin="0,0,6,4"/>
-                        <TextBox x:Name="TxtBatch" Text="8" Width="48" Height="24" VerticalContentAlignment="Center" Margin="0,0,16,4"/>
+                        <TextBox x:Name="TxtBatch" Text="4" Width="48" Height="24" VerticalContentAlignment="Center" Margin="0,0,16,4"
+                                 ToolTip="medium 模型显存占用高于 nano；OOM 时可降到 2"/>
                         <TextBlock Text="train 脚本" VerticalAlignment="Center" Margin="0,0,6,4"/>
                         <TextBox x:Name="TxtTrainScript" Text="YoloSeg_Tools/train_seg.py" Width="220" Height="24" VerticalContentAlignment="Center"/>
                     </WrapPanel>
