@@ -603,6 +603,75 @@ namespace CalibOperatorCLI_Example
             return new System.Windows.Point(x, y);
         }
 
+        private double GetAnnotResampleSpacingPx()
+        {
+            if (!double.TryParse(TxtAnnotResampleSpacing.Text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
+                v = 8;
+            return Math.Clamp(v, 2, 200);
+        }
+
+        /// <summary>
+        /// 沿闭合多边形周长按近似固定弧长间距均匀取点（不写回首尾重复点）。
+        /// </summary>
+        private static List<System.Windows.Point> ResampleClosedPolygonUniform(IReadOnlyList<System.Windows.Point> ring, double spacingPx)
+        {
+            if (ring == null || ring.Count < 3)
+                return ring?.ToList() ?? new List<System.Windows.Point>();
+
+            spacingPx = Math.Clamp(spacingPx, 2, 200);
+            int n = ring.Count;
+            var segLen = new double[n];
+            double total = 0;
+            for (int i = 0; i < n; i++)
+            {
+                var a = ring[i];
+                var b = ring[(i + 1) % n];
+                double dx = b.X - a.X;
+                double dy = b.Y - a.Y;
+                double len = Math.Sqrt(dx * dx + dy * dy);
+                segLen[i] = len;
+                total += len;
+            }
+
+            if (total < 1e-6)
+                return ring.Select(p => new System.Windows.Point(p.X, p.Y)).ToList();
+
+            int k = (int)Math.Ceiling(total / spacingPx);
+            k = Math.Clamp(k, 3, 300);
+
+            var result = new List<System.Windows.Point>(k);
+            for (int j = 0; j < k; j++)
+            {
+                double s = j / (double)k * total;
+                double acc = 0;
+                for (int i = 0; i < n; i++)
+                {
+                    double L = segLen[i];
+                    if (acc + L >= s - 1e-9 || i == n - 1)
+                    {
+                        double t = L < 1e-9 ? 0 : Math.Clamp((s - acc) / L, 0, 1);
+                        var a = ring[i];
+                        var b = ring[(i + 1) % n];
+                        double x = a.X + t * (b.X - a.X);
+                        double y = a.Y + t * (b.Y - a.Y);
+                        result.Add(new System.Windows.Point(x, y));
+                        break;
+                    }
+
+                    acc += L;
+                }
+            }
+
+            return result;
+        }
+
+        private List<System.Windows.Point> ResampleContourForAnnot(IReadOnlyList<System.Windows.Point> ring)
+        {
+            if (ChkAnnotResampleContour.IsChecked != true || ring.Count < 3)
+                return ring.Select(p => new System.Windows.Point(p.X, p.Y)).ToList();
+            return ResampleClosedPolygonUniform(ring, GetAnnotResampleSpacingPx());
+        }
+
         private void RefreshAnnotOverlay()
         {
             if (_annotImageElement == null) return;
@@ -683,6 +752,7 @@ namespace CalibOperatorCLI_Example
 
             int cls = GetAnnotSelectedClassId();
             var copy = _annotDraft.Select(pt => new System.Windows.Point(pt.X, pt.Y)).ToList();
+            copy = ResampleContourForAnnot(copy);
             _annotInstances.Add((cls, copy));
             _annotDraft.Clear();
             RefreshAnnotOverlay();
@@ -719,6 +789,17 @@ namespace CalibOperatorCLI_Example
                 Directory.CreateDirectory(lblDir);
                 string stem = IoPath.GetFileNameWithoutExtension(_annotImagePath);
                 string lblPath = IoPath.Combine(lblDir, stem + ".txt");
+
+                if (ChkAnnotResampleContour.IsChecked == true)
+                {
+                    for (int i = 0; i < _annotInstances.Count; i++)
+                    {
+                        var t = _annotInstances[i];
+                        _annotInstances[i] = (t.ClassId, ResampleContourForAnnot(t.Points));
+                    }
+
+                    RefreshAnnotOverlay();
+                }
 
                 var sb = new StringBuilder();
                 foreach (var inst in _annotInstances)

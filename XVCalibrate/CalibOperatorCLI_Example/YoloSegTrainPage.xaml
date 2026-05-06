@@ -242,6 +242,13 @@
                         <TextBlock Text="当前类别" VerticalAlignment="Center"/>
                         <ComboBox x:Name="CmbAnnotClass" Width="220" Margin="8,0,0,0" VerticalContentAlignment="Center"/>
                     </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <CheckBox x:Name="ChkAnnotResampleContour" Content="闭合/保存时沿轮廓均匀重采样" IsChecked="True" VerticalAlignment="Center" Margin="0,0,12,0"
+                                  ToolTip="按闭合多边形周长等距取点，减轻顶点过少导致的直角台阶；保存时对已有实例同样生效"/>
+                        <TextBlock Text="间距(px)" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBox x:Name="TxtAnnotResampleSpacing" Text="8" Width="44" Height="24" VerticalContentAlignment="Center"
+                                 ToolTip="沿周长方向的采样步长（像素），越小顶点越多，标签文件越大"/>
+                    </StackPanel>
                     <TextBlock x:Name="TxtAnnotImageInfo" Text="未加载图像" FontSize="11" Foreground="#666" Margin="0,0,0,4"/>
                     <Border BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Background="#2A2A2A" HorizontalAlignment="Stretch"
                             MinHeight="360" MinWidth="320" ClipToBounds="True">
