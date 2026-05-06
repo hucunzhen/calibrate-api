@@ -836,13 +836,17 @@ namespace CalibOperatorCLI_Example
                 int epochs = int.TryParse(TxtEpochs.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var ep) ? ep : 100;
                 int imgsz = int.TryParse(TxtImgSz.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var iz) ? iz : 640;
                 int batch = int.TryParse(TxtBatch.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var bt) ? bt : 4;
+                int patience = int.TryParse(TxtTrainPatience.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var pt)
+                    ? pt
+                    : 0;
                 epochs = Math.Max(1, epochs);
                 imgsz = Math.Max(32, imgsz);
                 batch = Math.Max(1, batch);
+                patience = Math.Max(0, patience);
 
                 string device = TxtDevice.Text.Trim();
 
-                AppendLog($"开始训练… epochs={epochs}, imgsz={imgsz}, batch={batch}");
+                AppendLog($"开始训练… epochs={epochs}, imgsz={imgsz}, batch={batch}, patience={patience}");
 
                 var argsList = new List<string>
                 {
@@ -857,6 +861,8 @@ namespace CalibOperatorCLI_Example
                     imgsz.ToString(CultureInfo.InvariantCulture),
                     "--batch",
                     batch.ToString(CultureInfo.InvariantCulture),
+                    "--patience",
+                    patience.ToString(CultureInfo.InvariantCulture),
                 };
                 if (!string.IsNullOrEmpty(device))
                 {

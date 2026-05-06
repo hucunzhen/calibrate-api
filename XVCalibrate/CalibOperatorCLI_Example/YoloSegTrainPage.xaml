@@ -189,6 +189,13 @@
                         <TextBlock Grid.Column="6" Text="train 脚本" VerticalAlignment="Center" Margin="0,0,6,4"/>
                         <TextBox x:Name="TxtTrainScript" Grid.Column="7" Grid.ColumnSpan="3" Text="YoloSeg_Tools/train_seg.py" MinWidth="160" Height="24" VerticalContentAlignment="Center" Margin="0,0,0,4"/>
                     </Grid>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="早停 patience" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBox x:Name="TxtTrainPatience" Text="0" Width="44" Height="24" VerticalContentAlignment="Center" Margin="0,0,12,0"
+                                 ToolTip="0=关闭早停，极少样本时避免很快因验证波动而停止；100≈Ultralytics 默认早停耐心"/>
+                        <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="#666" VerticalAlignment="Center"
+                                   Text="图很少时验证指标不稳定，易触发「无改进」早停；保持 0 可跑满上方 epochs。"/>
+                    </StackPanel>
                     <Button x:Name="BtnTrain" Content="开始训练（工作目录=数据集根目录）" Width="260" Height="30" HorizontalAlignment="Left" Click="BtnTrain_Click"/>
                     <TextBlock Text="权重与曲线默认保存在数据集根目录下的 runs 文件夹。" FontSize="11" Foreground="#666" Margin="0,8,0,0"/>
                 </StackPanel>

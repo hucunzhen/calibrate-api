@@ -5,7 +5,10 @@ Ultralytics YOLO-Seg 训练入口（便于从工具界面调用）。
 若 data.yaml 中含顶层键 ``augment``（几何/颜色增强），将一并传入 ``model.train()``，
 与 Ultralytics 默认参数合并（后者可被覆盖）。
 
-  python train_seg.py --data .../data.yaml --weights yolo11m-seg.pt --epochs 100 --imgsz 640 --batch 4
+  python train_seg.py --data .../data.yaml --weights yolo11m-seg.pt --epochs 300 --imgsz 640 --batch 4 --patience 0
+
+样本很少时验证指标波动大，Ultralytics 默认 patience=100 也可能很早触发「无改进」早停；
+``--patience 0`` 表示关闭早停（内部等价无限 patience），可训满 ``--epochs``。
 
 工作目录建议设为数据集根目录，runs 会生成在当前目录下。
 """
@@ -76,6 +79,12 @@ def main() -> int:
     ap.add_argument("--epochs", type=int, default=100)
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--batch", type=int, default=8)
+    ap.add_argument(
+        "--patience",
+        type=int,
+        default=0,
+        help="早停：验证集 fitness 连续若干 epoch 无提升则停止；0=关闭（适合极少图）。默认 0；设为 100 接近 Ultralytics 原版默认行为。",
+    )
     ap.add_argument("--device", type=str, default="", help="0 / cpu / 空=自动")
     args = ap.parse_args()
 
@@ -102,6 +111,7 @@ def main() -> int:
         "epochs": args.epochs,
         "imgsz": args.imgsz,
         "batch": args.batch,
+        "patience": max(0, args.patience),
     }
     if dev is not None:
         train_kw["device"] = dev
