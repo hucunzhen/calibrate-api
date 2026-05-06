@@ -95,6 +95,36 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "jit_sample",
+                DisplayName = "JiT采样",
+                Description =
+                    "Just Image Transformers（Li&He / flow-matching，像素空间 ViT）ImageNet 类条件采样；需克隆 jkyl/just-image-transformer、uv sync、下载权重 npz；GPU Ampere+",
+                Category = "输入",
+                Params =
+                {
+                    new OperatorParam { Name = "pythonPath", DisplayName = "Python", DefaultValue = "python", Description = "已安装该 JiT 仓库依赖的解释器（常用仓库内 .venv）" },
+                    new OperatorParam { Name = "launcherScript", DisplayName = "启动脚本", DefaultValue = "JIT_Inference/jit_calibrate_launcher.py", Description = "本仓库内 launcher；路径解析同 ONNX" },
+                    new OperatorParam { Name = "jitRepoRoot", DisplayName = "JiT仓库根目录", DefaultValue = "just-image-transformer", Description = "克隆的 just-image-transformer 根路径（相对 exe 或源码树）" },
+                    new OperatorParam { Name = "configYaml", DisplayName = "配置YAML", DefaultValue = "config/jit_L_32.yaml", Description = "相对 JiT 仓库根，如 config/jit_L_32.yaml" },
+                    new OperatorParam { Name = "checkpointPath", DisplayName = "权重npz", DefaultValue = "", Description = "model.npz 路径（相对 exe 或源码树）；见 JiT README Google Drive" },
+                    new OperatorParam { Name = "seed", DisplayName = "随机种子", DefaultValue = "555", Description = "噪声初始化" },
+                    new OperatorParam { Name = "label", DisplayName = "ImageNet类别", DefaultValue = "123", Description = "类条件标签 0~999" },
+                    new OperatorParam { Name = "cfgStrength", DisplayName = "CFG强度", DefaultValue = "3.0", Description = "classifier-free guidance" },
+                    new OperatorParam { Name = "numSteps", DisplayName = "采样步数", DefaultValue = "50", Description = "越大越慢" },
+                    new OperatorParam
+                    {
+                        Name = "schedule",
+                        DisplayName = "时间步调度",
+                        DefaultValue = "linear",
+                        Description = "linear | logit_normal",
+                        Options = new List<string> { "linear", "logit_normal" }
+                    },
+                    new OperatorParam { Name = "timeoutSec", DisplayName = "超时(秒)", DefaultValue = "3600", Description = "整段推理超时，至少 120" }
+                },
+                Ports = { new PortDef { Name = "Image", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" } }
+            },
+            new OperatorDef
+            {
                 TypeId = "camera_snap",
                 DisplayName = "相机取一帧",
                 Description = "从相机抓取单帧图像",
@@ -325,6 +355,92 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "h", DisplayName = "滤波强度", DefaultValue = "12", Description = "越大去噪越强，细节也更易被抹平" },
                     new OperatorParam { Name = "searchWindow", DisplayName = "搜索窗口", DefaultValue = "11", Description = "奇数，建议 7~17" },
                     new OperatorParam { Name = "templateWindow", DisplayName = "模板窗口", DefaultValue = "3", Description = "奇数，建议 3/5" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "dip_denoise",
+                DisplayName = "DIP去噪",
+                Description = "Deep Image Prior（PyTorch U-Net 迭代优化）去噪；需安装 torch，详见 DIP_Inference/requirements-dip.txt",
+                Category = "预处理",
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" }
+                },
+                Params =
+                {
+                    new OperatorParam { Name = "pythonPath", DisplayName = "Python", DefaultValue = "python", Description = "python.exe 或可执行文件名（PATH 中）" },
+                    new OperatorParam { Name = "scriptPath", DisplayName = "脚本路径", DefaultValue = "DIP_Inference/dip_denoise.py", Description = "相对仓库根或 exe 目录；解析规则同 ONNX 模型路径" },
+                    new OperatorParam { Name = "iterations", DisplayName = "迭代次数", DefaultValue = "2400", Description = "Adam 步数，越大越慢" },
+                    new OperatorParam { Name = "learningRate", DisplayName = "学习率", DefaultValue = "0.01", Description = "Adam lr" },
+                    new OperatorParam { Name = "tvWeight", DisplayName = "TV权重", DefaultValue = "0.000001", Description = "全变分正则，0 关闭" },
+                    new OperatorParam { Name = "maxSide", DisplayName = "最长边上限", DefaultValue = "0", Description = "0=原分辨率；>0 时按比例缩小最长边以加速" },
+                    new OperatorParam { Name = "useGpu", DisplayName = "使用 CUDA", DefaultValue = "false", Description = "true 时 --device cuda（需 CUDA 版 torch）" },
+                    new OperatorParam { Name = "timeoutSec", DisplayName = "超时(秒)", DefaultValue = "600", Description = "整段优化超时，至少 30" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "swin_transformer",
+                DisplayName = "Swin特征",
+                Description = "timm Swin：可选 ImageNet Top-K 分类、全局特征向量 JSON、最后一层特征的空间范数热力图（显著性/粗分割可视化，非实例分割）。依赖 Swin_Inference/requirements-swin.txt",
+                Category = "预处理",
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "LabelsJson", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" },
+                    new PortDef { Name = "EmbeddingJson", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#795548" },
+                    new PortDef { Name = "SegmentHeatmap", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF5722" }
+                },
+                Params =
+                {
+                    new OperatorParam { Name = "pythonPath", DisplayName = "Python", DefaultValue = "python", Description = "已安装 torch/timm/torchvision 的解释器" },
+                    new OperatorParam { Name = "scriptPath", DisplayName = "脚本路径", DefaultValue = "Swin_Inference/swin_infer.py", Description = "相对仓库根或 exe；解析规则同 ONNX" },
+                    new OperatorParam
+                    {
+                        Name = "modelName",
+                        DisplayName = "timm模型名",
+                        DefaultValue = "swin_tiny_patch4_window7_224",
+                        Description = "任意 timm Swin 注册名，如 swin_small_patch4_window7_224、swin_base_patch4_window7_224（须与 ImageNet 224 预处理匹配）"
+                    },
+                    new OperatorParam { Name = "enableClassification", DisplayName = "输出分类", DefaultValue = "true", Description = "true 时计算 Top-K 并写入 LabelsJson" },
+                    new OperatorParam { Name = "topK", DisplayName = "Top-K", DefaultValue = "5", Description = "开启分类时前 K 个类别及置信度" },
+                    new OperatorParam { Name = "enableEmbedding", DisplayName = "输出特征向量", DefaultValue = "true", Description = "true 时输出 EmbeddingJson（全局池化后向量）" },
+                    new OperatorParam { Name = "enableSegmentHeatmap", DisplayName = "输出分割热力图", DefaultValue = "true", Description = "true 时输出与原图同尺寸的灰度热力图（伪分割）" },
+                    new OperatorParam { Name = "useGpu", DisplayName = "使用 CUDA", DefaultValue = "false", Description = "true 时需 CUDA 版 PyTorch" },
+                    new OperatorParam { Name = "timeoutSec", DisplayName = "超时(秒)", DefaultValue = "300", Description = "首次会下载权重，建议 ≥120" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "yolo_seg_infer",
+                DisplayName = "YOLO分割推理",
+                Description = "Ultralytics YOLO-Seg：加载自定义 .pt（如 runs/.../weights/best.pt），输出原图透传、可视化叠加图、检测 JSON（含 polygon_norm）。依赖 pip install ultralytics",
+                Category = "预处理",
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Vis", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#00BCD4" },
+                    new PortDef { Name = "DetectJson", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" }
+                },
+                Params =
+                {
+                    new OperatorParam { Name = "pythonPath", DisplayName = "Python", DefaultValue = "python", Description = "已安装 ultralytics 的解释器" },
+                    new OperatorParam { Name = "scriptPath", DisplayName = "脚本路径", DefaultValue = "YoloSeg_Tools/predict_seg.py", Description = "相对仓库根或 exe" },
+                    new OperatorParam
+                    {
+                        Name = "weightsPath",
+                        DisplayName = "权重 .pt",
+                        DefaultValue = "yolo_data/runs/segment/train-2/weights/best.pt",
+                        Description = "best.pt 或 last.pt；相对路径从 exe 向上查找仓库根"
+                    },
+                    new OperatorParam { Name = "conf", DisplayName = "置信度阈值", DefaultValue = "0.25", Description = "与 Ultralytics predict conf 一致" },
+                    new OperatorParam { Name = "imgsz", DisplayName = "推理边长", DefaultValue = "0", Description = "0=模型默认；否则如 640" },
+                    new OperatorParam { Name = "useGpu", DisplayName = "使用 CUDA", DefaultValue = "false", Description = "true 时 device=cuda:0" },
+                    new OperatorParam { Name = "timeoutSec", DisplayName = "超时(秒)", DefaultValue = "120", Description = "单张推理超时，至少 15" }
                 }
             },
             new OperatorDef
@@ -677,7 +793,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "display",
                 DisplayName = "显示图像",
-                Description = "在窗口中显示图像，可选背景图/点位叠加",
+                Description = "每个画布上的「显示图像」节点独占一个预览窗口（标题含短 Guid）；同一节点多次运行会刷新该窗口。右键连线看图仍共用单个快捷预览窗口。",
                 Category = "可视化",
                 Params =
                 {
@@ -972,7 +1088,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "sam_onnx_segment",
                 DisplayName = "SAM 图像分割",
-                Description = "Segment Anything ONNX：点提示或文本提示（OWLv2→框→SAM box prompt）。填写 textPrompt 时优先走文本选物体；否则用 Points 或默认点击。输出 Mask 为 IoU 最优候选；Mask2–Mask4 为其余候选（decoder 导出勿使用 --return-single-mask）。GroundingJson 为 grounding 元数据。需 Python：pip install -r SAM_Inference/requirements-grounded.txt。默认 FP32 ONNX；int8 请用 quantize_sam_onnx.py --matmul-only。",
+                Description = "Segment Anything ONNX：点提示或文本提示（OWLv2 ONNX→多框→SAM）。OWLv2 经 NMS 保留的目标数由 textMaxDetections 决定（见 GroundingJson）。仅 1 目标时 Mask～Mask4 为 SAM 多掩码候选；多目标时 encoder 一次、decoder 次数为 min(检出数, maskMergeMax)。MaskAll 为 3 通道图：黑底上各路掩码用不同颜色、固定 alpha 叠加以模拟透明。Mask～Mask4 仍为前 4 实例单通道掩码。Flow 参数上限见 FlowSamMaskMergeParamUpperBound。需 OWLv2 ONNX + tokenizer.json。",
                 Category = "分割",
                 Params =
                 {
@@ -981,12 +1097,14 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "textPrompt", DisplayName = "文本选物体", DefaultValue = "", Description = "非空时调用 OWLv2 生成框再 SAM；优先于 Points。模型单次查询约 16 英文词元，脚本会自动截断；中文建议尽量短或 textRawQuery=true" },
                     new OperatorParam { Name = "textThreshold", DisplayName = "文本检测阈值", DefaultValue = "0.25", Description = "OWLv2 post_process_object_detection threshold；无框时可调低" },
                     new OperatorParam { Name = "textRawQuery", DisplayName = "文本不加前缀", DefaultValue = "false", Description = "true 时直接把 textPrompt 送入模型；false 时使用「a photo of …」模板" },
-                    new OperatorParam { Name = "pythonPath", DisplayName = "Python", DefaultValue = "", Description = "空则使用 python（需在 PATH 中）" },
-                    new OperatorParam { Name = "groundingScript", DisplayName = "Grounding 脚本", DefaultValue = GroundedTextToBoxBridge.DefaultScriptRepoRelative, Description = "相对仓库根或绝对路径；默认同 ResolveModelPath 查找规则" },
-                    new OperatorParam { Name = "groundingTimeoutSec", DisplayName = "Grounding 超时(秒)", DefaultValue = "180", Description = "子进程超时；首次下载 HF 权重时需足够大" },
+                    new OperatorParam { Name = "owlv2OnnxPath", DisplayName = "OWLv2 ONNX", DefaultValue = Owlv2OnnxTextToBox.DefaultOnnxRepoRelative, Description = "optimum 导出的零样本检测 ONNX；路径规则同 SAM 模型（ResolveModelPath）" },
+                    new OperatorParam { Name = "owlv2TokenizerJson", DisplayName = "tokenizer.json", DefaultValue = Owlv2OnnxTextToBox.DefaultTokenizerJsonRelative, Description = "CLIP tokenizer.json（可与 openai/clip-vit-base-patch32 一致），供 Tokenizers.DotNet 编码文本" },
+                    new OperatorParam { Name = "textMaxDetections", DisplayName = "文本最大目标数", DefaultValue = "16", Description = "OWLv2 NMS 后保留的实例上限（写入 GroundingJson）；与 maskMergeMax、SAM decoder 次数配合，Flow 解析上限见 FlowSamTextMaxDetectionsUpperBound" },
+                    new OperatorParam { Name = "textNmsIou", DisplayName = "文本NMS IoU", DefaultValue = "0.5", Description = "合并重叠框的 NMS IoU（0～1）；略升高可保留更多邻近实例" },
                     new OperatorParam { Name = "clickX", DisplayName = "默认点击 X", DefaultValue = "512", Description = "未连接 Points 且无文本时使用，原图像素坐标" },
                     new OperatorParam { Name = "clickY", DisplayName = "默认点击 Y", DefaultValue = "512", Description = "未连接 Points 且无文本时使用，原图像素坐标" },
                     new OperatorParam { Name = "maskThreshold", DisplayName = "掩码 logit 阈值", DefaultValue = "0", Description = "decoder 输出 logits，大于阈值视为前景（通常 0）" },
+                    new OperatorParam { Name = "maskMergeMax", DisplayName = "MaskAll合并路数", DefaultValue = "4", Description = "MaskAll：多路掩码合成为 3 通道彩色图（黑底、各路不同色相、固定透明度叠加）；多实例时 SAM decoder 至多 min(检出数, N) 次。路数上限见 FlowSamMaskMergeParamUpperBound。单实例 SAM 仍最多 4 路 decoder 候选" },
                     new OperatorParam { Name = "useGpu", DisplayName = "尝试 CUDA", DefaultValue = "false", Description = "需要 onnxruntime GPU 与 CUDA；失败则自动用 CPU" }
                 },
                 Ports =
@@ -997,6 +1115,7 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "Mask2", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#66BB6A" },
                     new PortDef { Name = "Mask3", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#81C784" },
                     new PortDef { Name = "Mask4", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#A5D6A7" },
+                    new PortDef { Name = "MaskAll", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#2E7D32" },
                     new PortDef { Name = "Vis", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "GroundingJson", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" }
                 }
@@ -1204,6 +1323,11 @@ namespace CalibOperatorCLI_Example
         // 页面状态
         // ================================================================
 
+        /// <summary>SAM/OWLv2 相关 Flow 参数在 UI 解析时的上限（防误填）；需要更多路数可调大该常量。</summary>
+        private const int FlowSamMaskMergeParamUpperBound = 4096;
+
+        private const int FlowSamTextMaxDetectionsUpperBound = 4096;
+
         private readonly List<FlowNode> _nodes = new List<FlowNode>();
         private readonly List<FlowConnection> _connections = new List<FlowConnection>();
         private readonly ObservableCollection<ToolboxGroup> _toolboxGroups = new ObservableCollection<ToolboxGroup>();
@@ -1217,8 +1341,17 @@ namespace CalibOperatorCLI_Example
         // 连线状态
         private PortVisual? _connectingFromPort;
         private Path? _tempConnectionPath;
-        private Window? _livePreviewWindow;
-        private System.Windows.Controls.Image? _livePreviewImageCtrl;
+
+        private sealed class LivePreviewSlot
+        {
+            public Window Window { get; init; } = null!;
+            public System.Windows.Controls.Image ImageCtrl { get; init; } = null!;
+        }
+
+        /// <summary>连线快捷预览等非「显示图像」算子共用同一窗口。</summary>
+        private const string LivePreviewSingletonSlotKey = "__flow_singleton_preview__";
+
+        private readonly Dictionary<string, LivePreviewSlot> _livePreviewBySlot = new(StringComparer.Ordinal);
         private System.Threading.CancellationTokenSource? _runCts;
         private bool _isRunInProgress;
         private bool _isPanningCanvas;
@@ -5024,6 +5157,70 @@ namespace CalibOperatorCLI_Example
                         break;
                     }
 
+                    case "jit_sample":
+                    {
+                        string py = node.Params.GetValueOrDefault("pythonPath", "python") ?? "python";
+                        string launcherRel = node.Params.GetValueOrDefault("launcherScript", JitSampleBridge.DefaultLauncherRepoRelative)
+                                             ?? JitSampleBridge.DefaultLauncherRepoRelative;
+                        string launcherAbs = SamOnnxSegmentation.ResolveModelPath(launcherRel);
+                        string repoRoot = node.Params.GetValueOrDefault("jitRepoRoot", "")?.Trim() ?? "";
+                        if (string.IsNullOrWhiteSpace(repoRoot))
+                            throw new InvalidOperationException("JiT采样: 请填写 jitRepoRoot（just-image-transformer 克隆路径）");
+                        string cfgYaml = node.Params.GetValueOrDefault("configYaml", JitSampleBridge.DefaultConfigYamlRelative)
+                                         ?? JitSampleBridge.DefaultConfigYamlRelative;
+                        string ckRel = node.Params.GetValueOrDefault("checkpointPath", "")?.Trim() ?? "";
+                        if (string.IsNullOrWhiteSpace(ckRel))
+                            throw new InvalidOperationException("JiT采样: 请填写 checkpointPath（model.npz）");
+                        string ckAbs = SamOnnxSegmentation.ResolveModelPath(ckRel);
+                        int seed = int.TryParse(node.Params.GetValueOrDefault("seed"), out var sd) ? sd : 555;
+                        int label = int.TryParse(node.Params.GetValueOrDefault("label"), out var lb) ? lb : 123;
+                        double cfgS = double.TryParse(
+                            node.Params.GetValueOrDefault("cfgStrength"),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var cfgVal)
+                            ? cfgVal
+                            : 3.0;
+                        int steps = int.TryParse(node.Params.GetValueOrDefault("numSteps"), out var st) ? st : 50;
+                        string schedule = node.Params.GetValueOrDefault("schedule", "linear") ?? "linear";
+                        int timeoutSec = int.TryParse(node.Params.GetValueOrDefault("timeoutSec"), out var ts) ? ts : 3600;
+                        timeoutSec = Math.Max(120, timeoutSec);
+                        string tmpDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "calibrate_jit_" + Guid.NewGuid().ToString("N"));
+                        System.IO.Directory.CreateDirectory(tmpDir);
+                        string outPng = System.IO.Path.Combine(tmpDir, "jit_out.png");
+                        try
+                        {
+                            var img = JitSampleBridge.Run(
+                                launcherAbs,
+                                repoRoot,
+                                py.Trim(),
+                                cfgYaml.Trim(),
+                                ckAbs,
+                                outPng,
+                                seed,
+                                label,
+                                cfgS,
+                                steps,
+                                schedule.Trim(),
+                                timeoutSec * 1000);
+                            node.Outputs["Image"] = img;
+                        }
+                        finally
+                        {
+                            try
+                            {
+                                if (System.IO.Directory.Exists(tmpDir))
+                                    System.IO.Directory.Delete(tmpDir, recursive: true);
+                            }
+                            catch
+                            {
+                                // ignored
+                            }
+                        }
+
+                        break;
+                    }
+
                     case "camera_snap":
                     {
                         int deviceIndex = int.TryParse(node.Params.GetValueOrDefault("deviceIndex"), out var di) ? di : 0;
@@ -5221,6 +5418,150 @@ namespace CalibOperatorCLI_Example
                         int templateWindow = int.TryParse(node.Params.GetValueOrDefault("templateWindow"), out var tw) ? tw : 3;
                         var outImg = NLMeansDenoiseImage(srcImg, hStrength, searchWindow, templateWindow);
                         node.Outputs["Out"] = outImg;
+                        break;
+                    }
+
+                    case "dip_denoise":
+                    {
+                        var srcImg = inputs["In"] as CalibImage;
+                        if (srcImg == null) throw new InvalidOperationException("DIP去噪: 缺少输入图像");
+                        string py = node.Params.GetValueOrDefault("pythonPath", "python") ?? "python";
+                        string scriptRel = node.Params.GetValueOrDefault("scriptPath", DipDenoiseBridge.DefaultScriptRepoRelative)
+                                           ?? DipDenoiseBridge.DefaultScriptRepoRelative;
+                        string scriptAbs = SamOnnxSegmentation.ResolveModelPath(scriptRel);
+                        int iterations = int.TryParse(node.Params.GetValueOrDefault("iterations"), out var it) ? it : 2400;
+                        double lr = double.TryParse(
+                            node.Params.GetValueOrDefault("learningRate"),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var lrVal)
+                            ? lrVal
+                            : 0.01;
+                        double tv = double.TryParse(
+                            node.Params.GetValueOrDefault("tvWeight"),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var tvVal)
+                            ? tvVal
+                            : 1e-6;
+                        int maxSide = int.TryParse(node.Params.GetValueOrDefault("maxSide"), out var ms) ? ms : 0;
+                        bool useGpu = string.Equals(
+                            (node.Params.GetValueOrDefault("useGpu", "false") ?? "false").Trim(),
+                            "true",
+                            StringComparison.OrdinalIgnoreCase);
+                        int timeoutSec = int.TryParse(node.Params.GetValueOrDefault("timeoutSec"), out var ts) ? ts : 600;
+                        timeoutSec = Math.Max(30, timeoutSec);
+                        var dipOut = DipDenoiseBridge.Run(
+                            srcImg,
+                            py.Trim(),
+                            scriptAbs,
+                            iterations,
+                            lr,
+                            tv,
+                            maxSide,
+                            useGpu,
+                            timeoutSec * 1000);
+                        node.Outputs["Out"] = dipOut;
+                        break;
+                    }
+
+                    case "swin_transformer":
+                    {
+                        var srcImg = inputs["In"] as CalibImage;
+                        if (srcImg == null) throw new InvalidOperationException("SwinTransformer: 缺少输入图像");
+                        string py = node.Params.GetValueOrDefault("pythonPath", "python") ?? "python";
+                        string scriptRel = node.Params.GetValueOrDefault("scriptPath", SwinTransformerBridge.DefaultScriptRepoRelative)
+                                             ?? SwinTransformerBridge.DefaultScriptRepoRelative;
+                        string scriptAbs = SamOnnxSegmentation.ResolveModelPath(scriptRel);
+                        string modelName = node.Params.GetValueOrDefault("modelName", "swin_tiny_patch4_window7_224")
+                                           ?? "swin_tiny_patch4_window7_224";
+                        bool enableClassification = string.Equals(
+                            (node.Params.GetValueOrDefault("enableClassification", "true") ?? "true").Trim(),
+                            "true",
+                            StringComparison.OrdinalIgnoreCase);
+                        bool enableEmbedding = string.Equals(
+                            (node.Params.GetValueOrDefault("enableEmbedding", "true") ?? "true").Trim(),
+                            "true",
+                            StringComparison.OrdinalIgnoreCase);
+                        bool enableSegmentHeatmap = string.Equals(
+                            (node.Params.GetValueOrDefault("enableSegmentHeatmap", "true") ?? "true").Trim(),
+                            "true",
+                            StringComparison.OrdinalIgnoreCase);
+                        int topK = int.TryParse(node.Params.GetValueOrDefault("topK"), out var tk) ? tk : 5;
+                        if (enableClassification)
+                            topK = Math.Clamp(topK, 1, 1000);
+                        bool useGpu = string.Equals(
+                            (node.Params.GetValueOrDefault("useGpu", "false") ?? "false").Trim(),
+                            "true",
+                            StringComparison.OrdinalIgnoreCase);
+                        int timeoutSec = int.TryParse(node.Params.GetValueOrDefault("timeoutSec"), out var swTs) ? swTs : 300;
+                        timeoutSec = Math.Max(30, timeoutSec);
+                        var sw = SwinTransformerBridge.Run(
+                            srcImg,
+                            py.Trim(),
+                            scriptAbs,
+                            modelName.Trim(),
+                            topK,
+                            useGpu,
+                            timeoutSec * 1000,
+                            enableClassification,
+                            enableEmbedding,
+                            enableSegmentHeatmap);
+                        node.Outputs["Out"] = sw.Passthrough;
+                        node.Outputs["LabelsJson"] = sw.LabelsJson;
+                        node.Outputs["EmbeddingJson"] = sw.EmbeddingJson;
+                        node.Outputs["SegmentHeatmap"] = sw.SegmentHeatmap;
+                        if (enableClassification && !string.IsNullOrEmpty(sw.LabelsJson))
+                            node.ResultSummary = sw.LabelsJson.Length > 96 ? sw.LabelsJson.Substring(0, 96) + "…" : sw.LabelsJson;
+                        else if (enableEmbedding && sw.EmbeddingJson.Length > 2)
+                            node.ResultSummary = sw.EmbeddingJson.Length > 120 ? sw.EmbeddingJson.Substring(0, 120) + "…" : sw.EmbeddingJson;
+                        else
+                            node.ResultSummary = enableSegmentHeatmap ? "热力图已生成" : "OK";
+                        break;
+                    }
+
+                    case "yolo_seg_infer":
+                    {
+                        var srcImg = inputs["In"] as CalibImage;
+                        if (srcImg == null) throw new InvalidOperationException("YOLO分割推理: 缺少输入图像");
+                        string py = node.Params.GetValueOrDefault("pythonPath", "python") ?? "python";
+                        string scriptRel = node.Params.GetValueOrDefault("scriptPath", YoloSegInferenceBridge.DefaultScriptRepoRelative)
+                                           ?? YoloSegInferenceBridge.DefaultScriptRepoRelative;
+                        string scriptAbs = SamOnnxSegmentation.ResolveModelPath(scriptRel);
+                        string weightsRel = node.Params.GetValueOrDefault(
+                                                "weightsPath",
+                                                "yolo_data/runs/segment/train-2/weights/best.pt")
+                                           ?? "yolo_data/runs/segment/train-2/weights/best.pt";
+                        string weightsAbs = SamOnnxSegmentation.ResolveModelPath(weightsRel.Trim());
+                        double conf = double.TryParse(
+                            node.Params.GetValueOrDefault("conf"),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var cf)
+                            ? cf
+                            : 0.25;
+                        conf = Math.Clamp(conf, 0.01, 1.0);
+                        int imgsz = int.TryParse(node.Params.GetValueOrDefault("imgsz"), out var isz) ? isz : 0;
+                        imgsz = Math.Max(0, imgsz);
+                        bool useGpu = string.Equals(
+                            (node.Params.GetValueOrDefault("useGpu", "false") ?? "false").Trim(),
+                            "true",
+                            StringComparison.OrdinalIgnoreCase);
+                        int timeoutSec = int.TryParse(node.Params.GetValueOrDefault("timeoutSec"), out var yTs) ? yTs : 120;
+                        timeoutSec = Math.Max(15, timeoutSec);
+                        var yr = YoloSegInferenceBridge.Run(
+                            srcImg,
+                            py.Trim(),
+                            scriptAbs,
+                            weightsAbs,
+                            conf,
+                            useGpu,
+                            timeoutSec * 1000,
+                            imgsz);
+                        node.Outputs["Out"] = yr.Passthrough;
+                        node.Outputs["Vis"] = yr.Visualization;
+                        node.Outputs["DetectJson"] = yr.DetectJson;
+                        node.ResultSummary = yr.DetectJson.Length > 96 ? yr.DetectJson.Substring(0, 96) + "…" : yr.DetectJson;
                         break;
                     }
 
@@ -5659,6 +6000,13 @@ namespace CalibOperatorCLI_Example
                         double fx = double.TryParse(node.Params.GetValueOrDefault("clickX"), out var cxx) ? cxx : 512;
                         double fy = double.TryParse(node.Params.GetValueOrDefault("clickY"), out var cyy) ? cyy : 512;
                         float th = float.TryParse(node.Params.GetValueOrDefault("maskThreshold"), out var thv) ? thv : 0f;
+                        int maskMergeMax = int.TryParse(
+                            node.Params.GetValueOrDefault("maskMergeMax"),
+                            System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var mmx)
+                            ? Math.Clamp(mmx, 1, FlowSamMaskMergeParamUpperBound)
+                            : 4;
                         bool useGpu = bool.TryParse(node.Params.GetValueOrDefault("useGpu"), out var ug) && ug;
                         string enc = node.Params.GetValueOrDefault("encoderPath", "") ?? "";
                         string dec = node.Params.GetValueOrDefault("decoderPath", "") ?? "";
@@ -5666,6 +6014,7 @@ namespace CalibOperatorCLI_Example
                         string decAbs = SamOnnxSegmentation.ResolveModelPath(string.IsNullOrWhiteSpace(dec) ? SamOnnxSegmentation.DefaultDecoderRepoRelative : dec);
 
                         SamOnnxSegmentation.OrigBoxPrompt? boxOrig = null;
+                        IReadOnlyList<Owlv2OnnxTextToBox.Owlv2Detection>? textDetections = null;
                         string groundingJson;
                         string textPrompt = (node.Params.GetValueOrDefault("textPrompt", "") ?? "").Trim();
                         if (textPrompt.Length > 0)
@@ -5677,26 +6026,41 @@ namespace CalibOperatorCLI_Example
                                 out var tt)
                                 ? tt
                                 : 0.25;
-                            string py = (node.Params.GetValueOrDefault("pythonPath", "") ?? "").Trim();
-                            if (string.IsNullOrEmpty(py))
-                                py = "python";
-                            string scriptRel = (node.Params.GetValueOrDefault("groundingScript", "") ?? "").Trim();
-                            if (string.IsNullOrEmpty(scriptRel))
-                                scriptRel = GroundedTextToBoxBridge.DefaultScriptRepoRelative;
-                            string scriptAbs = SamOnnxSegmentation.ResolveModelPath(scriptRel);
-                            int timeoutMs = int.TryParse(
-                                node.Params.GetValueOrDefault("groundingTimeoutSec"),
+                            int maxDet = int.TryParse(
+                                node.Params.GetValueOrDefault("textMaxDetections"),
                                 System.Globalization.NumberStyles.Integer,
                                 System.Globalization.CultureInfo.InvariantCulture,
-                                out var gts)
-                                ? System.Math.Max(1, gts) * 1000
-                                : 180000;
+                                out var md)
+                                ? Math.Clamp(md, 1, FlowSamTextMaxDetectionsUpperBound)
+                                : 16;
+                            double nmsIou = double.TryParse(
+                                node.Params.GetValueOrDefault("textNmsIou"),
+                                System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                out var ni)
+                                ? Math.Clamp(ni, 0.0, 1.0)
+                                : 0.5;
+                            string owlv2OnnxRel = (node.Params.GetValueOrDefault("owlv2OnnxPath", "") ?? "").Trim();
+                            if (string.IsNullOrEmpty(owlv2OnnxRel))
+                                owlv2OnnxRel = Owlv2OnnxTextToBox.DefaultOnnxRepoRelative;
+                            string tokRel = (node.Params.GetValueOrDefault("owlv2TokenizerJson", "") ?? "").Trim();
+                            if (string.IsNullOrEmpty(tokRel))
+                                tokRel = Owlv2OnnxTextToBox.DefaultTokenizerJsonRelative;
+                            string onnxAbs = SamOnnxSegmentation.ResolveModelPath(owlv2OnnxRel);
+                            string tokenizerAbs = SamOnnxSegmentation.ResolveModelPath(tokRel);
                             bool rawQ = bool.TryParse(node.Params.GetValueOrDefault("textRawQuery"), out var trq) && trq;
-                            (SamOnnxSegmentation.OrigBoxPrompt box, double score) pair;
                             try
                             {
-                                pair = GroundedTextToBoxBridge.QueryBestBoxOrThrow(
-                                    samImg, textPrompt, tthr, py, scriptAbs, timeoutMs, rawQ);
+                                textDetections = Owlv2OnnxTextToBox.QueryDetectionsOrThrow(
+                                    samImg,
+                                    textPrompt,
+                                    tthr,
+                                    onnxAbs,
+                                    tokenizerAbs,
+                                    rawQ,
+                                    useGpu,
+                                    maxDet,
+                                    nmsIou);
                             }
                             catch (Exception ex)
                             {
@@ -5704,8 +6068,8 @@ namespace CalibOperatorCLI_Example
                                 {
                                     MessageBox.Show(
                                         "文本 grounding 失败：\n\n" + ex.Message +
-                                        "\n\n提示：OWLv2 单次查询约 16 个英文词元上限；中文更易超长（已自动截断）。仍失败时请缩短描述、" +
-                                        "开启「文本不加前缀」，或改用简短英文。",
+                                        "\n\n提示：请确认已放置 OWLv2 ONNX 与 CLIP tokenizer.json（见 models/onnx/README）；文本长度上限 16 token；" +
+                                        "可缩短描述、开启「文本不加前缀」，或调低 textThreshold / 放宽 textNmsIou。",
                                         "SAM 图像分割",
                                         MessageBoxButton.OK,
                                         MessageBoxImage.Warning);
@@ -5718,13 +6082,23 @@ namespace CalibOperatorCLI_Example
                                 throw new FlowExecutionGracefulStopException("文本 grounding 失败，流程已中止。", ex);
                             }
 
-                            boxOrig = pair.box;
+                            boxOrig = textDetections.Count == 1 ? textDetections[0].Box : null;
+                            var first = textDetections[0];
                             groundingJson = JsonSerializer.Serialize(new
                             {
                                 mode = "text",
                                 query = textPrompt,
-                                score = pair.score,
-                                box = new { x1 = pair.box.X1, y1 = pair.box.Y1, x2 = pair.box.X2, y2 = pair.box.Y2 },
+                                maxDetections = maxDet,
+                                nmsIou,
+                                detectionCount = textDetections.Count,
+                                score = first.Score,
+                                box = new { x1 = first.Box.X1, y1 = first.Box.Y1, x2 = first.Box.X2, y2 = first.Box.Y2 },
+                                detections = textDetections.Select(d => new
+                                {
+                                    patchIndex = d.PatchIndex,
+                                    score = d.Score,
+                                    box = new { x1 = d.Box.X1, y1 = d.Box.Y1, x2 = d.Box.X2, y2 = d.Box.Y2 },
+                                }).ToArray(),
                             });
                         }
                         else if (promptPts != null && promptPts.Length > 0)
@@ -5736,15 +6110,37 @@ namespace CalibOperatorCLI_Example
                             groundingJson = JsonSerializer.Serialize(new { mode = "fallback_click", x = fx, y = fy });
                         }
 
-                        var seg = SamOnnxSegmentation.Run(samImg, promptPts, fx, fy, encAbs, decAbs, th, useGpu, boxOrig);
+                        SamOnnxSegmentation.Result seg;
+                        if (textPrompt.Length > 0 && textDetections != null)
+                        {
+                            if (textDetections.Count == 1)
+                                seg = SamOnnxSegmentation.Run(samImg, promptPts, fx, fy, encAbs, decAbs, th, useGpu, boxOrig);
+                            else
+                            {
+                                var boxList = textDetections.Select(d => d.Box).ToList();
+                                seg = SamOnnxSegmentation.RunMultiBox(
+                                    samImg,
+                                    boxList,
+                                    encAbs,
+                                    decAbs,
+                                    th,
+                                    useGpu,
+                                    maxInstances: Math.Min(boxList.Count, maskMergeMax));
+                            }
+                        }
+                        else
+                            seg = SamOnnxSegmentation.Run(samImg, promptPts, fx, fy, encAbs, decAbs, th, useGpu, boxOrig);
                         node.Outputs["Mask"] = seg.Mask;
                         if (seg.Mask2 != null) node.Outputs["Mask2"] = seg.Mask2;
                         if (seg.Mask3 != null) node.Outputs["Mask3"] = seg.Mask3;
                         if (seg.Mask4 != null) node.Outputs["Mask4"] = seg.Mask4;
+                        node.Outputs["MaskAll"] = SamOnnxSegmentation.MergeMaskOutputsUnion(seg, maskMergeMax);
                         node.Outputs["Vis"] = seg.Vis;
                         node.Outputs["GroundingJson"] = groundingJson;
-                        node.ResultSummary = textPrompt.Length > 0
-                            ? $"SAM 文本→框「{textPrompt}」，候选×{seg.MaskCandidateCount}，最佳 IoU≈{seg.IouPrediction:F3}"
+                        node.ResultSummary = textPrompt.Length > 0 && textDetections != null
+                            ? (textDetections.Count > 1
+                                ? $"SAM 文本「{textPrompt}」OWLv2×{textDetections.Count}，解码×{seg.MaskUnionSources?.Count ?? 0}（MaskAll≤{maskMergeMax}），首实例 IoU≈{seg.IouPrediction:F3}"
+                                : $"SAM 文本→框「{textPrompt}」，SAM 掩码候选×{seg.MaskCandidateCount}，最佳 IoU≈{seg.IouPrediction:F3}")
                             : $"SAM 候选×{seg.MaskCandidateCount}，最佳 IoU≈{seg.IouPrediction:F3}";
                         break;
                     }
@@ -5932,7 +6328,9 @@ namespace CalibOperatorCLI_Example
                         inputs.TryGetValue("Points", out var ptsObj);
                         Point2D[]? overlayPts = ptsObj as Point2D[];
                         int dotRadius = int.TryParse(node.Params.GetValueOrDefault("dotRadius"), out int r) ? r : 3;
-                        ShowImagePreview(foregroundImg, overlayPts, dotRadius, backgroundImg);
+                        string dispSlot = node.Id.ToString("D");
+                        string dispTitle = $"{node.Def.DisplayName} [{node.Id.ToString("N")[..8]}]";
+                        ShowImagePreview(foregroundImg, overlayPts, dotRadius, backgroundImg, dispSlot, dispTitle);
                         break;
                     }
 
@@ -6476,7 +6874,15 @@ namespace CalibOperatorCLI_Example
         /// 显示图像预览窗口，支持缩放和平移，可选叠加点位
         /// 滚轮缩放；右键按住拖拽平移（轻微移动仍可弹出菜单）；右键菜单或 F 适应窗口，1 重置100%
         /// </summary>
-        private void ShowImagePreview(CalibImage? img, Point2D[]? overlayPoints = null, int dotRadius = 3, CalibImage? backgroundImg = null)
+        /// <param name="previewSlotKey">每个槽位独立窗口；默认 <see cref="LivePreviewSingletonSlotKey"/> 供连线预览等共用。</param>
+        /// <param name="titlePrefix">窗口标题前缀（例如「显示图像 [节点短Guid]」）；空则用默认「图像预览」。</param>
+        private void ShowImagePreview(
+            CalibImage? img,
+            Point2D[]? overlayPoints = null,
+            int dotRadius = 3,
+            CalibImage? backgroundImg = null,
+            string? previewSlotKey = null,
+            string? titlePrefix = null)
         {
             var baseSource = backgroundImg ?? img;
             if (baseSource == null) return;
@@ -6545,17 +6951,35 @@ namespace CalibOperatorCLI_Example
             DeleteObject(hBitmap);
             bmp.Dispose();
 
-            string previewTitle = overlayPoints != null ? $"图像预览 ({overlayPoints.Length} 个点)" : "图像预览";
+            string previewTitle = !string.IsNullOrEmpty(titlePrefix)
+                ? (overlayPoints != null ? $"{titlePrefix} ({overlayPoints.Length} 个点)" : titlePrefix)
+                : (overlayPoints != null ? $"图像预览 ({overlayPoints.Length} 个点)" : "图像预览");
             int imgW = baseSource.Width;
             int imgH = baseSource.Height;
+            string slotKey = string.IsNullOrEmpty(previewSlotKey) ? LivePreviewSingletonSlotKey : previewSlotKey!;
 
             void OpenOrUpdateLivePreviewOnUiThread()
             {
-                if (_livePreviewWindow != null && _livePreviewWindow.IsVisible && _livePreviewImageCtrl != null)
+                if (_livePreviewBySlot.TryGetValue(slotKey, out var existingSlot))
                 {
-                    _livePreviewWindow.Title = previewTitle;
-                    _livePreviewImageCtrl.Source = bitmapSource;
-                    return;
+                    if (existingSlot.Window.IsLoaded)
+                    {
+                        existingSlot.Window.Title = previewTitle;
+                        existingSlot.ImageCtrl.Source = bitmapSource;
+                        existingSlot.Window.Show();
+                        try
+                        {
+                            existingSlot.Window.Activate();
+                        }
+                        catch
+                        {
+                            // ignored
+                        }
+
+                        return;
+                    }
+
+                    _livePreviewBySlot.Remove(slotKey);
                 }
 
                 var win = new Window
@@ -6580,7 +7004,6 @@ namespace CalibOperatorCLI_Example
                 // 内层：承载图像，应用变换
                 var canvas = new System.Windows.Controls.Canvas { RenderTransform = transformGroup, RenderTransformOrigin = new Point(0, 0) };
                 var imageCtrl = new System.Windows.Controls.Image { Source = bitmapSource, Width = imgW, Height = imgH };
-                _livePreviewImageCtrl = imageCtrl;
                 canvas.Children.Add(imageCtrl);
                 border.Child = canvas;
 
@@ -6743,13 +7166,9 @@ namespace CalibOperatorCLI_Example
 
                 // 窗口打开后自适应
                 win.ContentRendered += (_, _) => FitToView();
-                win.Closed += (_, _) =>
-                {
-                    _livePreviewWindow = null;
-                    _livePreviewImageCtrl = null;
-                };
+                win.Closed += (_, _) => { _livePreviewBySlot.Remove(slotKey); };
 
-                _livePreviewWindow = win;
+                _livePreviewBySlot[slotKey] = new LivePreviewSlot { Window = win, ImageCtrl = imageCtrl };
                 win.Show();
             }
 

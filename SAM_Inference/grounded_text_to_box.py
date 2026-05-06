@@ -1,6 +1,8 @@
 """
 Open-vocabulary text -> axis-aligned box (xyxy in original image pixels) via OWLv2.
-Called from CalibOperatorCLI GroundedTextToBoxBridge; writes JSON for C# to consume.
+
+Production Flow uses C# (Owlv2OnnxTextToBox + ONNX); this script remains for manual
+debugging or tooling — not invoked by the app at runtime.
 
   pip install -r SAM_Inference/requirements-grounded.txt
 

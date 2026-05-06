@@ -15,6 +15,7 @@ namespace CalibOperatorCLI_Example
         private PlcPage _plcPage;
         private HistogramPage _histogramPage;
         private FlowPage _flowPage;
+        private YoloSegTrainPage _yoloSegTrainPage;
 
         /// <summary>
         /// 全局相机服务实例
@@ -42,6 +43,7 @@ namespace CalibOperatorCLI_Example
             _histogramPage = new HistogramPage();
             _flowPage = new FlowPage();
             _flowPage.FlowLoaded += SaveLastFlowPath;
+            _yoloSegTrainPage = new YoloSegTrainPage();
 
             // 将轨迹检测结果获取委托注入 PlcPage，使其可访问最新轨迹
             _plcPage.GetTrajectoryResult = () => _trajectoryPage.LastResult;
@@ -74,6 +76,7 @@ namespace CalibOperatorCLI_Example
             NavPlc.Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
             NavHistogram.Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
             NavFlow.Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
+            NavYoloSeg.Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
 
             switch (tab)
             {
@@ -91,6 +94,9 @@ namespace CalibOperatorCLI_Example
                     break;
                 case "Flow":
                     NavFlow.Background = new SolidColorBrush(Color.FromRgb(0x00, 0x7A, 0xCC));
+                    break;
+                case "YoloSeg":
+                    NavYoloSeg.Background = new SolidColorBrush(Color.FromRgb(0x00, 0x7A, 0xCC));
                     break;
             }
         }
@@ -124,6 +130,12 @@ namespace CalibOperatorCLI_Example
             NavigateTo(_flowPage);
             HighlightTab("Flow");
             TryAutoLoadLastFlowOnFlowPageSwitch();
+        }
+
+        private void NavYoloSeg_Click(object sender, RoutedEventArgs e)
+        {
+            NavigateTo(_yoloSegTrainPage);
+            HighlightTab("YoloSeg");
         }
 
         public async Task<bool> RunFlowConfigInBackgroundAsync(string flowFilePath)

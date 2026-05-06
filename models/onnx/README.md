@@ -57,6 +57,34 @@ python quantize_sam_onnx.py --in-dir ..\models\onnx --prefix sam_vit_b
 
 若需 **静态量化**（激活也量化，体积/延迟更优），需要代表性样本做校准，可在此基础上自行接入 `onnxruntime.quantization.quantize_static` 与 `CalibrationDataReader`。
 
+## OWLv2（文本 grounding → SAM 框提示）
+
+SAM Flow 算子在填写 **textPrompt** 时，会在 **C#** 内用 ONNX Runtime 跑 OWLv2，不再调用 Python。
+
+### 所需文件
+
+| 路径（默认） | 说明 |
+|--------------|------|
+| `models/onnx/owlv2_base_patch16_ensemble.onnx`（可调） | 使用 Hugging Face Optimum 等工具导出的 OWLv2 **零样本检测** ONNX（输入含 `pixel_values`、`input_ids`、`attention_mask`） |
+| `models/onnx/owlv2_tokenizer/tokenizer.json`（可调） | 与 OWLv2 文本塔一致的 **CLIP** tokenizer（可与 `openai/clip-vit-base-patch32` 的 `tokenizer.json` 相同家族）；工程通过 **Tokenizers.DotNet**（Rust `hf_tokenizers`）加载 |
+
+### 导出示例（开发机一次性操作）
+
+需 Python 环境仅用于 **离线导出**，运行时不需要 `python.exe`：
+
+```powershell
+pip install optimum[exporters] transformers onnx onnxruntime
+
+# 示例：导出 base-patch16（名称与算子默认路径对齐时请自行重命名或改 Flow 参数）
+optimum-cli export onnx --model google/owlv2-base-patch16-ensemble --task zero-shot-object-detection .\models\onnx\owlv2_export
+```
+
+将生成的 ONNX 复制为 Flow 默认路径下的 `owlv2_base_patch16_ensemble.onnx`（或在工作流里填写 **OWLv2 ONNX** 参数的完整路径）。从 Hugging Face 仓库下载 `tokenizer.json`（及可选 `vocab.json` / `merges.txt`）到 `models/onnx/owlv2_tokenizer/`。
+
+**Windows**：NuGet 包 `Tokenizers.DotNet.runtime.win-x64` 会把 `hf_tokenizers.dll` 拷到输出目录；其他 RID 需对应 runtime 包。
+
+图像预处理：填黑 pad 成正方形 → **960×960** → CLIP mean/std → NCHW `float32`。文本：**最长 16 token**，padding id **0**，与导出模型保持一致。
+
 ## 工程引用
 
 - ONNX 文件体积较大，默认不强制提交到 Git；可按需在 CI/发布步骤复制 `models\onnx\*.onnx` 到应用程序目录。

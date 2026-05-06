@@ -57,6 +57,9 @@
                 <Button x:Name="NavFlow" Content="组态" Style="{StaticResource NavTabButtonStyle}"
                         Click="NavFlow_Click"
                         AutomationProperties.Name="组态流程"/>
+                <Button x:Name="NavYoloSeg" Content="YOLO分割" Style="{StaticResource NavTabButtonStyle}"
+                        Click="NavYoloSeg_Click"
+                        AutomationProperties.Name="YOLO分割训练"/>
             </StackPanel>
         </Border>
 

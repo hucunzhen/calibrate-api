@@ -4,6 +4,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -14,6 +15,27 @@
     <PackageReference Include="System.Drawing.Common" Version="6.0.0" />
     <PackageReference Include="HslCommunication" Version="12.7.0" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
+    <PackageReference Include="Tokenizers.DotNet" Version="1.4.0" />
+    <PackageReference Include="Tokenizers.DotNet.runtime.win-x64" Version="1.4.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\YoloSeg_Tools\auto_label_seg.py">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>YoloSeg_Tools\auto_label_seg.py</Link>
+    </None>
+    <None Include="..\..\YoloSeg_Tools\train_seg.py">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>YoloSeg_Tools\train_seg.py</Link>
+    </None>
+    <None Include="..\..\YoloSeg_Tools\predict_seg.py">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>YoloSeg_Tools\predict_seg.py</Link>
+    </None>
+    <None Include="..\..\YoloSeg_Tools\requirements-yolo-seg.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>YoloSeg_Tools\requirements-yolo-seg.txt</Link>
+    </None>
   </ItemGroup>
 
   <!-- PLC 配置文件复制到输出目录 -->

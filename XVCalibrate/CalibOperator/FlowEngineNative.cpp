@@ -209,6 +209,22 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         out["Out"] = MakeImage(dst);
         return true;
     }
+    if (n.type == "dip_denoise") {
+        err = "requires managed execution (PyTorch DIP)";
+        return false;
+    }
+    if (n.type == "jit_sample") {
+        err = "requires managed execution (JiT / JAX)";
+        return false;
+    }
+    if (n.type == "swin_transformer") {
+        err = "requires managed execution (PyTorch timm Swin)";
+        return false;
+    }
+    if (n.type == "yolo_seg_infer") {
+        err = "requires managed execution (Ultralytics YOLO-Seg)";
+        return false;
+    }
     if (n.type == "sobel" || n.type == "scharr") {
         Value vin = InputOf(e, n.id, "In");
         if (vin.kind != Value::Kind::Image) { err = n.type + ": missing In"; return false; }

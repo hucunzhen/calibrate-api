@@ -59,6 +59,11 @@ namespace CalibOperatorCLI_Example
             public float[]? IouPerMaskRaw { get; set; }
             /// <summary>decoder 输出的掩码个数（通常为 3 或 4；单掩码导出为 1）。</summary>
             public int MaskCandidateCount { get; set; }
+            /// <summary>
+            /// <see cref="MergeMaskOutputsUnion"/> 优先合并此序列：多框路径为各实例主掩码（长度由 <see cref="RunMultiBox"/> 的 <c>maxInstances</c> 与框数决定）；
+            /// 单提示 SAM 多候选时为 Mask～Mask4 按 IoU 排序后的列表（decoder 导出多掩码时通常 ≤4）。
+            /// </summary>
+            public IReadOnlyList<CalibImage>? MaskUnionSources { get; set; }
         }
 
         /// <summary>
@@ -247,25 +252,7 @@ namespace CalibOperatorCLI_Example
             List<float> labels = new List<float>();
 
             if (boxOrig.HasValue)
-            {
-                var b = boxOrig.Value;
-                double x1 = Math.Min(b.X1, b.X2);
-                double x2 = Math.Max(b.X1, b.X2);
-                double y1 = Math.Min(b.Y1, b.Y2);
-                double y2 = Math.Max(b.Y1, b.Y2);
-                const double eps = 1e-3;
-                x1 = Math.Clamp(x1, 0, origW - eps);
-                x2 = Math.Clamp(x2, eps, origW);
-                y1 = Math.Clamp(y1, 0, origH - eps);
-                y2 = Math.Clamp(y2, eps, origH);
-                if (x2 <= x1) x2 = Math.Min(origW, x1 + 1.0);
-                if (y2 <= y1) y2 = Math.Min(origH, y1 + 1.0);
-
-                pts.Add(new Point2f((float)(x1 * newW / origW), (float)(y1 * newH / origH)));
-                labels.Add(2f);
-                pts.Add(new Point2f((float)(x2 * newW / origW), (float)(y2 * newH / origH)));
-                labels.Add(3f);
-            }
+                AppendBoxCornersNorm(boxOrig.Value, origW, origH, newW, newH, pts, labels);
             else if (promptPoints != null && promptPoints.Count > 0)
             {
                 pts.Add(new Point2f(
@@ -288,21 +275,109 @@ namespace CalibOperatorCLI_Example
                 labels.Add(1f);
             }
 
-            int nPts = pts.Count;
             var sessions = GetOrCreateSessions(encoderPath, decoderPath, useGpu);
+            var embTensor = RunSamEncoder(sessions, encoderTensor);
+            return RunSamDecode(image, sessions, embTensor, origH, origW, newH, newW, pts, labels, maskLogitThreshold);
+        }
 
+        /// <summary>
+        /// 文本 grounding 等多实例：共享一次 SAM encoder，对前 <c>min(框数, maxInstances)</c> 个框依次 decoder。
+        /// Mask～Mask4 仍为第 1～4 个实例的主掩码；更多实例仅出现在 <see cref="Result.MaskUnionSources"/> 供 MaskAll 合并。
+        /// </summary>
+        /// <param name="maxInstances">最多解码几次（与 Flow 中 maskMergeMax 等对齐）；默认解码全部传入的框。</param>
+        public static Result RunMultiBox(
+            CalibImage image,
+            IReadOnlyList<OrigBoxPrompt> boxPrompts,
+            string encoderPath,
+            string decoderPath,
+            float maskLogitThreshold,
+            bool useGpu,
+            int maxInstances = int.MaxValue)
+        {
+            if (image == null) throw new ArgumentNullException(nameof(image));
+            if (boxPrompts == null || boxPrompts.Count == 0)
+                throw new ArgumentException("boxPrompts 不能为空", nameof(boxPrompts));
+            if (maxInstances < 1)
+                throw new ArgumentOutOfRangeException(nameof(maxInstances));
+
+            int origH = image.Height;
+            int origW = image.Width;
+            if (origH <= 0 || origW <= 0)
+                throw new InvalidOperationException("SAM: 输入图像尺寸无效");
+
+            GetPreprocessShape(origH, origW, SamInputSize, out int newH, out int newW);
+
+            using Bitmap rgbCanvas = CalibImageToRgbBitmap(image);
+            using Bitmap resized = ResizeRgb(rgbCanvas, newW, newH);
+            using Bitmap padded = PadTopLeftBlack(resized, SamInputSize, SamInputSize);
+
+            var encoderTensor = RgbBitmapToNormalizedNchw(padded);
+            var sessions = GetOrCreateSessions(encoderPath, decoderPath, useGpu);
+            var embTensor = RunSamEncoder(sessions, encoderTensor);
+
+            int nInst = Math.Min(boxPrompts.Count, maxInstances);
+            var partial = new Result[nInst];
+            var overlayBins = new List<byte[]>(Math.Min(nInst, 3));
+            var unionList = new List<CalibImage>(nInst);
+            for (int i = 0; i < nInst; i++)
+            {
+                var pts = new List<Point2f>();
+                var labels = new List<float>();
+                AppendBoxCornersNorm(boxPrompts[i], origW, origH, newW, newH, pts, labels);
+                partial[i] = RunSamDecode(image, sessions, embTensor, origH, origW, newH, newW, pts, labels, maskLogitThreshold);
+                unionList.Add(partial[i].Mask);
+                if (overlayBins.Count < 3)
+                    overlayBins.Add(ReadGrayMaskTightBytes(partial[i].Mask));
+            }
+
+            CalibImage vis = overlayBins.Count > 0
+                ? BlendMultiOverlay(image, overlayBins, partial[0].Mask.Width, partial[0].Mask.Height)
+                : CalibAPI.DuplicateImage(image);
+
+            CalibImage? m2 = null, m3 = null, m4 = null;
+            if (nInst >= 2) m2 = partial[1].Mask;
+            if (nInst >= 3) m3 = partial[2].Mask;
+            if (nInst >= 4) m4 = partial[3].Mask;
+
+            return new Result
+            {
+                Mask = partial[0].Mask,
+                Mask2 = m2,
+                Mask3 = m3,
+                Mask4 = m4,
+                Vis = vis,
+                IouPrediction = partial[0].IouPrediction,
+                IouPerMaskRaw = partial[0].IouPerMaskRaw,
+                MaskCandidateCount = partial[0].MaskCandidateCount,
+                MaskUnionSources = unionList,
+            };
+        }
+
+        private static DenseTensor<float> RunSamEncoder(SessionPair sessions, DenseTensor<float> encoderTensor)
+        {
             var encInput = new List<NamedOnnxValue>
             {
                 NamedOnnxValue.CreateFromTensor("image", encoderTensor)
             };
 
-            Tensor<float>? embTensor;
-            using (var encOut = sessions.Encoder.Run(encInput))
-            {
-                var first = encOut.First(x => x.Name == "image_embeddings");
-                embTensor = first.AsTensor<float>().ToDenseTensor();
-            }
+            using var encOut = sessions.Encoder.Run(encInput);
+            var first = encOut.First(x => x.Name == "image_embeddings");
+            return first.AsTensor<float>().ToDenseTensor();
+        }
 
+        private static Result RunSamDecode(
+            CalibImage image,
+            SessionPair sessions,
+            DenseTensor<float> embTensor,
+            int origH,
+            int origW,
+            int newH,
+            int newW,
+            List<Point2f> pts,
+            List<float> labels,
+            float maskLogitThreshold)
+        {
+            int nPts = pts.Count;
             float[] pcArr = new float[nPts * 2];
             for (int i = 0; i < nPts; i++)
             {
@@ -328,18 +403,174 @@ namespace CalibOperatorCLI_Example
                 NamedOnnxValue.CreateFromTensor("orig_im_size", origSize),
             };
 
-            using (var decOut = sessions.Decoder.Run(decInputs))
+            using var decOut = sessions.Decoder.Run(decInputs);
+            var masksNv = decOut.First(x => x.Name == "masks");
+            var iouNv = decOut.First(x => x.Name == "iou_predictions");
+            var masksDense = masksNv.AsTensor<float>().ToDenseTensor();
+            var iouDense = iouNv.AsTensor<float>().ToDenseTensor();
+            return BuildMultiMaskResult(
+                image,
+                masksDense,
+                iouDense,
+                maskLogitThreshold);
+        }
+
+        private static void AppendBoxCornersNorm(
+            OrigBoxPrompt b,
+            int origW,
+            int origH,
+            int newW,
+            int newH,
+            List<Point2f> pts,
+            List<float> labels)
+        {
+            double x1 = Math.Min(b.X1, b.X2);
+            double x2 = Math.Max(b.X1, b.X2);
+            double y1 = Math.Min(b.Y1, b.Y2);
+            double y2 = Math.Max(b.Y1, b.Y2);
+            const double eps = 1e-3;
+            x1 = Math.Clamp(x1, 0, origW - eps);
+            x2 = Math.Clamp(x2, eps, origW);
+            y1 = Math.Clamp(y1, 0, origH - eps);
+            y2 = Math.Clamp(y2, eps, origH);
+            if (x2 <= x1) x2 = Math.Min(origW, x1 + 1.0);
+            if (y2 <= y1) y2 = Math.Min(origH, y1 + 1.0);
+
+            pts.Add(new Point2f((float)(x1 * newW / origW), (float)(y1 * newH / origH)));
+            labels.Add(2f);
+            pts.Add(new Point2f((float)(x2 * newW / origW), (float)(y2 * newH / origH)));
+            labels.Add(3f);
+        }
+
+        private static byte[] ReadGrayMaskTightBytes(CalibImage m)
+        {
+            NativeImage ni = m.GetNativeStruct();
+            int w = ni.width;
+            int h = ni.height;
+            if (ni.data == IntPtr.Zero || w <= 0 || h <= 0 || ni.channels != 1)
+                throw new InvalidOperationException("SAM: 掩码图为空或通道数无效");
+
+            int tightRow = w;
+            int stride = tightRow % 4 == 0 ? tightRow : ((tightRow / 4) + 1) * 4;
+            byte[] packed = new byte[w * h];
+            for (int y = 0; y < h; y++)
+                Marshal.Copy(IntPtr.Add(ni.data, y * stride), packed, y * w, w);
+            return packed;
+        }
+
+        /// <summary>
+        /// 将多路掩码叠成一张 <strong>3 通道 BGR</strong> 图：黑底上按掩码顺序用<strong>不同色相</strong>以固定透明度逐层 alpha 混合（重叠处会叠色，模拟半透明）。
+        /// 优先使用 <see cref="Result.MaskUnionSources"/>；否则退回 Mask→Mask4。需要单通道二值并集时请对各路掩码自行做逻辑或。
+        /// </summary>
+        public static CalibImage MergeMaskOutputsUnion(Result seg, int maxMerge)
+        {
+            if (seg == null) throw new ArgumentNullException(nameof(seg));
+            if (maxMerge < 1) throw new ArgumentOutOfRangeException(nameof(maxMerge));
+
+            var masks = new List<CalibImage>();
+
+            if (seg.MaskUnionSources != null && seg.MaskUnionSources.Count > 0)
             {
-                var masksNv = decOut.First(x => x.Name == "masks");
-                var iouNv = decOut.First(x => x.Name == "iou_predictions");
-                var masksDense = masksNv.AsTensor<float>().ToDenseTensor();
-                var iouDense = iouNv.AsTensor<float>().ToDenseTensor();
-                return BuildMultiMaskResult(
-                    image,
-                    masksDense,
-                    iouDense,
-                    maskLogitThreshold);
+                foreach (CalibImage m in seg.MaskUnionSources)
+                {
+                    if (m == null) continue;
+                    masks.Add(m);
+                    if (masks.Count >= maxMerge) break;
+                }
             }
+            else
+            {
+                CalibImage?[] slots = { seg.Mask, seg.Mask2, seg.Mask3, seg.Mask4 };
+                foreach (CalibImage? m in slots)
+                {
+                    if (m == null) continue;
+                    masks.Add(m);
+                    if (masks.Count >= maxMerge) break;
+                }
+            }
+
+            if (masks.Count == 0)
+                throw new InvalidOperationException("SAM MaskAll: 无可用掩码，无法合并");
+
+            int w = masks[0].Width;
+            int h = masks[0].Height;
+            foreach (CalibImage m in masks)
+            {
+                if (m.Width != w || m.Height != h || m.Channels != 1)
+                    throw new InvalidOperationException(
+                        $"SAM MaskAll: 掩码须为单通道且尺寸一致 ({w}×{h})");
+            }
+
+            int wh = w * h;
+            var accB = new float[wh];
+            var accG = new float[wh];
+            var accR = new float[wh];
+            const float layerAlpha = 0.42f;
+            float invA = 1f - layerAlpha;
+
+            for (int mi = 0; mi < masks.Count; mi++)
+            {
+                HsvToRgbBytesGolden(mi, out byte cr8, out byte cg8, out byte cb8);
+                float cr = cr8, cg = cg8, cb = cb8;
+                byte[] packed = ReadGrayMaskTightBytes(masks[mi]);
+                for (int i = 0; i < wh; i++)
+                {
+                    if (packed[i] < 128)
+                        continue;
+                    accR[i] = accR[i] * invA + cr * layerAlpha;
+                    accG[i] = accG[i] * invA + cg * layerAlpha;
+                    accB[i] = accB[i] * invA + cb * layerAlpha;
+                }
+            }
+
+            byte[] buf = new byte[wh * 3];
+            for (int i = 0; i < wh; i++)
+            {
+                buf[i * 3 + 0] = (byte)Math.Clamp((int)MathF.Round(accB[i]), 0, 255);
+                buf[i * 3 + 1] = (byte)Math.Clamp((int)MathF.Round(accG[i]), 0, 255);
+                buf[i * 3 + 2] = (byte)Math.Clamp((int)MathF.Round(accR[i]), 0, 255);
+            }
+
+            var dst = new CalibImage(w, h, 3);
+            NativeImage dni = dst.GetNativeStruct();
+            if (dni.data == IntPtr.Zero)
+                throw new InvalidOperationException("SAM MaskAll: 目标图像缓冲区无效");
+            Marshal.Copy(buf, 0, dni.data, buf.Length);
+            return dst;
+        }
+
+        /// <summary>黄金角分布色相，使相邻索引颜色区分大。</summary>
+        private static void HsvToRgbBytesGolden(int index, out byte r, out byte g, out byte b)
+        {
+            float hue = (index * 0.618033988749895f + 0.112f) % 1f;
+            HsvToRgbBytes(hue, 0.84f, 0.96f, out r, out g, out b);
+        }
+
+        private static void HsvToRgbBytes(float h, float s, float v, out byte r, out byte g, out byte b)
+        {
+            h = (h % 1f + 1f) % 1f;
+            s = Math.Clamp(s, 0f, 1f);
+            v = Math.Clamp(v, 0f, 1f);
+            float hh = h * 6f;
+            int sector = (int)MathF.Floor(hh);
+            float f = hh - sector;
+            float p = v * (1f - s);
+            float q = v * (1f - f * s);
+            float t = v * (1f - (1f - f) * s);
+            float rf, gf, bf;
+            switch (sector % 6)
+            {
+                case 0: rf = v; gf = t; bf = p; break;
+                case 1: rf = q; gf = v; bf = p; break;
+                case 2: rf = p; gf = v; bf = t; break;
+                case 3: rf = p; gf = q; bf = v; break;
+                case 4: rf = t; gf = p; bf = v; break;
+                default: rf = v; gf = p; bf = q; break;
+            }
+
+            r = (byte)Math.Clamp((int)MathF.Round(rf * 255f), 0, 255);
+            g = (byte)Math.Clamp((int)MathF.Round(gf * 255f), 0, 255);
+            b = (byte)Math.Clamp((int)MathF.Round(bf * 255f), 0, 255);
         }
 
         private static Result BuildMultiMaskResult(
@@ -394,6 +625,10 @@ namespace CalibOperatorCLI_Example
                 ? BlendMultiOverlay(image, overlaySlices, maskW, maskH)
                 : CalibAPI.DuplicateImage(image);
 
+            var unionList = new List<CalibImage>(ranked.Length);
+            foreach (CalibImage ri in ranked)
+                unionList.Add(ri);
+
             return new Result
             {
                 Mask = primary,
@@ -404,6 +639,7 @@ namespace CalibOperatorCLI_Example
                 IouPrediction = iousAligned[order[0]],
                 IouPerMaskRaw = iouRaw,
                 MaskCandidateCount = nMask,
+                MaskUnionSources = unionList,
             };
         }
 

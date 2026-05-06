@@ -1,0 +1,228 @@
+<Page x:Class="CalibOperatorCLI_Example.YoloSegTrainPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      Title="YOLO分割训练"
+      Background="{StaticResource Ui.PageBackground}">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="8">
+        <StackPanel MaxWidth="980">
+            <TextBlock Text="YOLO-Seg 数据集与训练" FontSize="18" FontWeight="Bold" Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" Foreground="#444" Margin="0,0,0,12"
+                       Text="流程：① 路径与导入图像 → ② 填写类别并生成 data.yaml（含 augment 训练增强）→ ③ 自动标注 → ④ 画布校对 → ⑤ 训练（train_seg.py 会读取 augment）。自动标注需 pip install ultralytics。"/>
+
+            <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                <StackPanel>
+                    <TextBlock FontWeight="Bold" Text="路径" Margin="0,0,0,6"/>
+                    <Grid Margin="0,0,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="数据集根目录" VerticalAlignment="Center"/>
+                        <TextBox x:Name="TxtDatasetRoot" Grid.Column="1" Height="24" VerticalContentAlignment="Center" Margin="4,0"/>
+                        <Button x:Name="BtnBrowseDataset" Grid.Column="2" Content="浏览…" Width="72" Height="26" Margin="4,0,0,0" Click="BtnBrowseDataset_Click"/>
+                    </Grid>
+                    <Grid Margin="0,4,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="原始图像文件夹" VerticalAlignment="Center"/>
+                        <TextBox x:Name="TxtSourceFolder" Grid.Column="1" Height="24" VerticalContentAlignment="Center" Margin="4,0"/>
+                        <Button x:Name="BtnBrowseSource" Grid.Column="2" Content="浏览…" Width="72" Height="26" Margin="4,0,0,0" Click="BtnBrowseSource_Click"/>
+                    </Grid>
+                    <WrapPanel Margin="0,10,0,0">
+                        <Button x:Name="BtnImportImages" Content="导入图像到 images/train" Width="180" Height="28" Margin="0,0,8,4" Click="BtnImportImages_Click"/>
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                <StackPanel>
+                    <TextBlock FontWeight="Bold" Text="类别（写入 data.yaml）" Margin="0,0,0,6"/>
+                    <TextBox x:Name="TxtClassNames" Text="object" Height="24" VerticalContentAlignment="Center"
+                             ToolTip="英文逗号分隔，例如：scratch,dent；类别 id 从左到右为 0,1,…"/>
+                    <TextBlock Text="与「单一类别 id」配合：若自动标注全部映射为 0，此处一般只填一个类别名。" FontSize="11" Foreground="#666" Margin="0,4,0,0"/>
+                    <WrapPanel Margin="0,10,0,0">
+                        <Button x:Name="BtnGenYaml" Content="生成 data.yaml（含下方增强）" Width="200" Height="28" Margin="0,0,10,4" Click="BtnGenYaml_Click"/>
+                        <Button Content="仅更新 augment 段" Width="140" Height="28" Margin="0,0,10,4" Click="BtnWriteAugmentToYaml_Click"
+                                ToolTip="保留 path/train/val/names，只重写 augment；需已存在 data.yaml"/>
+                        <Button Content="预设·轻度" Width="88" Height="28" Margin="0,0,8,4" Click="BtnAugPresetLight_Click"/>
+                        <Button Content="预设·中度" Width="88" Height="28" Margin="0,0,8,4" Click="BtnAugPresetMedium_Click"/>
+                        <Button Content="预设·仅翻转+HSV" Width="130" Height="28" Margin="0,0,8,4" Click="BtnAugPresetFlipHsv_Click"
+                                ToolTip="关闭旋转/平移/缩放等几何随机增强"/>
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                <StackPanel>
+                    <TextBlock FontWeight="Bold" Text="训练增强（写入 data.yaml → augment）" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="#555"
+                               Text="以下为 Ultralytics train 的几何/合成/颜色增强参数；点击「生成 data.yaml」或「仅更新 augment 段」写入。训练时 train_seg.py 会读取并传入 model.train()。"/>
+                    <Grid Margin="0,8,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="72"/>
+                            <ColumnDefinition Width="24"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="72"/>
+                            <ColumnDefinition Width="24"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="degrees°" VerticalAlignment="Center" Margin="0,4"/>
+                        <TextBox x:Name="TxtAugDegrees" Grid.Row="0" Grid.Column="1" Text="10" Height="24" Margin="4,4" VerticalContentAlignment="Center"
+                                 ToolTip="随机旋转角度 ±degrees"/>
+                        <TextBlock Grid.Row="0" Grid.Column="3" Text="translate" VerticalAlignment="Center" Margin="12,4,0,4"/>
+                        <TextBox x:Name="TxtAugTranslate" Grid.Row="0" Grid.Column="4" Text="0.1" Height="24" Margin="4,4" VerticalContentAlignment="Center"
+                                 ToolTip="平移幅度（相对尺寸比例）"/>
+                        <TextBlock Grid.Row="0" Grid.Column="6" Text="scale" VerticalAlignment="Center" Margin="12,4,0,4"/>
+                        <TextBox x:Name="TxtAugScale" Grid.Row="0" Grid.Column="7" Text="0.5" Height="24" Margin="4,4" VerticalContentAlignment="Center"
+                                 ToolTip="缩放抖动幅度"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="shear°" VerticalAlignment="Center" Margin="0,4"/>
+                        <TextBox x:Name="TxtAugShear" Grid.Row="1" Grid.Column="1" Text="0" Height="24" Margin="4,4" VerticalContentAlignment="Center"/>
+                        <TextBlock Grid.Row="1" Grid.Column="3" Text="perspective" VerticalAlignment="Center" Margin="12,4,0,4"/>
+                        <TextBox x:Name="TxtAugPerspective" Grid.Row="1" Grid.Column="4" Text="0" Height="24" Margin="4,4" VerticalContentAlignment="Center"/>
+                        <TextBlock Grid.Row="1" Grid.Column="6" Text="fliplr" VerticalAlignment="Center" Margin="12,4,0,4"/>
+                        <TextBox x:Name="TxtAugFliplr" Grid.Row="1" Grid.Column="7" Text="0.5" Height="24" Margin="4,4" VerticalContentAlignment="Center"
+                                 ToolTip="水平翻转概率"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="flipud" VerticalAlignment="Center" Margin="0,4"/>
+                        <TextBox x:Name="TxtAugFlipud" Grid.Row="2" Grid.Column="1" Text="0" Height="24" Margin="4,4" VerticalContentAlignment="Center"/>
+                        <TextBlock Grid.Row="2" Grid.Column="3" Text="mosaic" VerticalAlignment="Center" Margin="12,4,0,4"/>
+                        <TextBox x:Name="TxtAugMosaic" Grid.Row="2" Grid.Column="4" Text="1" Height="24" Margin="4,4" VerticalContentAlignment="Center"
+                                 ToolTip="Mosaic 增强概率，1=几乎总启用"/>
+                        <TextBlock Grid.Row="2" Grid.Column="6" Text="mixup" VerticalAlignment="Center" Margin="12,4,0,4"/>
+                        <TextBox x:Name="TxtAugMixup" Grid.Row="2" Grid.Column="7" Text="0" Height="24" Margin="4,4" VerticalContentAlignment="Center"/>
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="copy_paste" VerticalAlignment="Center" Margin="0,4"/>
+                        <TextBox x:Name="TxtAugCopyPaste" Grid.Row="3" Grid.Column="1" Text="0" Height="24" Margin="4,4" VerticalContentAlignment="Center"/>
+                        <TextBlock Grid.Row="3" Grid.Column="3" Text="hsv_h" VerticalAlignment="Center" Margin="12,4,0,4"/>
+                        <TextBox x:Name="TxtAugHsvH" Grid.Row="3" Grid.Column="4" Text="0.015" Height="24" Margin="4,4" VerticalContentAlignment="Center"/>
+                        <TextBlock Grid.Row="3" Grid.Column="6" Text="hsv_s / hsv_v" VerticalAlignment="Center" Margin="12,4,0,4"/>
+                        <StackPanel Grid.Row="3" Grid.Column="7" Orientation="Horizontal" Margin="4,4,0,4">
+                            <TextBox x:Name="TxtAugHsvS" Text="0.7" Width="52" Height="24" VerticalContentAlignment="Center" Margin="0,0,6,0"/>
+                            <TextBox x:Name="TxtAugHsvV" Text="0.4" Width="52" Height="24" VerticalContentAlignment="Center"/>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                <StackPanel>
+                    <TextBlock FontWeight="Bold" Text="自动标注（Python / Ultralytics）" Margin="0,0,0,6"/>
+                    <Grid Margin="0,0,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Python" VerticalAlignment="Center" Margin="0,4"/>
+                        <TextBox x:Name="TxtPython" Grid.Row="0" Grid.Column="1" Text="python" Height="24" VerticalContentAlignment="Center" Margin="4,4,0,4"/>
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="预训练权重" VerticalAlignment="Center" Margin="0,4"/>
+                        <TextBox x:Name="TxtWeights" Grid.Row="1" Grid.Column="1" Text="yolov8n-seg.pt" Height="24" VerticalContentAlignment="Center" Margin="4,4,0,4"/>
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="置信度 conf" VerticalAlignment="Center" Margin="0,4"/>
+                        <TextBox x:Name="TxtConf" Grid.Row="2" Grid.Column="1" Text="0.25" Width="80" HorizontalAlignment="Left" Height="24" VerticalContentAlignment="Center" Margin="4,4,0,4"/>
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="单一类别 id" VerticalAlignment="Center" Margin="0,4"/>
+                        <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="4,4,0,4">
+                            <TextBox x:Name="TxtSingleClass" Text="0" Width="56" Height="24" VerticalContentAlignment="Center"
+                                     ToolTip="-1 保留模型原始类别（需与 COCO 等 nc 对齐）；0 表示全部标成第 0 类"/>
+                            <TextBlock Text="设备 (空=自动)" VerticalAlignment="Center" Margin="16,0,6,0"/>
+                            <TextBox x:Name="TxtDevice" Width="100" Height="24" VerticalContentAlignment="Center"
+                                     ToolTip="cuda:0 或 cpu"/>
+                        </StackPanel>
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="脚本路径" VerticalAlignment="Center" Margin="0,4"/>
+                        <TextBox x:Name="TxtAutoLabelScript" Grid.Row="4" Grid.Column="1" Text="YoloSeg_Tools/auto_label_seg.py" Height="24" VerticalContentAlignment="Center" Margin="4,4,0,4"
+                                 ToolTip="相对仓库/exe 目录，解析规则同 Flow 内 ONNX 脚本"/>
+                    </Grid>
+                    <Button x:Name="BtnAutoLabel" Content="自动标注（写入 labels/train）" Width="220" Height="30" Margin="0,8,0,0" HorizontalAlignment="Left" Click="BtnAutoLabel_Click"/>
+                </StackPanel>
+            </Border>
+
+            <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                <StackPanel>
+                    <TextBlock FontWeight="Bold" Text="训练" Margin="0,0,0,6"/>
+                    <WrapPanel Margin="0,0,0,6">
+                        <TextBlock Text="epochs" VerticalAlignment="Center" Margin="0,0,6,4"/>
+                        <TextBox x:Name="TxtEpochs" Text="100" Width="56" Height="24" VerticalContentAlignment="Center" Margin="0,0,16,4"/>
+                        <TextBlock Text="imgsz" VerticalAlignment="Center" Margin="0,0,6,4"/>
+                        <TextBox x:Name="TxtImgSz" Text="640" Width="56" Height="24" VerticalContentAlignment="Center" Margin="0,0,16,4"/>
+                        <TextBlock Text="batch" VerticalAlignment="Center" Margin="0,0,6,4"/>
+                        <TextBox x:Name="TxtBatch" Text="8" Width="48" Height="24" VerticalContentAlignment="Center" Margin="0,0,16,4"/>
+                        <TextBlock Text="train 脚本" VerticalAlignment="Center" Margin="0,0,6,4"/>
+                        <TextBox x:Name="TxtTrainScript" Text="YoloSeg_Tools/train_seg.py" Width="220" Height="24" VerticalContentAlignment="Center"/>
+                    </WrapPanel>
+                    <Button x:Name="BtnTrain" Content="开始训练（工作目录=数据集根目录）" Width="260" Height="30" HorizontalAlignment="Left" Click="BtnTrain_Click"/>
+                    <TextBlock Text="权重与曲线默认保存在数据集根目录下的 runs 文件夹。" FontSize="11" Foreground="#666" Margin="0,8,0,0"/>
+                </StackPanel>
+            </Border>
+
+            <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                <StackPanel>
+                    <TextBlock FontWeight="Bold" Text="单张画布标注（YOLO-Seg 多边形）" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="#555"
+                               Text="左键点击加点，右键撤销一点；点数≥3 后点「闭合当前多边形」形成实例。标签写入数据集根目录下 labels/train，主文件名与图像相同（.txt）。打开图像时若已有标签会自动加载。"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,6,0,4">
+                        <TextBlock Text="视图缩放" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <Button Content="−" Width="28" Height="26" Margin="0,0,4,0" Click="BtnAnnotZoomOut_Click" ToolTip="缩小"/>
+                        <Slider x:Name="AnnotZoomSlider" Width="200" Minimum="0.25" Maximum="8" Value="1" LargeChange="0.25" SmallChange="0.05"
+                                VerticalAlignment="Center" ValueChanged="AnnotZoomSlider_ValueChanged" ToolTip="25%～800%"/>
+                        <Button Content="+" Width="28" Height="26" Margin="4,0,8,0" Click="BtnAnnotZoomIn_Click" ToolTip="放大"/>
+                        <Button Content="1:1" Width="44" Height="26" Margin="0,0,8,0" Click="BtnAnnotZoomReset_Click" ToolTip="重置为 100%"/>
+                        <TextBlock x:Name="TxtAnnotZoomPct" Text="100%" VerticalAlignment="Center" MinWidth="44" Foreground="#444"/>
+                    </StackPanel>
+                    <TextBlock Text="在画布上按住 Ctrl 并滚轮缩放；放大后可拖动滚动条平移，便于抠细边。" FontSize="10" Foreground="#888" Margin="0,0,0,4"/>
+                    <WrapPanel Margin="0,8,0,4">
+                        <Button Content="打开图像…" Width="96" Height="26" Margin="0,0,8,4" Click="BtnAnnotLoadImage_Click"/>
+                        <Button Content="闭合当前多边形" Width="120" Height="26" Margin="0,0,8,4" Click="BtnAnnotClosePolygon_Click"/>
+                        <Button Content="删除上一实例" Width="96" Height="26" Margin="0,0,8,4" Click="BtnAnnotRemoveLastInstance_Click"/>
+                        <Button Content="清空全部实例" Width="104" Height="26" Margin="0,0,8,4" Click="BtnAnnotClearAllInstances_Click"/>
+                        <Button Content="保存标签" Width="88" Height="26" Margin="0,0,8,4" Click="BtnAnnotSaveLabel_Click"/>
+                        <Button Content="复制图像到 train" Width="128" Height="26" Margin="0,0,8,4" Click="BtnAnnotCopyImageToTrain_Click"/>
+                        <Button Content="刷新类别" Width="88" Height="26" Margin="0,0,8,4" Click="BtnAnnotRefreshClasses_Click"/>
+                    </WrapPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,2,0,6">
+                        <TextBlock Text="当前类别" VerticalAlignment="Center"/>
+                        <ComboBox x:Name="CmbAnnotClass" Width="220" Margin="8,0,0,0" VerticalContentAlignment="Center"/>
+                    </StackPanel>
+                    <TextBlock x:Name="TxtAnnotImageInfo" Text="未加载图像" FontSize="11" Foreground="#666" Margin="0,0,0,4"/>
+                    <Border BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Background="#2A2A2A" HorizontalAlignment="Left"
+                            Width="920" Height="560" ClipToBounds="True">
+                        <ScrollViewer x:Name="AnnotScrollViewer" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                                      PreviewMouseWheel="AnnotScrollViewer_PreviewMouseWheel" Focusable="False">
+                            <Grid x:Name="AnnotZoomGrid">
+                                <Grid.LayoutTransform>
+                                    <ScaleTransform x:Name="AnnotLayoutScale" ScaleX="1" ScaleY="1"/>
+                                </Grid.LayoutTransform>
+                                <Canvas x:Name="AnnotDrawCanvas" Width="640" Height="480" Background="#333333" ClipToBounds="True"
+                                        MouseLeftButtonDown="AnnotDrawCanvas_MouseLeftButtonDown"
+                                        MouseRightButtonDown="AnnotDrawCanvas_MouseRightButtonDown"/>
+                            </Grid>
+                        </ScrollViewer>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <TextBlock FontWeight="Bold" Text="日志" Margin="0,4,0,4"/>
+            <Border BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Background="#1E1E1E" Padding="6">
+                <TextBox x:Name="TxtLog" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                         MinHeight="180" FontFamily="Consolas" FontSize="12" Foreground="#D4D4D4" Background="Transparent" BorderThickness="0"/>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

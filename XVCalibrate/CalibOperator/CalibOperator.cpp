@@ -173,10 +173,13 @@ int SaveBMP(const char* filename, Image* img) {
     int bitCount = img->channels * 8;
     int srcRowBytes = img->width * img->channels;
     int bmpRowBytes = ((srcRowBytes + 3) / 4) * 4;
+    // 8bpp BMP 必须在 InfoHeader 之后写入 256×RGBQUAD，否则文件无效；PIL/OpenCV 读到的像素会错位或近似全黑。
+    const int paletteBytes = (img->channels == 1) ? (256 * 4) : 0;
+
     BMPHeader header = { 0 };
     header.type = 0x4D42;
-    header.size = sizeof(BMPHeader) + sizeof(BMPInfoHeader) + bmpRowBytes * img->height;
-    header.offset = sizeof(BMPHeader) + sizeof(BMPInfoHeader);
+    header.size = sizeof(BMPHeader) + sizeof(BMPInfoHeader) + paletteBytes + bmpRowBytes * img->height;
+    header.offset = sizeof(BMPHeader) + sizeof(BMPInfoHeader) + paletteBytes;
 
     BMPInfoHeader info = { 0 };
     info.size = sizeof(BMPInfoHeader);
@@ -185,9 +188,25 @@ int SaveBMP(const char* filename, Image* img) {
     info.planes = 1;
     info.bitCount = (unsigned short)bitCount;
     info.imageSize = bmpRowBytes * img->height;
+    if (img->channels == 1) {
+        info.colorsUsed = 256;
+        info.colorsImportant = 256;
+    }
 
     fwrite(&header, sizeof(header), 1, fp);
     fwrite(&info, sizeof(info), 1, fp);
+
+    if (paletteBytes > 0) {
+        unsigned char quad[4];
+        for (int i = 0; i < 256; i++) {
+            quad[0] = quad[1] = quad[2] = (unsigned char)i;
+            quad[3] = 0;
+            if (fwrite(quad, 1, 4, fp) != 4) {
+                fclose(fp);
+                return 0;
+            }
+        }
+    }
 
     std::vector<unsigned char> row(static_cast<size_t>(bmpRowBytes));
     const unsigned char* src = img->data;
