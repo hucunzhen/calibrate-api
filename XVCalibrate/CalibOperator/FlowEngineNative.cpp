@@ -1,4 +1,7 @@
 #include "FlowEngineNative.h"
+#include <algorithm>
+#include <cctype>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <opencv2/opencv.hpp>
@@ -115,6 +118,72 @@ static std::vector<std::vector<cv::Point>> ToContours(const ContoursData& cd) {
         offset += len;
     }
     return out;
+}
+
+struct LinesJsonBinKey {
+    int tb = 0;
+    int rb = 0;
+    bool operator==(const LinesJsonBinKey& o) const { return tb == o.tb && rb == o.rb; }
+};
+struct LinesJsonBinKeyHash {
+    size_t operator()(const LinesJsonBinKey& k) const {
+        return (static_cast<size_t>(k.tb) * 1315423911u) ^ (static_cast<size_t>(k.rb) * 2654435761u);
+    }
+};
+
+static std::string FormatLinesJsonVec4(const std::vector<cv::Vec4i>& segs) {
+    std::ostringstream jb;
+    jb << '[';
+    for (size_t i = 0; i < segs.size(); ++i) {
+        const auto& s = segs[i];
+        if (i) jb << ',';
+        jb << '[' << s[0] << ',' << s[1] << ',' << s[2] << ',' << s[3] << ']';
+    }
+    jb << ']';
+    return jb.str();
+}
+
+static void LinesJsonNmsBucket(const std::vector<cv::Vec4i>& in, double angleTolDeg, double rhoTolPx, std::vector<cv::Vec4i>& out) {
+    out.clear();
+    if (in.empty()) return;
+    double angleTolRad = angleTolDeg * CV_PI / 180.0;
+    if (angleTolRad < 1e-9) angleTolRad = 1e-9;
+    if (rhoTolPx < 1e-9) rhoTolPx = 1e-9;
+    std::unordered_map<LinesJsonBinKey, cv::Vec4i, LinesJsonBinKeyHash> best;
+    best.reserve(in.size());
+    for (const auto& seg : in) {
+        double dx = (double)(seg[2] - seg[0]), dy = (double)(seg[3] - seg[1]);
+        double len = std::hypot(dx, dy);
+        if (len < 1e-6) continue;
+        double thetaLine = std::atan2(dy, dx);
+        double thetaN = thetaLine + CV_PI / 2;
+        while (thetaN < 0) thetaN += CV_PI;
+        while (thetaN >= CV_PI) thetaN -= CV_PI;
+        double mx = 0.5 * (seg[0] + seg[2]), my = 0.5 * (seg[1] + seg[3]);
+        double rho = mx * std::cos(thetaN) + my * std::sin(thetaN);
+        LinesJsonBinKey k{ (int)std::floor(thetaN / angleTolRad), (int)std::floor(rho / rhoTolPx) };
+        auto it = best.find(k);
+        if (it == best.end()) {
+            best.emplace(k, seg);
+        } else {
+            double ox = (double)(it->second[2] - it->second[0]), oy = (double)(it->second[3] - it->second[1]);
+            if (len > std::hypot(ox, oy))
+                it->second = seg;
+        }
+    }
+    out.reserve(best.size());
+    for (const auto& kv : best)
+        out.push_back(kv.second);
+}
+
+static void LinesJsonThresholdLen(const std::vector<cv::Vec4i>& in, double minLen, double maxLen, std::vector<cv::Vec4i>& out) {
+    out.clear();
+    const double maxL = maxLen <= 0 ? 1e300 : maxLen;
+    for (const auto& s : in) {
+        double len = std::hypot((double)(s[2] - s[0]), (double)(s[3] - s[1]));
+        if (len >= minLen && len <= maxL)
+            out.push_back(s);
+    }
 }
 
 static Value InputOf(NativeFlowEngineImpl* e, const std::string& nodeId, const std::string& portName) {
@@ -275,6 +344,118 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         out["Out"] = MakeImage(bin);
         return true;
     }
+    if (n.type == "binary_merge") {
+        Value va = InputOf(e, n.id, "InA");
+        Value vb = InputOf(e, n.id, "InB");
+        if (va.kind != Value::Kind::Image || vb.kind != Value::Kind::Image) {
+            err = "binary_merge: missing InA or InB";
+            return false;
+        }
+        cv::Mat a = EnsureGray(va.img);
+        cv::Mat b = EnsureGray(vb.img);
+        if (a.size() != b.size()) {
+            err = "binary_merge: image size mismatch";
+            return false;
+        }
+        std::string mode = NodeParam(n, "mergeMode", "or");
+        for (auto& c : mode)
+            c = (char)std::tolower((unsigned char)c);
+        int fgTh = ToInt(NodeParam(n, "foregroundThreshold", "0"), 0);
+        cv::Mat ba, bb;
+        if (fgTh < 0) {
+            ba = a.clone();
+            bb = b.clone();
+        } else {
+            cv::threshold(a, ba, fgTh, 255, cv::THRESH_BINARY);
+            cv::threshold(b, bb, fgTh, 255, cv::THRESH_BINARY);
+        }
+        cv::Mat dst;
+        if (mode == "and")
+            cv::bitwise_and(ba, bb, dst);
+        else if (mode == "xor")
+            cv::bitwise_xor(ba, bb, dst);
+        else
+            cv::bitwise_or(ba, bb, dst);
+        out["Out"] = MakeImage(dst);
+        return true;
+    }
+    if (n.type == "binary_morph_rect") {
+        Value vin = InputOf(e, n.id, "In");
+        if (vin.kind != Value::Kind::Image) { err = "binary_morph_rect: missing In"; return false; }
+        cv::Mat g = EnsureGray(vin.img);
+        int fgTh = ToInt(NodeParam(n, "foregroundThreshold", "0"), 0);
+        cv::Mat bin;
+        if (fgTh < 0)
+            cv::threshold(g, bin, 1, 255, cv::THRESH_BINARY);
+        else
+            cv::threshold(g, bin, fgTh, 255, cv::THRESH_BINARY);
+        std::string orient = NodeParam(n, "orientation", "horizontal_strips");
+        for (auto& c : orient) c = (char)std::tolower((unsigned char)c);
+        int kw = ToInt(NodeParam(n, "kernelW", "0"), 0);
+        int kh = ToInt(NodeParam(n, "kernelH", "0"), 0);
+        if (kw <= 0 || kh <= 0) {
+            if (orient.find("vertical") != std::string::npos) { kw = 5; kh = 31; }
+            else { kw = 31; kh = 5; }
+        }
+        if ((kw & 1) == 0) kw++;
+        if ((kh & 1) == 0) kh++;
+        kw = std::max(1, kw);
+        kh = std::max(1, kh);
+        cv::Mat ker = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(kw, kh));
+        std::string mop = NodeParam(n, "op", "open");
+        for (auto& c : mop) c = (char)std::tolower((unsigned char)c);
+        int iterations = std::max(1, ToInt(NodeParam(n, "iterations", "1"), 1));
+        cv::Mat outm = bin.clone();
+        for (int i = 0; i < iterations; ++i) {
+            if (mop == "erode") cv::erode(outm, outm, ker);
+            else if (mop == "dilate") cv::dilate(outm, outm, ker);
+            else if (mop == "close") cv::morphologyEx(outm, outm, cv::MORPH_CLOSE, ker);
+            else cv::morphologyEx(outm, outm, cv::MORPH_OPEN, ker);
+        }
+        int minComp = ToInt(NodeParam(n, "minComponentPixels", "0"), 0);
+        if (minComp > 1) {
+            cv::Mat labels, stats, cent;
+            int nlab = cv::connectedComponentsWithStats(outm, labels, stats, cent, 8, CV_32S);
+            cv::Mat cleaned = cv::Mat::zeros(outm.size(), CV_8UC1);
+            for (int li = 1; li < nlab; ++li) {
+                int area = stats.at<int>(li, cv::CC_STAT_AREA);
+                if (area >= minComp)
+                    cleaned.setTo(255, labels == li);
+            }
+            outm = cleaned;
+        }
+        out["Out"] = MakeImage(outm);
+        return true;
+    }
+    if (n.type == "gray_blend_ratio") {
+        Value va = InputOf(e, n.id, "InA");
+        Value vb = InputOf(e, n.id, "InB");
+        if (va.kind != Value::Kind::Image || vb.kind != Value::Kind::Image) {
+            err = "gray_blend_ratio: missing InA or InB";
+            return false;
+        }
+        cv::Mat a = EnsureGray(va.img);
+        cv::Mat b = EnsureGray(vb.img);
+        if (a.size() != b.size()) {
+            err = "gray_blend_ratio: image size mismatch";
+            return false;
+        }
+        std::string bm = NodeParam(n, "grayBlendMode", "weighted");
+        for (auto& c : bm)
+            c = (char)std::tolower((unsigned char)c);
+        cv::Mat dst;
+        if (bm == "add" || bm == "sum")
+            cv::add(a, b, dst);
+        else if (bm == "subtract" || bm == "sub")
+            cv::subtract(a, b, dst);
+        else {
+            double r = ToDouble(NodeParam(n, "ratioA", "0.5"), 0.5);
+            r = std::max(0.0, std::min(1.0, r));
+            cv::addWeighted(a, r, b, 1.0 - r, 0.0, dst, CV_8U);
+        }
+        out["Out"] = MakeImage(dst);
+        return true;
+    }
     if (n.type == "find_contours") {
         Value vin = InputOf(e, n.id, "In");
         if (vin.kind != Value::Kind::Image) { err = "find_contours: missing In"; return false; }
@@ -362,15 +543,44 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         auto contours = ToContours(vc.contours);
         double minArea = ToDouble(NodeParam(n, "minArea", "8000"), 8000);
         double maxArea = ToDouble(NodeParam(n, "maxArea", "4000000"), 4000000);
+        double minAsp = ToDouble(NodeParam(n, "minAspect", "0"), 0);
+        double maxAsp = ToDouble(NodeParam(n, "maxAspect", "1e12"), 1e12);
+        double minCirc = ToDouble(NodeParam(n, "minCircularity", "0"), 0);
+        double maxCirc = ToDouble(NodeParam(n, "maxCircularity", "1"), 1);
         int target = ToInt(NodeParam(n, "targetCount", "16"), 16);
-        std::vector<std::vector<cv::Point>> kept;
-        for (auto& c : contours) {
+        std::string sortCy = NodeParam(n, "sortByCentroidY", "false");
+        for (auto& c : sortCy) c = (char)std::tolower((unsigned char)c);
+        bool sortCentroidY = (sortCy == "true" || sortCy == "1" || sortCy == "yes");
+        struct Cand {
+            std::vector<cv::Point> pts;
+            double area;
+            double cy;
+        };
+        std::vector<Cand> cand;
+        for (const auto& c : contours) {
             double a = cv::contourArea(c);
             if (a < minArea || a > maxArea) continue;
-            kept.push_back(c);
+            cv::Rect r = cv::boundingRect(c);
+            double rw = std::max(1, r.width), rh = std::max(1, r.height);
+            double aspect = rw / rh;
+            if (aspect < minAsp || aspect > maxAsp) continue;
+            double peri = cv::arcLength(c, true);
+            double circ = peri <= 1e-6 ? 0.0 : (4.0 * CV_PI * a) / (peri * peri);
+            if (minCirc > 0 && circ < minCirc) continue;
+            if (maxCirc < 1.0 && circ > maxCirc) continue;
+            Cand x;
+            x.pts = c;
+            x.area = a;
+            x.cy = r.y + 0.5 * r.height;
+            cand.push_back(std::move(x));
         }
-        std::sort(kept.begin(), kept.end(), [](const auto& a, const auto& b) { return cv::contourArea(a) > cv::contourArea(b); });
-        if ((int)kept.size() > target) kept.resize(target);
+        std::sort(cand.begin(), cand.end(), [](const Cand& a, const Cand& b) { return a.area > b.area; });
+        if ((int)cand.size() > target) cand.resize(target);
+        if (sortCentroidY)
+            std::sort(cand.begin(), cand.end(), [](const Cand& a, const Cand& b) { return a.cy < b.cy; });
+        std::vector<std::vector<cv::Point>> kept;
+        kept.reserve(cand.size());
+        for (auto& x : cand) kept.push_back(std::move(x.pts));
         out["Contours"] = MakeContours(kept);
         Value cnt; cnt.kind = Value::Kind::Int; cnt.i = (int)kept.size(); out["Count"] = cnt;
         return true;
@@ -682,6 +892,127 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         Value cnt; cnt.kind = Value::Kind::Int; cnt.i = (int)circles.size(); out["Count"] = cnt;
         return true;
     }
+    if (n.type == "hough_circles") {
+        Value in = InputOf(e, n.id, "Image");
+        if (in.kind != Value::Kind::Image) { err = "hough_circles: missing Image"; return false; }
+        int blurK = ToInt(NodeParam(n, "blurKsize", "9"), 9);
+        double hcDp = ToDouble(NodeParam(n, "hcDp", "1.2"), 1.2);
+        double hcMinDist = ToDouble(NodeParam(n, "hcMinDist", "40"), 40.0);
+        double hcP1 = ToDouble(NodeParam(n, "hcParam1", "100"), 100.0);
+        double hcP2 = ToDouble(NodeParam(n, "hcParam2", "30"), 30.0);
+        int hcMinR = ToInt(NodeParam(n, "hcMinRadius", "5"), 5);
+        int hcMaxR = ToInt(NodeParam(n, "hcMaxRadius", "200"), 200);
+        std::vector<Point2D> circ;
+        cv::Mat dst;
+        std::string cj;
+        HoughCirclesOnMat(in.img, dst, circ, blurK, hcDp, hcMinDist, hcP1, hcP2, hcMinR, hcMaxR, &cj);
+        out["Out"] = MakeImage(dst);
+        const int nCirc = (int)circ.size();
+        Value vp; vp.kind = Value::Kind::Points; vp.points = std::move(circ); out["CirclePoints"] = vp;
+        Value vc; vc.kind = Value::Kind::Int; vc.i = nCirc; out["CircleCount"] = vc;
+        Value vj; vj.kind = Value::Kind::String; vj.str = std::move(cj); out["CirclesJson"] = vj;
+        return true;
+    }
+    if (n.type == "hough_lines") {
+        Value in = InputOf(e, n.id, "Edge");
+        if (in.kind != Value::Kind::Image) in = InputOf(e, n.id, "Image");
+        if (in.kind != Value::Kind::Image) { err = "hough_lines: missing Edge (or legacy Image)"; return false; }
+        double hlRho = ToDouble(NodeParam(n, "hlRho", "1"), 1.0);
+        double hlThetaDeg = ToDouble(NodeParam(n, "hlThetaDeg", "1"), 1.0);
+        int hlTh = ToInt(NodeParam(n, "hlThreshold", "50"), 50);
+        double hlMinLen = ToDouble(NodeParam(n, "hlMinLineLength", "40"), 40.0);
+        double hlMaxGap = ToDouble(NodeParam(n, "hlMaxLineGap", "15"), 15.0);
+        int maxLines = ToInt(NodeParam(n, "maxLinesOut", "400"), 400);
+        int covHalfW = ToInt(NodeParam(n, "hlCoverageHalfWidthPx", "0"), 0);
+        if (covHalfW < 0) covHalfW = 0;
+        std::string lj;
+        cv::Mat dst;
+        int nseg = 0;
+        HoughLinesOnMat(in.img, dst, lj, &nseg, hlRho, hlThetaDeg, hlTh, hlMinLen, hlMaxGap, maxLines, covHalfW);
+        out["Out"] = MakeImage(dst);
+        Value vs; vs.kind = Value::Kind::String; vs.str = std::move(lj); out["LinesJson"] = vs;
+        Value vn; vn.kind = Value::Kind::Int; vn.i = nseg; out["LineCount"] = vn;
+        return true;
+    }
+    if (n.type == "lines_nms") {
+        Value vin = InputOf(e, n.id, "LinesJson");
+        if (vin.kind != Value::Kind::String) { err = "lines_nms: missing LinesJson"; return false; }
+        double angleTol = ToDouble(NodeParam(n, "angleTolDeg", "5"), 5.0);
+        double rhoTol = ToDouble(NodeParam(n, "rhoTolPx", "10"), 10.0);
+        std::vector<cv::Vec4i> segs;
+        if (!vin.str.empty())
+            ParseHoughLinesJsonUtf8(vin.str.c_str(), segs);
+        std::vector<cv::Vec4i> fi;
+        LinesJsonNmsBucket(segs, angleTol, rhoTol, fi);
+        Value vs; vs.kind = Value::Kind::String; vs.str = FormatLinesJsonVec4(fi); out["LinesJson"] = vs;
+        Value vn; vn.kind = Value::Kind::Int; vn.i = (int)fi.size(); out["LineCount"] = vn;
+        return true;
+    }
+    if (n.type == "lines_threshold") {
+        Value vin = InputOf(e, n.id, "LinesJson");
+        if (vin.kind != Value::Kind::String) { err = "lines_threshold: missing LinesJson"; return false; }
+        double minLen = ToDouble(NodeParam(n, "minLengthPx", "0"), 0.0);
+        double maxLen = ToDouble(NodeParam(n, "maxLengthPx", "0"), 0.0);
+        std::vector<cv::Vec4i> segs;
+        if (!vin.str.empty())
+            ParseHoughLinesJsonUtf8(vin.str.c_str(), segs);
+        std::vector<cv::Vec4i> fi;
+        LinesJsonThresholdLen(segs, minLen, maxLen, fi);
+        Value vs; vs.kind = Value::Kind::String; vs.str = FormatLinesJsonVec4(fi); out["LinesJson"] = vs;
+        Value vn; vn.kind = Value::Kind::Int; vn.i = (int)fi.size(); out["LineCount"] = vn;
+        return true;
+    }
+    if (n.type == "hough_runway") {
+        Value in = InputOf(e, n.id, "Image");
+        if (in.kind != Value::Kind::Image) { err = "hough_runway: missing Image"; return false; }
+        int blurK = ToInt(NodeParam(n, "blurKsize", "9"), 9);
+        double c1 = ToDouble(NodeParam(n, "cannyTh1", "50"), 50.0);
+        double c2 = ToDouble(NodeParam(n, "cannyTh2", "150"), 150.0);
+        double hlRho = ToDouble(NodeParam(n, "hlRho", "1"), 1.0);
+        double hlThetaDeg = ToDouble(NodeParam(n, "hlThetaDeg", "1"), 1.0);
+        int hlTh = ToInt(NodeParam(n, "hlThreshold", "50"), 50);
+        double hlMinLen = ToDouble(NodeParam(n, "hlMinLineLength", "40"), 40.0);
+        double hlMaxGap = ToDouble(NodeParam(n, "hlMaxLineGap", "15"), 15.0);
+        int maxLines = ToInt(NodeParam(n, "maxLinesOut", "400"), 400);
+        double rwAng = ToDouble(NodeParam(n, "runwayAngleTolDeg", "10"), 10.0);
+        int rwRho = ToInt(NodeParam(n, "runwayRhoBinPx", "25"), 25);
+        int rwStrips = ToInt(NodeParam(n, "runwayStripCount", "2"), 2);
+        int maxRw = ToInt(NodeParam(n, "maxRunwayLinesOut", "120"), 120);
+        std::string rwShape = NodeParam(n, "runwayShape", "parallel");
+        int shapeMode = 0;
+        if (rwShape == "stadium")
+            shapeMode = 1;
+        double hcDp = ToDouble(NodeParam(n, "hcDp", "1.2"), 1.2);
+        double hcMinDist = ToDouble(NodeParam(n, "hcMinDist", "40"), 40.0);
+        double hcP1 = ToDouble(NodeParam(n, "hcParam1", "100"), 100.0);
+        double hcP2 = ToDouble(NodeParam(n, "hcParam2", "30"), 30.0);
+        int hcMinR = ToInt(NodeParam(n, "hcMinRadius", "5"), 5);
+        int hcMaxR = ToInt(NodeParam(n, "hcMaxRadius", "200"), 200);
+        Value vLinesIn = InputOf(e, n.id, "LinesJson");
+        Value vCircIn = InputOf(e, n.id, "CirclesJson");
+        std::vector<cv::Vec4i> optLinesParsed;
+        std::vector<cv::Vec3f> optCirclesParsed;
+        const std::vector<cv::Vec4i>* plines = nullptr;
+        const std::vector<cv::Vec3f>* pcirc = nullptr;
+        if (vLinesIn.kind == Value::Kind::String && !vLinesIn.str.empty()) {
+            if (ParseHoughLinesJsonUtf8(vLinesIn.str.c_str(), optLinesParsed))
+                plines = &optLinesParsed;
+        }
+        if (vCircIn.kind == Value::Kind::String && !vCircIn.str.empty()) {
+            if (ParseHoughCirclesJsonUtf8(vCircIn.str.c_str(), optCirclesParsed))
+                pcirc = &optCirclesParsed;
+        }
+        std::string rj;
+        cv::Mat dst;
+        int rwSegCount = 0;
+        HoughRunwayOnMat(in.img, dst, rj, &rwSegCount, blurK, c1, c2, hlRho, hlThetaDeg, hlTh, hlMinLen, hlMaxGap, maxLines,
+            rwAng, rwRho, rwStrips, maxRw, shapeMode, hcDp, hcMinDist, hcP1, hcP2, hcMinR, hcMaxR,
+            plines, pcirc);
+        out["Out"] = MakeImage(dst);
+        Value vrj; vrj.kind = Value::Kind::String; vrj.str = std::move(rj); out["RunwayLinesJson"] = vrj;
+        Value vrc; vrc.kind = Value::Kind::Int; vrc.i = rwSegCount; out["RunwayLineCount"] = vrc;
+        return true;
+    }
     if (n.type == "send_plc") {
         Value pts = InputOf(e, n.id, "Points");
         if (pts.kind != Value::Kind::Points) { err = "send_plc: missing Points"; return false; }
@@ -758,6 +1089,9 @@ static bool LoadFlowFromCvFileStorage(NativeFlowEngineImpl* e, cv::FileStorage& 
         cd.fromPort = (std::string)(*it)["FromPort"];
         cd.toNodeId = (std::string)(*it)["ToNodeId"];
         cd.toPort = (std::string)(*it)["ToPort"];
+        auto tit = std::find_if(e->nodes.begin(), e->nodes.end(), [&](const NodeDef& nd) { return nd.id == cd.toNodeId; });
+        if (tit != e->nodes.end() && tit->type == "hough_lines" && cd.toPort == "Image")
+            cd.toPort = "Edge";
         e->conns.push_back(std::move(cd));
     }
     return true;

@@ -99,6 +99,35 @@ CALIB_API int CALIB_DetectCircles(Image* img, Point2D* pts, int* count, int maxC
  */
 CALIB_API void CALIB_DrawDetectedCircles(Image* img, Point2D* pts, int count, int gray);
 
+CALIB_API int CALIB_HoughCirclesDetect(Image* src, Image* dstOverlay,
+    Point2D* circlePts, int* circleCount, int maxCircles,
+    char* circlesJsonOut, int circlesJsonBufSize,
+    int blurKsize,
+    double hcDp, double hcMinDist, double hcParam1, double hcParam2, int hcMinR, int hcMaxR);
+
+CALIB_API int CALIB_HoughLinesDetect(Image* src, Image* dstOverlay,
+    char* linesJsonOut, int linesJsonBufSize,
+    int* lineSegmentCountOut,
+    double hlRho, double hlThetaDeg, int hlThreshold, double hlMinLen, double hlMaxGap,
+    int maxLinesOut,
+    int coverageMatchHalfWidthPx);
+
+CALIB_API int CALIB_HoughRunwayDetect(Image* src, Image* dstOverlay,
+    char* runwayJsonOut, int runwayJsonBufSize,
+    int* runwayLineCountOut,
+    int blurKsize,
+    double cannyTh1, double cannyTh2,
+    double hlRho, double hlThetaDeg, int hlThreshold, double hlMinLen, double hlMaxGap,
+    int maxLinesOut,
+    double runwayAngleTolDeg,
+    int runwayRhoBinPx,
+    int runwayStripCount,
+    int maxRunwayLinesOut,
+    int runwayShapeMode,
+    double hcDp, double hcMinDist, double hcParam1, double hcParam2, int hcMinR, int hcMaxR,
+    const char* linesJsonUtf8,
+    const char* circlesJsonUtf8);
+
 /**
  * Chessboard inner corners (OpenCV). Returns 0 if full pattern found, 1 if not found.
  */
@@ -340,6 +369,8 @@ CALIB_API int CALIB_TrajStep_2c_GrayRangeBinary(TrajStepContext ctx, int grayLow
  * Returns: Number of dark bars found
  */
 CALIB_API int CALIB_TrajStep_6_FindAndSortDarkContours(TrajStepContext ctx);
+/** minContourAreaPixels < 0：使用默认面积阈值；否则 contourArea 须大于该值（流程图细条轮廓可用较小值如 400） */
+CALIB_API int CALIB_TrajStep_6_FindAndSortDarkContoursEx(TrajStepContext ctx, double minContourAreaPixels);
 
 /**
  * Step 7: Sample contours equidistantly (pure OpenCV arc-length sampling)

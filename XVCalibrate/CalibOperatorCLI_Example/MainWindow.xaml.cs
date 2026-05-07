@@ -152,7 +152,15 @@ namespace CalibOperatorCLI_Example
             if (!loaded) return false;
 
             SaveLastFlowPath(flowFilePath);
-            return await _flowPage.RunAllAsync(clearLog: true, preferNativeEngine: true);
+            _flowPage.MirrorErrorsToStderr = true;
+            try
+            {
+                return await _flowPage.RunAllAsync(clearLog: true, preferNativeEngine: true);
+            }
+            finally
+            {
+                _flowPage.MirrorErrorsToStderr = false;
+            }
         }
 
         private static string GetLastFlowRecordPath()

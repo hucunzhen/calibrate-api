@@ -85,7 +85,7 @@ namespace CalibOperatorCLI_Example
             if (string.IsNullOrWhiteSpace(checkpointAbsolutePath))
                 throw new ArgumentException("checkpoint 路径为空", nameof(checkpointAbsolutePath));
             if (!File.Exists(checkpointAbsolutePath))
-                throw new FileNotFoundException("JiT checkpoint 不存在", checkpointAbsolutePath);
+                throw new FileNotFoundException("JiT checkpoint 不存在（可为 model.npz 或内含 model.npz 的 .zip）", checkpointAbsolutePath);
             if (numSteps < 1)
                 throw new ArgumentOutOfRangeException(nameof(numSteps));
 

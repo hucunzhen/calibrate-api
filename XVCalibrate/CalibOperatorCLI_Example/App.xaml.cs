@@ -29,6 +29,8 @@ namespace CalibOperatorCLI_Example
                     catch (Exception ex)
                     {
                         Console.Error.WriteLine($"[FlowRunner] {ex.Message}");
+                        if (ex.InnerException != null)
+                            Console.Error.WriteLine($"[FlowRunner] Inner: {ex.InnerException}");
                     }
 
                     Environment.ExitCode = ok ? 0 : 1;

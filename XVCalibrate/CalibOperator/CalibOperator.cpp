@@ -9,7 +9,11 @@
 #include <time.h>
 #include <string>
 #include <vector>
+#include <map>
 #include <cstdio>
+#include <sstream>
+#include <cmath>
+#include <algorithm>
 
 using namespace cv;
 
@@ -896,6 +900,1198 @@ void DetectCircles(Image* img, Point2D* pts, int* count) {
     for (int i = 0; i < *count; i++) {
         LOG_DEBUG("  Point %d: (%.1f, %.1f)", i, pts[i].x, pts[i].y);
     }
+}
+
+static Mat ImageToMatClone(const Image* img) {
+    if (!img || !img->data) return Mat();
+    int w = img->width, h = img->height;
+    int stride = ((w * img->channels + 3) / 4) * 4;
+    if (img->channels == 1)
+        return Mat(h, w, CV_8UC1, img->data, stride).clone();
+    if (img->channels == 3)
+        return Mat(h, w, CV_8UC3, img->data, stride).clone();
+    return Mat();
+}
+
+// 线段方向角 [0, π)
+static double SegmentDirectionRad(const Vec4i& s) {
+    double dx = (double)(s[2] - s[0]), dy = (double)(s[3] - s[1]);
+    double a = std::atan2(dy, dx);
+    if (a < 0) a += CV_PI;
+    if (a >= CV_PI) a -= CV_PI;
+    return a;
+}
+
+static double SegmentLengthPx(const Vec4i& s) {
+    double dx = (double)(s[2] - s[0]), dy = (double)(s[3] - s[1]);
+    return std::sqrt(dx * dx + dy * dy);
+}
+
+// 跑道线：在全部 Hough 线段中找“主导方向”，再按法向距离 ρ 分桶，取前 stripCount 个桶（典型两侧平行边=2）
+static void ExtractRunwayLineSegments(
+    const std::vector<Vec4i>& linesP,
+    double angleTolDeg,
+    int rhoBinPx,
+    int stripCount,
+    int maxOut,
+    std::vector<Vec4i>& outSegs,
+    std::string& jsonOut)
+{
+    outSegs.clear();
+    jsonOut = "[]";
+    if (linesP.empty() || stripCount <= 0 || rhoBinPx <= 0 || maxOut <= 0)
+        return;
+
+    const double binW = angleTolDeg * CV_PI / 180.0;
+    if (binW <= 1e-9)
+        return;
+    const int numAngleBins = (int)std::ceil(CV_PI / binW);
+    if (numAngleBins <= 0)
+        return;
+
+    std::vector<double> angleW((size_t)numAngleBins, 0.0);
+    for (const auto& s : linesP) {
+        double L = SegmentLengthPx(s);
+        if (L < 1.0)
+            continue;
+        double a = SegmentDirectionRad(s);
+        int b = (int)std::floor(a / binW);
+        if (b < 0) b = 0;
+        if (b >= numAngleBins) b = numAngleBins - 1;
+        angleW[(size_t)b] += L;
+    }
+    int bestBin = 0;
+    for (int i = 1; i < numAngleBins; ++i) {
+        if (angleW[(size_t)i] > angleW[(size_t)bestBin])
+            bestBin = i;
+    }
+    if (angleW[(size_t)bestBin] < 1.0)
+        return;
+
+    double phiStar = (bestBin + 0.5) * binW;            // 主导边线方向
+    double thetaH = phiStar + CV_PI / 2.0;              // 法向角（Hough 的 θ）
+    while (thetaH >= CV_PI) thetaH -= CV_PI;
+    while (thetaH < 0) thetaH += CV_PI;
+    double cth = std::cos(thetaH), sth = std::sin(thetaH);
+
+    struct RhoAcc {
+        double w = 0;
+        std::vector<Vec4i> segs;
+    };
+    std::map<int, RhoAcc> rhoMap;
+
+    for (const auto& s : linesP) {
+        double L = SegmentLengthPx(s);
+        if (L < 1.0)
+            continue;
+        double a = SegmentDirectionRad(s);
+        int b = (int)std::floor(a / binW);
+        if (b < 0) b = 0;
+        if (b >= numAngleBins) b = numAngleBins - 1;
+        if (b != bestBin)
+            continue;
+
+        double mx = 0.5 * (s[0] + s[2]), my = 0.5 * (s[1] + s[3]);
+        double rho = mx * cth + my * sth;
+        int rhoBin = (int)std::floor(rho / (double)rhoBinPx);
+
+        RhoAcc& acc = rhoMap[rhoBin];
+        acc.w += L;
+        acc.segs.push_back(s);
+    }
+
+    std::vector<std::pair<double, int>> rhoOrder;
+    rhoOrder.reserve(rhoMap.size());
+    for (const auto& kv : rhoMap)
+        rhoOrder.push_back({ kv.second.w, kv.first });
+    std::sort(rhoOrder.begin(), rhoOrder.end(),
+        [](const std::pair<double, int>& A, const std::pair<double, int>& B) { return A.first > B.first; });
+
+    std::vector<Vec4i> picked;
+    for (size_t i = 0; i < rhoOrder.size() && (int)i < stripCount; ++i) {
+        int rb = rhoOrder[i].second;
+        const auto& segs = rhoMap[rb].segs;
+        picked.insert(picked.end(), segs.begin(), segs.end());
+    }
+
+    if ((int)picked.size() > maxOut)
+        picked.resize((size_t)maxOut);
+    outSegs = std::move(picked);
+
+    std::ostringstream jb;
+    jb << '[';
+    for (size_t i = 0; i < outSegs.size(); ++i) {
+        if (i) jb << ',';
+        const Vec4i& s = outSegs[i];
+        jb << '[' << s[0] << ',' << s[1] << ',' << s[2] << ',' << s[3] << ']';
+    }
+    jb << ']';
+    jsonOut = jb.str();
+}
+
+static bool MergeSegmentsToVec4i(const std::vector<Vec4i>& segs, Vec4i& out) {
+    std::vector<Point2f> pts;
+    for (const auto& s : segs) {
+        pts.push_back(Point2f((float)s[0], (float)s[1]));
+        pts.push_back(Point2f((float)s[2], (float)s[3]));
+    }
+    if (pts.size() < 2)
+        return false;
+    Vec4f line;
+    fitLine(pts, line, DIST_L2, 0, 0.01, 0.01);
+    float vx = line[0], vy = line[1], x0 = line[2], y0 = line[3];
+    double smin = 1e30, smax = -1e30;
+    for (const auto& p : pts) {
+        double t = (double)((p.x - x0) * vx + (p.y - y0) * vy);
+        smin = std::min(smin, t);
+        smax = std::max(smax, t);
+    }
+    Point2f p1(x0 + vx * (float)smin, y0 + vy * (float)smin);
+    Point2f p2(x0 + vx * (float)smax, y0 + vy * (float)smax);
+    out[0] = cvRound(p1.x);
+    out[1] = cvRound(p1.y);
+    out[2] = cvRound(p2.x);
+    out[3] = cvRound(p2.y);
+    return true;
+}
+
+// 体育场直道：主导平行方向 + ρ 分桶，取权重最高的两个桶，各合并为一条长线段
+static bool ExtractStadiumTwoStraights(
+    const std::vector<Vec4i>& linesP,
+    double angleTolDeg,
+    int rhoBinPx,
+    Vec4i& straightA,
+    Vec4i& straightB,
+    double& phiStarOut)
+{
+    if (linesP.empty() || rhoBinPx <= 0)
+        return false;
+
+    const double binW = angleTolDeg * CV_PI / 180.0;
+    if (binW <= 1e-9)
+        return false;
+    const int numAngleBins = (int)std::ceil(CV_PI / binW);
+    if (numAngleBins <= 0)
+        return false;
+
+    std::vector<double> angleW((size_t)numAngleBins, 0.0);
+    for (const auto& s : linesP) {
+        double L = SegmentLengthPx(s);
+        if (L < 1.0)
+            continue;
+        double a = SegmentDirectionRad(s);
+        int b = (int)std::floor(a / binW);
+        if (b < 0) b = 0;
+        if (b >= numAngleBins) b = numAngleBins - 1;
+        angleW[(size_t)b] += L;
+    }
+    int bestBin = 0;
+    for (int i = 1; i < numAngleBins; ++i) {
+        if (angleW[(size_t)i] > angleW[(size_t)bestBin])
+            bestBin = i;
+    }
+    if (angleW[(size_t)bestBin] < 1.0)
+        return false;
+
+    phiStarOut = (bestBin + 0.5) * binW;
+    double thetaH = phiStarOut + CV_PI / 2.0;
+    while (thetaH >= CV_PI) thetaH -= CV_PI;
+    while (thetaH < 0) thetaH += CV_PI;
+    double cth = std::cos(thetaH), sth = std::sin(thetaH);
+
+    struct RhoAcc {
+        double w = 0;
+        std::vector<Vec4i> segs;
+    };
+    std::map<int, RhoAcc> rhoMap;
+
+    for (const auto& s : linesP) {
+        double L = SegmentLengthPx(s);
+        if (L < 1.0)
+            continue;
+        double a = SegmentDirectionRad(s);
+        int b = (int)std::floor(a / binW);
+        if (b < 0) b = 0;
+        if (b >= numAngleBins) b = numAngleBins - 1;
+        if (b != bestBin)
+            continue;
+
+        double mx = 0.5 * (s[0] + s[2]), my = 0.5 * (s[1] + s[3]);
+        double rho = mx * cth + my * sth;
+        int rhoBin = (int)std::floor(rho / (double)rhoBinPx);
+
+        RhoAcc& acc = rhoMap[rhoBin];
+        acc.w += L;
+        acc.segs.push_back(s);
+    }
+
+    std::vector<std::pair<double, int>> rhoOrder;
+    rhoOrder.reserve(rhoMap.size());
+    for (const auto& kv : rhoMap)
+        rhoOrder.push_back({ kv.second.w, kv.first });
+    std::sort(rhoOrder.begin(), rhoOrder.end(),
+        [](const std::pair<double, int>& A, const std::pair<double, int>& B) { return A.first > B.first; });
+
+    if (rhoOrder.size() < 2)
+        return false;
+    const auto& segs0 = rhoMap[rhoOrder[0].second].segs;
+    const auto& segs1 = rhoMap[rhoOrder[1].second].segs;
+    if (!MergeSegmentsToVec4i(segs0, straightA))
+        return false;
+    if (!MergeSegmentsToVec4i(segs1, straightB))
+        return false;
+    return true;
+}
+
+// 已知直道方向 phiStar，对近似平行的线段做 ρ 分桶并取最强的两桶合并（用于圆轴已定后的直边）
+static bool ExtractTwoStraightsGivenPhi(
+    const std::vector<Vec4i>& linesP,
+    double phiStar,
+    double angleTolDeg,
+    int rhoBinPx,
+    Vec4i& straightA,
+    Vec4i& straightB)
+{
+    if (linesP.empty() || rhoBinPx <= 0)
+        return false;
+    double tolRad = angleTolDeg * CV_PI / 180.0;
+    if (tolRad <= 1e-9)
+        return false;
+
+    double thetaH = phiStar + CV_PI / 2.0;
+    while (thetaH >= CV_PI) thetaH -= CV_PI;
+    while (thetaH < 0) thetaH += CV_PI;
+    double cth = std::cos(thetaH), sth = std::sin(thetaH);
+
+    struct RhoAcc {
+        double w = 0;
+        std::vector<Vec4i> segs;
+    };
+    std::map<int, RhoAcc> rhoMap;
+
+    for (const auto& s : linesP) {
+        double L = SegmentLengthPx(s);
+        if (L < 1.0)
+            continue;
+        double a = SegmentDirectionRad(s);
+        double ad = std::fabs(a - phiStar);
+        double angDiff = std::min(ad, CV_PI - ad);
+        if (angDiff > tolRad)
+            continue;
+
+        double mx = 0.5 * (s[0] + s[2]), my = 0.5 * (s[1] + s[3]);
+        double rho = mx * cth + my * sth;
+        int rhoBin = (int)std::floor(rho / (double)rhoBinPx);
+
+        RhoAcc& acc = rhoMap[rhoBin];
+        acc.w += L;
+        acc.segs.push_back(s);
+    }
+
+    std::vector<std::pair<double, int>> rhoOrder;
+    rhoOrder.reserve(rhoMap.size());
+    for (const auto& kv : rhoMap)
+        rhoOrder.push_back({ kv.second.w, kv.first });
+    std::sort(rhoOrder.begin(), rhoOrder.end(),
+        [](const std::pair<double, int>& A, const std::pair<double, int>& B) { return A.first > B.first; });
+
+    if (rhoOrder.size() < 2)
+        return false;
+    const auto& segs0 = rhoMap[rhoOrder[0].second].segs;
+    const auto& segs1 = rhoMap[rhoOrder[1].second].segs;
+    if (!MergeSegmentsToVec4i(segs0, straightA))
+        return false;
+    if (!MergeSegmentsToVec4i(segs1, straightB))
+        return false;
+    return true;
+}
+
+// 在半径相容的圆对中选「最大匹配」：score = 圆心距 × min(r1,r2)，平局取更大圆心距
+static bool PickBestStadiumCirclePair(const std::vector<Vec3f>& cand,
+    double minSepPx,
+    double radiusTolFrac,
+    int& outIdxLo,
+    int& outIdxHi,
+    double& outScore)
+{
+    outIdxLo = outIdxHi = -1;
+    outScore = 0.0;
+    double bestScore = -1.0;
+    double bestDist = -1.0;
+    const int n = (int)cand.size();
+    for (int i = 0; i < n; ++i) {
+        for (int j = i + 1; j < n; ++j) {
+            float ri = cand[i][2], rj = cand[j][2];
+            if (ri < 1.f || rj < 1.f)
+                continue;
+            double rBig = std::max((double)ri, (double)rj);
+            if (std::fabs((double)ri - (double)rj) > radiusTolFrac * rBig)
+                continue;
+            double dx = (double)cand[j][0] - (double)cand[i][0];
+            double dy = (double)cand[j][1] - (double)cand[i][1];
+            double dist = std::sqrt(dx * dx + dy * dy);
+            if (dist < minSepPx)
+                continue;
+            double score = dist * (double)std::min(ri, rj);
+            if (score > bestScore + 1e-9 || (std::fabs(score - bestScore) <= 1e-9 && dist > bestDist)) {
+                bestScore = score;
+                bestDist = dist;
+                outIdxLo = i;
+                outIdxHi = j;
+            }
+        }
+    }
+    if (outIdxLo < 0)
+        return false;
+    outScore = bestScore;
+    return true;
+}
+
+// projUx/projUy：沿跑道轴（通常取两端圆心方向）做「夹在两端之间」的投影；phiStar：线段平行方向角 [0,π)
+static void FilterSegmentsBetweenCircleEnds(
+    const std::vector<Vec4i>& linesP,
+    Point2f CLo,
+    Point2f CHi,
+    double projUx,
+    double projUy,
+    float rLo,
+    float rHi,
+    double phiStar,
+    double angleTolDeg,
+    double bandMarginFrac,
+    std::vector<Vec4i>& out)
+{
+    out.clear();
+    double loP = (double)CLo.x * projUx + (double)CLo.y * projUy;
+    double hiP = (double)CHi.x * projUx + (double)CHi.y * projUy;
+    if (loP > hiP)
+        std::swap(loP, hiP);
+    double span = hiP - loP;
+    double margin = bandMarginFrac * span;
+    double capMargin = 0.35 * (double)std::max(rLo, rHi);
+    if (margin < capMargin)
+        margin = capMargin;
+    if (margin > span * 0.45)
+        margin = span * 0.45;
+    double loBand = loP + margin;
+    double hiBand = hiP - margin;
+    if (loBand >= hiBand) {
+        loBand = loP + 0.08 * span;
+        hiBand = hiP - 0.08 * span;
+    }
+
+    double tolRad = angleTolDeg * CV_PI / 180.0;
+
+    for (const auto& s : linesP) {
+        double L = SegmentLengthPx(s);
+        if (L < 1.0)
+            continue;
+        double a = SegmentDirectionRad(s);
+        double ad = std::fabs(a - phiStar);
+        double angDiff = std::min(ad, CV_PI - ad);
+        if (angDiff > tolRad)
+            continue;
+        double mx = 0.5 * (s[0] + s[2]), my = 0.5 * (s[1] + s[3]);
+        double pm = mx * projUx + my * projUy;
+        if (pm >= loBand && pm <= hiBand)
+            out.push_back(s);
+    }
+}
+
+static void RefineStadiumCirclePoles(const std::vector<Vec3f>& allCircles,
+    double radTolFrac,
+    double gatePx,
+    Point2f& CLo,
+    Point2f& CHi,
+    float& rLo,
+    float& rHi)
+{
+    auto fuse = [&](Point2f refC, float refR, Point2f& outC, float& outR) {
+        double sx = 0.0, sy = 0.0, sw = 0.0;
+        std::vector<float> rs;
+        rs.reserve(allCircles.size());
+        for (const auto& c : allCircles) {
+            float x = c[0], y = c[1], rr = c[2];
+            if (rr < 1.f)
+                continue;
+            double dx = (double)x - (double)refC.x;
+            double dy = (double)y - (double)refC.y;
+            if (dx * dx + dy * dy > gatePx * gatePx)
+                continue;
+            double rBig = std::max((double)rr, (double)refR);
+            if (std::fabs((double)rr - (double)refR) > radTolFrac * rBig)
+                continue;
+            double dist = std::sqrt(dx * dx + dy * dy);
+            double w = 1.0 / (1.0 + dist);
+            sx += (double)x * w;
+            sy += (double)y * w;
+            sw += w;
+            rs.push_back(rr);
+        }
+        if (rs.empty()) {
+            outC = refC;
+            outR = refR;
+            return;
+        }
+        outC.x = (float)(sx / sw);
+        outC.y = (float)(sy / sw);
+        size_t mid = rs.size() / 2;
+        std::nth_element(rs.begin(), rs.begin() + (std::vector<float>::difference_type)mid, rs.end());
+        outR = rs[mid];
+    };
+
+    Point2f inLo = CLo, inHi = CHi;
+    float rlIn = rLo, rhIn = rHi;
+    fuse(inLo, rlIn, CLo, rLo);
+    fuse(inHi, rhIn, CHi, rHi);
+}
+
+static void RefineStadiumPhiAndStraightsFromHoughLines(
+    const std::vector<Vec4i>& linesP,
+    Point2f CLo,
+    Point2f CHi,
+    float rLo,
+    float rHi,
+    double projUx,
+    double projUy,
+    double angleTolDeg,
+    int rhoBinPx,
+    double& phiStarInOut,
+    double& uxOut,
+    double& uyOut,
+    Vec4i& s1,
+    Vec4i& s2)
+{
+    double basePhi = phiStarInOut;
+    double bestPhi = basePhi;
+    double bestScore = -1.0;
+    std::vector<Vec4i> bestSegs;
+    std::vector<Vec4i> tmp;
+    const double stepDeg = 0.75;
+    const int K = 8;
+    const double relaxTolDeg = angleTolDeg + 1.25;
+
+    for (int k = -K; k <= K; ++k) {
+        double tryPhi = basePhi + k * stepDeg * CV_PI / 180.0;
+        while (tryPhi < 0)
+            tryPhi += CV_PI;
+        while (tryPhi >= CV_PI)
+            tryPhi -= CV_PI;
+
+        FilterSegmentsBetweenCircleEnds(linesP, CLo, CHi, projUx, projUy, rLo, rHi, tryPhi, relaxTolDeg, 0.14, tmp);
+        double sc = 0.0;
+        for (const auto& s : tmp)
+            sc += SegmentLengthPx(s);
+        if (sc > bestScore + 1e-6) {
+            bestScore = sc;
+            bestPhi = tryPhi;
+            bestSegs = tmp;
+        }
+    }
+
+    bool ok = ExtractTwoStraightsGivenPhi(bestSegs, bestPhi, angleTolDeg, rhoBinPx, s1, s2);
+    if (!ok)
+        ok = ExtractTwoStraightsGivenPhi(bestSegs, bestPhi, relaxTolDeg, rhoBinPx, s1, s2);
+    if (!ok)
+        return;
+
+    phiStarInOut = bestPhi;
+    uxOut = std::cos(bestPhi);
+    uyOut = std::sin(bestPhi);
+}
+
+static double MedianRadius(std::vector<float>& radii) {
+    if (radii.empty())
+        return 0.0;
+    size_t mid = radii.size() / 2;
+    std::nth_element(radii.begin(), radii.begin() + (std::vector<float>::difference_type)mid, radii.end());
+    return (double)radii[mid];
+}
+
+static double AngleDegPt(Point2f C, Point2f P) {
+    return std::atan2((double)(P.y - C.y), (double)(P.x - C.x)) * 180.0 / CV_PI;
+}
+
+// 直线 M + t*u（|u|=1）与圆 |X-C|=r 的交点参数 t；返回交点个数 0/1/2
+static int LineCircleIntersectTs(Point2f M, double ux, double uy, Point2f C, float r, double outT[2]) {
+    double wx = (double)M.x - (double)C.x;
+    double wy = (double)M.y - (double)C.y;
+    double b = wx * ux + wy * uy;
+    double ww = wx * wx + wy * wy;
+    double rr = (double)r * (double)r;
+    double disc = b * b - (ww - rr);
+    const double eps = 1e-8;
+    if (disc < -eps)
+        return 0;
+    if (disc < 0)
+        disc = 0;
+    double sd = std::sqrt(disc);
+    outT[0] = -b - sd;
+    outT[1] = -b + sd;
+    if (sd < eps)
+        return 1;
+    return 2;
+}
+
+static Point2f LinePointAtT(Point2f M, double ux, double uy, double t) {
+    return Point2f((float)(M.x + t * ux), (float)(M.y + t * uy));
+}
+
+// 在直线与圆的交点中选：沿 track 轴 (tu,tv) 投影最小或最大的一点（体育场一端）
+static bool PickLineCircleJunction(Point2f M, double ux, double uy, Point2f C, float r,
+    double tu, double tv, bool minProjOnTrack, Point2f& out) {
+    double ts[2];
+    int n = LineCircleIntersectTs(M, ux, uy, C, r, ts);
+    if (n == 0)
+        return false;
+    auto proj = [&](double t) {
+        Point2f P = LinePointAtT(M, ux, uy, t);
+        return (double)P.x * tu + (double)P.y * tv;
+    };
+    if (n == 1) {
+        out = LinePointAtT(M, ux, uy, ts[0]);
+        return true;
+    }
+    double p0 = proj(ts[0]), p1 = proj(ts[1]);
+    if (minProjOnTrack)
+        out = (p0 <= p1) ? LinePointAtT(M, ux, uy, ts[0]) : LinePointAtT(M, ux, uy, ts[1]);
+    else
+        out = (p0 >= p1) ? LinePointAtT(M, ux, uy, ts[0]) : LinePointAtT(M, ux, uy, ts[1]);
+    return true;
+}
+
+// 圆上从 A 到 B：两段弧中选离 awayFrom 更远的一段；用折线绘制，端点与 A、B 重合以利闭合
+static void DrawCircularArcPolylineBulgingAway(Mat& bgr, Point2f C, float r, Point2f A, Point2f B, Point2f awayFrom,
+    const Scalar& col, int thick,
+    double* outA0Deg, double* outA1Deg)
+{
+    double a0 = AngleDegPt(C, A);
+    double a1 = AngleDegPt(C, B);
+    double d = a1 - a0;
+    while (d <= 0)
+        d += 360.0;
+    while (d > 360.0)
+        d -= 360.0;
+    double mid1 = a0 + d * 0.5;
+    double radM1 = mid1 * CV_PI / 180.0;
+    Point2f Mc((float)(C.x + r * std::cos(radM1)), (float)(C.y + r * std::sin(radM1)));
+    double d2 = 360.0 - d;
+    double mid2 = a1 + d2 * 0.5;
+    while (mid2 >= 360.0)
+        mid2 -= 360.0;
+    double radM2 = mid2 * CV_PI / 180.0;
+    Point2f M2((float)(C.x + r * std::cos(radM2)), (float)(C.y + r * std::sin(radM2)));
+    double dist1 = cv::norm(Mc - awayFrom);
+    double dist2 = cv::norm(M2 - awayFrom);
+    double startAng, endAng;
+    if (dist1 >= dist2) {
+        startAng = a0;
+        endAng = a1;
+        if (endAng <= startAng)
+            endAng += 360.0;
+    } else {
+        startAng = a1;
+        endAng = a0 + 360.0;
+    }
+    if (outA0Deg) *outA0Deg = startAng;
+    if (outA1Deg) *outA1Deg = endAng;
+
+    double deltaDeg = endAng - startAng;
+    double span = std::fabs(deltaDeg) * (double)r / 10.0;
+    if (span < 12.0) span = 12.0;
+    if (span > 160.0) span = 160.0;
+    int N = (int)std::round(span);
+    std::vector<Point> pts;
+    pts.reserve((size_t)N + 1);
+    pts.push_back(Point(cvRound(A.x), cvRound(A.y)));
+    for (int i = 1; i < N; ++i) {
+        double angDeg = startAng + deltaDeg * (double)i / (double)N;
+        double rad = angDeg * CV_PI / 180.0;
+        pts.push_back(Point(cvRound(C.x + r * std::cos(rad)), cvRound(C.y + r * std::sin(rad))));
+    }
+    pts.push_back(Point(cvRound(B.x), cvRound(B.y)));
+    std::vector<std::vector<Point>> pl;
+    pl.push_back(std::move(pts));
+    polylines(bgr, pl, false, col, thick, LINE_AA);
+}
+
+static bool HoughPrepareWorkGrayAndBgr(const Mat& src, int blurKsize, Mat& workGray, Mat& bgrBase) {
+    if (src.empty())
+        return false;
+    Mat gray;
+    if (src.channels() == 3)
+        cvtColor(src, gray, COLOR_BGR2GRAY);
+    else if (src.channels() == 1)
+        gray = src.clone();
+    else
+        return false;
+    workGray = gray;
+    if (blurKsize >= 3 && (blurKsize % 2) == 1)
+        GaussianBlur(gray, workGray, Size(blurKsize, blurKsize), 0);
+    if (src.channels() == 3)
+        bgrBase = src.clone();
+    else
+        cvtColor(workGray, bgrBase, COLOR_GRAY2BGR);
+    return true;
+}
+
+bool ParseHoughLinesJsonUtf8(const char* json, std::vector<Vec4i>& out) {
+    out.clear();
+    if (!json || !json[0])
+        return false;
+    std::string s(json);
+    size_t pos = 0;
+    while (true) {
+        size_t lb = s.find('[', pos);
+        if (lb == std::string::npos)
+            break;
+        size_t rb = s.find(']', lb + 1);
+        if (rb == std::string::npos)
+            break;
+        std::string chunk = s.substr(lb + 1, rb - lb - 1);
+        int x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+        if (std::sscanf(chunk.c_str(), "%d,%d,%d,%d", &x1, &y1, &x2, &y2) == 4)
+            out.push_back(Vec4i(x1, y1, x2, y2));
+        pos = rb + 1;
+    }
+    return !out.empty();
+}
+
+bool ParseHoughCirclesJsonUtf8(const char* json, std::vector<Vec3f>& out) {
+    out.clear();
+    if (!json || !json[0])
+        return false;
+    std::string s(json);
+    size_t pos = 0;
+    while (true) {
+        size_t lb = s.find('[', pos);
+        if (lb == std::string::npos)
+            break;
+        size_t rb = s.find(']', lb + 1);
+        if (rb == std::string::npos)
+            break;
+        std::string chunk = s.substr(lb + 1, rb - lb - 1);
+        double xf = 0, yf = 0, rf = 0;
+        if (std::sscanf(chunk.c_str(), "%lf,%lf,%lf", &xf, &yf, &rf) == 3)
+            out.push_back(Vec3f((float)xf, (float)yf, (float)rf));
+        pos = rb + 1;
+    }
+    return !out.empty();
+}
+
+void HoughCirclesOnMat(const Mat& src, Mat& dstBgr,
+    std::vector<Point2D>& circleCenters,
+    int blurKsize,
+    double hcDp, double hcMinDist, double hcParam1, double hcParam2, int hcMinR, int hcMaxR,
+    std::string* circlesJsonOut)
+{
+    circleCenters.clear();
+    if (circlesJsonOut)
+        circlesJsonOut->clear();
+    Mat work, bgr;
+    if (!HoughPrepareWorkGrayAndBgr(src, blurKsize, work, bgr))
+        return;
+
+    std::vector<Vec3f> circles;
+    HoughCircles(work, circles, HOUGH_GRADIENT, hcDp, hcMinDist, hcParam1, hcParam2, hcMinR, hcMaxR);
+
+    std::ostringstream jb;
+    if (circlesJsonOut)
+        jb << '[';
+
+    for (size_t i = 0; i < circles.size(); ++i) {
+        float x = circles[i][0], y = circles[i][1], r = circles[i][2];
+        circleCenters.push_back(Point2D{ (double)x, (double)y });
+        Point center(cvRound(x), cvRound(y));
+        int radius = cvRound(r);
+        circle(bgr, center, radius, Scalar(0, 255, 0), 2, LINE_AA);
+        circle(bgr, center, 3, Scalar(0, 255, 255), -1, LINE_AA);
+        if (circlesJsonOut) {
+            if (i)
+                jb << ',';
+            jb << '[' << x << ',' << y << ',' << r << ']';
+        }
+    }
+    if (circlesJsonOut) {
+        jb << ']';
+        *circlesJsonOut = jb.str();
+    }
+    dstBgr = std::move(bgr);
+}
+
+/** Bresenham 沿线采样：落在图像内且 gray>edgeMin 的像素占比，用于霍夫线段排序。 */
+static double HoughLineEdgeCoverageRatio(const Mat& edgeGray, int x1, int y1, int x2, int y2, int edgeMin) {
+    if (edgeGray.empty() || edgeGray.type() != CV_8UC1)
+        return 0.0;
+    LineIterator it(edgeGray, Point(x1, y1), Point(x2, y2), 8);
+    int total = 0, hit = 0;
+    for (int i = 0; i < it.count; ++i, ++it) {
+        Point p = it.pos();
+        if ((unsigned)p.x >= (unsigned)edgeGray.cols || (unsigned)p.y >= (unsigned)edgeGray.rows)
+            continue;
+        total++;
+        if ((int)edgeGray.at<uint8_t>(p.y, p.x) > edgeMin)
+            hit++;
+    }
+    if (total <= 0)
+        return 0.0;
+    return (double)hit / (double)total;
+}
+
+static double HoughLineSegLenPx(const Vec4i& s) {
+    double dx = (double)(s[2] - s[0]), dy = (double)(s[3] - s[1]);
+    return std::hypot(dx, dy);
+}
+
+void HoughLinesOnMat(const Mat& src, Mat& dstBgr,
+    std::string& linesJson,
+    int* lineSegmentCountOut,
+    double hlRho, double hlThetaDeg, int hlThreshold, double hlMinLen, double hlMaxGap,
+    int maxLinesOut,
+    int coverageMatchHalfWidthPx)
+{
+    linesJson.clear();
+    linesJson = "[]";
+    if (lineSegmentCountOut) *lineSegmentCountOut = 0;
+
+    if (src.empty())
+        return;
+    Mat gray;
+    if (src.channels() == 3)
+        cvtColor(src, gray, COLOR_BGR2GRAY);
+    else if (src.channels() == 1)
+        gray = src.clone();
+    else
+        return;
+    Mat edges = gray;
+    Mat bgr;
+    if (src.channels() == 3)
+        bgr = src.clone();
+    else
+        cvtColor(gray, bgr, COLOR_GRAY2BGR);
+
+    const int edgeHitMin = 0;
+    Mat edgesForHough;
+    if (coverageMatchHalfWidthPx > 0) {
+        Mat bin;
+        threshold(edges, bin, edgeHitMin, 255, THRESH_BINARY);
+        int k = 2 * coverageMatchHalfWidthPx + 1;
+        k = std::max(3, k | 1);
+        Mat ker = getStructuringElement(MORPH_ELLIPSE, Size(k, k));
+        dilate(bin, edgesForHough, ker);
+    } else {
+        edgesForHough = edges;
+    }
+
+    std::vector<Vec4i> linesP;
+    double thetaRad = hlThetaDeg * CV_PI / 180.0;
+    if (thetaRad <= 1e-9)
+        thetaRad = CV_PI / 180.0;
+    HoughLinesP(edgesForHough, linesP, hlRho, thetaRad, hlThreshold, hlMinLen, hlMaxGap);
+
+    const int covPixMin = coverageMatchHalfWidthPx > 0 ? 0 : edgeHitMin;
+
+    struct ScoredSeg {
+        Vec4i seg;
+        double len;
+        double cov;
+    };
+    std::vector<ScoredSeg> ranked;
+    ranked.reserve(linesP.size());
+    for (const auto& s : linesP) {
+        double len = HoughLineSegLenPx(s);
+        double cov = HoughLineEdgeCoverageRatio(edgesForHough, s[0], s[1], s[2], s[3], covPixMin);
+        ranked.push_back({ s, len, cov });
+    }
+    std::sort(ranked.begin(), ranked.end(), [](const ScoredSeg& a, const ScoredSeg& b) {
+        if (a.len != b.len)
+            return a.len > b.len;
+        return a.cov > b.cov;
+    });
+
+    int cap = maxLinesOut > 0 ? maxLinesOut : 500;
+    std::ostringstream jb;
+    jb << '[';
+    int nl = 0;
+    for (size_t i = 0; i < ranked.size() && nl < cap; ++i) {
+        int x1 = ranked[i].seg[0], y1 = ranked[i].seg[1], x2 = ranked[i].seg[2], y2 = ranked[i].seg[3];
+        line(bgr, Point(x1, y1), Point(x2, y2), Scalar(0, 0, 255), 2, LINE_AA);
+        if (nl) jb << ',';
+        jb << '[' << x1 << ',' << y1 << ',' << x2 << ',' << y2 << ']';
+        nl++;
+    }
+    jb << ']';
+    linesJson = jb.str();
+    if (lineSegmentCountOut) *lineSegmentCountOut = nl;
+    dstBgr = std::move(bgr);
+}
+
+void HoughRunwayOnMat(const Mat& src, Mat& dstBgr,
+    std::string& runwayLinesJson,
+    int* runwaySegCountOut,
+    int blurKsize,
+    double cannyTh1, double cannyTh2,
+    double hlRho, double hlThetaDeg, int hlThreshold, double hlMinLen, double hlMaxGap,
+    int maxLinesOut,
+    double runwayAngleTolDeg,
+    int runwayRhoBinPx,
+    int runwayStripCount,
+    int maxRunwayLinesOut,
+    int runwayShapeMode,
+    double hcDp, double hcMinDist, double hcParam1, double hcParam2, int hcMinR, int hcMaxR,
+    const std::vector<Vec4i>* optLinesP,
+    const std::vector<Vec3f>* optCircles)
+{
+    runwayLinesJson.clear();
+    runwayLinesJson = "[]";
+    if (runwaySegCountOut) *runwaySegCountOut = 0;
+
+    Mat work, bgr;
+    if (!HoughPrepareWorkGrayAndBgr(src, blurKsize, work, bgr))
+        return;
+
+    std::vector<Vec4i> linesP;
+    if (optLinesP && !optLinesP->empty())
+        linesP = *optLinesP;
+    else {
+        Mat edges;
+        Canny(work, edges, cannyTh1, cannyTh2);
+        double thetaRad = hlThetaDeg * CV_PI / 180.0;
+        if (thetaRad <= 1e-9)
+            thetaRad = CV_PI / 180.0;
+        HoughLinesP(edges, linesP, hlRho, thetaRad, hlThreshold, hlMinLen, hlMaxGap);
+    }
+
+    (void)maxLinesOut;
+
+    if (runwayShapeMode != 0) {
+        std::vector<Vec3f> circles;
+        if (optCircles && !optCircles->empty())
+            circles = *optCircles;
+        else
+            HoughCircles(work, circles, HOUGH_GRADIENT, hcDp, hcMinDist, hcParam1, hcParam2, hcMinR, hcMaxR);
+
+        const double radiusTolFrac = 0.35;
+        int w = bgr.cols, h = bgr.rows;
+        double minEndSep = std::max(30.0, 0.05 * (double)std::min(w, h));
+
+        std::vector<Vec3f> cand;
+        cand.reserve(circles.size());
+        if (!circles.empty()) {
+            std::vector<float> radii;
+            radii.reserve(circles.size());
+            for (const auto& c : circles)
+                radii.push_back(c[2]);
+            double rMed = MedianRadius(radii);
+            if (rMed > 1e-6) {
+                for (const auto& c : circles) {
+                    double r = c[2];
+                    if (r > 1e-6 && std::fabs(r - rMed) <= radiusTolFrac * rMed)
+                        cand.push_back(c);
+                }
+            }
+            if ((int)cand.size() < 2) {
+                cand = circles;
+            }
+        }
+
+        int pairILo = -1, pairIHi = -1;
+        double pairScore = 0.0;
+        bool havePair = PickBestStadiumCirclePair(cand, minEndSep, radiusTolFrac, pairILo, pairIHi, pairScore);
+
+        Vec4i s1, s2;
+        double phiStar = 0.0;
+        double ux = 1.0, uy = 0.0;
+        Point2f CLo(0.f, 0.f), CHi(0.f, 0.f);
+        float rLo = 0.f, rHi = 0.f;
+
+        if (havePair) {
+            const Vec3f& ca = cand[pairILo];
+            const Vec3f& cb = cand[pairIHi];
+            double dx = (double)cb[0] - (double)ca[0];
+            double dy = (double)cb[1] - (double)ca[1];
+            double len = std::sqrt(dx * dx + dy * dy);
+            if (len >= 1e-6) {
+                ux = dx / len;
+                uy = dy / len;
+                double pa = (double)ca[0] * ux + (double)ca[1] * uy;
+                double pb = (double)cb[0] * ux + (double)cb[1] * uy;
+                if (pa <= pb) {
+                    CLo = Point2f(ca[0], ca[1]);
+                    CHi = Point2f(cb[0], cb[1]);
+                    rLo = ca[2];
+                    rHi = cb[2];
+                } else {
+                    CLo = Point2f(cb[0], cb[1]);
+                    CHi = Point2f(ca[0], ca[1]);
+                    rLo = cb[2];
+                    rHi = ca[2];
+                }
+                phiStar = std::atan2(uy, ux);
+                if (phiStar < 0)
+                    phiStar += CV_PI;
+                if (phiStar >= CV_PI)
+                    phiStar -= CV_PI;
+
+                std::vector<Vec4i> bandSegs;
+                bool got = false;
+                double bandUx = ux, bandUy = uy;
+                const double margins[] = { 0.22, 0.12, 0.04 };
+                for (double mf : margins) {
+                    FilterSegmentsBetweenCircleEnds(linesP, CLo, CHi, bandUx, bandUy, rLo, rHi, phiStar, runwayAngleTolDeg, mf, bandSegs);
+                    if (ExtractTwoStraightsGivenPhi(bandSegs, phiStar, runwayAngleTolDeg, runwayRhoBinPx, s1, s2)) {
+                        got = true;
+                        break;
+                    }
+                }
+                if (!got) {
+                    std::vector<Vec4i> paraOnly;
+                    paraOnly.reserve(linesP.size());
+                    double tolRad = runwayAngleTolDeg * CV_PI / 180.0;
+                    for (const auto& s : linesP) {
+                        if (SegmentLengthPx(s) < 1.0)
+                            continue;
+                        double a = SegmentDirectionRad(s);
+                        double ad = std::fabs(a - phiStar);
+                        double angDiff = std::min(ad, CV_PI - ad);
+                        if (angDiff <= tolRad)
+                            paraOnly.push_back(s);
+                    }
+                    got = ExtractTwoStraightsGivenPhi(paraOnly, phiStar, runwayAngleTolDeg, runwayRhoBinPx, s1, s2);
+                }
+                if (!got)
+                    havePair = false;
+                else if (!circles.empty()) {
+                    double gatePx = std::max(15.0, 0.06 * (double)std::min(w, h));
+                    RefineStadiumCirclePoles(circles, radiusTolFrac, gatePx, CLo, CHi, rLo, rHi);
+                    double flen = std::hypot((double)CHi.x - (double)CLo.x, (double)CHi.y - (double)CLo.y);
+                    if (flen >= 1e-6) {
+                        bandUx = ((double)CHi.x - (double)CLo.x) / flen;
+                        bandUy = ((double)CHi.y - (double)CLo.y) / flen;
+                        RefineStadiumPhiAndStraightsFromHoughLines(linesP, CLo, CHi, rLo, rHi, bandUx, bandUy,
+                            runwayAngleTolDeg, runwayRhoBinPx, phiStar, ux, uy, s1, s2);
+                    }
+                }
+            } else {
+                havePair = false;
+            }
+        }
+
+        if (!havePair) {
+            double phTmp = 0.0;
+            if (!ExtractStadiumTwoStraights(linesP, runwayAngleTolDeg, runwayRhoBinPx, s1, s2, phTmp)) {
+                runwayLinesJson = "{\"shape\":\"stadium\",\"closed\":false,\"straights\":[],\"arcs\":[]}";
+                dstBgr = std::move(bgr);
+                return;
+            }
+            phiStar = phTmp;
+            ux = std::cos(phiStar);
+            uy = std::sin(phiStar);
+        }
+
+        float mx1 = 0.5f * (float)(s1[0] + s1[2]), my1 = 0.5f * (float)(s1[1] + s1[3]);
+        float mx2 = 0.5f * (float)(s2[0] + s2[2]), my2 = 0.5f * (float)(s2[1] + s2[3]);
+        Point2f trackMid(0.5f * (mx1 + mx2), 0.5f * (my1 + my2));
+
+        std::ostringstream jb;
+        jb.setf(std::ios::fixed);
+        jb << "{\"shape\":\"stadium\"";
+
+        const Scalar magenta(255, 0, 255);
+        const int thick = 3;
+
+        bool closedOk = havePair && rLo >= 1.f && rHi >= 1.f;
+        if (closedOk) {
+            Point2f M1(mx1, my1), M2(mx2, my2);
+            Point2f H11, H21, H12, H22;
+            bool geomOk = PickLineCircleJunction(M1, ux, uy, CLo, rLo, ux, uy, true, H11)
+                && PickLineCircleJunction(M2, ux, uy, CLo, rLo, ux, uy, true, H12)
+                && PickLineCircleJunction(M1, ux, uy, CHi, rHi, ux, uy, false, H21)
+                && PickLineCircleJunction(M2, ux, uy, CHi, rHi, ux, uy, false, H22);
+            if (!geomOk)
+                closedOk = false;
+            else {
+                line(bgr, Point(cvRound(H11.x), cvRound(H11.y)), Point(cvRound(H21.x), cvRound(H21.y)), magenta, thick, LINE_AA);
+                line(bgr, Point(cvRound(H22.x), cvRound(H22.y)), Point(cvRound(H12.x), cvRound(H12.y)), magenta, thick, LINE_AA);
+
+                double aHi0 = 0, aHi1 = 0, aLo0 = 0, aLo1 = 0;
+                DrawCircularArcPolylineBulgingAway(bgr, CHi, rHi, H21, H22, trackMid, magenta, thick, &aHi0, &aHi1);
+                DrawCircularArcPolylineBulgingAway(bgr, CLo, rLo, H12, H11, trackMid, magenta, thick, &aLo0, &aLo1);
+
+                jb << ",\"closed\":true";
+                jb << ",\"pairScore\":" << pairScore;
+                jb << ",\"straights\":[[" << cvRound(H11.x) << ',' << cvRound(H11.y) << ',' << cvRound(H21.x) << ',' << cvRound(H21.y)
+                   << "],[" << cvRound(H22.x) << ',' << cvRound(H22.y) << ',' << cvRound(H12.x) << ',' << cvRound(H12.y) << "]]";
+                jb << ",\"arcs\":[";
+                jb << "{\"cx\":" << CHi.x << ",\"cy\":" << CHi.y << ",\"r\":" << rHi
+                   << ",\"a0Deg\":" << aHi0 << ",\"a1Deg\":" << aHi1 << "}";
+                jb << ',';
+                jb << "{\"cx\":" << CLo.x << ",\"cy\":" << CLo.y << ",\"r\":" << rLo
+                   << ",\"a0Deg\":" << aLo0 << ",\"a1Deg\":" << aLo1 << "}";
+                jb << "]";
+                jb << ",\"rawStraights\":[[" << s1[0] << ',' << s1[1] << ',' << s1[2] << ',' << s1[3]
+                   << "],[" << s2[0] << ',' << s2[1] << ',' << s2[2] << ',' << s2[3] << "]]";
+                jb << '}';
+                runwayLinesJson = jb.str();
+                if (runwaySegCountOut)
+                    *runwaySegCountOut = 4;
+                dstBgr = std::move(bgr);
+                return;
+            }
+        }
+
+        jb << ",\"closed\":false";
+        jb << ",\"straights\":[[" << s1[0] << ',' << s1[1] << ',' << s1[2] << ',' << s1[3]
+           << "],[" << s2[0] << ',' << s2[1] << ',' << s2[2] << ',' << s2[3] << "]],\"arcs\":[]}";
+        runwayLinesJson = jb.str();
+        line(bgr, Point(s1[0], s1[1]), Point(s1[2], s1[3]), magenta, thick, LINE_AA);
+        line(bgr, Point(s2[0], s2[1]), Point(s2[2], s2[3]), magenta, thick, LINE_AA);
+        if (runwaySegCountOut)
+            *runwaySegCountOut = 2;
+        dstBgr = std::move(bgr);
+        return;
+    }
+
+    std::vector<Vec4i> runwaySegs;
+    ExtractRunwayLineSegments(linesP, runwayAngleTolDeg, runwayRhoBinPx, runwayStripCount,
+        maxRunwayLinesOut > 0 ? maxRunwayLinesOut : 200, runwaySegs, runwayLinesJson);
+    if (runwaySegCountOut) *runwaySegCountOut = (int)runwaySegs.size();
+    for (const auto& s : runwaySegs) {
+        line(bgr, Point(s[0], s[1]), Point(s[2], s[3]), Scalar(255, 0, 255), 3, LINE_AA);
+    }
+    dstBgr = std::move(bgr);
+}
+
+int HoughCirclesDetect(Image* src, Image* dstOverlay,
+    Point2D* circlePts, int* circleCount, int maxCircles,
+    char* circlesJsonOut, int circlesJsonBufSize,
+    int blurKsize,
+    double hcDp, double hcMinDist, double hcParam1, double hcParam2, int hcMinR, int hcMaxR)
+{
+    if (!src || !src->data || !dstOverlay || !circlePts || maxCircles <= 0)
+        return -1;
+    if (circleCount) *circleCount = 0;
+    if (circlesJsonOut && circlesJsonBufSize > 0)
+        circlesJsonOut[0] = '\0';
+
+    Mat m = ImageToMatClone(src);
+    if (m.empty())
+        return -1;
+
+    std::vector<Point2D> centers;
+    Mat out;
+    std::string cj;
+    std::string* pj = (circlesJsonOut && circlesJsonBufSize > 0) ? &cj : nullptr;
+    HoughCirclesOnMat(m, out, centers, blurKsize, hcDp, hcMinDist, hcParam1, hcParam2, hcMinR, hcMaxR, pj);
+
+    if (circlesJsonOut && circlesJsonBufSize > 0 && !cj.empty()) {
+        size_t cap = (size_t)circlesJsonBufSize - 1;
+        size_t n = std::min(cj.size(), cap);
+        if (n > 0)
+            memcpy(circlesJsonOut, cj.data(), n);
+        circlesJsonOut[n] = '\0';
+    }
+
+    int nc = (int)std::min(centers.size(), (size_t)maxCircles);
+    if (circleCount) *circleCount = nc;
+    for (int i = 0; i < nc; ++i)
+        circlePts[i] = centers[i];
+
+    MatToImageBGR(out, dstOverlay);
+    return 0;
+}
+
+int HoughLinesDetect(Image* src, Image* dstOverlay,
+    char* linesJsonOut, int linesJsonBufSize,
+    int* lineSegmentCountOut,
+    double hlRho, double hlThetaDeg, int hlThreshold, double hlMinLen, double hlMaxGap,
+    int maxLinesOut,
+    int coverageMatchHalfWidthPx)
+{
+    if (!src || !src->data || !dstOverlay)
+        return -1;
+    if (linesJsonOut && linesJsonBufSize > 0)
+        linesJsonOut[0] = '\0';
+    if (lineSegmentCountOut) *lineSegmentCountOut = 0;
+
+    Mat m = ImageToMatClone(src);
+    if (m.empty())
+        return -1;
+
+    std::string lj;
+    Mat out;
+    int nseg = 0;
+    HoughLinesOnMat(m, out, lj, &nseg, hlRho, hlThetaDeg, hlThreshold, hlMinLen, hlMaxGap, maxLinesOut,
+        coverageMatchHalfWidthPx);
+
+    if (lineSegmentCountOut) *lineSegmentCountOut = nseg;
+    if (linesJsonOut && linesJsonBufSize > 0) {
+        size_t cap = (size_t)linesJsonBufSize - 1;
+        size_t n = std::min(lj.size(), cap);
+        if (n > 0)
+            memcpy(linesJsonOut, lj.data(), n);
+        linesJsonOut[n] = '\0';
+    }
+
+    MatToImageBGR(out, dstOverlay);
+    return 0;
+}
+
+int HoughRunwayDetect(Image* src, Image* dstOverlay,
+    char* runwayJsonOut, int runwayJsonBufSize,
+    int* runwayLineCountOut,
+    int blurKsize,
+    double cannyTh1, double cannyTh2,
+    double hlRho, double hlThetaDeg, int hlThreshold, double hlMinLen, double hlMaxGap,
+    int maxLinesOut,
+    double runwayAngleTolDeg,
+    int runwayRhoBinPx,
+    int runwayStripCount,
+    int maxRunwayLinesOut,
+    int runwayShapeMode,
+    double hcDp, double hcMinDist, double hcParam1, double hcParam2, int hcMinR, int hcMaxR,
+    const char* linesJsonUtf8,
+    const char* circlesJsonUtf8)
+{
+    if (!src || !src->data || !dstOverlay)
+        return -1;
+    if (runwayLineCountOut) *runwayLineCountOut = 0;
+    if (runwayJsonOut && runwayJsonBufSize > 0)
+        runwayJsonOut[0] = '\0';
+
+    Mat m = ImageToMatClone(src);
+    if (m.empty())
+        return -1;
+
+    std::vector<Vec4i> optLinesParsed;
+    std::vector<Vec3f> optCirclesParsed;
+    const std::vector<Vec4i>* plines = nullptr;
+    const std::vector<Vec3f>* pcirc = nullptr;
+    if (linesJsonUtf8 && linesJsonUtf8[0] && ParseHoughLinesJsonUtf8(linesJsonUtf8, optLinesParsed))
+        plines = &optLinesParsed;
+    if (circlesJsonUtf8 && circlesJsonUtf8[0] && ParseHoughCirclesJsonUtf8(circlesJsonUtf8, optCirclesParsed))
+        pcirc = &optCirclesParsed;
+
+    std::string rj;
+    Mat out;
+    int rwc = 0;
+    HoughRunwayOnMat(m, out, rj, &rwc, blurKsize, cannyTh1, cannyTh2,
+        hlRho, hlThetaDeg, hlThreshold, hlMinLen, hlMaxGap, maxLinesOut,
+        runwayAngleTolDeg, runwayRhoBinPx, runwayStripCount, maxRunwayLinesOut,
+        runwayShapeMode, hcDp, hcMinDist, hcParam1, hcParam2, hcMinR, hcMaxR,
+        plines, pcirc);
+
+    if (runwayLineCountOut) *runwayLineCountOut = rwc;
+    if (runwayJsonOut && runwayJsonBufSize > 0) {
+        size_t cap = (size_t)runwayJsonBufSize - 1;
+        size_t n = std::min(rj.size(), cap);
+        if (n > 0)
+            memcpy(runwayJsonOut, rj.data(), n);
+        runwayJsonOut[n] = '\0';
+    }
+
+    MatToImageBGR(out, dstOverlay);
+    return 0;
 }
 
 void DrawDetectedCircles(Image* img, Point2D* pts, int count, int gray) {
@@ -2928,14 +4124,19 @@ void Step_ExpandToEdgeBoundary(cv::Mat* darkBinary, const cv::Mat& edgeMap,
 // 6. 提取暗条轮廓并按面积排序
 int Step_FindAndSortDarkContours(cv::Mat* darkBinary, int width, int height,
                                    std::vector<std::pair<double, int>>* sortedBars,
-                                   std::vector<std::vector<cv::Point>>* darkContours) {
+                                   std::vector<std::vector<cv::Point>>* darkContours,
+                                   double minAreaPixels) {
     // 提取所有暗条轮廓
     findContours(*darkBinary, *darkContours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
-    
-    // 自适应面积阈值
-    double areaThreshold = (double)(width * height) * 0.002;
-    if (areaThreshold < 500.0) areaThreshold = 500.0;
-    
+
+    double areaThreshold;
+    if (minAreaPixels >= 0.0) {
+        areaThreshold = minAreaPixels;
+    } else {
+        areaThreshold = (double)(width * height) * 0.002;
+        if (areaThreshold < 500.0) areaThreshold = 500.0;
+    }
+
     for (size_t i = 0; i < darkContours->size(); i++) {
         double area = contourArea((*darkContours)[i]);
         if (area > areaThreshold) {

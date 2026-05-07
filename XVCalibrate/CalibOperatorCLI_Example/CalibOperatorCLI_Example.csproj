@@ -11,6 +11,29 @@
     <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
 
+  <!-- HALCON：未安装时跳过引用与算子（可通过 msbuild -p:HalconRoot=... 覆盖路径） -->
+  <PropertyGroup>
+    <HalconRoot Condition="'$(HalconRoot)'==''">C:\Users\WGDQ\AppData\Local\Programs\MVTec\HALCON-25.11-Progress</HalconRoot>
+  </PropertyGroup>
+  <PropertyGroup>
+    <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRoot)\bin\dotnet50\HalconDotNet.dll')">$(HalconRoot)\bin\dotnet50\HalconDotNet.dll</HalconDotNetDll>
+    <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRoot)\bin\dotnet45\HalconDotNet.dll')">$(HalconRoot)\bin\dotnet45\HalconDotNet.dll</HalconDotNetDll>
+    <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRoot)\bin\dotnet40\HalconDotNet.dll')">$(HalconRoot)\bin\dotnet40\HalconDotNet.dll</HalconDotNetDll>
+    <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRoot)\bin\dotnet35\HalconDotNet.dll')">$(HalconRoot)\bin\dotnet35\HalconDotNet.dll</HalconDotNetDll>
+    <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRoot)\bin\dotnetcore31\HalconDotNet.dll')">$(HalconRoot)\bin\dotnetcore31\HalconDotNet.dll</HalconDotNetDll>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HalconDotNetDll)' != ''">
+    <DefineConstants>$(DefineConstants);HALCON_ENABLED</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(HalconDotNetDll)' != ''">
+    <Reference Include="HalconDotNet">
+      <HintPath>$(HalconDotNetDll)</HintPath>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup Condition="'$(HalconDotNetDll)' == ''">
+    <Compile Remove="HalconFlowBridge.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="System.Drawing.Common" Version="6.0.0" />
     <PackageReference Include="HslCommunication" Version="12.7.0" />
@@ -80,6 +103,14 @@
   <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
     <EnableUnmanagedDebugging>true</EnableUnmanagedDebugging>
   </PropertyGroup>
+
+  <!-- HALCON x64 原生 DLL（与 exe 同目录，供 halconxl 等加载） -->
+  <Target Name="CopyHalconNativeDlls" AfterTargets="Build" Condition="Exists('$(HalconRoot)\bin\x64-win64')">
+    <ItemGroup>
+      <_HalconNative Include="$(HalconRoot)\bin\x64-win64\*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_HalconNative)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+  </Target>
 
   <!-- 编译后自动复制海康 MVS Runtime 原生 DLL -->
   <Target Name="CopyMvsRuntime" AfterTargets="Build" Condition="'$(PlatformTarget)' == 'x64'">

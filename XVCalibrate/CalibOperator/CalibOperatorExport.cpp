@@ -84,6 +84,48 @@ CALIB_API void CALIB_DrawDetectedCircles(Image* img, Point2D* pts, int count, in
     ::DrawDetectedCircles(img, pts, count, gray);
 }
 
+CALIB_API int CALIB_HoughCirclesDetect(Image* src, Image* dstOverlay,
+    Point2D* circlePts, int* circleCount, int maxCircles,
+    char* circlesJsonOut, int circlesJsonBufSize,
+    int blurKsize,
+    double hcDp, double hcMinDist, double hcParam1, double hcParam2, int hcMinR, int hcMaxR) {
+    return ::HoughCirclesDetect(src, dstOverlay, circlePts, circleCount, maxCircles,
+        circlesJsonOut, circlesJsonBufSize,
+        blurKsize, hcDp, hcMinDist, hcParam1, hcParam2, hcMinR, hcMaxR);
+}
+
+CALIB_API int CALIB_HoughLinesDetect(Image* src, Image* dstOverlay,
+    char* linesJsonOut, int linesJsonBufSize,
+    int* lineSegmentCountOut,
+    double hlRho, double hlThetaDeg, int hlThreshold, double hlMinLen, double hlMaxGap,
+    int maxLinesOut,
+    int coverageMatchHalfWidthPx) {
+    return ::HoughLinesDetect(src, dstOverlay, linesJsonOut, linesJsonBufSize, lineSegmentCountOut,
+        hlRho, hlThetaDeg, hlThreshold, hlMinLen, hlMaxGap, maxLinesOut, coverageMatchHalfWidthPx);
+}
+
+CALIB_API int CALIB_HoughRunwayDetect(Image* src, Image* dstOverlay,
+    char* runwayJsonOut, int runwayJsonBufSize,
+    int* runwayLineCountOut,
+    int blurKsize,
+    double cannyTh1, double cannyTh2,
+    double hlRho, double hlThetaDeg, int hlThreshold, double hlMinLen, double hlMaxGap,
+    int maxLinesOut,
+    double runwayAngleTolDeg,
+    int runwayRhoBinPx,
+    int runwayStripCount,
+    int maxRunwayLinesOut,
+    int runwayShapeMode,
+    double hcDp, double hcMinDist, double hcParam1, double hcParam2, int hcMinR, int hcMaxR,
+    const char* linesJsonUtf8,
+    const char* circlesJsonUtf8) {
+    return ::HoughRunwayDetect(src, dstOverlay, runwayJsonOut, runwayJsonBufSize, runwayLineCountOut,
+        blurKsize, cannyTh1, cannyTh2, hlRho, hlThetaDeg, hlThreshold, hlMinLen, hlMaxGap, maxLinesOut,
+        runwayAngleTolDeg, runwayRhoBinPx, runwayStripCount, maxRunwayLinesOut,
+        runwayShapeMode, hcDp, hcMinDist, hcParam1, hcParam2, hcMinR, hcMaxR,
+        linesJsonUtf8, circlesJsonUtf8);
+}
+
 CALIB_API int CALIB_FindChessboardCorners(Image* img, int boardCols, int boardRows,
     Point2D* outPts, int* outCount, int maxPts, int refineSubPix, int fastCheck) {
     return ::FindChessboardCorners(img, boardCols, boardRows, outPts, outCount, maxPts, refineSubPix, fastCheck);
@@ -545,12 +587,17 @@ CALIB_API int CALIB_TrajStep_5_5_ExpandToEdgeBoundary(TrajStepContext ctx, int e
     return 0;
 }
 
-CALIB_API int CALIB_TrajStep_6_FindAndSortDarkContours(TrajStepContext ctx) {
+CALIB_API int CALIB_TrajStep_6_FindAndSortDarkContoursEx(TrajStepContext ctx, double minContourAreaPixels) {
     if (!ctx) return -1;
     TrajStepContextImpl* impl = (TrajStepContextImpl*)ctx;
     impl->darkBarCount = Step_FindAndSortDarkContours(&impl->darkBinary, impl->width, impl->height,
-                                                       &impl->sortedBars, &impl->darkContours);
+                                                       &impl->sortedBars, &impl->darkContours,
+                                                       minContourAreaPixels);
     return impl->darkBarCount;
+}
+
+CALIB_API int CALIB_TrajStep_6_FindAndSortDarkContours(TrajStepContext ctx) {
+    return CALIB_TrajStep_6_FindAndSortDarkContoursEx(ctx, -1.0);
 }
 
 CALIB_API int CALIB_TrajStep_7_SampleContours(TrajStepContext ctx, int targetBars, double spacing) {

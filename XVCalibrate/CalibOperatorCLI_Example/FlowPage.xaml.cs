@@ -15,6 +15,9 @@ using System.Numerics;
 using Microsoft.Win32;
 using CalibOperatorPInvoke;
 using HslCommunication.ModBus;
+#if HALCON_ENABLED
+using HalconDotNet;
+#endif
 
 namespace CalibOperatorCLI_Example
 {
@@ -22,6 +25,11 @@ namespace CalibOperatorCLI_Example
     {
         public string? CurrentFlowFilePath { get; private set; }
         public event Action<string>? FlowLoaded;
+
+        /// <summary>
+        /// CLI <c>--flow</c> 自动执行时为 true：流程日志里标记为错误的行同时写入标准错误输出。
+        /// </summary>
+        public bool MirrorErrorsToStderr { get; set; }
 
         // ================================================================
         // 算子定义模型
@@ -41,6 +49,7 @@ namespace CalibOperatorCLI_Example
             public PortDirection Direction { get; set; }
             public Type DataType { get; set; }
             public string ColorHex { get; set; }  // 端口颜色
+            public bool IsOptional { get; set; }
         }
 
         /// <summary>
@@ -106,7 +115,13 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "launcherScript", DisplayName = "启动脚本", DefaultValue = "JIT_Inference/jit_calibrate_launcher.py", Description = "本仓库内 launcher；路径解析同 ONNX" },
                     new OperatorParam { Name = "jitRepoRoot", DisplayName = "JiT仓库根目录", DefaultValue = "just-image-transformer", Description = "克隆的 just-image-transformer 根路径（相对 exe 或源码树）" },
                     new OperatorParam { Name = "configYaml", DisplayName = "配置YAML", DefaultValue = "config/jit_L_32.yaml", Description = "相对 JiT 仓库根，如 config/jit_L_32.yaml" },
-                    new OperatorParam { Name = "checkpointPath", DisplayName = "权重npz", DefaultValue = "", Description = "model.npz 路径（相对 exe 或源码树）；见 JiT README Google Drive" },
+                    new OperatorParam
+                    {
+                        Name = "checkpointPath",
+                        DisplayName = "权重 npz 或 zip",
+                        DefaultValue = "",
+                        Description = "model.npz，或官方 jit_L_32_ckpt_442k.zip（内含 model.npz）；launcher 会自动解压 zip"
+                    },
                     new OperatorParam { Name = "seed", DisplayName = "随机种子", DefaultValue = "555", Description = "噪声初始化" },
                     new OperatorParam { Name = "label", DisplayName = "ImageNet类别", DefaultValue = "123", Description = "类条件标签 0~999" },
                     new OperatorParam { Name = "cfgStrength", DisplayName = "CFG强度", DefaultValue = "3.0", Description = "classifier-free guidance" },
@@ -492,6 +507,188 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "binary_merge",
+                DisplayName = "二值图合并",
+                Description = "两幅图先转单通道灰度，尺寸须一致；可选按阈值再二值化后做逐像素位运算合并，输出单通道 0/255",
+                Category = "预处理",
+                Ports =
+                {
+                    new PortDef { Name = "InA", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "InB", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" }
+                },
+                Params =
+                {
+                    new OperatorParam { Name = "mergeMode", DisplayName = "合并方式", DefaultValue = "or", Description = "or=并集 | and=交集 | xor=对称差" },
+                    new OperatorParam { Name = "foregroundThreshold", DisplayName = "前景阈", DefaultValue = "0", Description = "灰度大于该值视为前景(255)再合并；与 OpenCV THRESH_BINARY 一致。设为 -1 时不预二值化，直接对原灰度字节做位运算" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "binary_morph_rect",
+                DisplayName = "矩形形态学(二值)",
+                Description = "矩形结构元腐蚀/膨胀/开/闭。横向细长核对横贯图像的长条前景可做 opening，打断竖直方向的细连接，便于拆开误合并的多条标定条带；vertical_strips 则使用竖向核。可选剔除过小连通域",
+                Category = "预处理",
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" }
+                },
+                Params =
+                {
+                    new OperatorParam { Name = "op", DisplayName = "运算", DefaultValue = "open", Description = "open | close | erode | dilate" },
+                    new OperatorParam { Name = "orientation", DisplayName = "条带方向预设", DefaultValue = "horizontal_strips", Description = "horizontal_strips=横向长条(默认核宽约31高约5)打断竖直连通 | vertical_strips=纵向长条 | custom=完全由 kernelW/H 决定" },
+                    new OperatorParam { Name = "kernelW", DisplayName = "结构元宽度", DefaultValue = "", Description = "奇数；留空则用预设" },
+                    new OperatorParam { Name = "kernelH", DisplayName = "结构元高度", DefaultValue = "", Description = "奇数；留空则用预设" },
+                    new OperatorParam { Name = "iterations", DisplayName = "迭代次数", DefaultValue = "1", Description = ">=1" },
+                    new OperatorParam { Name = "foregroundThreshold", DisplayName = "前景阈", DefaultValue = "0", Description = "灰度大于阈值为前景；-1 表示非零即前景" },
+                    new OperatorParam { Name = "minComponentPixels", DisplayName = "最小连通像素", DefaultValue = "0", Description = "形态学后剔除小于该像素数的 4-连通域；0 表示关闭" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "gray_blend_ratio",
+                DisplayName = "灰度合并",
+                Description = "两幅图转灰度后尺寸须一致，输出单通道灰度。weighted：加权混合 ratioA·InA+(1-ratioA)·InB；add：饱和相加 min(255,InA+InB)；subtract：InA−InB 饱和下溢为 0",
+                Category = "预处理",
+                Ports =
+                {
+                    new PortDef { Name = "InA", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "InB", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" }
+                },
+                Params =
+                {
+                    new OperatorParam { Name = "grayBlendMode", DisplayName = "合并方式", DefaultValue = "weighted", Description = "weighted=加权混合 | add/sum=相加饱和截断 | subtract/sub=InA−InB 饱和" },
+                    new OperatorParam { Name = "ratioA", DisplayName = "InA 权重", DefaultValue = "0.5", Description = "仅 weighted 有效：0~1，Out=ratioA·InA+(1−ratioA)·InB；超出裁剪到 [0,1]" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "hough_circles",
+                DisplayName = "霍夫圆",
+                Description = "HoughCircles：输出绿圈与青圆心叠加图；CirclesJson [[cx,cy,r],...] 可接霍夫跑道形",
+                Category = "检测",
+                Ports =
+                {
+                    new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "CirclePoints", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "CircleCount", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FF9800" },
+                    new PortDef { Name = "CirclesJson", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" }
+                },
+                Params =
+                {
+                    new OperatorParam { Name = "blurKsize", DisplayName = "高斯模糊核", DefaultValue = "9", Description = "奇数 ≥3；降噪" },
+                    new OperatorParam { Name = "hcDp", DisplayName = "累加器分辨(dp)", DefaultValue = "1.2", Description = "HoughCircles dp" },
+                    new OperatorParam { Name = "hcMinDist", DisplayName = "圆心最小距", DefaultValue = "40", Description = "minDist" },
+                    new OperatorParam { Name = "hcParam1", DisplayName = "Canny上阈", DefaultValue = "100", Description = "param1" },
+                    new OperatorParam { Name = "hcParam2", DisplayName = "圆心累加阈", DefaultValue = "30", Description = "param2" },
+                    new OperatorParam { Name = "hcMinRadius", DisplayName = "最小半径", DefaultValue = "5", Description = "像素" },
+                    new OperatorParam { Name = "hcMaxRadius", DisplayName = "最大半径", DefaultValue = "200", Description = "像素" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "hough_lines",
+                DisplayName = "霍夫线段",
+                Description = "Edge 接边缘图（8 位灰度或 BGR）；转灰度后可选按「霍夫匹配半宽」将边缘二值并膨胀再送入 HoughLinesP。检出后按线段长度降序、再按沿线覆盖率（在同一张用于霍夫的边缘图上 Bresenham 采样）降序排序，再截取最多线段数。下列为 HoughLinesP 与匹配参数",
+                Category = "检测",
+                Ports =
+                {
+                    new PortDef { Name = "Edge", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "LinesJson", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" },
+                    new PortDef { Name = "LineCount", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FF9800" }
+                },
+                Params =
+                {
+                    new OperatorParam { Name = "hlRho", DisplayName = "ρ步长", DefaultValue = "1", Description = "HoughLinesP rho（像素）" },
+                    new OperatorParam { Name = "hlThetaDeg", DisplayName = "θ步长(度)", DefaultValue = "1", Description = "角度分辨率" },
+                    new OperatorParam { Name = "hlThreshold", DisplayName = "累加阈", DefaultValue = "50", Description = "(ρ,θ) 投票阈值" },
+                    new OperatorParam { Name = "hlMinLineLength", DisplayName = "最短线段", DefaultValue = "40", Description = "像素" },
+                    new OperatorParam { Name = "hlMaxLineGap", DisplayName = "最大断裂", DefaultValue = "15", Description = "像素" },
+                    new OperatorParam { Name = "maxLinesOut", DisplayName = "最多线段数", DefaultValue = "400", Description = "绘制与 JSON 上限" },
+                    new OperatorParam { Name = "hlCoverageHalfWidthPx", DisplayName = "霍夫匹配半宽(px)", DefaultValue = "0", Description = "0=边缘图直接参与 HoughLinesP；N>0=边缘先按灰度>0 二值再以半径 N 圆形膨胀，膨胀图作为霍夫输入（线段更易在带宽内成形）；排序用覆盖率在同一张膨胀图上统计" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "lines_nms",
+                DisplayName = "线段非极大值抑制",
+                Description = "对 LinesJson [[x1,y1,x2,y2],...] 按法向角 θ 与距原点垂距 ρ 分桶，每桶保留最长线段，用于合并霍夫重复检测",
+                Category = "检测",
+                Ports =
+                {
+                    new PortDef { Name = "LinesJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B" },
+                    new PortDef { Name = "LinesJson", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" },
+                    new PortDef { Name = "LineCount", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FF9800" }
+                },
+                Params =
+                {
+                    new OperatorParam { Name = "angleTolDeg", DisplayName = "角度桶宽(度)", DefaultValue = "5", Description = "法向角 θ∈[0,π) 分桶宽度；越小越严格" },
+                    new OperatorParam { Name = "rhoTolPx", DisplayName = "ρ桶宽(像素)", DefaultValue = "10", Description = "垂距 ρ 分桶宽度（像素）" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "lines_threshold",
+                DisplayName = "线段阈值筛选",
+                Description = "按线段长度（像素）筛选 LinesJson；maxLengthPx≤0 表示不限制上限",
+                Category = "检测",
+                Ports =
+                {
+                    new PortDef { Name = "LinesJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B" },
+                    new PortDef { Name = "LinesJson", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" },
+                    new PortDef { Name = "LineCount", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FF9800" }
+                },
+                Params =
+                {
+                    new OperatorParam { Name = "minLengthPx", DisplayName = "最小长度(px)", DefaultValue = "0", Description = "长度小于此值的线段剔除；0 表示不限制下限" },
+                    new OperatorParam { Name = "maxLengthPx", DisplayName = "最大长度(px)", DefaultValue = "0", Description = "长度大于此值的线段剔除；0 或负数表示不限制上限" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "hough_runway",
+                DisplayName = "霍夫跑道形",
+                Description = "parallel：主导方向 + ρ 分桶线段（JSON）；stadium：圆线参考→跑道闭合。可选 LinesJson（霍夫线段）、CirclesJson（霍夫圆）覆盖内部检测",
+                Category = "检测",
+                Ports =
+                {
+                    new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "LinesJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "CirclesJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "RunwayLinesJson", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#E040FB" },
+                    new PortDef { Name = "RunwayLineCount", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#AB47BC" }
+                },
+                Params =
+                {
+                    new OperatorParam { Name = "blurKsize", DisplayName = "高斯模糊核", DefaultValue = "9", Description = "与霍夫线段一致时可叠在同一张图上对比" },
+                    new OperatorParam { Name = "cannyTh1", DisplayName = "Canny低阈", DefaultValue = "50", Description = "" },
+                    new OperatorParam { Name = "cannyTh2", DisplayName = "Canny高阈", DefaultValue = "150", Description = "" },
+                    new OperatorParam { Name = "hlRho", DisplayName = "ρ步长", DefaultValue = "1", Description = "" },
+                    new OperatorParam { Name = "hlThetaDeg", DisplayName = "θ步长(度)", DefaultValue = "1", Description = "" },
+                    new OperatorParam { Name = "hlThreshold", DisplayName = "累加阈", DefaultValue = "50", Description = "" },
+                    new OperatorParam { Name = "hlMinLineLength", DisplayName = "最短线段", DefaultValue = "40", Description = "" },
+                    new OperatorParam { Name = "hlMaxLineGap", DisplayName = "最大断裂", DefaultValue = "15", Description = "" },
+                    new OperatorParam { Name = "maxLinesOut", DisplayName = "内部线段预算", DefaultValue = "400", Description = "先完整检测线段再筛跑道；影响性能" },
+                    new OperatorParam { Name = "runwayShape", DisplayName = "形状", DefaultValue = "parallel", Description = "parallel | stadium（体育场=两直边+两半圆）" },
+                    new OperatorParam { Name = "runwayAngleTolDeg", DisplayName = "跑道方向桶宽(度)", DefaultValue = "10", Description = "" },
+                    new OperatorParam { Name = "runwayRhoBinPx", DisplayName = "跑道ρ桶宽(像素)", DefaultValue = "25", Description = "" },
+                    new OperatorParam { Name = "runwayStripCount", DisplayName = "跑道条带数", DefaultValue = "2", Description = "parallel：取前 N 个 ρ 桶；stadium 固定取最强两桶合并为直道" },
+                    new OperatorParam { Name = "maxRunwayLinesOut", DisplayName = "跑道线段上限", DefaultValue = "120", Description = "仅 parallel 模式" },
+                    new OperatorParam { Name = "hcDp", DisplayName = "圆 dp(stadium)", DefaultValue = "1.2", Description = "stadium 端点半径检测 HoughCircles" },
+                    new OperatorParam { Name = "hcMinDist", DisplayName = "圆心最小距(stadium)", DefaultValue = "40", Description = "" },
+                    new OperatorParam { Name = "hcParam1", DisplayName = "圆 Canny上阈(stadium)", DefaultValue = "100", Description = "" },
+                    new OperatorParam { Name = "hcParam2", DisplayName = "圆累加阈(stadium)", DefaultValue = "30", Description = "" },
+                    new OperatorParam { Name = "hcMinRadius", DisplayName = "最小半径(stadium)", DefaultValue = "5", Description = "像素" },
+                    new OperatorParam { Name = "hcMaxRadius", DisplayName = "最大半径(stadium)", DefaultValue = "200", Description = "像素" }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "find_contours",
                 DisplayName = "查找轮廓",
                 Description = "从二值图中提取暗条轮廓、排序并输出可视化图和轮廓数据",
@@ -502,6 +699,10 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Count", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FF9800" },
                     new PortDef { Name = "Contours", Direction = PortDirection.Output, DataType = typeof(ValueTuple<int[], int[], int[], int>), ColorHex = "#9C27B0" }
+                },
+                Params =
+                {
+                    new OperatorParam { Name = "minContourArea", DisplayName = "最小轮廓面积", DefaultValue = "", Description = "留空=默认 max(500,0.002×宽高)；填像素²阈值（如 400）可保留细长条带轮廓" }
                 }
             },
             new OperatorDef
@@ -522,7 +723,9 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "maxArea", DisplayName = "最大面积", DefaultValue = "4000000", Description = "保留轮廓最大面积(像素)" },
                     new OperatorParam { Name = "minAspect", DisplayName = "最小长宽比", DefaultValue = "0.2", Description = "保留包围盒宽高比最小值" },
                     new OperatorParam { Name = "maxAspect", DisplayName = "最大长宽比", DefaultValue = "5.0", Description = "保留包围盒宽高比最大值" },
-                    new OperatorParam { Name = "minCircularity", DisplayName = "最小圆度", DefaultValue = "0.02", Description = "4πA/P² 最小阈值(0~1)" },
+                    new OperatorParam { Name = "minCircularity", DisplayName = "最小圆度", DefaultValue = "0.02", Description = "4πA/P²；≤0 表示不限制下限" },
+                    new OperatorParam { Name = "maxCircularity", DisplayName = "最大圆度", DefaultValue = "1", Description = "≥1 表示不限制；否则剔除过圆的块状域（细长条圆度低）" },
+                    new OperatorParam { Name = "sortByCentroidY", DisplayName = "按重心Y排序", DefaultValue = "false", Description = "true=筛选后自上而下排序（适合横向条带）" },
                     new OperatorParam { Name = "targetCount", DisplayName = "保留数量", DefaultValue = "15", Description = "按面积降序保留前N条" }
                 }
             },
@@ -705,6 +908,10 @@ namespace CalibOperatorCLI_Example
                 {
                     new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Count", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FF9800" }
+                },
+                Params =
+                {
+                    new OperatorParam { Name = "minContourArea", DisplayName = "最小轮廓面积", DefaultValue = "", Description = "留空=默认；填像素²可降低面积门槛" }
                 }
             },
             new OperatorDef
@@ -806,7 +1013,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "display",
                 DisplayName = "显示图像",
-                Description = "每个画布上的「显示图像」节点独占一个预览窗口（标题含短 Guid）；同一节点多次运行会刷新该窗口。右键连线看图仍共用单个快捷预览窗口。",
+                Description = "每个画布上的「显示图像」节点独占一个预览窗口（标题含短 Guid）；同一节点多次运行会刷新该窗口。可选端口 Xld：叠加 HALCON XLD 折线（橘色）。右键连线看图仍共用单个快捷预览窗口。",
                 Category = "可视化",
                 Params =
                 {
@@ -816,7 +1023,8 @@ namespace CalibOperatorCLI_Example
                 {
                     new PortDef { Name = "Img", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
-                    new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
+                    new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Xld", Direction = PortDirection.Input, DataType = typeof(HalconXldContourBundle), ColorHex = "#E65100" }
                 }
             },
             new OperatorDef
@@ -1208,6 +1416,605 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "expandDist", DisplayName = "膨胀距离", DefaultValue = "15", Description = "边缘膨胀距离 (像素)" }
                 }
             },
+#if HALCON_ENABLED
+            new OperatorDef
+            {
+                TypeId = "halcon_rgb1_to_gray",
+                DisplayName = "HALCON 转灰度",
+                Description = "Rgb1ToGray：三通道则转灰度，单通道则直通（需本机 HALCON 与许可证）",
+                Category = "HALCON",
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_threshold_bin",
+                DisplayName = "HALCON 阈值二值",
+                Description = "Threshold + RegionToBin → 单通道二值图（与流程里「查找轮廓」等衔接）",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "minGray", DisplayName = "MinGray", DefaultValue = "128", Description = "灰度下阈" },
+                    new OperatorParam { Name = "maxGray", DisplayName = "MaxGray", DefaultValue = "255", Description = "灰度上阈" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_emphasize",
+                DisplayName = "HALCON Emphasize",
+                Description = "灰度强调（Emphasize），利于边缘/纹理对比",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "maskWidth", DisplayName = "MaskWidth", DefaultValue = "7", Description = "滤波宽度（奇数更佳）" },
+                    new OperatorParam { Name = "maskHeight", DisplayName = "MaskHeight", DefaultValue = "7", Description = "滤波高度（奇数更佳）" },
+                    new OperatorParam { Name = "factor", DisplayName = "Factor", DefaultValue = "1.0", Description = "强调系数" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_gray_opening_rect",
+                DisplayName = "HALCON 灰度开运算",
+                Description = "GrayOpeningRect：矩形结构元灰度开运算，抑制亮噪点",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "maskHeight", DisplayName = "MaskHeight", DefaultValue = "3", Description = "结构元高度" },
+                    new OperatorParam { Name = "maskWidth", DisplayName = "MaskWidth", DefaultValue = "3", Description = "结构元宽度" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_scale_image",
+                DisplayName = "HALCON ScaleImage",
+                Description = "线性缩放 Gray' = Mult×Gray + Add，调节对比度与亮度",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "mult", DisplayName = "Mult", DefaultValue = "1.0", Description = "乘因子" },
+                    new OperatorParam { Name = "add", DisplayName = "Add", DefaultValue = "0", Description = "加偏置" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_scale_image_max",
+                DisplayName = "HALCON ScaleImageMax",
+                Description = "按图像最大值拉伸动态范围（整幅归一化）",
+                Category = "HALCON",
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_illuminate",
+                DisplayName = "HALCON Illuminate",
+                Description = "局部亮度校正（大视场光照不均）",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "maskWidth", DisplayName = "MaskWidth", DefaultValue = "41", Description = "掩模宽（奇数）" },
+                    new OperatorParam { Name = "maskHeight", DisplayName = "MaskHeight", DefaultValue = "41", Description = "掩模高（奇数）" },
+                    new OperatorParam { Name = "factor", DisplayName = "Factor", DefaultValue = "0.7", Description = "校正强度" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_mean_image",
+                DisplayName = "HALCON MeanImage",
+                Description = "均值平滑；输出常作为 DynThreshold 的参考图",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "maskWidth", DisplayName = "MaskWidth", DefaultValue = "15", Description = "滤波宽" },
+                    new OperatorParam { Name = "maskHeight", DisplayName = "MaskHeight", DefaultValue = "15", Description = "滤波高" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_gauss_filter",
+                DisplayName = "HALCON GaussFilter",
+                Description = "高斯平滑（Size 为奇数）",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "size", DisplayName = "Size", DefaultValue = "5", Description = "滤波尺寸" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_gray_closing_rect",
+                DisplayName = "HALCON 灰度闭运算",
+                Description = "GrayClosingRect：连接暗条、填小缝",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "maskHeight", DisplayName = "MaskHeight", DefaultValue = "5", Description = "结构元高度" },
+                    new OperatorParam { Name = "maskWidth", DisplayName = "MaskWidth", DefaultValue = "5", Description = "结构元宽度" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_binary_threshold",
+                DisplayName = "HALCON BinaryThreshold",
+                Description = "自动全局阈值（如 max_separability）→ 二值图",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "method", DisplayName = "Method", DefaultValue = "max_separability", Description = "Halcon 方法名，如 max_separability、smooth_histo" },
+                    new OperatorParam { Name = "lightDark", DisplayName = "LightDark", DefaultValue = "dark", Description = "dark / light" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_dyn_threshold",
+                DisplayName = "HALCON DynThreshold",
+                Description = "局部自适应：原图 In 与参考图 Ref（建议接 MeanImage），offset 为灰度差阈值",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "offset", DisplayName = "Offset", DefaultValue = "15", Description = "与参考图的差分阈值" },
+                    new OperatorParam { Name = "lightDark", DisplayName = "LightDark", DefaultValue = "dark", Description = "dark / light" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Ref", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FFB74D" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_var_threshold",
+                DisplayName = "HALCON VarThreshold",
+                Description = "基于局部均值与标准差的自适应阈值（单幅输入）",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "maskWidth", DisplayName = "MaskWidth", DefaultValue = "15", Description = "分析窗宽" },
+                    new OperatorParam { Name = "maskHeight", DisplayName = "MaskHeight", DefaultValue = "15", Description = "分析窗高" },
+                    new OperatorParam { Name = "stdDevScale", DisplayName = "StdDevScale", DefaultValue = "0.2", Description = "标准差权重" },
+                    new OperatorParam { Name = "absThreshold", DisplayName = "AbsThreshold", DefaultValue = "40", Description = "绝对阈值项" },
+                    new OperatorParam { Name = "lightDark", DisplayName = "LightDark", DefaultValue = "dark", Description = "dark / light" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_median_image",
+                DisplayName = "HALCON MedianImage",
+                Description = "中值滤波，抑制椒盐噪声",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "maskType", DisplayName = "MaskType", DefaultValue = "circle", Description = "circle / square …" },
+                    new OperatorParam { Name = "radius", DisplayName = "Radius", DefaultValue = "3", Description = "半径" },
+                    new OperatorParam { Name = "margin", DisplayName = "Margin", DefaultValue = "mirrored", Description = "边界处理" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_invert_image",
+                DisplayName = "HALCON InvertImage",
+                Description = "灰度取反（InvertImage）",
+                Category = "HALCON",
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_abs_diff",
+                DisplayName = "HALCON AbsDiffImage",
+                Description = "逐像素绝对差 |In−In2|×mult（须同尺寸）",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "mult", DisplayName = "Mult", DefaultValue = "1.0", Description = "输出缩放" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "In2", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FFB74D" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_sub_image",
+                DisplayName = "HALCON SubImage",
+                Description = "Out = (In−In2)×mult + add（须同尺寸）",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "mult", DisplayName = "Mult", DefaultValue = "1.0", Description = "差分缩放" },
+                    new OperatorParam { Name = "add", DisplayName = "Add", DefaultValue = "0", Description = "加偏置" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "In2", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FFB74D" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_add_image",
+                DisplayName = "HALCON AddImage",
+                Description = "Out = mult×In + In2 + add（须同尺寸）",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "mult", DisplayName = "Mult", DefaultValue = "1.0", Description = "In 的系数" },
+                    new OperatorParam { Name = "add", DisplayName = "Add", DefaultValue = "0", Description = "加偏置" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "In2", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FFB74D" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_mult_image",
+                DisplayName = "HALCON MultImage",
+                Description = "Out = In×In2×mult + add（须同尺寸）",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "mult", DisplayName = "Mult", DefaultValue = "0.007843", Description = "乘因子（约 1/127 防溢出）" },
+                    new OperatorParam { Name = "add", DisplayName = "Add", DefaultValue = "0", Description = "加偏置" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "In2", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FFB74D" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_min_image",
+                DisplayName = "HALCON MinImage",
+                Description = "逐像素取 min(In, In2)（须同尺寸）",
+                Category = "HALCON",
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "In2", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FFB74D" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_max_image",
+                DisplayName = "HALCON MaxImage",
+                Description = "逐像素取 max(In, In2)（须同尺寸）",
+                Category = "HALCON",
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "In2", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FFB74D" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_sobel_amp",
+                DisplayName = "HALCON SobelAmp",
+                Description = "Sobel 边缘幅值（如 sum_abs）",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "filterType", DisplayName = "FilterType", DefaultValue = "sum_abs", Description = "如 sum_abs、sum_sqrt、thin_max_abs 等" },
+                    new OperatorParam { Name = "size", DisplayName = "Size", DefaultValue = "3", Description = "滤波尺寸（奇数）" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_smooth_image",
+                DisplayName = "HALCON SmoothImage",
+                Description = "平滑（如 gauss），Alpha 控制平滑强度",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "filter", DisplayName = "Filter", DefaultValue = "gauss", Description = "如 gauss" },
+                    new OperatorParam { Name = "alpha", DisplayName = "Alpha", DefaultValue = "3.0", Description = "平滑参数" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_gray_erosion_rect",
+                DisplayName = "HALCON GrayErosionRect",
+                Description = "灰度矩形腐蚀（暗细节扩张）",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "maskHeight", DisplayName = "MaskHeight", DefaultValue = "3", Description = "结构元高" },
+                    new OperatorParam { Name = "maskWidth", DisplayName = "MaskWidth", DefaultValue = "3", Description = "结构元宽" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_gray_dilation_rect",
+                DisplayName = "HALCON GrayDilationRect",
+                Description = "灰度矩形膨胀（亮细节扩张）",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "maskHeight", DisplayName = "MaskHeight", DefaultValue = "3", Description = "结构元高" },
+                    new OperatorParam { Name = "maskWidth", DisplayName = "MaskWidth", DefaultValue = "3", Description = "结构元宽" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_auto_threshold",
+                DisplayName = "HALCON AutoThreshold",
+                Description = "直方图自动多类分割后取面积最大类的二值 Mask（Sigma 为直方图平滑）",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "sigma", DisplayName = "Sigma", DefaultValue = "2.0", Description = "直方图平滑（≥0）" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_binary_morph_rect",
+                DisplayName = "HALCON 矩形形态学",
+                Description = "二值 Region：OpeningRectangle1 / ClosingRectangle1 / Erosion / Dilation",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "op", DisplayName = "运算", DefaultValue = "open", Description = "open / close / erode / dilate" },
+                    new OperatorParam { Name = "width", DisplayName = "宽", DefaultValue = "3", Description = "矩形结构元宽" },
+                    new OperatorParam { Name = "height", DisplayName = "高", DefaultValue = "3", Description = "矩形结构元高" },
+                    new OperatorParam { Name = "iterations", DisplayName = "迭代次数", DefaultValue = "1", Description = "重复次数" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_binary_to_xld",
+                DisplayName = "HALCON 二值→XLD",
+                Description = "Threshold → Connection → GenContourRegionXld；输出独立数据结构 HalconXldContourBundle（不接原生 find_contours）",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "minGray", DisplayName = "MinGray", DefaultValue = "1", Description = "进入区域的灰度下阈" },
+                    new OperatorParam { Name = "maxGray", DisplayName = "MaxGray", DefaultValue = "255", Description = "进入区域的灰度上阈" },
+                    new OperatorParam { Name = "genContourMode", DisplayName = "GenContourMode", DefaultValue = "border", Description = "GenContourRegionXld 的 Mode，如 border / center" },
+                    new OperatorParam { Name = "minContourPoints", DisplayName = "Min点数", DefaultValue = "3", Description = "丢弃点数少于此值的轮廓" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Xld", Direction = PortDirection.Output, DataType = typeof(HalconXldContourBundle), ColorHex = "#E65100" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_segment_xld",
+                DisplayName = "HALCON XLD 分格",
+                Description = "GenContourPolygonXld + SegmentContoursXld，将轮廓拆成直线/圆弧段（输出仍为 HalconXldContourBundle）",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "mode", DisplayName = "Mode", DefaultValue = "lines_circles", Description = "SegmentContoursXld 的 Mode" },
+                    new OperatorParam { Name = "smoothCont", DisplayName = "SmoothCont", DefaultValue = "5", Description = "平滑控制" },
+                    new OperatorParam { Name = "maxLineDist1", DisplayName = "MaxLineDist1", DefaultValue = "4.0", Description = "分段距离参数 1" },
+                    new OperatorParam { Name = "maxLineDist2", DisplayName = "MaxLineDist2", DefaultValue = "2.0", Description = "分段距离参数 2" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Xld", Direction = PortDirection.Input, DataType = typeof(HalconXldContourBundle), ColorHex = "#E65100" },
+                    new PortDef { Name = "XldOut", Direction = PortDirection.Output, DataType = typeof(HalconXldContourBundle), ColorHex = "#FF6E40" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_largest_blob_mask",
+                DisplayName = "HALCON 最大连通域Mask",
+                Description = "Gauss → Threshold → Connection → 取面积最大的 Region → Mask 二值图（对应 binarize+find_contours+create_mask 思路）",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "gaussSize", DisplayName = "Gauss尺寸", DefaultValue = "9", Description = "≥3 奇数；预先平滑，模拟 binarize 中去噪" },
+                    new OperatorParam { Name = "minGray", DisplayName = "MinGray", DefaultValue = "40", Description = "阈值分割灰度下界（需在平滑图上分出工件区域）" },
+                    new OperatorParam { Name = "maxGray", DisplayName = "MaxGray", DefaultValue = "255", Description = "阈值分割灰度上界" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_largest_contour_mask",
+                DisplayName = "HALCON 最大轮廓Mask",
+                Description = "Gauss → Threshold → Connection → 按 rankBy 选最大域 → FillUp（填满内部空洞）→ 实心二值 Mask；默认按面积最大",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "gaussSize", DisplayName = "Gauss尺寸", DefaultValue = "9", Description = "≥3 奇数；0 或省略表示不平滑" },
+                    new OperatorParam { Name = "minGray", DisplayName = "MinGray", DefaultValue = "40", Description = "阈值分割灰度下界" },
+                    new OperatorParam { Name = "maxGray", DisplayName = "MaxGray", DefaultValue = "255", Description = "阈值分割灰度上界" },
+                    new OperatorParam { Name = "genContourMode", DisplayName = "GenContourMode", DefaultValue = "border", Description = "rankBy=perimeter 时 GenContourRegionXld 的 Mode" },
+                    new OperatorParam { Name = "rankBy", DisplayName = "排序依据", DefaultValue = "area", Description = "area＝区域面积最大；perimeter＝外轮廓周长最大（输出均经 FillUp，无空洞）" },
+                    new OperatorParam { Name = "minContourPoints", DisplayName = "最少轮廓点数", DefaultValue = "3", Description = "perimeter 模式下少于该点数的 XLD 不参与比较" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_local_contrast",
+                DisplayName = "HALCON 局部对比度",
+                Description = "Illuminate + Emphasize，取代 CLAHE（HALCON 无同名算子时的典型替代）",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "illumMaskWidth", DisplayName = "Illuminate宽", DefaultValue = "41", Description = "Illuminate 掩模宽（奇数）" },
+                    new OperatorParam { Name = "illumMaskHeight", DisplayName = "Illuminate高", DefaultValue = "41", Description = "Illuminate 掩模高（奇数）" },
+                    new OperatorParam { Name = "illumFactor", DisplayName = "Illuminate因子", DefaultValue = "0.7", Description = "光照校正强度" },
+                    new OperatorParam { Name = "emphasizeWidth", DisplayName = "Emphasize宽", DefaultValue = "7", Description = "Emphasize 掩模宽" },
+                    new OperatorParam { Name = "emphasizeHeight", DisplayName = "Emphasize高", DefaultValue = "7", Description = "Emphasize 掩模高" },
+                    new OperatorParam { Name = "emphasizeFactor", DisplayName = "Emphasize因子", DefaultValue = "1.0", Description = "细节强调系数" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_gray_mask",
+                DisplayName = "HALCON GrayMask",
+                Description = "Mask 灰度在区间内保留 Image，否则置 0（语义同 apply_mask）",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "maskMin", DisplayName = "MaskMin", DefaultValue = "1", Description = "Mask 有效像素下界" },
+                    new OperatorParam { Name = "maskMax", DisplayName = "MaskMax", DefaultValue = "255", Description = "Mask 有效像素上界" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Mask", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FFB74D" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_binary_morph_circle",
+                DisplayName = "HALCON 圆形态学",
+                Description = "二值 Region 上 OpeningCircle / ClosingCircle（对应 morphology 清理）",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "op", DisplayName = "运算", DefaultValue = "open", Description = "open / close" },
+                    new OperatorParam { Name = "radius", DisplayName = "半径", DefaultValue = "2.5", Description = "圆形结构元半径" },
+                    new OperatorParam { Name = "iterations", DisplayName = "迭代次数", DefaultValue = "2", Description = "重复次数" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_xld_sample_points",
+                DisplayName = "HALCON XLD 采样点",
+                Description = "沿 XLD 折线按间距采样为 Point2D[]（对应 sample 思路，独立数据结构）",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "spacing", DisplayName = "间距", DefaultValue = "4", Description = "沿轮廓弧长采样步长（像素）" },
+                    new OperatorParam { Name = "maxBars", DisplayName = "最多条数", DefaultValue = "16", Description = "按轮廓长度降序只取前 N 条；0 表示不限制" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Xld", Direction = PortDirection.Input, DataType = typeof(HalconXldContourBundle), ColorHex = "#E65100" },
+                    new PortDef { Name = "Points", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
+                }
+            },
+#endif
             new OperatorDef
             {
                 TypeId = "composite",
@@ -1466,10 +2273,12 @@ namespace CalibOperatorCLI_Example
                 "预处理",
                 "后处理",
                 "验证",
+                "检测",
                 "流程",
                 "标定",
                 "输出",
-                "可视化"
+                "可视化",
+                "HALCON"
             };
 
             _toolboxGroups.Clear();
@@ -2273,8 +3082,9 @@ namespace CalibOperatorCLI_Example
 
                     var fromPort = fromNode.PortVisuals.FirstOrDefault(p =>
                         p.Definition.Name == cd.FromPort && p.Definition.Direction == PortDirection.Output);
+                    string toPortName = NormalizeHoughLinesInputPort(toNode, cd.ToPort);
                     var toPort = toNode.PortVisuals.FirstOrDefault(p =>
-                        p.Definition.Name == cd.ToPort && p.Definition.Direction == PortDirection.Input);
+                        p.Definition.Name == toPortName && p.Definition.Direction == PortDirection.Input);
 
                     if (fromPort != null && toPort != null && CanConnect(fromPort, toPort))
                         CreateConnection(fromPort, toPort);
@@ -2570,6 +3380,14 @@ namespace CalibOperatorCLI_Example
             return inputs;
         }
 
+        /// <summary>旧版霍夫线段输入端口名为 Image，现改为 Edge；加载组态时自动映射。</summary>
+        private static string NormalizeHoughLinesInputPort(FlowNode toNode, string? toPort)
+        {
+            if (toNode.Def.TypeId == "hough_lines" && string.Equals(toPort, "Image", StringComparison.Ordinal))
+                return "Edge";
+            return toPort ?? "";
+        }
+
         /// <summary>
         /// 高亮/恢复节点边框（执行状态可视化）
         /// </summary>
@@ -2593,6 +3411,18 @@ namespace CalibOperatorCLI_Example
         /// </summary>
         private void AppendLog(string text, bool isError = false)
         {
+            if (isError && MirrorErrorsToStderr)
+            {
+                try
+                {
+                    Console.Error.WriteLine($"[Flow] {text}");
+                }
+                catch
+                {
+                    // ignored
+                }
+            }
+
             LogBox.Dispatcher.Invoke(() =>
             {
                 var timestamp = DateTime.Now.ToString("HH:mm:ss");
@@ -2806,13 +3636,15 @@ namespace CalibOperatorCLI_Example
 
         private static (int[] flatX, int[] flatY, int[] lengths, int count) FilterContoursByGeometry(
             ValueTuple<int[], int[], int[], int> contourData,
-            double minArea, double maxArea, double minAspect, double maxAspect, double minCircularity, int targetCount)
+            double minArea, double maxArea, double minAspect, double maxAspect,
+            double minCircularity, double maxCircularity, int targetCount,
+            bool sortByCentroidY)
         {
             var (flatX, flatY, contourLengths, contourCount) = contourData;
             if (contourCount <= 0 || contourLengths == null || contourLengths.Length == 0)
                 return (Array.Empty<int>(), Array.Empty<int>(), Array.Empty<int>(), 0);
 
-            var accepted = new List<(int Start, int Len, double Area)>();
+            var accepted = new List<(int Start, int Len, double Area, double Cy)>();
             int offset = 0;
             for (int ci = 0; ci < contourCount && ci < contourLengths.Length; ci++)
             {
@@ -2848,11 +3680,14 @@ namespace CalibOperatorCLI_Example
                 double aspect = w / h;
                 double circularity = perimeter <= 1e-6 ? 0 : (4.0 * Math.PI * area) / (perimeter * perimeter);
 
+                bool circOk = (minCircularity <= 0.0 || circularity >= minCircularity)
+                    && (maxCircularity >= 1.0 || circularity <= maxCircularity);
                 if (area >= minArea && area <= maxArea &&
                     aspect >= minAspect && aspect <= maxAspect &&
-                    circularity >= minCircularity)
+                    circOk)
                 {
-                    accepted.Add((offset, len, area));
+                    double cy = (minY + maxY) * 0.5;
+                    accepted.Add((offset, len, area, cy));
                 }
 
                 offset += len;
@@ -2865,6 +3700,8 @@ namespace CalibOperatorCLI_Example
                 .OrderByDescending(c => c.Area)
                 .Take(Math.Max(1, targetCount))
                 .ToList();
+            if (sortByCentroidY)
+                selected = selected.OrderBy(c => c.Cy).ToList();
 
             var outLens = new List<int>(selected.Count);
             var outX = new List<int>(selected.Sum(s => s.Len));
@@ -3199,6 +4036,108 @@ namespace CalibOperatorCLI_Example
                 }
             }
             return dst;
+        }
+
+        private static bool[,] CalibImageToBinary(CalibImage img, int foregroundThreshold)
+        {
+            if (img == null) throw new ArgumentNullException(nameof(img));
+            var n = img.GetNativeStruct();
+            int w = n.width, h = n.height;
+            if (w <= 0 || h <= 0)
+                throw new ArgumentException("图像尺寸无效", nameof(img));
+            var buf = new byte[w * h];
+            FillGrayBytesFromCalib(img, buf);
+            var data = new bool[h, w];
+            for (int y = 0; y < h; y++)
+            {
+                int row = y * w;
+                for (int x = 0; x < w; x++)
+                {
+                    byte v = buf[row + x];
+                    data[y, x] = foregroundThreshold < 0 ? v != 0 : v > foregroundThreshold;
+                }
+            }
+            return data;
+        }
+
+        private static void EnsureOddKernel(ref int k)
+        {
+            if (k < 1) k = 1;
+            if ((k & 1) == 0) k++;
+        }
+
+        private static bool[,] ErodeBinaryRect(bool[,] src, int kw, int kh)
+        {
+            int h = src.GetLength(0), w = src.GetLength(1);
+            EnsureOddKernel(ref kw);
+            EnsureOddKernel(ref kh);
+            int rx = kw / 2, ry = kh / 2;
+            var dst = new bool[h, w];
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    bool ok = true;
+                    for (int dy = -ry; dy <= ry && ok; dy++)
+                    {
+                        int yy = y + dy;
+                        if (yy < 0 || yy >= h) { ok = false; break; }
+                        for (int dx = -rx; dx <= rx; dx++)
+                        {
+                            int xx = x + dx;
+                            if (xx < 0 || xx >= w || !src[yy, xx]) { ok = false; break; }
+                        }
+                    }
+                    dst[y, x] = ok;
+                }
+            }
+            return dst;
+        }
+
+        private static bool[,] DilateBinaryRect(bool[,] src, int kw, int kh)
+        {
+            int h = src.GetLength(0), w = src.GetLength(1);
+            EnsureOddKernel(ref kw);
+            EnsureOddKernel(ref kh);
+            int rx = kw / 2, ry = kh / 2;
+            var dst = new bool[h, w];
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    bool on = false;
+                    for (int dy = -ry; dy <= ry && !on; dy++)
+                    {
+                        int yy = y + dy;
+                        if (yy < 0 || yy >= h) continue;
+                        for (int dx = -rx; dx <= rx; dx++)
+                        {
+                            int xx = x + dx;
+                            if (xx < 0 || xx >= w) continue;
+                            if (src[yy, xx]) { on = true; break; }
+                        }
+                    }
+                    dst[y, x] = on;
+                }
+            }
+            return dst;
+        }
+
+        /// <summary>矩形结构元开运算：先腐蚀再膨胀，常用横向核打断竖直细桥接。</summary>
+        private static bool[,] MorphOpenBinaryRect(bool[,] src, int kw, int kh)
+            => DilateBinaryRect(ErodeBinaryRect(src, kw, kh), kw, kh);
+
+        private static bool[,] MorphCloseBinaryRect(bool[,] src, int kw, int kh)
+            => ErodeBinaryRect(DilateBinaryRect(src, kw, kh), kw, kh);
+
+        private static bool[,] ApplyBinaryMorphRectOp(bool[,] src, string op, int kw, int kh)
+        {
+            string m = (op ?? "open").Trim().ToLowerInvariant();
+            if (m.Length == 0) m = "open";
+            if (m == "erode") return ErodeBinaryRect(src, kw, kh);
+            if (m == "dilate") return DilateBinaryRect(src, kw, kh);
+            if (m == "close") return MorphCloseBinaryRect(src, kw, kh);
+            return MorphOpenBinaryRect(src, kw, kh);
         }
 
         private static bool[,] RemoveSmallComponents(bool[,] src, int minSize)
@@ -3620,6 +4559,132 @@ namespace CalibOperatorCLI_Example
             }
             Marshal.Copy(bytes, 0, native.data, bytes.Length);
             return img;
+        }
+
+        private static void FillGrayBytesFromCalib(CalibImage img, byte[] dstGray)
+        {
+            var n = img.GetNativeStruct();
+            int w = n.width, h = n.height;
+            int ch = n.channels;
+            int nPix = w * h;
+            if (dstGray.Length < nPix)
+                throw new InvalidOperationException("内部缓冲区过小");
+            if (ch == 1)
+            {
+                Marshal.Copy(n.data, dstGray, 0, nPix);
+                return;
+            }
+            if (ch == 3)
+            {
+                var tmp = new byte[nPix * 3];
+                Marshal.Copy(n.data, tmp, 0, tmp.Length);
+                for (int p = 0; p < nPix; p++)
+                {
+                    int b = tmp[p * 3], g = tmp[p * 3 + 1], r = tmp[p * 3 + 2];
+                    dstGray[p] = (byte)Math.Clamp((int)(0.299 * r + 0.587 * g + 0.114 * b), 0, 255);
+                }
+                return;
+            }
+            throw new InvalidOperationException($"二值图合并: 不支持的通道数 {ch}");
+        }
+
+        private static CalibImage BinaryMergeCalibImages(CalibImage imgA, CalibImage imgB, string mergeMode, int foregroundThreshold)
+        {
+            var na = imgA.GetNativeStruct();
+            var nb = imgB.GetNativeStruct();
+            if (na.width != nb.width || na.height != nb.height)
+                throw new InvalidOperationException($"二值图合并: 尺寸须一致，当前 {na.width}x{na.height} 与 {nb.width}x{nb.height}");
+            int w = na.width, h = na.height;
+            int nPix = w * h;
+            var ga = new byte[nPix];
+            var gb = new byte[nPix];
+            FillGrayBytesFromCalib(imgA, ga);
+            FillGrayBytesFromCalib(imgB, gb);
+            var ba = new byte[nPix];
+            var bb = new byte[nPix];
+            if (foregroundThreshold < 0)
+            {
+                Buffer.BlockCopy(ga, 0, ba, 0, nPix);
+                Buffer.BlockCopy(gb, 0, bb, 0, nPix);
+            }
+            else
+            {
+                for (int i = 0; i < nPix; i++)
+                {
+                    ba[i] = (byte)(ga[i] > foregroundThreshold ? 255 : 0);
+                    bb[i] = (byte)(gb[i] > foregroundThreshold ? 255 : 0);
+                }
+            }
+            string m = (mergeMode ?? "or").Trim();
+            if (m.Length == 0) m = "or";
+            m = m.ToLowerInvariant();
+            var dst = new byte[nPix];
+            if (m == "and")
+            {
+                for (int i = 0; i < nPix; i++)
+                    dst[i] = (byte)(ba[i] & bb[i]);
+            }
+            else if (m == "xor")
+            {
+                for (int i = 0; i < nPix; i++)
+                    dst[i] = (byte)(ba[i] ^ bb[i]);
+            }
+            else
+            {
+                for (int i = 0; i < nPix; i++)
+                    dst[i] = (byte)(ba[i] | bb[i]);
+            }
+            var outImg = new CalibImage(w, h, 1);
+            var no = outImg.GetNativeStruct();
+            Marshal.Copy(dst, 0, no.data, nPix);
+            return outImg;
+        }
+
+        private static string NormalizeGrayBlendMode(string? blendMode)
+        {
+            string m = (blendMode ?? "weighted").Trim();
+            if (m.Length == 0) m = "weighted";
+            m = m.ToLowerInvariant();
+            if (m == "sum") return "add";
+            if (m == "sub") return "subtract";
+            if (m == "blend" || m == "mix" || m == "linear") return "weighted";
+            return m;
+        }
+
+        private static CalibImage GrayMergeCalibImages(CalibImage imgA, CalibImage imgB, string? blendMode, double ratioA)
+        {
+            var na = imgA.GetNativeStruct();
+            var nb = imgB.GetNativeStruct();
+            if (na.width != nb.width || na.height != nb.height)
+                throw new InvalidOperationException($"灰度合并: 尺寸须一致，当前 {na.width}x{na.height} 与 {nb.width}x{nb.height}");
+            int nPix = na.width * na.height;
+            var ga = new byte[nPix];
+            var gb = new byte[nPix];
+            FillGrayBytesFromCalib(imgA, ga);
+            FillGrayBytesFromCalib(imgB, gb);
+            var dst = new byte[nPix];
+            string m = NormalizeGrayBlendMode(blendMode);
+            if (m == "add")
+            {
+                for (int i = 0; i < nPix; i++)
+                    dst[i] = (byte)Math.Clamp((int)ga[i] + (int)gb[i], 0, 255);
+            }
+            else if (m == "subtract")
+            {
+                for (int i = 0; i < nPix; i++)
+                    dst[i] = (byte)Math.Clamp((int)ga[i] - (int)gb[i], 0, 255);
+            }
+            else
+            {
+                ratioA = Math.Clamp(ratioA, 0.0, 1.0);
+                double wB = 1.0 - ratioA;
+                for (int i = 0; i < nPix; i++)
+                    dst[i] = (byte)Math.Clamp(Math.Round(ratioA * ga[i] + wB * gb[i]), 0.0, 255.0);
+            }
+            var outImg = new CalibImage(na.width, na.height, 1);
+            var no = outImg.GetNativeStruct();
+            Marshal.Copy(dst, 0, no.data, nPix);
+            return outImg;
         }
 
         private static CalibImage SobelEdgeImage(CalibImage src, int threshold)
@@ -4785,7 +5850,11 @@ namespace CalibOperatorCLI_Example
             {
                 if (!Guid.TryParse(cd.FromNodeId?.Trim(), out var fid)) continue;
                 if (!Guid.TryParse(cd.ToNodeId?.Trim(), out var tid)) continue;
-                edges.Add((fid, cd.FromPort ?? "", tid, cd.ToPort ?? ""));
+                string toPort = cd.ToPort ?? "";
+                if (idMap.TryGetValue(tid, out var toInner) && toInner.Def.TypeId == "hough_lines" &&
+                    string.Equals(toPort, "Image", StringComparison.Ordinal))
+                    toPort = "Edge";
+                edges.Add((fid, cd.FromPort ?? "", tid, toPort));
             }
 
             var innerList = idMap.Values.ToList();
@@ -5022,6 +6091,120 @@ namespace CalibOperatorCLI_Example
             }
         }
 
+        private readonly struct HoughLineSeg
+        {
+            public int X1 { get; }
+            public int Y1 { get; }
+            public int X2 { get; }
+            public int Y2 { get; }
+            public HoughLineSeg(int x1, int y1, int x2, int y2)
+            {
+                X1 = x1;
+                Y1 = y1;
+                X2 = x2;
+                Y2 = y2;
+            }
+            public double Length
+            {
+                get
+                {
+                    double dx = X2 - X1, dy = Y2 - Y1;
+                    return Math.Sqrt(dx * dx + dy * dy);
+                }
+            }
+        }
+
+        private static List<HoughLineSeg> ParseHoughLinesJsonToSegs(string? json)
+        {
+            var list = new List<HoughLineSeg>();
+            if (string.IsNullOrWhiteSpace(json)) return list;
+            int pos = 0;
+            while (pos < json.Length)
+            {
+                int lb = json.IndexOf('[', pos);
+                if (lb < 0) break;
+                int rb = json.IndexOf(']', lb + 1);
+                if (rb < 0) break;
+                ReadOnlySpan<char> chunk = json.AsSpan(lb + 1, rb - lb - 1);
+                int comma1 = chunk.IndexOf(',');
+                if (comma1 < 0) { pos = rb + 1; continue; }
+                int comma2Rel = chunk.Slice(comma1 + 1).IndexOf(',');
+                if (comma2Rel < 0) { pos = rb + 1; continue; }
+                int comma2 = comma1 + 1 + comma2Rel;
+                int comma3Rel = chunk.Slice(comma2 + 1).IndexOf(',');
+                if (comma3Rel < 0) { pos = rb + 1; continue; }
+                int comma3 = comma2 + 1 + comma3Rel;
+                if (!int.TryParse(chunk.Slice(0, comma1).Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var x1) ||
+                    !int.TryParse(chunk.Slice(comma1 + 1, comma2 - comma1 - 1).Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var y1) ||
+                    !int.TryParse(chunk.Slice(comma2 + 1, comma3 - comma2 - 1).Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var x2) ||
+                    !int.TryParse(chunk.Slice(comma3 + 1).Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var y2))
+                {
+                    pos = rb + 1;
+                    continue;
+                }
+                list.Add(new HoughLineSeg(x1, y1, x2, y2));
+                pos = rb + 1;
+            }
+            return list;
+        }
+
+        private static string FormatHoughLinesJson(List<HoughLineSeg> segs)
+        {
+            if (segs == null || segs.Count == 0) return "[]";
+            var sb = new StringBuilder();
+            sb.Append('[');
+            for (int i = 0; i < segs.Count; i++)
+            {
+                var s = segs[i];
+                if (i > 0) sb.Append(',');
+                sb.Append('[').Append(s.X1).Append(',').Append(s.Y1).Append(',').Append(s.X2).Append(',').Append(s.Y2).Append(']');
+            }
+            sb.Append(']');
+            return sb.ToString();
+        }
+
+        private static List<HoughLineSeg> HoughLinesJsonNonMaxSuppression(List<HoughLineSeg> input, double angleTolDeg, double rhoTolPx)
+        {
+            var result = new List<HoughLineSeg>();
+            if (input == null || input.Count == 0) return result;
+            double angleTolRad = angleTolDeg * Math.PI / 180.0;
+            if (angleTolRad < 1e-9) angleTolRad = 1e-9;
+            if (rhoTolPx < 1e-9) rhoTolPx = 1e-9;
+            var best = new Dictionary<(int tb, int rb), HoughLineSeg>();
+            foreach (var seg in input)
+            {
+                if (seg.Length < 1e-6) continue;
+                double dx = seg.X2 - seg.X1, dy = seg.Y2 - seg.Y1;
+                double thetaLine = Math.Atan2(dy, dx);
+                double thetaN = thetaLine + Math.PI / 2;
+                while (thetaN < 0) thetaN += Math.PI;
+                while (thetaN >= Math.PI) thetaN -= Math.PI;
+                double mx = (seg.X1 + seg.X2) * 0.5, my = (seg.Y1 + seg.Y2) * 0.5;
+                double rho = mx * Math.Cos(thetaN) + my * Math.Sin(thetaN);
+                int tb = (int)Math.Floor(thetaN / angleTolRad);
+                int rb = (int)Math.Floor(rho / rhoTolPx);
+                var key = (tb, rb);
+                if (!best.TryGetValue(key, out var cur) || seg.Length > cur.Length)
+                    best[key] = seg;
+            }
+            result.AddRange(best.Values);
+            return result;
+        }
+
+        private static List<HoughLineSeg> HoughLinesJsonLengthThreshold(List<HoughLineSeg> input, double minLen, double maxLen)
+        {
+            if (input == null || input.Count == 0) return new List<HoughLineSeg>();
+            double maxL = maxLen <= 0 ? double.PositiveInfinity : maxLen;
+            var result = new List<HoughLineSeg>(input.Count);
+            foreach (var s in input)
+            {
+                double len = s.Length;
+                if (len >= minLen && len <= maxL)
+                    result.Add(s);
+            }
+            return result;
+        }
+
         private static Point2D[] ParseWorldPointsParam(string? raw)
         {
             if (string.IsNullOrWhiteSpace(raw))
@@ -5183,7 +6366,7 @@ namespace CalibOperatorCLI_Example
                                          ?? JitSampleBridge.DefaultConfigYamlRelative;
                         string ckRel = node.Params.GetValueOrDefault("checkpointPath", "")?.Trim() ?? "";
                         if (string.IsNullOrWhiteSpace(ckRel))
-                            throw new InvalidOperationException("JiT采样: 请填写 checkpointPath（model.npz）");
+                            throw new InvalidOperationException("JiT采样: 请填写 checkpointPath（model.npz 或含 model.npz 的 .zip）");
                         string ckAbs = SamOnnxSegmentation.ResolveModelPath(ckRel);
                         int seed = int.TryParse(node.Params.GetValueOrDefault("seed"), out var sd) ? sd : 555;
                         int label = int.TryParse(node.Params.GetValueOrDefault("label"), out var lb) ? lb : 123;
@@ -5321,6 +6504,91 @@ namespace CalibOperatorCLI_Example
                         detector.GrayRangeBinary(grayLow, grayHigh);
                         var grayBinImg = detector.GetStepImage(2);
                         node.Outputs["Out"] = grayBinImg;
+                        break;
+                    }
+
+                    case "binary_merge":
+                    {
+                        var imgA = inputs["InA"] as CalibImage;
+                        var imgB = inputs["InB"] as CalibImage;
+                        if (imgA == null || imgB == null) throw new InvalidOperationException("二值图合并: 需要 InA、InB");
+                        string mergeMode = (node.Params.GetValueOrDefault("mergeMode", "or") ?? "or").Trim();
+                        int fgTh = int.TryParse(node.Params.GetValueOrDefault("foregroundThreshold"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var ft) ? ft : 0;
+                        var merged = BinaryMergeCalibImages(imgA, imgB, mergeMode, fgTh);
+                        node.Outputs["Out"] = merged;
+                        node.ResultSummary = $"binary_merge {mergeMode}";
+                        break;
+                    }
+
+                    case "binary_morph_rect":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("矩形形态学: 缺少输入图像");
+                        int fgTh = int.TryParse(
+                            node.Params.GetValueOrDefault("foregroundThreshold"),
+                            System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var ft)
+                            ? ft
+                            : 0;
+                        string op = (node.Params.GetValueOrDefault("op", "open") ?? "open").Trim();
+                        int iterations = int.TryParse(
+                            node.Params.GetValueOrDefault("iterations"),
+                            System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var it)
+                            ? Math.Max(1, it)
+                            : 1;
+                        string orient = (node.Params.GetValueOrDefault("orientation", "horizontal_strips") ?? "horizontal_strips").Trim().ToLowerInvariant();
+                        bool customKw = int.TryParse(node.Params.GetValueOrDefault("kernelW"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var kwParsed) && kwParsed > 0;
+                        bool customKh = int.TryParse(node.Params.GetValueOrDefault("kernelH"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var khParsed) && khParsed > 0;
+                        int kw, kh;
+                        if (customKw || customKh)
+                        {
+                            kw = customKw ? kwParsed : 31;
+                            kh = customKh ? khParsed : 5;
+                        }
+                        else if (orient.Contains("vertical"))
+                        {
+                            kw = 5;
+                            kh = 31;
+                        }
+                        else
+                        {
+                            kw = 31;
+                            kh = 5;
+                        }
+
+                        EnsureOddKernel(ref kw);
+                        EnsureOddKernel(ref kh);
+                        var bin = CalibImageToBinary(inImg, fgTh);
+                        for (int i = 0; i < iterations; i++)
+                            bin = ApplyBinaryMorphRectOp(bin, op, kw, kh);
+                        int minComp = int.TryParse(
+                            node.Params.GetValueOrDefault("minComponentPixels"),
+                            System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var mc)
+                            ? mc
+                            : 0;
+                        if (minComp > 1)
+                            bin = RemoveSmallComponents(bin, minComp);
+                        node.Outputs["Out"] = BinaryToCalibImage(bin);
+                        node.ResultSummary = $"{op} rect {kw}x{kh} x{iterations}";
+                        break;
+                    }
+
+                    case "gray_blend_ratio":
+                    {
+                        var imgA = inputs["InA"] as CalibImage;
+                        var imgB = inputs["InB"] as CalibImage;
+                        if (imgA == null || imgB == null) throw new InvalidOperationException("灰度合并: 需要 InA、InB");
+                        string blendMode = (node.Params.GetValueOrDefault("grayBlendMode", "weighted") ?? "weighted").Trim();
+                        double ratioA = double.TryParse(node.Params.GetValueOrDefault("ratioA"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ra) ? ra : 0.5;
+                        ratioA = Math.Clamp(ratioA, 0.0, 1.0);
+                        var blended = GrayMergeCalibImages(imgA, imgB, blendMode, ratioA);
+                        node.Outputs["Out"] = blended;
+                        node.ResultSummary = $"gray_merge {NormalizeGrayBlendMode(blendMode)} ratioA={ratioA:G4}";
                         break;
                     }
 
@@ -5589,7 +6857,16 @@ namespace CalibOperatorCLI_Example
                         if (inImg == null) throw new InvalidOperationException("查找轮廓: 缺少输入二值图像");
                         using var detector = new TrajectoryStepDetector();
                         detector.SetDarkBinary(inImg);
-                        int count = detector.FindAndSortDarkContours();
+                        double minContourArea = -1.0;
+                        var minAreaStr = node.Params.GetValueOrDefault("minContourArea");
+                        if (!string.IsNullOrWhiteSpace(minAreaStr) &&
+                            double.TryParse(
+                                minAreaStr.Trim(),
+                                System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                out var ma))
+                            minContourArea = ma;
+                        int count = detector.FindAndSortDarkContours(minContourArea);
                         var contourVis = detector.GetContourVis();
                         node.Outputs["Out"] = contourVis;
                         node.Outputs["Count"] = count;
@@ -5713,7 +6990,16 @@ namespace CalibOperatorCLI_Example
                         if (srcImg == null) throw new InvalidOperationException("排序: 缺少输入图像");
                         using var detector = new TrajectoryStepDetector();
                         detector.SetDarkBinary(srcImg);
-                        int count = detector.FindAndSortDarkContours();
+                        double minContourArea = -1.0;
+                        var minAreaStr = node.Params.GetValueOrDefault("minContourArea");
+                        if (!string.IsNullOrWhiteSpace(minAreaStr) &&
+                            double.TryParse(
+                                minAreaStr.Trim(),
+                                System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                out var ma))
+                            minContourArea = ma;
+                        int count = detector.FindAndSortDarkContours(minContourArea);
                         node.Outputs["Count"] = count;
                         break;
                     }
@@ -5743,15 +7029,26 @@ namespace CalibOperatorCLI_Example
                         if (contourObj is not ValueTuple<int[], int[], int[], int> contourData)
                             throw new InvalidOperationException("轮廓筛选: 轮廓数据格式错误");
 
-                        double minArea = double.Parse(node.Params["minArea"]);
-                        double maxArea = double.Parse(node.Params["maxArea"]);
-                        double minAspect = double.Parse(node.Params["minAspect"]);
-                        double maxAspect = double.Parse(node.Params["maxAspect"]);
-                        double minCircularity = double.Parse(node.Params["minCircularity"]);
-                        int targetCount = int.Parse(node.Params["targetCount"]);
+                        double ParseInv(string key, double defVal)
+                        {
+                            var s = node.Params.GetValueOrDefault(key);
+                            if (string.IsNullOrWhiteSpace(s)) return defVal;
+                            return double.TryParse(s.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v)
+                                ? v
+                                : defVal;
+                        }
+
+                        double minArea = ParseInv("minArea", 8000);
+                        double maxArea = ParseInv("maxArea", 4000000);
+                        double minAspect = ParseInv("minAspect", 0.2);
+                        double maxAspect = ParseInv("maxAspect", 5.0);
+                        double minCircularity = ParseInv("minCircularity", 0.02);
+                        double maxCircularity = ParseInv("maxCircularity", 1.0);
+                        int targetCount = int.TryParse(node.Params.GetValueOrDefault("targetCount"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var tc) ? tc : 15;
+                        bool sortCy = string.Equals((node.Params.GetValueOrDefault("sortByCentroidY", "false") ?? "false").Trim(), "true", StringComparison.OrdinalIgnoreCase);
 
                         var filtered = FilterContoursByGeometry(
-                            contourData, minArea, maxArea, minAspect, maxAspect, minCircularity, targetCount);
+                            contourData, minArea, maxArea, minAspect, maxAspect, minCircularity, maxCircularity, targetCount, sortCy);
 
                         node.Outputs["Contours"] = filtered;
                         node.Outputs["Count"] = filtered.count;
@@ -6005,6 +7302,123 @@ namespace CalibOperatorCLI_Example
                         if (circleImg == null) throw new InvalidOperationException("检测圆点: 缺少输入图像");
                         var circles = CalibAPI.DetectCircles(circleImg);
                         node.Outputs["Points"] = circles;
+                        break;
+                    }
+
+                    case "hough_circles":
+                    {
+                        var hImg = inputs["Image"] as CalibImage;
+                        if (hImg == null) throw new InvalidOperationException("霍夫圆: 缺少输入图像 Image");
+                        int blurK = int.TryParse(node.Params.GetValueOrDefault("blurKsize"), out var bk) ? bk : 9;
+                        if (blurK >= 3 && (blurK & 1) == 0) blurK |= 1;
+                        double hcDp = double.TryParse(node.Params.GetValueOrDefault("hcDp"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hdp) ? hdp : 1.2;
+                        double hcMinDist = double.TryParse(node.Params.GetValueOrDefault("hcMinDist"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hmd) ? hmd : 40.0;
+                        double hcP1 = double.TryParse(node.Params.GetValueOrDefault("hcParam1"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hp1) ? hp1 : 100.0;
+                        double hcP2 = double.TryParse(node.Params.GetValueOrDefault("hcParam2"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hp2) ? hp2 : 30.0;
+                        int hcMinR = int.TryParse(node.Params.GetValueOrDefault("hcMinRadius"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var hminr) ? hminr : 5;
+                        int hcMaxR = int.TryParse(node.Params.GetValueOrDefault("hcMaxRadius"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var hmaxr) ? hmaxr : 200;
+                        var overlay = CalibAPI.HoughCirclesOverlay(hImg, out var circlePts, out var circlesJson, blurK, hcDp, hcMinDist, hcP1, hcP2, hcMinR, hcMaxR);
+                        node.Outputs["Out"] = overlay;
+                        node.Outputs["CirclePoints"] = circlePts;
+                        node.Outputs["CircleCount"] = circlePts.Length;
+                        node.Outputs["CirclesJson"] = circlesJson;
+                        node.ResultSummary = $"HoughCircles: {circlePts.Length}";
+                        break;
+                    }
+
+                    case "hough_lines":
+                    {
+                        CalibImage? hImg = inputs.TryGetValue("Edge", out var edgeIn) ? edgeIn as CalibImage : null;
+                        if (hImg == null && inputs.TryGetValue("Image", out var legacyImg))
+                            hImg = legacyImg as CalibImage;
+                        if (hImg == null) throw new InvalidOperationException("霍夫线段: 缺少边缘输入端口 Edge（或兼容旧连线 Image）");
+                        double hlRho = double.TryParse(node.Params.GetValueOrDefault("hlRho"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hrh) ? hrh : 1.0;
+                        double hlThetaDeg = double.TryParse(node.Params.GetValueOrDefault("hlThetaDeg"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hthd) ? hthd : 1.0;
+                        int hlTh = int.TryParse(node.Params.GetValueOrDefault("hlThreshold"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var hlt) ? hlt : 50;
+                        double hlMinLen = double.TryParse(node.Params.GetValueOrDefault("hlMinLineLength"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hlml) ? hlml : 40.0;
+                        double hlMaxGap = double.TryParse(node.Params.GetValueOrDefault("hlMaxLineGap"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hlmg) ? hlmg : 15.0;
+                        int maxLines = int.TryParse(node.Params.GetValueOrDefault("maxLinesOut"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var mlx) ? mlx : 400;
+                        int covHalfW = int.TryParse(node.Params.GetValueOrDefault("hlCoverageHalfWidthPx"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var chw) ? chw : 0;
+                        if (covHalfW < 0) covHalfW = 0;
+                        var overlay = CalibAPI.HoughLinesOverlay(hImg, out var linesJson, out var lineCount,
+                            hlRho, hlThetaDeg, hlTh, hlMinLen, hlMaxGap, maxLines, covHalfW);
+                        node.Outputs["Out"] = overlay;
+                        node.Outputs["LinesJson"] = linesJson;
+                        node.Outputs["LineCount"] = lineCount;
+                        node.ResultSummary = $"HoughLines: n={lineCount}, json={linesJson.Length}B";
+                        break;
+                    }
+
+                    case "lines_nms":
+                    {
+                        if (!inputs.TryGetValue("LinesJson", out var ljObj) || ljObj is not string linesJson)
+                            throw new InvalidOperationException("线段非极大值抑制: 缺少 LinesJson");
+                        double angleTol = double.TryParse(node.Params.GetValueOrDefault("angleTolDeg"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var atd) ? atd : 5.0;
+                        double rhoTol = double.TryParse(node.Params.GetValueOrDefault("rhoTolPx"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var rtp) ? rtp : 10.0;
+                        var segs = ParseHoughLinesJsonToSegs(linesJson);
+                        var filtered = HoughLinesJsonNonMaxSuppression(segs, angleTol, rhoTol);
+                        node.Outputs["LinesJson"] = FormatHoughLinesJson(filtered);
+                        node.Outputs["LineCount"] = filtered.Count;
+                        node.ResultSummary = $"LinesNMS: n={filtered.Count}";
+                        break;
+                    }
+
+                    case "lines_threshold":
+                    {
+                        if (!inputs.TryGetValue("LinesJson", out var ljObj2) || ljObj2 is not string linesJson2)
+                            throw new InvalidOperationException("线段阈值筛选: 缺少 LinesJson");
+                        double minLen = double.TryParse(node.Params.GetValueOrDefault("minLengthPx"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mn) ? mn : 0.0;
+                        double maxLen = double.TryParse(node.Params.GetValueOrDefault("maxLengthPx"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx) ? mx : 0.0;
+                        var segs2 = ParseHoughLinesJsonToSegs(linesJson2);
+                        var filtered2 = HoughLinesJsonLengthThreshold(segs2, minLen, maxLen);
+                        node.Outputs["LinesJson"] = FormatHoughLinesJson(filtered2);
+                        node.Outputs["LineCount"] = filtered2.Count;
+                        node.ResultSummary = $"LinesThresh: n={filtered2.Count}";
+                        break;
+                    }
+
+                    case "hough_runway":
+                    {
+                        var hImg = inputs["Image"] as CalibImage;
+                        if (hImg == null) throw new InvalidOperationException("霍夫跑道形: 缺少输入图像 Image");
+                        int blurK = int.TryParse(node.Params.GetValueOrDefault("blurKsize"), out var bk) ? bk : 9;
+                        if (blurK >= 3 && (blurK & 1) == 0) blurK |= 1;
+                        double c1 = double.TryParse(node.Params.GetValueOrDefault("cannyTh1"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ct1) ? ct1 : 50.0;
+                        double c2 = double.TryParse(node.Params.GetValueOrDefault("cannyTh2"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ct2) ? ct2 : 150.0;
+                        double hlRho = double.TryParse(node.Params.GetValueOrDefault("hlRho"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hrh) ? hrh : 1.0;
+                        double hlThetaDeg = double.TryParse(node.Params.GetValueOrDefault("hlThetaDeg"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hthd) ? hthd : 1.0;
+                        int hlTh = int.TryParse(node.Params.GetValueOrDefault("hlThreshold"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var hlt) ? hlt : 50;
+                        double hlMinLen = double.TryParse(node.Params.GetValueOrDefault("hlMinLineLength"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hlml) ? hlml : 40.0;
+                        double hlMaxGap = double.TryParse(node.Params.GetValueOrDefault("hlMaxLineGap"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hlmg) ? hlmg : 15.0;
+                        int maxLines = int.TryParse(node.Params.GetValueOrDefault("maxLinesOut"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var mlx) ? mlx : 400;
+                        double rwAng = double.TryParse(node.Params.GetValueOrDefault("runwayAngleTolDeg"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var rwa) ? rwa : 10.0;
+                        int rwRho = int.TryParse(node.Params.GetValueOrDefault("runwayRhoBinPx"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var rwr) ? rwr : 25;
+                        int rwStrips = int.TryParse(node.Params.GetValueOrDefault("runwayStripCount"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var rws) ? rws : 2;
+                        int maxRw = int.TryParse(node.Params.GetValueOrDefault("maxRunwayLinesOut"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var rwm) ? rwm : 120;
+                        string rwShape = (node.Params.GetValueOrDefault("runwayShape", "parallel") ?? "parallel").Trim();
+                        int shapeMode = string.Equals(rwShape, "stadium", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+                        double hcDp = double.TryParse(node.Params.GetValueOrDefault("hcDp"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hdp) ? hdp : 1.2;
+                        double hcMinDist = double.TryParse(node.Params.GetValueOrDefault("hcMinDist"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hmd) ? hmd : 40.0;
+                        double hcP1 = double.TryParse(node.Params.GetValueOrDefault("hcParam1"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hp1) ? hp1 : 100.0;
+                        double hcP2 = double.TryParse(node.Params.GetValueOrDefault("hcParam2"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hp2) ? hp2 : 30.0;
+                        int hcMinR = int.TryParse(node.Params.GetValueOrDefault("hcMinRadius"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var hminr) ? hminr : 5;
+                        int hcMaxR = int.TryParse(node.Params.GetValueOrDefault("hcMaxRadius"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var hmaxr) ? hmaxr : 200;
+                        string? linesJsonIn = null;
+                        if (inputs.TryGetValue("LinesJson", out var ljObj) && ljObj is string ljStr && !string.IsNullOrWhiteSpace(ljStr))
+                            linesJsonIn = ljStr;
+                        string? circlesJsonIn = null;
+                        if (inputs.TryGetValue("CirclesJson", out var cjObj) && cjObj is string cjStr && !string.IsNullOrWhiteSpace(cjStr))
+                            circlesJsonIn = cjStr;
+                        var overlay = CalibAPI.HoughRunwayOverlay(hImg, out var runwayLinesJson, out var runwayLineCount,
+                            blurK, c1, c2, hlRho, hlThetaDeg, hlTh, hlMinLen, hlMaxGap, maxLines,
+                            rwAng, rwRho, rwStrips, maxRw, shapeMode, hcDp, hcMinDist, hcP1, hcP2, hcMinR, hcMaxR,
+                            linesJsonIn, circlesJsonIn);
+                        node.Outputs["Out"] = overlay;
+                        node.Outputs["RunwayLinesJson"] = runwayLinesJson;
+                        node.Outputs["RunwayLineCount"] = runwayLineCount;
+                        node.ResultSummary = shapeMode != 0
+                            ? $"HoughRunway(stadium): prim={runwayLineCount}"
+                            : $"HoughRunway: seg={runwayLineCount}";
                         break;
                     }
 
@@ -6338,17 +7752,19 @@ namespace CalibOperatorCLI_Example
 
                     case "display":
                     {
-                        // 显示图像到预览窗口：可选背景图 Img，Image 作为前景层，Points 透明叠加
+                        // 显示图像到预览窗口：可选背景图 Img，Image 作为前景层，Points 透明叠加；Xld 单独叠加折线
                         var foregroundImg = (inputs.TryGetValue("Image", out var fgObj) ? fgObj : null) as CalibImage;
                         var backgroundImg = (inputs.TryGetValue("Img", out var bgObj) ? bgObj : null) as CalibImage;
                         if (foregroundImg == null && backgroundImg == null)
                             throw new InvalidOperationException("显示: 缺少输入图像(Image 或 Img)");
                         inputs.TryGetValue("Points", out var ptsObj);
                         Point2D[]? overlayPts = ptsObj as Point2D[];
+                        inputs.TryGetValue("Xld", out var xldObj);
+                        var xldBundle = xldObj as HalconXldContourBundle;
                         int dotRadius = int.TryParse(node.Params.GetValueOrDefault("dotRadius"), out int r) ? r : 3;
                         string dispSlot = node.Id.ToString("D");
                         string dispTitle = $"{node.Def.DisplayName} [{node.Id.ToString("N")[..8]}]";
-                        ShowImagePreview(foregroundImg, overlayPts, dotRadius, backgroundImg, dispSlot, dispTitle);
+                        ShowImagePreview(foregroundImg, overlayPts, dotRadius, backgroundImg, dispSlot, dispTitle, xldBundle);
                         break;
                     }
 
@@ -6535,6 +7951,434 @@ namespace CalibOperatorCLI_Example
                         }
                         break;
                     }
+
+#if HALCON_ENABLED
+                    case "halcon_rgb1_to_gray":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON 转灰度: 缺少 In");
+                        HObject ho = HalconFlowBridge.CalibToHObject(inImg);
+                        try
+                        {
+                            ho = HalconFlowBridge.EnsureGray(ho);
+                            node.Outputs["Out"] = HalconFlowBridge.ToCalibGray(ho);
+                            node.ResultSummary = $"HALCON gray {inImg.Width}x{inImg.Height}";
+                        }
+                        finally
+                        {
+                            ho.Dispose();
+                        }
+                        break;
+                    }
+
+                    case "halcon_threshold_bin":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON 阈值二值: 缺少 In");
+                        double minG = double.TryParse(node.Params.GetValueOrDefault("minGray"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mn) ? mn : 128.0;
+                        double maxG = double.TryParse(node.Params.GetValueOrDefault("maxGray"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx) ? mx : 255.0;
+                        node.Outputs["Out"] = HalconFlowBridge.ThresholdToCalibGray(inImg, minG, maxG);
+                        node.ResultSummary = $"HALCON bin [{minG:G6},{maxG:G6}]";
+                        break;
+                    }
+
+                    case "halcon_emphasize":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON Emphasize: 缺少 In");
+                        int mw = int.TryParse(node.Params.GetValueOrDefault("maskWidth"), out var mwv) ? mwv : 7;
+                        int mh = int.TryParse(node.Params.GetValueOrDefault("maskHeight"), out var mhv) ? mhv : 7;
+                        double factor = double.TryParse(node.Params.GetValueOrDefault("factor"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var fv) ? fv : 1.0;
+                        mw = Math.Max(1, mw);
+                        mh = Math.Max(1, mh);
+                        node.Outputs["Out"] = HalconFlowBridge.EmphasizeToCalib(inImg, mw, mh, factor);
+                        node.ResultSummary = $"HALCON emphasize {mw}x{mh}";
+                        break;
+                    }
+
+                    case "halcon_gray_opening_rect":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON 灰度开运算: 缺少 In");
+                        int mh = int.TryParse(node.Params.GetValueOrDefault("maskHeight"), out var mhv) ? mhv : 3;
+                        int mw = int.TryParse(node.Params.GetValueOrDefault("maskWidth"), out var mwv) ? mwv : 3;
+                        mh = Math.Max(1, mh);
+                        mw = Math.Max(1, mw);
+                        node.Outputs["Out"] = HalconFlowBridge.GrayOpeningRectToCalib(inImg, mh, mw);
+                        node.ResultSummary = $"HALCON gray_opening {mh}x{mw}";
+                        break;
+                    }
+
+                    case "halcon_scale_image":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON ScaleImage: 缺少 In");
+                        double mult = double.TryParse(node.Params.GetValueOrDefault("mult"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var m) ? m : 1.0;
+                        double add = double.TryParse(node.Params.GetValueOrDefault("add"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var a) ? a : 0.0;
+                        node.Outputs["Out"] = HalconFlowBridge.ScaleImageToCalib(inImg, mult, add);
+                        node.ResultSummary = $"HALCON scale {mult:G4},{add:G4}";
+                        break;
+                    }
+
+                    case "halcon_scale_image_max":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON ScaleImageMax: 缺少 In");
+                        node.Outputs["Out"] = HalconFlowBridge.ScaleImageMaxToCalib(inImg);
+                        node.ResultSummary = "HALCON scale_max";
+                        break;
+                    }
+
+                    case "halcon_illuminate":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON Illuminate: 缺少 In");
+                        int mw = int.TryParse(node.Params.GetValueOrDefault("maskWidth"), out var mwv) ? mwv : 41;
+                        int mh = int.TryParse(node.Params.GetValueOrDefault("maskHeight"), out var mhv) ? mhv : 41;
+                        double factor = double.TryParse(node.Params.GetValueOrDefault("factor"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var fv) ? fv : 0.7;
+                        node.Outputs["Out"] = HalconFlowBridge.IlluminateToCalib(inImg, mw, mh, factor);
+                        node.ResultSummary = $"HALCON illuminate {mw}x{mh}";
+                        break;
+                    }
+
+                    case "halcon_mean_image":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON MeanImage: 缺少 In");
+                        int mw = int.TryParse(node.Params.GetValueOrDefault("maskWidth"), out var mwv) ? mwv : 15;
+                        int mh = int.TryParse(node.Params.GetValueOrDefault("maskHeight"), out var mhv) ? mhv : 15;
+                        node.Outputs["Out"] = HalconFlowBridge.MeanImageToCalib(inImg, mw, mh);
+                        node.ResultSummary = $"HALCON mean {mw}x{mh}";
+                        break;
+                    }
+
+                    case "halcon_gauss_filter":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON GaussFilter: 缺少 In");
+                        int size = int.TryParse(node.Params.GetValueOrDefault("size"), out var sz) ? sz : 5;
+                        node.Outputs["Out"] = HalconFlowBridge.GaussFilterToCalib(inImg, size);
+                        node.ResultSummary = $"HALCON gauss {size}";
+                        break;
+                    }
+
+                    case "halcon_gray_closing_rect":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON 灰度闭运算: 缺少 In");
+                        int mh = int.TryParse(node.Params.GetValueOrDefault("maskHeight"), out var mhv) ? mhv : 5;
+                        int mw = int.TryParse(node.Params.GetValueOrDefault("maskWidth"), out var mwv) ? mwv : 5;
+                        node.Outputs["Out"] = HalconFlowBridge.GrayClosingRectToCalib(inImg, mh, mw);
+                        node.ResultSummary = $"HALCON gray_closing {mh}x{mw}";
+                        break;
+                    }
+
+                    case "halcon_binary_threshold":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON BinaryThreshold: 缺少 In");
+                        string method = node.Params.GetValueOrDefault("method") ?? "max_separability";
+                        string lightDark = node.Params.GetValueOrDefault("lightDark") ?? "dark";
+                        node.Outputs["Out"] = HalconFlowBridge.BinaryThresholdToCalibGray(inImg, method.Trim(), lightDark.Trim());
+                        node.ResultSummary = $"HALCON bin_auto {method}";
+                        break;
+                    }
+
+                    case "halcon_dyn_threshold":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        var refImg = inputs["Ref"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON DynThreshold: 缺少 In");
+                        if (refImg == null) throw new InvalidOperationException("HALCON DynThreshold: 缺少 Ref");
+                        double offset = double.TryParse(node.Params.GetValueOrDefault("offset"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var off) ? off : 15.0;
+                        string lightDark = node.Params.GetValueOrDefault("lightDark") ?? "dark";
+                        node.Outputs["Out"] = HalconFlowBridge.DynThresholdToCalibGray(inImg, refImg, offset, lightDark.Trim());
+                        node.ResultSummary = $"HALCON dyn_th off={offset:G4}";
+                        break;
+                    }
+
+                    case "halcon_var_threshold":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON VarThreshold: 缺少 In");
+                        int mw = int.TryParse(node.Params.GetValueOrDefault("maskWidth"), out var mwv) ? mwv : 15;
+                        int mh = int.TryParse(node.Params.GetValueOrDefault("maskHeight"), out var mhv) ? mhv : 15;
+                        double stdScale = double.TryParse(node.Params.GetValueOrDefault("stdDevScale"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ss) ? ss : 0.2;
+                        double absTh = double.TryParse(node.Params.GetValueOrDefault("absThreshold"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var at) ? at : 40.0;
+                        string lightDark = node.Params.GetValueOrDefault("lightDark") ?? "dark";
+                        node.Outputs["Out"] = HalconFlowBridge.VarThresholdToCalibGray(inImg, mw, mh, stdScale, absTh, lightDark.Trim());
+                        node.ResultSummary = $"HALCON var_th {mw}x{mh}";
+                        break;
+                    }
+
+                    case "halcon_median_image":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON MedianImage: 缺少 In");
+                        string maskType = node.Params.GetValueOrDefault("maskType") ?? "circle";
+                        int radius = int.TryParse(node.Params.GetValueOrDefault("radius"), out var r) ? r : 3;
+                        string margin = node.Params.GetValueOrDefault("margin") ?? "mirrored";
+                        node.Outputs["Out"] = HalconFlowBridge.MedianImageToCalib(inImg, maskType.Trim(), radius, margin.Trim());
+                        node.ResultSummary = $"HALCON median r={radius}";
+                        break;
+                    }
+
+                    case "halcon_invert_image":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON InvertImage: 缺少 In");
+                        node.Outputs["Out"] = HalconFlowBridge.InvertImageToCalib(inImg);
+                        node.ResultSummary = "HALCON invert";
+                        break;
+                    }
+
+                    case "halcon_abs_diff":
+                    {
+                        var a = inputs["In"] as CalibImage;
+                        var b = inputs["In2"] as CalibImage;
+                        if (a == null) throw new InvalidOperationException("HALCON AbsDiff: 缺少 In");
+                        if (b == null) throw new InvalidOperationException("HALCON AbsDiff: 缺少 In2");
+                        double mult = double.TryParse(node.Params.GetValueOrDefault("mult"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mv) ? mv : 1.0;
+                        node.Outputs["Out"] = HalconFlowBridge.AbsDiffImageToCalib(a, b, mult);
+                        node.ResultSummary = "HALCON abs_diff";
+                        break;
+                    }
+
+                    case "halcon_sub_image":
+                    {
+                        var a = inputs["In"] as CalibImage;
+                        var b = inputs["In2"] as CalibImage;
+                        if (a == null) throw new InvalidOperationException("HALCON SubImage: 缺少 In");
+                        if (b == null) throw new InvalidOperationException("HALCON SubImage: 缺少 In2");
+                        double mult = double.TryParse(node.Params.GetValueOrDefault("mult"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mv) ? mv : 1.0;
+                        double add = double.TryParse(node.Params.GetValueOrDefault("add"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var av) ? av : 0.0;
+                        node.Outputs["Out"] = HalconFlowBridge.SubImageToCalib(a, b, mult, add);
+                        node.ResultSummary = "HALCON sub_image";
+                        break;
+                    }
+
+                    case "halcon_add_image":
+                    {
+                        var a = inputs["In"] as CalibImage;
+                        var b = inputs["In2"] as CalibImage;
+                        if (a == null) throw new InvalidOperationException("HALCON AddImage: 缺少 In");
+                        if (b == null) throw new InvalidOperationException("HALCON AddImage: 缺少 In2");
+                        double mult = double.TryParse(node.Params.GetValueOrDefault("mult"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mv) ? mv : 1.0;
+                        double add = double.TryParse(node.Params.GetValueOrDefault("add"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var av) ? av : 0.0;
+                        node.Outputs["Out"] = HalconFlowBridge.AddImageToCalib(a, b, mult, add);
+                        node.ResultSummary = "HALCON add_image";
+                        break;
+                    }
+
+                    case "halcon_mult_image":
+                    {
+                        var a = inputs["In"] as CalibImage;
+                        var b = inputs["In2"] as CalibImage;
+                        if (a == null) throw new InvalidOperationException("HALCON MultImage: 缺少 In");
+                        if (b == null) throw new InvalidOperationException("HALCON MultImage: 缺少 In2");
+                        double mult = double.TryParse(node.Params.GetValueOrDefault("mult"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mv) ? mv : 0.007843;
+                        double add = double.TryParse(node.Params.GetValueOrDefault("add"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var av) ? av : 0.0;
+                        node.Outputs["Out"] = HalconFlowBridge.MultImageToCalib(a, b, mult, add);
+                        node.ResultSummary = "HALCON mult_image";
+                        break;
+                    }
+
+                    case "halcon_min_image":
+                    {
+                        var a = inputs["In"] as CalibImage;
+                        var b = inputs["In2"] as CalibImage;
+                        if (a == null) throw new InvalidOperationException("HALCON MinImage: 缺少 In");
+                        if (b == null) throw new InvalidOperationException("HALCON MinImage: 缺少 In2");
+                        node.Outputs["Out"] = HalconFlowBridge.MinImageToCalib(a, b);
+                        node.ResultSummary = "HALCON min_image";
+                        break;
+                    }
+
+                    case "halcon_max_image":
+                    {
+                        var a = inputs["In"] as CalibImage;
+                        var b = inputs["In2"] as CalibImage;
+                        if (a == null) throw new InvalidOperationException("HALCON MaxImage: 缺少 In");
+                        if (b == null) throw new InvalidOperationException("HALCON MaxImage: 缺少 In2");
+                        node.Outputs["Out"] = HalconFlowBridge.MaxImageToCalib(a, b);
+                        node.ResultSummary = "HALCON max_image";
+                        break;
+                    }
+
+                    case "halcon_sobel_amp":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON SobelAmp: 缺少 In");
+                        string ft = node.Params.GetValueOrDefault("filterType") ?? "sum_abs";
+                        int size = int.TryParse(node.Params.GetValueOrDefault("size"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var sz) ? sz : 3;
+                        node.Outputs["Out"] = HalconFlowBridge.SobelAmpToCalib(inImg, ft.Trim(), size);
+                        node.ResultSummary = $"HALCON sobel {ft}";
+                        break;
+                    }
+
+                    case "halcon_smooth_image":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON SmoothImage: 缺少 In");
+                        string filter = node.Params.GetValueOrDefault("filter") ?? "gauss";
+                        double alpha = double.TryParse(node.Params.GetValueOrDefault("alpha"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var al) ? al : 3.0;
+                        node.Outputs["Out"] = HalconFlowBridge.SmoothImageToCalib(inImg, filter.Trim(), alpha);
+                        node.ResultSummary = $"HALCON smooth {filter}";
+                        break;
+                    }
+
+                    case "halcon_gray_erosion_rect":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON GrayErosionRect: 缺少 In");
+                        int mh = int.TryParse(node.Params.GetValueOrDefault("maskHeight"), out var mhv) ? mhv : 3;
+                        int mw = int.TryParse(node.Params.GetValueOrDefault("maskWidth"), out var mwv) ? mwv : 3;
+                        node.Outputs["Out"] = HalconFlowBridge.GrayErosionRectToCalib(inImg, mh, mw);
+                        node.ResultSummary = $"HALCON gray_erode {mh}x{mw}";
+                        break;
+                    }
+
+                    case "halcon_gray_dilation_rect":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON GrayDilationRect: 缺少 In");
+                        int mh = int.TryParse(node.Params.GetValueOrDefault("maskHeight"), out var mhv) ? mhv : 3;
+                        int mw = int.TryParse(node.Params.GetValueOrDefault("maskWidth"), out var mwv) ? mwv : 3;
+                        node.Outputs["Out"] = HalconFlowBridge.GrayDilationRectToCalib(inImg, mh, mw);
+                        node.ResultSummary = $"HALCON gray_dilate {mh}x{mw}";
+                        break;
+                    }
+
+                    case "halcon_auto_threshold":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON AutoThreshold: 缺少 In");
+                        double sigma = double.TryParse(node.Params.GetValueOrDefault("sigma"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var sg) ? sg : 2.0;
+                        node.Outputs["Out"] = HalconFlowBridge.AutoThresholdToCalibGray(inImg, sigma);
+                        node.ResultSummary = $"HALCON auto_th σ={sigma:G4}";
+                        break;
+                    }
+
+                    case "halcon_binary_morph_rect":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON 矩形形态学: 缺少 In");
+                        string op = node.Params.GetValueOrDefault("op") ?? "open";
+                        int w = int.TryParse(node.Params.GetValueOrDefault("width"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var wv) ? wv : 3;
+                        int h = int.TryParse(node.Params.GetValueOrDefault("height"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var hv) ? hv : 3;
+                        int it = int.TryParse(node.Params.GetValueOrDefault("iterations"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var itv) ? itv : 1;
+                        node.Outputs["Out"] = HalconFlowBridge.BinaryMorphRect(inImg, op.Trim(), w, h, it);
+                        node.ResultSummary = $"HALCON morph_rect {op}";
+                        break;
+                    }
+
+                    case "halcon_binary_to_xld":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON 二值→XLD: 缺少 In");
+                        double minG = double.TryParse(node.Params.GetValueOrDefault("minGray"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mn) ? mn : 1.0;
+                        double maxG = double.TryParse(node.Params.GetValueOrDefault("maxGray"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx) ? mx : 255.0;
+                        string genMode = node.Params.GetValueOrDefault("genContourMode") ?? "border";
+                        int minPts = int.TryParse(node.Params.GetValueOrDefault("minContourPoints"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var mp) ? mp : 3;
+                        var bundle = HalconFlowBridge.XldContoursFromBinaryGray(inImg, minG, maxG, genMode.Trim(), minPts);
+                        node.Outputs["Xld"] = bundle;
+                        node.ResultSummary = $"HALCON XLD contours={bundle.ContourCount}";
+                        break;
+                    }
+
+                    case "halcon_segment_xld":
+                    {
+                        if (!inputs.TryGetValue("Xld", out var bx) || bx is not HalconXldContourBundle bundleIn)
+                            throw new InvalidOperationException("HALCON XLD 分格: 缺少 Xld");
+                        string segMode = node.Params.GetValueOrDefault("mode") ?? "lines_circles";
+                        int smooth = int.TryParse(node.Params.GetValueOrDefault("smoothCont"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var sm) ? sm : 5;
+                        double d1 = double.TryParse(node.Params.GetValueOrDefault("maxLineDist1"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var md1) ? md1 : 4.0;
+                        double d2 = double.TryParse(node.Params.GetValueOrDefault("maxLineDist2"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var md2) ? md2 : 2.0;
+                        var bundleOut = HalconFlowBridge.SegmentXldBundle(bundleIn, segMode.Trim(), smooth, d1, d2);
+                        node.Outputs["XldOut"] = bundleOut;
+                        node.ResultSummary = $"HALCON seg XLD → {bundleOut.ContourCount}";
+                        break;
+                    }
+
+                    case "halcon_largest_blob_mask":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON 最大连通域Mask: 缺少 In");
+                        int gs = int.TryParse(node.Params.GetValueOrDefault("gaussSize"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var gsv) ? gsv : 9;
+                        double minG = double.TryParse(node.Params.GetValueOrDefault("minGray"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mn) ? mn : 40.0;
+                        double maxG = double.TryParse(node.Params.GetValueOrDefault("maxGray"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx) ? mx : 255.0;
+                        node.Outputs["Out"] = HalconFlowBridge.LargestBlobMaskFromGray(inImg, gs, minG, maxG);
+                        node.ResultSummary = "HALCON largest_blob_mask";
+                        break;
+                    }
+
+                    case "halcon_largest_contour_mask":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON 最大轮廓Mask: 缺少 In");
+                        int gs = int.TryParse(node.Params.GetValueOrDefault("gaussSize"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var gsv) ? gsv : 9;
+                        double minG = double.TryParse(node.Params.GetValueOrDefault("minGray"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mn) ? mn : 40.0;
+                        double maxG = double.TryParse(node.Params.GetValueOrDefault("maxGray"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx) ? mx : 255.0;
+                        string genMode = node.Params.GetValueOrDefault("genContourMode") ?? "border";
+                        string rankBy = node.Params.GetValueOrDefault("rankBy") ?? "area";
+                        int minPts = int.TryParse(node.Params.GetValueOrDefault("minContourPoints"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var mp) ? mp : 3;
+                        node.Outputs["Out"] = HalconFlowBridge.LargestContourMaskFromGray(inImg, gs, minG, maxG, genMode.Trim(), rankBy.Trim(), minPts);
+                        node.ResultSummary = $"HALCON largest_contour_mask ({rankBy.Trim()})";
+                        break;
+                    }
+
+                    case "halcon_local_contrast":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON 局部对比度: 缺少 In");
+                        int iw = int.TryParse(node.Params.GetValueOrDefault("illumMaskWidth"), out var iwv) ? iwv : 41;
+                        int ih = int.TryParse(node.Params.GetValueOrDefault("illumMaskHeight"), out var ihv) ? ihv : 41;
+                        double ifac = double.TryParse(node.Params.GetValueOrDefault("illumFactor"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ifv) ? ifv : 0.7;
+                        int ew = int.TryParse(node.Params.GetValueOrDefault("emphasizeWidth"), out var ewv) ? ewv : 7;
+                        int eh = int.TryParse(node.Params.GetValueOrDefault("emphasizeHeight"), out var ehv) ? ehv : 7;
+                        double ef = double.TryParse(node.Params.GetValueOrDefault("emphasizeFactor"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var efv) ? efv : 1.0;
+                        node.Outputs["Out"] = HalconFlowBridge.LocalContrastEnhance(inImg, iw, ih, ifac, ew, eh, ef);
+                        node.ResultSummary = "HALCON local_contrast";
+                        break;
+                    }
+
+                    case "halcon_gray_mask":
+                    {
+                        var img = inputs["Image"] as CalibImage;
+                        var mask = inputs["Mask"] as CalibImage;
+                        if (img == null) throw new InvalidOperationException("HALCON GrayMask: 缺少 Image");
+                        if (mask == null) throw new InvalidOperationException("HALCON GrayMask: 缺少 Mask");
+                        double mmn = double.TryParse(node.Params.GetValueOrDefault("maskMin"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mn0) ? mn0 : 1.0;
+                        double mmx = double.TryParse(node.Params.GetValueOrDefault("maskMax"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx0) ? mx0 : 255.0;
+                        node.Outputs["Out"] = HalconFlowBridge.GrayMaskApply(img, mask, mmn, mmx);
+                        node.ResultSummary = "HALCON gray_mask";
+                        break;
+                    }
+
+                    case "halcon_binary_morph_circle":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("HALCON 圆形态学: 缺少 In");
+                        string op = node.Params.GetValueOrDefault("op") ?? "open";
+                        double rad = double.TryParse(node.Params.GetValueOrDefault("radius"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var rd) ? rd : 2.5;
+                        int it = int.TryParse(node.Params.GetValueOrDefault("iterations"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var itv) ? itv : 2;
+                        node.Outputs["Out"] = HalconFlowBridge.BinaryMorphCircle(inImg, op.Trim(), rad, it);
+                        node.ResultSummary = $"HALCON morph_circle {op}";
+                        break;
+                    }
+
+                    case "halcon_xld_sample_points":
+                    {
+                        if (!inputs.TryGetValue("Xld", out var sx) || sx is not HalconXldContourBundle xb)
+                            throw new InvalidOperationException("HALCON XLD 采样点: 缺少 Xld");
+                        double spacing = double.TryParse(node.Params.GetValueOrDefault("spacing"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var sp) ? sp : 4.0;
+                        int maxBars = int.TryParse(node.Params.GetValueOrDefault("maxBars"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var mb) ? mb : 16;
+                        var pts = HalconFlowBridge.SamplePointsFromXldBundle(xb, spacing, maxBars);
+                        node.Outputs["Points"] = pts;
+                        node.ResultSummary = $"HALCON xld_pts {pts.Length}";
+                        break;
+                    }
+#endif
 
                     case "composite":
                     {
@@ -6900,7 +8744,8 @@ namespace CalibOperatorCLI_Example
             int dotRadius = 3,
             CalibImage? backgroundImg = null,
             string? previewSlotKey = null,
-            string? titlePrefix = null)
+            string? titlePrefix = null,
+            HalconXldContourBundle? xldOverlay = null)
         {
             var baseSource = backgroundImg ?? img;
             if (baseSource == null) return;
@@ -6933,8 +8778,9 @@ namespace CalibOperatorCLI_Example
                 }
             }
 
-            // 如果有叠加点位，在 bitmap 上画点
-            if (overlayPoints != null && overlayPoints.Length > 0)
+            bool drawPts = overlayPoints != null && overlayPoints.Length > 0;
+            bool drawXld = xldOverlay != null && xldOverlay.ContourCount > 0;
+            if (drawPts || drawXld)
             {
                 // Graphics.FromImage 不支持索引像素格式，先转为 24bppRgb
                 var drawBmp = new System.Drawing.Bitmap(bmp.Width, bmp.Height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
@@ -6948,15 +8794,34 @@ namespace CalibOperatorCLI_Example
                 using (var g = System.Drawing.Graphics.FromImage(bmp))
                 {
                     g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
-                    using var pointPen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(140, 0, 255, 0), 1.2f);
-                    for (int i = 0; i < overlayPoints.Length; i++)
+                    if (drawPts && overlayPoints != null)
                     {
-                        var p = overlayPoints[i];
-                        int cx = (int)p.X, cy = (int)p.Y;
-                        int r = dotRadius;
-                        g.DrawEllipse(pointPen, cx - r, cy - r, r * 2, r * 2);
-                        g.DrawLine(pointPen, cx - r - 1, cy, cx + r + 1, cy);
-                        g.DrawLine(pointPen, cx, cy - r - 1, cx, cy + r + 1);
+                        using var pointPen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(140, 0, 255, 0), 1.2f);
+                        for (int i = 0; i < overlayPoints.Length; i++)
+                        {
+                            var p = overlayPoints[i];
+                            int cx = (int)p.X, cy = (int)p.Y;
+                            int r = dotRadius;
+                            g.DrawEllipse(pointPen, cx - r, cy - r, r * 2, r * 2);
+                            g.DrawLine(pointPen, cx - r - 1, cy, cx + r + 1, cy);
+                            g.DrawLine(pointPen, cx, cy - r - 1, cx, cy + r + 1);
+                        }
+                    }
+
+                    if (drawXld && xldOverlay != null)
+                    {
+                        using var xldPen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(220, 255, 140, 0), 1.5f);
+                        foreach (var contour in xldOverlay.Contours)
+                        {
+                            if (contour == null || contour.Length < 2)
+                                continue;
+                            for (int i = 0; i < contour.Length - 1; i++)
+                            {
+                                g.DrawLine(xldPen,
+                                    (float)contour[i].X, (float)contour[i].Y,
+                                    (float)contour[i + 1].X, (float)contour[i + 1].Y);
+                            }
+                        }
                     }
                 }
             }
@@ -6969,9 +8834,11 @@ namespace CalibOperatorCLI_Example
             DeleteObject(hBitmap);
             bmp.Dispose();
 
-            string previewTitle = !string.IsNullOrEmpty(titlePrefix)
-                ? (overlayPoints != null ? $"{titlePrefix} ({overlayPoints.Length} 个点)" : titlePrefix)
-                : (overlayPoints != null ? $"图像预览 ({overlayPoints.Length} 个点)" : "图像预览");
+            string previewTitle = !string.IsNullOrEmpty(titlePrefix) ? titlePrefix : "图像预览";
+            if (overlayPoints != null && overlayPoints.Length > 0)
+                previewTitle += $" ({overlayPoints.Length} 个点)";
+            if (xldOverlay != null && xldOverlay.ContourCount > 0)
+                previewTitle += $" | XLD {xldOverlay.ContourCount}";
             int imgW = baseSource.Width;
             int imgH = baseSource.Height;
             string slotKey = string.IsNullOrEmpty(previewSlotKey) ? LivePreviewSingletonSlotKey : previewSlotKey!;
@@ -7551,6 +9418,12 @@ namespace CalibOperatorCLI_Example
                     catch (Exception ex)
                     {
                         AppendLog($"  -> [ERROR] {node.Def.DisplayName}: {ex.Message}", true);
+                        if (MirrorErrorsToStderr && ex.InnerException != null)
+                            AppendLog($"     Inner: {ex.InnerException}", true);
+                        if (MirrorErrorsToStderr)
+                        {
+                            try { Console.Error.WriteLine(ex.ToString()); } catch { /* ignored */ }
+                        }
                         StatusText.Text = $"执行失败: {node.Def.DisplayName} - {ex.Message}";
                         StatusText.Foreground = new SolidColorBrush(Colors.Red);
                         AppendLog("========== 执行中止 ==========");
@@ -7577,6 +9450,12 @@ namespace CalibOperatorCLI_Example
                 StatusText.Text = $"执行失败: {ex.Message}";
                 StatusText.Foreground = new SolidColorBrush(Colors.Red);
                 AppendLog($"[ERROR] 托管回退执行失败: {ex.Message}", true);
+                if (MirrorErrorsToStderr && ex.InnerException != null)
+                    AppendLog($"  Inner: {ex.InnerException}", true);
+                if (MirrorErrorsToStderr)
+                {
+                    try { Console.Error.WriteLine(ex.ToString()); } catch { /* ignored */ }
+                }
                 AppendLog("========== 执行中止 ==========");
                 return false;
             }

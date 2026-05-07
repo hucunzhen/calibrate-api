@@ -12,6 +12,7 @@
 #include <math.h>
 #include <string.h>
 #include <algorithm>
+#include <string>
 #include <vector>
 
 #include <opencv2/opencv.hpp>
@@ -104,6 +105,74 @@ void DetectCircles(Image* img, Point2D* pts, int* count);
 
 // 在图像上绘制检测到的圆标记
 void DrawDetectedCircles(Image* img, Point2D* pts, int count, int gray);
+
+// 霍夫变换拆分为三个独立入口（叠加均为在输入图副本上绘制）。
+int HoughCirclesDetect(Image* src, Image* dstOverlay,
+    Point2D* circlePts, int* circleCount, int maxCircles,
+    char* circlesJsonOut, int circlesJsonBufSize,
+    int blurKsize,
+    double hcDp, double hcMinDist, double hcParam1, double hcParam2, int hcMinR, int hcMaxR);
+
+// 输入为边缘图（8 位单通道或 BGR）；转灰度后直接 HoughLinesP；结果按线段长度降序、沿线边缘覆盖点率降序排序后再截断 maxLinesOut。
+// coverageMatchHalfWidthPx（与流程参数 hlCoverageHalfWidthPx 一致）：霍夫检测匹配半宽（像素）。0=直接用输入边缘调用 HoughLinesP；>0 时先将边缘二值(>0)再以半径 N 圆形膨胀，膨胀结果既作为 HoughLinesP 输入，也用于后续覆盖率排序。
+int HoughLinesDetect(Image* src, Image* dstOverlay,
+    char* linesJsonOut, int linesJsonBufSize,
+    int* lineSegmentCountOut,
+    double hlRho, double hlThetaDeg, int hlThreshold, double hlMinLen, double hlMaxGap,
+    int maxLinesOut,
+    int coverageMatchHalfWidthPx);
+
+int HoughRunwayDetect(Image* src, Image* dstOverlay,
+    char* runwayJsonOut, int runwayJsonBufSize,
+    int* runwayLineCountOut,
+    int blurKsize,
+    double cannyTh1, double cannyTh2,
+    double hlRho, double hlThetaDeg, int hlThreshold, double hlMinLen, double hlMaxGap,
+    int maxLinesOut,
+    double runwayAngleTolDeg,
+    int runwayRhoBinPx,
+    int runwayStripCount,
+    int maxRunwayLinesOut,
+    int runwayShapeMode,
+    double hcDp, double hcMinDist, double hcParam1, double hcParam2, int hcMinR, int hcMaxR,
+    const char* linesJsonUtf8,
+    const char* circlesJsonUtf8);
+
+#ifdef __cplusplus
+void HoughCirclesOnMat(const cv::Mat& src, cv::Mat& dstBgr,
+    std::vector<Point2D>& circleCenters,
+    int blurKsize,
+    double hcDp, double hcMinDist, double hcParam1, double hcParam2, int hcMinR, int hcMaxR,
+    std::string* circlesJsonOut = nullptr);
+
+void HoughLinesOnMat(const cv::Mat& src, cv::Mat& dstBgr,
+    std::string& linesJson,
+    int* lineSegmentCountOut,
+    double hlRho, double hlThetaDeg, int hlThreshold, double hlMinLen, double hlMaxGap,
+    int maxLinesOut,
+    int coverageMatchHalfWidthPx = 0);
+
+void HoughRunwayOnMat(const cv::Mat& src, cv::Mat& dstBgr,
+    std::string& runwayLinesJson,
+    int* runwaySegCountOut,
+    int blurKsize,
+    double cannyTh1, double cannyTh2,
+    double hlRho, double hlThetaDeg, int hlThreshold, double hlMinLen, double hlMaxGap,
+    int maxLinesOut,
+    double runwayAngleTolDeg,
+    int runwayRhoBinPx,
+    int runwayStripCount,
+    int maxRunwayLinesOut,
+    int runwayShapeMode,
+    double hcDp, double hcMinDist, double hcParam1, double hcParam2, int hcMinR, int hcMaxR,
+    const std::vector<cv::Vec4i>* optLinesP = nullptr,
+    const std::vector<cv::Vec3f>* optCircles = nullptr);
+
+/** Parse [[x1,y1,x2,y2],...] from hough_lines JSON (non-empty segments → true). */
+bool ParseHoughLinesJsonUtf8(const char* jsonUtf8, std::vector<cv::Vec4i>& segmentsOut);
+/** Parse [[cx,cy,r],...] from hough_circles JSON (non-empty circles → true). */
+bool ParseHoughCirclesJsonUtf8(const char* jsonUtf8, std::vector<cv::Vec3f>& circlesOut);
+#endif
 
 // ========== 棋盘格 / 相机内参（OpenCV）==========
 // boardCols/boardRows：棋盘内侧角点列数、行数（与 cv::findChessboardCorners 的 patternSize 一致）
@@ -225,9 +294,11 @@ void Step_ExpandToEdgeBoundary(cv::Mat* darkBinary, const cv::Mat& edgeMap,
                                 cv::Mat* expandedMask);
 
 // 6. 提取并按面积排序暗条轮廓，返回有效暗条数量
+// minAreaPixels < 0：使用自适应阈值 max(500, 0.002*width*height)；>=0：轮廓面积须严格大于该值
 int Step_FindAndSortDarkContours(cv::Mat* darkBinary, int width, int height,
                                   std::vector<std::pair<double, int>>* sortedBars,
-                                  std::vector<std::vector<cv::Point>>* darkContours);
+                                  std::vector<std::vector<cv::Point>>* darkContours,
+                                  double minAreaPixels = -1.0);
 
 
 // 7. 等间距轮廓采样（纯 OpenCV 方案）

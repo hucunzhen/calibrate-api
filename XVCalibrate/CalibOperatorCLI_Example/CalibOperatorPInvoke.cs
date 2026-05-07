@@ -242,6 +242,68 @@ namespace CalibOperatorPInvoke
         public static extern int CALIB_DetectCircles(IntPtr img, IntPtr pts, ref int count, int maxCount);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_HoughCirclesDetect(
+            IntPtr src,
+            IntPtr dstOverlay,
+            IntPtr circlePts,
+            ref int circleCount,
+            int maxCircles,
+            IntPtr circlesJsonOut,
+            int circlesJsonBufSize,
+            int blurKsize,
+            double hcDp,
+            double hcMinDist,
+            double hcParam1,
+            double hcParam2,
+            int hcMinR,
+            int hcMaxR);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_HoughLinesDetect(
+            IntPtr src,
+            IntPtr dstOverlay,
+            IntPtr linesJsonOut,
+            int linesJsonBufSize,
+            ref int lineSegmentCountOut,
+            double hlRho,
+            double hlThetaDeg,
+            int hlThreshold,
+            double hlMinLen,
+            double hlMaxGap,
+            int maxLinesOut,
+            int coverageMatchHalfWidthPx);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_HoughRunwayDetect(
+            IntPtr src,
+            IntPtr dstOverlay,
+            IntPtr runwayJsonOut,
+            int runwayJsonBufSize,
+            ref int runwayLineCountOut,
+            int blurKsize,
+            double cannyTh1,
+            double cannyTh2,
+            double hlRho,
+            double hlThetaDeg,
+            int hlThreshold,
+            double hlMinLen,
+            double hlMaxGap,
+            int maxLinesOut,
+            double runwayAngleTolDeg,
+            int runwayRhoBinPx,
+            int runwayStripCount,
+            int maxRunwayLinesOut,
+            int runwayShapeMode,
+            double hcDp,
+            double hcMinDist,
+            double hcParam1,
+            double hcParam2,
+            int hcMinR,
+            int hcMaxR,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string? linesJsonUtf8,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string? circlesJsonUtf8);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern void CALIB_DrawDetectedCircles(IntPtr img, IntPtr pts, int count, int gray);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
@@ -380,6 +442,9 @@ namespace CalibOperatorPInvoke
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int CALIB_TrajStep_6_FindAndSortDarkContours(IntPtr ctx);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_TrajStep_6_FindAndSortDarkContoursEx(IntPtr ctx, double minContourAreaPixels);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int CALIB_TrajStep_7_SampleContours(IntPtr ctx, int targetBars, double spacing);
@@ -687,6 +752,104 @@ namespace CalibOperatorPInvoke
         // ================================================================
         // Circle Detection
         // ================================================================
+
+        public const int HoughDetectMaxCircles = 512;
+        public const int HoughJsonCap = 262144;
+
+        /// <summary>霍夫圆（绿圈/青圆心）；circlesJson 为 [[cx,cy,r],...]，可与霍夫跑道形 CirclesJson 对接。</summary>
+        public static CalibImage HoughCirclesOverlay(CalibImage src, out Point2D[] circleCenters, out string circlesJson,
+            int blurKsize, double hcDp, double hcMinDist, double hcParam1, double hcParam2, int hcMinR, int hcMaxR)
+        {
+            if (src == null) throw new ArgumentNullException(nameof(src));
+            var dst = new CalibImage(src.Width, src.Height, 3);
+            int count = 0;
+            circlesJson = "[]";
+            IntPtr ptsPin = Marshal.AllocHGlobal(Marshal.SizeOf<NativePoint2D>() * HoughDetectMaxCircles);
+            IntPtr circlesJsonPtr = Marshal.AllocHGlobal(HoughJsonCap);
+            try
+            {
+                int rc = NativeAPI.CALIB_HoughCirclesDetect(
+                    src.NativePtr, dst.NativePtr, ptsPin, ref count, HoughDetectMaxCircles,
+                    circlesJsonPtr, HoughJsonCap,
+                    blurKsize, hcDp, hcMinDist, hcParam1, hcParam2, hcMinR, hcMaxR);
+                if (rc != 0)
+                    throw new InvalidOperationException($"CALIB_HoughCirclesDetect failed ({rc})");
+                circleCenters = new Point2D[count];
+                for (int i = 0; i < count; i++)
+                {
+                    IntPtr ep = IntPtr.Add(ptsPin, i * Marshal.SizeOf<NativePoint2D>());
+                    NativePoint2D np = Marshal.PtrToStructure<NativePoint2D>(ep);
+                    circleCenters[i] = Point2D.FromNative(np);
+                }
+                circlesJson = Marshal.PtrToStringUTF8(circlesJsonPtr) ?? "[]";
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(ptsPin);
+                Marshal.FreeHGlobal(circlesJsonPtr);
+            }
+            return dst;
+        }
+
+        /// <summary>概率霍夫线段（红线）。输入边缘图转灰度；coverageMatchHalfWidthPx&gt;0 时先边缘二值再以该半径圆形膨胀，膨胀图作为 HoughLinesP 输入，否则直接用灰度边缘。检出后按线段长度降序、沿线覆盖率（同霍夫输入图）降序排序，再截取最多线段数。</summary>
+        public static CalibImage HoughLinesOverlay(CalibImage src, out string linesJson, out int lineCount,
+            double hlRho, double hlThetaDeg, int hlThreshold, double hlMinLen, double hlMaxGap, int maxLinesOut,
+            int coverageMatchHalfWidthPx = 0)
+        {
+            if (src == null) throw new ArgumentNullException(nameof(src));
+            var dst = new CalibImage(src.Width, src.Height, 3);
+            int nseg = 0;
+            IntPtr jsonPtr = Marshal.AllocHGlobal(HoughJsonCap);
+            try
+            {
+                int rc = NativeAPI.CALIB_HoughLinesDetect(
+                    src.NativePtr, dst.NativePtr, jsonPtr, HoughJsonCap, ref nseg,
+                    hlRho, hlThetaDeg, hlThreshold, hlMinLen, hlMaxGap, maxLinesOut, coverageMatchHalfWidthPx);
+                if (rc != 0)
+                    throw new InvalidOperationException($"CALIB_HoughLinesDetect failed ({rc})");
+                linesJson = Marshal.PtrToStringUTF8(jsonPtr) ?? "[]";
+                lineCount = nseg;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(jsonPtr);
+            }
+            return dst;
+        }
+
+        /// <summary>跑道形：parallel 为 ρ 分桶线段 JSON；stadium 为两条合并直道 + 两端半圆弧 JSON。可选传入霍夫线段/霍夫圆的 JSON 以跳过内部检测。</summary>
+        public static CalibImage HoughRunwayOverlay(CalibImage src, out string runwayLinesJson, out int runwayLineCount,
+            int blurKsize, double cannyTh1, double cannyTh2,
+            double hlRho, double hlThetaDeg, int hlThreshold, double hlMinLen, double hlMaxGap, int maxLinesOut,
+            double runwayAngleTolDeg, int runwayRhoBinPx, int runwayStripCount, int maxRunwayLinesOut,
+            int runwayShapeMode = 0,
+            double hcDp = 1.2, double hcMinDist = 40.0, double hcParam1 = 100.0, double hcParam2 = 30.0,
+            int hcMinR = 5, int hcMaxR = 200,
+            string? linesJsonUtf8 = null, string? circlesJsonUtf8 = null)
+        {
+            if (src == null) throw new ArgumentNullException(nameof(src));
+            var dst = new CalibImage(src.Width, src.Height, 3);
+            int rwc = 0;
+            IntPtr runwayJsonPtr = Marshal.AllocHGlobal(HoughJsonCap);
+            try
+            {
+                int rc = NativeAPI.CALIB_HoughRunwayDetect(
+                    src.NativePtr, dst.NativePtr, runwayJsonPtr, HoughJsonCap, ref rwc,
+                    blurKsize, cannyTh1, cannyTh2, hlRho, hlThetaDeg, hlThreshold, hlMinLen, hlMaxGap, maxLinesOut,
+                    runwayAngleTolDeg, runwayRhoBinPx, runwayStripCount, maxRunwayLinesOut,
+                    runwayShapeMode, hcDp, hcMinDist, hcParam1, hcParam2, hcMinR, hcMaxR,
+                    linesJsonUtf8, circlesJsonUtf8);
+                if (rc != 0)
+                    throw new InvalidOperationException($"CALIB_HoughRunwayDetect failed ({rc})");
+                runwayLinesJson = Marshal.PtrToStringUTF8(runwayJsonPtr) ?? "[]";
+                runwayLineCount = rwc;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(runwayJsonPtr);
+            }
+            return dst;
+        }
 
         /// <summary>
         /// 检测圆点
@@ -1555,10 +1718,11 @@ namespace CalibOperatorPInvoke
         /// <summary>
         /// Step 6: 找暗条轮廓并排序
         /// </summary>
-        public int FindAndSortDarkContours()
+        /// <param name="minContourAreaPixels">轮廓面积下限（像素²）。负数表示使用原生默认阈值 max(500, 0.002×宽高)。</param>
+        public int FindAndSortDarkContours(double minContourAreaPixels = -1.0)
         {
             CheckDisposed();
-            DarkBarCount = NativeAPI.CALIB_TrajStep_6_FindAndSortDarkContours(_context);
+            DarkBarCount = NativeAPI.CALIB_TrajStep_6_FindAndSortDarkContoursEx(_context, minContourAreaPixels);
             return DarkBarCount;
         }
 
