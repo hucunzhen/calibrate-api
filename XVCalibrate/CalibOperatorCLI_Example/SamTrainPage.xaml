@@ -1,0 +1,220 @@
+<Page x:Class="CalibOperatorCLI_Example.SamTrainPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      Title="SAM ONNX 准备"
+      Background="{StaticResource Ui.PageBackground}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="3*" MinHeight="160"/>
+            <RowDefinition Height="1*" MinHeight="120"/>
+        </Grid.RowDefinitions>
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="8">
+            <StackPanel HorizontalAlignment="Stretch">
+                <TextBlock Text="SAM 图像分割 · ONNX 导出与量化" FontSize="18" FontWeight="Bold" Margin="0,0,0,8"/>
+                <TextBlock TextWrapping="Wrap" Foreground="#444" Margin="0,0,0,12"
+                           Text="Flow「SAM 图像分割」使用 encoder/decoder 双 ONNX。流程可选：① 由 YOLO-Seg 标签生成掩膜 → ②（可选）微调 → ③ 导出 ONNX → ④（可选）量化。导出/量化依赖 SAM_Tools/requirements-onnx.txt；生成掩膜/微调另需 Pillow、numpy 与 SAM_Tools/requirements-sam-train.txt。"/>
+
+                <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                    <StackPanel>
+                        <TextBlock FontWeight="Bold" Text="环境与脚本" Margin="0,0,0,6"/>
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="120"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Python" VerticalAlignment="Center"/>
+                            <TextBox x:Name="TxtPython" Grid.Row="0" Grid.Column="1" Text="python" Height="24" VerticalContentAlignment="Center" Margin="4,0"/>
+                            <Button x:Name="BtnBrowsePython" Grid.Row="0" Grid.Column="2" Content="浏览…" Width="72" Height="26" Margin="4,0,0,0" Click="BtnBrowsePython_Click"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="导出脚本" VerticalAlignment="Center" Margin="0,6,0,0"/>
+                            <TextBox x:Name="TxtExportScript" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Text="SAM_Tools/export_sam_onnx.py" Height="24" VerticalContentAlignment="Center" Margin="4,6,0,0"
+                                     ToolTip="相对 exe / 仓库根解析，规则同 Flow 内模型路径"/>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="量化脚本" VerticalAlignment="Center" Margin="0,6,0,0"/>
+                            <TextBox x:Name="TxtQuantScript" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Text="SAM_Tools/quantize_sam_onnx.py" Height="24" VerticalContentAlignment="Center" Margin="4,6,0,0"/>
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="微调脚本" VerticalAlignment="Center" Margin="0,6,0,0"/>
+                            <TextBox x:Name="TxtTrainScript" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Text="SAM_Tools/train_sam_finetune.py" Height="24" VerticalContentAlignment="Center" Margin="4,6,0,0"/>
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="掩膜脚本" VerticalAlignment="Center" Margin="0,6,0,0"/>
+                            <TextBox x:Name="TxtMaskGenScript" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Text="SAM_Tools/gen_masks_from_yolo_seg.py" Height="24" VerticalContentAlignment="Center" Margin="4,6,0,0"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                    <StackPanel>
+                        <TextBlock FontWeight="Bold" Text="生成掩膜（YOLO-Seg → PNG）" Margin="0,0,0,6"/>
+                        <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="#555" Margin="0,0,0,8"
+                                   Text="将「YOLO 分割训练」页生成的 labels/train（归一化多边形 .txt）栅格化为单通道掩膜，供下方 SAM 微调使用。图像与标签需同名配对。类别筛选留空则合并全部实例为一张前景。"/>
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="120"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="图像目录" VerticalAlignment="Center"/>
+                            <TextBox x:Name="TxtMaskImagesDir" Grid.Row="0" Grid.Column="1" Height="24" VerticalContentAlignment="Center" Margin="4,0"/>
+                            <Button x:Name="BtnBrowseMaskImages" Grid.Row="0" Grid.Column="2" Content="浏览…" Width="72" Height="26" Margin="4,0,0,0" Click="BtnBrowseMaskImages_Click"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="标签目录" VerticalAlignment="Center" Margin="0,6,0,0"/>
+                            <TextBox x:Name="TxtMaskLabelsDir" Grid.Row="1" Grid.Column="1" Height="24" VerticalContentAlignment="Center" Margin="4,6,0,0"/>
+                            <Button x:Name="BtnBrowseMaskLabels" Grid.Row="1" Grid.Column="2" Content="浏览…" Width="72" Height="26" Margin="4,6,0,0" Click="BtnBrowseMaskLabels_Click"/>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="输出 masks" VerticalAlignment="Center" Margin="0,6,0,0"/>
+                            <TextBox x:Name="TxtMaskOutDir" Grid.Row="2" Grid.Column="1" Height="24" VerticalContentAlignment="Center" Margin="4,6,0,0"/>
+                            <Button x:Name="BtnBrowseMaskOut" Grid.Row="2" Grid.Column="2" Content="浏览…" Width="72" Height="26" Margin="4,6,0,0" Click="BtnBrowseMaskOut_Click"/>
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="类别筛选" VerticalAlignment="Center" Margin="0,6,0,0"/>
+                            <TextBox x:Name="TxtMaskClassFilter" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Height="24" VerticalContentAlignment="Center" Margin="4,6,0,0"
+                                     ToolTip="逗号分隔 id，如 0；留空表示全部类别合并进一张掩膜"/>
+                            <Button x:Name="BtnRunGenMasks" Grid.Row="4" Grid.Column="1" Content="生成掩膜" Width="120" Height="30" HorizontalAlignment="Left" Margin="4,12,0,0" Click="BtnRunGenMasks_Click"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                    <StackPanel>
+                        <TextBlock FontWeight="Bold" Text="微调（可选 · PyTorch）" Margin="0,0,0,6"/>
+                        <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="#555" Margin="0,0,0,8"
+                                   Text="根目录下须有 images 与 masks。YOLO 常见 images/train：请在「images 子目录」填 train；掩膜多在 masks/ 根下则「masks 子目录」留空。文件名一一对应。建议 pip install -r SAM_Tools/requirements-sam-train.txt。"/>
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="120"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="数据集根目录" VerticalAlignment="Center"/>
+                            <TextBox x:Name="TxtTrainDataRoot" Grid.Row="0" Grid.Column="1" Height="24" VerticalContentAlignment="Center" Margin="4,0"/>
+                            <Button x:Name="BtnBrowseTrainData" Grid.Row="0" Grid.Column="2" Content="浏览…" Width="72" Height="26" Margin="4,0,0,0" Click="BtnBrowseTrainData_Click"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="images 子目录" VerticalAlignment="Center" Margin="0,6,0,0"/>
+                            <TextBox x:Name="TxtTrainImagesSubdir" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Height="24" VerticalContentAlignment="Center" Margin="4,6,0,0"
+                                     ToolTip="留空 = 使用 &lt;根&gt;/images/ ；YOLO 填 train（即 images/train）"/>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="masks 子目录" VerticalAlignment="Center" Margin="0,6,0,0"/>
+                            <TextBox x:Name="TxtTrainMasksSubdir" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Height="24" VerticalContentAlignment="Center" Margin="4,6,0,0"
+                                     ToolTip="留空 = 使用 &lt;根&gt;/masks/ ；若掩膜在 masks/train 则填 train"/>
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="保存权重 .pth" VerticalAlignment="Center" Margin="0,6,0,0"/>
+                            <TextBox x:Name="TxtTrainOutPth" Grid.Row="3" Grid.Column="1" Height="24" VerticalContentAlignment="Center" Margin="4,6,0,0"
+                                     ToolTip="留空则脚本写入 数据集根目录/sam_finetune_best.pth"/>
+                            <Button x:Name="BtnBrowseTrainOutPth" Grid.Row="3" Grid.Column="2" Content="浏览…" Width="72" Height="26" Margin="4,6,0,0" Click="BtnBrowseTrainOutPth_Click"/>
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="epochs / lr" VerticalAlignment="Center" Margin="0,6,0,0"/>
+                            <StackPanel Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="4,6,0,0">
+                                <TextBox x:Name="TxtTrainEpochs" Text="10" Width="56" Height="24" VerticalContentAlignment="Center" Margin="0,0,12,0"/>
+                                <TextBox x:Name="TxtTrainLr" Text="0.0001" Width="72" Height="24" VerticalContentAlignment="Center" Margin="0,0,16,0"/>
+                                <TextBlock Text="device" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <TextBox x:Name="TxtTrainDevice" Width="100" Height="24" VerticalContentAlignment="Center"
+                                         ToolTip="cuda:0 或 cpu；空=自动"/>
+                            </StackPanel>
+                            <CheckBox x:Name="ChkTrainImageEncoder" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Margin="4,8,0,0"
+                                      Content="同时微调 image encoder（显存占用高，慎用）"/>
+                            <Button x:Name="BtnRunTrain" Grid.Row="6" Grid.Column="1" Content="开始微调" Width="120" Height="30" HorizontalAlignment="Left" Margin="4,12,0,0" Click="BtnRunTrain_Click"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                    <StackPanel>
+                        <TextBlock FontWeight="Bold" Text="导出 ONNX（checkpoint → FP32）" Margin="0,0,0,6"/>
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="120"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Checkpoint" VerticalAlignment="Center"/>
+                            <TextBox x:Name="TxtCheckpoint" Grid.Row="0" Grid.Column="1" Height="24" VerticalContentAlignment="Center" Margin="4,0"/>
+                            <Button x:Name="BtnBrowseCheckpoint" Grid.Row="0" Grid.Column="2" Content="浏览…" Width="72" Height="26" Margin="4,0,0,0" Click="BtnBrowseCheckpoint_Click"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="model-type" VerticalAlignment="Center" Margin="0,6,0,0"/>
+                            <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="4,6,0,0">
+                                <ComboBox x:Name="CmbModelType" Width="120" VerticalContentAlignment="Center" SelectionChanged="CmbModelType_SelectionChanged">
+                                    <ComboBoxItem Content="vit_b" IsSelected="True"/>
+                                    <ComboBoxItem Content="vit_l"/>
+                                    <ComboBoxItem Content="vit_h"/>
+                                </ComboBox>
+                                <TextBlock Text="须与 .pth 一致" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#666" FontSize="11"/>
+                            </StackPanel>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="输出目录" VerticalAlignment="Center" Margin="0,6,0,0"/>
+                            <TextBox x:Name="TxtOutDir" Grid.Row="2" Grid.Column="1" Text="models/onnx" Height="24" VerticalContentAlignment="Center" Margin="4,6,0,0"/>
+                            <Button x:Name="BtnBrowseOutDir" Grid.Row="2" Grid.Column="2" Content="浏览…" Width="72" Height="26" Margin="4,6,0,0" Click="BtnBrowseOutDir_Click"/>
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="ONNX opset" VerticalAlignment="Center" Margin="0,6,0,0"/>
+                            <TextBox x:Name="TxtOpset" Grid.Row="3" Grid.Column="1" Text="17" Width="56" HorizontalAlignment="Left" Height="24" VerticalContentAlignment="Center" Margin="4,6,0,0"/>
+                        </Grid>
+                        <WrapPanel Margin="0,0,0,8">
+                            <CheckBox x:Name="ChkReturnSingleMask" Content="return-single-mask（仅单掩码，更快；Flow 需多候选时不要勾选）" Margin="0,0,16,4" VerticalAlignment="Center"/>
+                            <CheckBox x:Name="ChkGeluApproximate" Content="gelu-approximate" Margin="0,0,16,4" VerticalAlignment="Center"/>
+                            <CheckBox x:Name="ChkNoEncoder" Content="仅导出 decoder（--no-encoder）" Margin="0,0,16,4" VerticalAlignment="Center"/>
+                            <CheckBox x:Name="ChkNoDecoder" Content="仅导出 encoder（--no-decoder）" Margin="0,0,16,4" VerticalAlignment="Center"/>
+                        </WrapPanel>
+                        <Button x:Name="BtnExportOnnx" Content="导出 ONNX" Width="140" Height="30" HorizontalAlignment="Left" Click="BtnExportOnnx_Click"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                    <StackPanel>
+                        <TextBlock FontWeight="Bold" Text="动态量化（可选，ORT）" Margin="0,0,0,6"/>
+                        <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="#555" Margin="0,0,0,8"
+                                   Text="默认按「输出目录 + 前缀」查找 encoder/decoder。C# / OnnxRuntime CPU 建议勾选「仅量化 MatMul」，避免部分 ConvInteger 未实现；脚本会自动将默认后缀改为 _int8_mm（可用下方后缀覆盖）。"/>
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="120"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="模型目录" VerticalAlignment="Center"/>
+                            <TextBox x:Name="TxtQuantInDir" Grid.Row="0" Grid.Column="1" Text="models/onnx" Height="24" VerticalContentAlignment="Center" Margin="4,0"/>
+                            <Button x:Name="BtnBrowseQuantInDir" Grid.Row="0" Grid.Column="2" Content="浏览…" Width="72" Height="26" Margin="4,0,0,0" Click="BtnBrowseQuantInDir_Click"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="文件名前缀" VerticalAlignment="Center" Margin="0,6,0,0"/>
+                            <TextBox x:Name="TxtQuantPrefix" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Text="sam_vit_b" Height="24" VerticalContentAlignment="Center" Margin="4,6,0,0"
+                                     ToolTip="与导出一致，如 sam_vit_b / sam_vit_h"/>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="输出后缀" VerticalAlignment="Center" Margin="0,6,0,0"/>
+                            <TextBox x:Name="TxtQuantSuffix" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Text="_int8" Width="120" HorizontalAlignment="Left" Height="24" VerticalContentAlignment="Center" Margin="4,6,0,0"/>
+                            <StackPanel Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,10,0,0">
+                                <CheckBox x:Name="ChkQuantMatmulOnly" Content="仅量化 MatMul/Gemm（--matmul-only）" IsChecked="True" Margin="0,0,16,4" VerticalAlignment="Center"/>
+                                <CheckBox x:Name="ChkQuantPerChannel" Content="per-channel" Margin="0,0,16,4" VerticalAlignment="Center"/>
+                                <CheckBox x:Name="ChkQuantReduceRange" Content="reduce-range" Margin="0,0,16,4" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Grid>
+                        <Button x:Name="BtnQuantize" Content="运行量化" Width="120" Height="30" HorizontalAlignment="Left" Click="BtnQuantize_Click"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+        <DockPanel Grid.Row="1" Margin="8,0,8,8" LastChildFill="True">
+            <TextBlock DockPanel.Dock="Top" FontWeight="Bold" Text="日志" Margin="0,0,0,4"/>
+            <Border BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Background="#1E1E1E" Padding="6">
+                <TextBox x:Name="TxtLog" Loaded="TxtLog_Loaded" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                         VerticalAlignment="Stretch" VerticalContentAlignment="Top"
+                         FontFamily="Consolas" FontSize="12" Foreground="#D4D4D4" Background="Transparent" BorderThickness="0"/>
+            </Border>
+        </DockPanel>
+    </Grid>
+</Page>

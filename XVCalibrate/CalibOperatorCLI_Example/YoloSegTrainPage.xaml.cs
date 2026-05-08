@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -362,69 +361,6 @@ namespace CalibOperatorCLI_Example
             if (Math.Abs(v - Math.Round(v)) < 1e-9 && Math.Abs(v) < 1e15)
                 return ((long)Math.Round(v)).ToString(CultureInfo.InvariantCulture);
             return v.ToString("G9", CultureInfo.InvariantCulture);
-        }
-
-        private string ResolveScriptOrThrow(string relativeOrAbsolute)
-        {
-            string t = (relativeOrAbsolute ?? "").Trim();
-            if (string.IsNullOrEmpty(t))
-                throw new InvalidOperationException("脚本路径为空。");
-            return SamOnnxSegmentation.ResolveModelPath(t);
-        }
-
-        /// <summary>
-        /// 运行 Python：异步事件读取 stdout/stderr，避免「先 Read stdout 堵死 stderr 管道」的经典死锁；
-        /// <c>-u</c> 关闭缓冲便于首次下载权重时日志实时刷新。
-        /// </summary>
-        private async Task<int> RunPythonStreamingAsync(
-            string pythonExecutable,
-            string workingDirectory,
-            IReadOnlyList<string> argsAfterScript)
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = pythonExecutable,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-                WorkingDirectory = string.IsNullOrWhiteSpace(workingDirectory)
-                    ? Environment.CurrentDirectory
-                    : workingDirectory,
-            };
-            try
-            {
-                psi.StandardOutputEncoding = Encoding.UTF8;
-                psi.StandardErrorEncoding = Encoding.UTF8;
-            }
-            catch
-            {
-                // 个别环境下编码不可用则退回默认
-            }
-
-            psi.ArgumentList.Add("-u");
-            foreach (string a in argsAfterScript)
-                psi.ArgumentList.Add(a);
-
-            using var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
-            if (!p.Start())
-                throw new InvalidOperationException($"无法启动进程: {pythonExecutable}");
-
-            void OnLine(string? line)
-            {
-                if (string.IsNullOrEmpty(line)) return;
-                _ = Dispatcher.InvokeAsync(() => AppendLog(line));
-            }
-
-            p.OutputDataReceived += (_, e) => OnLine(e.Data);
-            p.ErrorDataReceived += (_, e) => OnLine(e.Data);
-            p.BeginOutputReadLine();
-            p.BeginErrorReadLine();
-
-            await p.WaitForExitAsync().ConfigureAwait(false);
-            // 等待异步行回调排空，避免末尾几行丢失
-            await Task.Delay(200).ConfigureAwait(false);
-            return p.ExitCode;
         }
 
         // ───────── 单张画布标注（YOLO-Seg 多边形）─────────
@@ -860,7 +796,7 @@ namespace CalibOperatorCLI_Example
                 if (string.IsNullOrWhiteSpace(py))
                     throw new InvalidOperationException("请填写 Python 可执行文件（如 python）。");
 
-                string scriptAbs = ResolveScriptOrThrow(TxtAutoLabelScript.Text);
+                string scriptAbs = FlowPythonRunner.ResolveScriptOrThrow(TxtAutoLabelScript.Text);
                 string weights = TxtWeights.Text.Trim();
                 if (string.IsNullOrWhiteSpace(weights))
                     weights = "yolo11m-seg.pt";
@@ -895,7 +831,7 @@ namespace CalibOperatorCLI_Example
                     argsList.Add(device);
                 }
 
-                int exit = await RunPythonStreamingAsync(py, workDir, argsList).ConfigureAwait(true);
+                int exit = await FlowPythonRunner.RunPythonStreamingAsync(py, workDir, argsList, Dispatcher, AppendLog).ConfigureAwait(true);
 
                 AppendLog(exit == 0 ? "自动标注完成。" : $"自动标注进程退出码: {exit}");
                 if (exit != 0)
@@ -926,7 +862,7 @@ namespace CalibOperatorCLI_Example
                 if (string.IsNullOrWhiteSpace(py))
                     throw new InvalidOperationException("请填写 Python 可执行文件。");
 
-                string trainScript = ResolveScriptOrThrow(TxtTrainScript.Text);
+                string trainScript = FlowPythonRunner.ResolveScriptOrThrow(TxtTrainScript.Text);
                 string weights = TxtWeights.Text.Trim();
                 if (string.IsNullOrWhiteSpace(weights))
                     weights = "yolo11m-seg.pt";
@@ -968,7 +904,7 @@ namespace CalibOperatorCLI_Example
                     argsList.Add(device);
                 }
 
-                int exit = await RunPythonStreamingAsync(py, root, argsList).ConfigureAwait(true);
+                int exit = await FlowPythonRunner.RunPythonStreamingAsync(py, root, argsList, Dispatcher, AppendLog).ConfigureAwait(true);
 
                 AppendLog(exit == 0 ? "训练进程已结束（详见 Ultralytics 输出与 runs 目录）。" : $"训练进程退出码: {exit}");
                 if (exit != 0)
@@ -1009,7 +945,7 @@ namespace CalibOperatorCLI_Example
                 if (string.IsNullOrWhiteSpace(py))
                     throw new InvalidOperationException("请填写 Python 可执行文件。");
 
-                string scriptAbs = ResolveScriptOrThrow(TxtInferScript.Text);
+                string scriptAbs = FlowPythonRunner.ResolveScriptOrThrow(TxtInferScript.Text);
                 string weightsRel = TxtWeights.Text.Trim();
                 if (string.IsNullOrWhiteSpace(weightsRel))
                     weightsRel = "yolo11m-seg.pt";
@@ -1060,7 +996,7 @@ namespace CalibOperatorCLI_Example
                 }
 
                 string workDir = IoPath.GetDirectoryName(scriptAbs) ?? Environment.CurrentDirectory;
-                int exit = await RunPythonStreamingAsync(py, workDir, argsList).ConfigureAwait(true);
+                int exit = await FlowPythonRunner.RunPythonStreamingAsync(py, workDir, argsList, Dispatcher, AppendLog).ConfigureAwait(true);
 
                 if (exit == 0)
                 {

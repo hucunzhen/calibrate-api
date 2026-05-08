@@ -59,6 +59,30 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>YoloSeg_Tools\requirements-yolo-seg.txt</Link>
     </None>
+    <None Include="..\..\SAM_Inference\export_sam_onnx.py">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>SAM_Tools\export_sam_onnx.py</Link>
+    </None>
+    <None Include="..\..\SAM_Inference\quantize_sam_onnx.py">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>SAM_Tools\quantize_sam_onnx.py</Link>
+    </None>
+    <None Include="..\..\SAM_Inference\requirements-onnx.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>SAM_Tools\requirements-onnx.txt</Link>
+    </None>
+    <None Include="..\..\SAM_Inference\gen_masks_from_yolo_seg.py">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>SAM_Tools\gen_masks_from_yolo_seg.py</Link>
+    </None>
+    <None Include="..\..\SAM_Inference\train_sam_finetune.py">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>SAM_Tools\train_sam_finetune.py</Link>
+    </None>
+    <None Include="..\..\SAM_Inference\requirements-sam-train.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>SAM_Tools\requirements-sam-train.txt</Link>
+    </None>
   </ItemGroup>
 
   <!-- PLC 配置文件复制到输出目录 -->

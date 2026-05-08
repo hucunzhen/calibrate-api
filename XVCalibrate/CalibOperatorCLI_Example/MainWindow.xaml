@@ -27,6 +27,9 @@
                 <Button x:Name="NavYoloSeg" Content="YOLO分割" Style="{StaticResource NavTabButtonStyle}"
                         Click="NavYoloSeg_Click"
                         AutomationProperties.Name="YOLO分割训练"/>
+                <Button x:Name="NavSamOnnx" Content="SAM ONNX" Style="{StaticResource NavTabButtonStyle}"
+                        Click="NavSamOnnx_Click"
+                        AutomationProperties.Name="SAM ONNX 导出"/>
             </StackPanel>
         </Border>
 

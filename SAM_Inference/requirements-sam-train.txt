@@ -1,0 +1,7 @@
+# SAM 微调 train_sam_finetune.py（需 GPU 时安装 CUDA 版 torch）
+torch>=2.0
+torchvision>=0.15
+numpy>=1.24
+Pillow>=9.0
+tqdm>=4.65
+# segment-anything: pip install git+https://github.com/facebookresearch/segment-anything.git
