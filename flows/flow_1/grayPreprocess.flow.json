@@ -1,0 +1,80 @@
+{
+  "Nodes": [
+    {
+      "Id": "11195b9f-c9f1-48e0-a38c-407b3afca2b2",
+      "TypeId": "clahe",
+      "X": 82.00000000000006,
+      "Y": 185,
+      "Params": {
+        "clipLimit": "2.0",
+        "tileSize": "8"
+      }
+    },
+    {
+      "Id": "996a9c0f-1dd1-4a35-a76e-7fe04454ecbf",
+      "TypeId": "gray_erode_rect",
+      "X": 80,
+      "Y": 299,
+      "Params": {
+        "kernelW": "5",
+        "kernelH": "5",
+        "iterations": "1"
+      }
+    },
+    {
+      "Id": "24e914ed-a03b-4935-b877-41d1a366b2d3",
+      "TypeId": "gray_dilate_rect",
+      "X": 77,
+      "Y": 413,
+      "Params": {
+        "kernelW": "5",
+        "kernelH": "5",
+        "iterations": "1"
+      }
+    },
+    {
+      "Id": "0e8ca248-5dc9-4002-b5ec-024a271b14af",
+      "TypeId": "composite_bind_in",
+      "X": 85,
+      "Y": 72,
+      "Params": {
+        "externalPort": "In"
+      }
+    },
+    {
+      "Id": "24071e2e-2d8a-42bb-a79b-3042f4b72bb8",
+      "TypeId": "composite_bind_out",
+      "X": 69,
+      "Y": 532,
+      "Params": {
+        "externalPort": "Out"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "11195b9f-c9f1-48e0-a38c-407b3afca2b2",
+      "FromPort": "Out",
+      "ToNodeId": "996a9c0f-1dd1-4a35-a76e-7fe04454ecbf",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "996a9c0f-1dd1-4a35-a76e-7fe04454ecbf",
+      "FromPort": "Out",
+      "ToNodeId": "24e914ed-a03b-4935-b877-41d1a366b2d3",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "0e8ca248-5dc9-4002-b5ec-024a271b14af",
+      "FromPort": "Out",
+      "ToNodeId": "11195b9f-c9f1-48e0-a38c-407b3afca2b2",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "24e914ed-a03b-4935-b877-41d1a366b2d3",
+      "FromPort": "Out",
+      "ToNodeId": "24071e2e-2d8a-42bb-a79b-3042f4b72bb8",
+      "ToPort": "In"
+    }
+  ]
+}

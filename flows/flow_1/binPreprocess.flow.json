@@ -1,0 +1,68 @@
+{
+  "Nodes": [
+    {
+      "Id": "8158457b-7f17-4856-8e56-7b943456422d",
+      "TypeId": "binary_morph_rect",
+      "X": 400,
+      "Y": 227,
+      "Params": {
+        "op": "close",
+        "orientation": "vertical_strips",
+        "kernelW": "",
+        "kernelH": "",
+        "iterations": "2",
+        "foregroundThreshold": "0",
+        "minComponentPixels": "450"
+      }
+    },
+    {
+      "Id": "ce5c410f-bcae-4f99-a5a6-2e9282378b18",
+      "TypeId": "morphology",
+      "X": 403,
+      "Y": 369,
+      "Params": {
+        "kernelSize": "5",
+        "blurKsize": "9",
+        "blurSigma": "2.0"
+      }
+    },
+    {
+      "Id": "2a1ca3e0-0078-4415-94e3-309f676709c0",
+      "TypeId": "composite_bind_in",
+      "X": 128,
+      "Y": 79,
+      "Params": {
+        "externalPort": "In"
+      }
+    },
+    {
+      "Id": "9c92f7fc-05ac-4718-82db-f4f57b4bb046",
+      "TypeId": "composite_bind_out",
+      "X": 666,
+      "Y": 549,
+      "Params": {
+        "externalPort": "Out"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "8158457b-7f17-4856-8e56-7b943456422d",
+      "FromPort": "Out",
+      "ToNodeId": "ce5c410f-bcae-4f99-a5a6-2e9282378b18",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "2a1ca3e0-0078-4415-94e3-309f676709c0",
+      "FromPort": "Out",
+      "ToNodeId": "8158457b-7f17-4856-8e56-7b943456422d",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "ce5c410f-bcae-4f99-a5a6-2e9282378b18",
+      "FromPort": "Out",
+      "ToNodeId": "9c92f7fc-05ac-4718-82db-f4f57b4bb046",
+      "ToPort": "In"
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "Nodes": [
+    {
+      "Id": "e42110e1-e6bc-4a96-83d8-daff4593502c",
+      "TypeId": "binarize",
+      "X": 120,
+      "Y": 300,
+      "Params": {
+        "blurSize": "9",
+        "morphSize": "7"
+      }
+    },
+    {
+      "Id": "d8cc0b87-3b3d-4d46-aadc-7d01422ef44e",
+      "TypeId": "find_contours",
+      "X": 120,
+      "Y": 410,
+      "Params": {
+        "minContourArea": ""
+      }
+    },
+    {
+      "Id": "5a3c3bdd-bc47-45fd-9ada-e0074ec21526",
+      "TypeId": "create_mask",
+      "X": 119,
+      "Y": 550,
+      "Params": {
+        "contourIdx": "-1"
+      }
+    },
+    {
+      "Id": "0b45620d-7cec-4073-81d4-7d8540428a24",
+      "TypeId": "composite_bind_in",
+      "X": 98,
+      "Y": 152,
+      "Params": {
+        "externalPort": "In"
+      }
+    },
+    {
+      "Id": "bc2ca097-10bc-4467-b153-f42a3d34b8b5",
+      "TypeId": "composite_bind_out",
+      "X": 120,
+      "Y": 691,
+      "Params": {
+        "externalPort": "Out"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "e42110e1-e6bc-4a96-83d8-daff4593502c",
+      "FromPort": "Out",
+      "ToNodeId": "d8cc0b87-3b3d-4d46-aadc-7d01422ef44e",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "d8cc0b87-3b3d-4d46-aadc-7d01422ef44e",
+      "FromPort": "Out",
+      "ToNodeId": "5a3c3bdd-bc47-45fd-9ada-e0074ec21526",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "d8cc0b87-3b3d-4d46-aadc-7d01422ef44e",
+      "FromPort": "Contours",
+      "ToNodeId": "5a3c3bdd-bc47-45fd-9ada-e0074ec21526",
+      "ToPort": "Contours"
+    },
+    {
+      "FromNodeId": "5a3c3bdd-bc47-45fd-9ada-e0074ec21526",
+      "FromPort": "Mask",
+      "ToNodeId": "bc2ca097-10bc-4467-b153-f42a3d34b8b5",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "0b45620d-7cec-4073-81d4-7d8540428a24",
+      "FromPort": "Out",
+      "ToNodeId": "e42110e1-e6bc-4a96-83d8-daff4593502c",
+      "ToPort": "In"
+    }
+  ]
+}

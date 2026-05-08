@@ -1,0 +1,93 @@
+{
+  "Nodes": [
+    {
+      "Id": "7a6c31b5-2b70-4c04-a79b-6ef100332bd3",
+      "TypeId": "filter_contours",
+      "X": 332.8571428571432,
+      "Y": 147.2142857142859,
+      "Params": {
+        "minArea": "2000",
+        "maxArea": "720000",
+        "minAspect": "0.02",
+        "maxAspect": "120",
+        "minCircularity": "0",
+        "maxCircularity": "0.45",
+        "sortByCentroidY": "true",
+        "targetCount": "16"
+      }
+    },
+    {
+      "Id": "32083068-d36b-40d4-a811-fa59eb8fbaae",
+      "TypeId": "sample",
+      "X": 325.1785714285714,
+      "Y": 311.67857142857144,
+      "Params": {
+        "targetBars": "16",
+        "spacing": "9"
+      }
+    },
+    {
+      "Id": "bb50f935-4f81-461b-8748-798a1b14a1f8",
+      "TypeId": "fit_shape",
+      "X": 332.5182857142857,
+      "Y": 486.49982857142857,
+      "Params": {
+        "mode": "hybrid",
+        "windowRadius": "1",
+        "epsilon": "2.0",
+        "splitGapFactor": "3.0",
+        "minRegionPoints": "16"
+      }
+    },
+    {
+      "Id": "171af4cb-8672-41d3-9c85-e96953357d90",
+      "TypeId": "composite_bind_in",
+      "X": 74.5182857142857,
+      "Y": 77.49982857142864,
+      "Params": {
+        "externalPort": "In"
+      }
+    },
+    {
+      "Id": "41b50ee4-0f09-4548-936a-50dc26d58879",
+      "TypeId": "composite_bind_out",
+      "X": 640.5182857142856,
+      "Y": 445.49982857142857,
+      "Params": {
+        "externalPort": "Out"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "7a6c31b5-2b70-4c04-a79b-6ef100332bd3",
+      "FromPort": "Contours",
+      "ToNodeId": "32083068-d36b-40d4-a811-fa59eb8fbaae",
+      "ToPort": "Contours"
+    },
+    {
+      "FromNodeId": "32083068-d36b-40d4-a811-fa59eb8fbaae",
+      "FromPort": "Points",
+      "ToNodeId": "bb50f935-4f81-461b-8748-798a1b14a1f8",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "32083068-d36b-40d4-a811-fa59eb8fbaae",
+      "FromPort": "BarIds",
+      "ToNodeId": "bb50f935-4f81-461b-8748-798a1b14a1f8",
+      "ToPort": "BarIds"
+    },
+    {
+      "FromNodeId": "171af4cb-8672-41d3-9c85-e96953357d90",
+      "FromPort": "Out",
+      "ToNodeId": "7a6c31b5-2b70-4c04-a79b-6ef100332bd3",
+      "ToPort": "Contours"
+    },
+    {
+      "FromNodeId": "bb50f935-4f81-461b-8748-798a1b14a1f8",
+      "FromPort": "Out",
+      "ToNodeId": "41b50ee4-0f09-4548-936a-50dc26d58879",
+      "ToPort": "In"
+    }
+  ]
+}

@@ -1,0 +1,140 @@
+{
+  "Nodes": [
+    {
+      "Id": "a4658b37-a9a4-48e9-b06c-cafc9f2109e3",
+      "TypeId": "display",
+      "X": 1487,
+      "Y": 160,
+      "Params": {
+        "dotRadius": "3"
+      }
+    },
+    {
+      "Id": "48ffc97b-b0bd-4244-ba63-8bca4207d992",
+      "TypeId": "binarize",
+      "X": 542,
+      "Y": 221,
+      "Params": {
+        "blurSize": "7",
+        "morphSize": "5"
+      }
+    },
+    {
+      "Id": "a45ddc3f-0663-4559-9948-086478c6211d",
+      "TypeId": "grayscale",
+      "X": 314,
+      "Y": 222,
+      "Params": {}
+    },
+    {
+      "Id": "5894e9b5-42cd-4cd4-857d-350fbc559c15",
+      "TypeId": "detect_circles",
+      "X": 765,
+      "Y": 233,
+      "Params": {}
+    },
+    {
+      "Id": "8428d378-e4de-4707-9db2-2b1f1ef871ab",
+      "TypeId": "calibrate",
+      "X": 983,
+      "Y": 315,
+      "Params": {}
+    },
+    {
+      "Id": "7dfbfdea-4f7d-43b5-ad61-bff9e794a95a",
+      "TypeId": "world_coords",
+      "X": 86,
+      "Y": 339,
+      "Params": {
+        "points": "100,100;400,100;700,100;100,300;400,300;700,300;100,500;400,500;700,500"
+      }
+    },
+    {
+      "Id": "3d9c3ec3-9e1a-435c-a95e-8ac9149f6e5a",
+      "TypeId": "img_to_world",
+      "X": 1226,
+      "Y": 242,
+      "Params": {}
+    },
+    {
+      "Id": "2e6c1302-183e-46b3-a638-238a2ba21e7f",
+      "TypeId": "load_image",
+      "X": 77,
+      "Y": 150,
+      "Params": {
+        "filePath": "D:\\work\\calibrate-api\\Image_20260416162435404.bmp"
+      }
+    },
+    {
+      "Id": "ac27d3f8-37d6-4739-aa77-6080d2f43f57",
+      "TypeId": "save_calibration_result",
+      "X": 1242.4800000000002,
+      "Y": 397.6400000000001,
+      "Params": {
+        "filePath": "D:\\work\\calibrate-api\\calibration_result.json"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "a45ddc3f-0663-4559-9948-086478c6211d",
+      "FromPort": "Out",
+      "ToNodeId": "48ffc97b-b0bd-4244-ba63-8bca4207d992",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "48ffc97b-b0bd-4244-ba63-8bca4207d992",
+      "FromPort": "Out",
+      "ToNodeId": "5894e9b5-42cd-4cd4-857d-350fbc559c15",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "5894e9b5-42cd-4cd4-857d-350fbc559c15",
+      "FromPort": "Points",
+      "ToNodeId": "8428d378-e4de-4707-9db2-2b1f1ef871ab",
+      "ToPort": "ImagePts"
+    },
+    {
+      "FromNodeId": "7dfbfdea-4f7d-43b5-ad61-bff9e794a95a",
+      "FromPort": "Points",
+      "ToNodeId": "8428d378-e4de-4707-9db2-2b1f1ef871ab",
+      "ToPort": "WorldPts"
+    },
+    {
+      "FromNodeId": "5894e9b5-42cd-4cd4-857d-350fbc559c15",
+      "FromPort": "Points",
+      "ToNodeId": "3d9c3ec3-9e1a-435c-a95e-8ac9149f6e5a",
+      "ToPort": "Pixel"
+    },
+    {
+      "FromNodeId": "2e6c1302-183e-46b3-a638-238a2ba21e7f",
+      "FromPort": "Image",
+      "ToNodeId": "a45ddc3f-0663-4559-9948-086478c6211d",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "8428d378-e4de-4707-9db2-2b1f1ef871ab",
+      "FromPort": "Transform",
+      "ToNodeId": "3d9c3ec3-9e1a-435c-a95e-8ac9149f6e5a",
+      "ToPort": "Transform"
+    },
+    {
+      "FromNodeId": "3d9c3ec3-9e1a-435c-a95e-8ac9149f6e5a",
+      "FromPort": "World",
+      "ToNodeId": "a4658b37-a9a4-48e9-b06c-cafc9f2109e3",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "2e6c1302-183e-46b3-a638-238a2ba21e7f",
+      "FromPort": "Image",
+      "ToNodeId": "a4658b37-a9a4-48e9-b06c-cafc9f2109e3",
+      "ToPort": "Img"
+    },
+    {
+      "FromNodeId": "8428d378-e4de-4707-9db2-2b1f1ef871ab",
+      "FromPort": "Transform",
+      "ToNodeId": "ac27d3f8-37d6-4739-aa77-6080d2f43f57",
+      "ToPort": "Transform"
+    }
+  ]
+}

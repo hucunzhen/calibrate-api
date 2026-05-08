@@ -1,0 +1,222 @@
+{
+  "Nodes": [
+    {
+      "Id": "7d116a5f-c070-4a7a-a545-e3b0f9d71cbc",
+      "TypeId": "load_image",
+      "X": 20.428571428571445,
+      "Y": 202.99999999999997,
+      "Params": {
+        "filePath": "D:\\work\\calibrate-api\\test_images\\Image_20260417090632792.bmp"
+      }
+    },
+    {
+      "Id": "1e52dbba-25b8-42c6-8b0c-2f39d07c92ae",
+      "TypeId": "display",
+      "X": 1110.9285714285716,
+      "Y": 279.28571428571433,
+      "Params": {
+        "dotRadius": "3"
+      }
+    },
+    {
+      "Id": "4ca9a20d-ccc5-4250-83b9-d89c13cc9176",
+      "TypeId": "apply_mask",
+      "X": 435.9642857142858,
+      "Y": 191.0000000000001,
+      "Params": {}
+    },
+    {
+      "Id": "50892baa-4648-4a1a-ae9f-0ceffdbb75ed",
+      "TypeId": "find_contours",
+      "X": 649,
+      "Y": 161.00000000000006,
+      "Params": {
+        "minContourArea": "120"
+      }
+    },
+    {
+      "Id": "15572a4b-62e3-466e-b891-c8d9d5ae35a7",
+      "TypeId": "composite",
+      "X": 216.67857142857156,
+      "Y": 245.07142857142867,
+      "Params": {
+        "innerFlowPath": "D:\\work\\calibrate-api\\flows\\flow_1\\genMask.flow.json",
+        "innerFlowJson": "",
+        "bindingsJson": "{}"
+      }
+    },
+    {
+      "Id": "6a20c99e-ee0b-4c12-82c1-ccfa91ebec0e",
+      "TypeId": "composite",
+      "X": 221.3928571428571,
+      "Y": 110.7857142857143,
+      "Params": {
+        "innerFlowPath": "D:\\work\\calibrate-api\\flows\\flow_1\\grayPreprocess.flow.json",
+        "innerFlowJson": "",
+        "bindingsJson": "{}"
+      }
+    },
+    {
+      "Id": "57911ca1-537f-421a-954c-2cd7b61809c1",
+      "TypeId": "gray_range_binary",
+      "X": 439.2142857142858,
+      "Y": 314.3571428571429,
+      "Params": {
+        "rangeMode": "percentile",
+        "grayLow": "2",
+        "grayHigh": "50",
+        "percentileExcludeLow": "82.8",
+        "percentileExcludeHigh": "9.7"
+      }
+    },
+    {
+      "Id": "a73161e3-931f-4b58-9090-fc0b26183c40",
+      "TypeId": "composite",
+      "X": 641.1785714285713,
+      "Y": 299.7857142857142,
+      "Params": {
+        "innerFlowPath": "D:\\work\\calibrate-api\\flows\\flow_1\\binPreprocess.flow.json",
+        "innerFlowJson": "",
+        "bindingsJson": "{}"
+      }
+    },
+    {
+      "Id": "cccd0504-756c-4631-8844-faeebd1d8db6",
+      "TypeId": "composite",
+      "X": 860.5182857142856,
+      "Y": 237.49982857142857,
+      "Params": {
+        "innerFlowPath": "D:\\work\\calibrate-api\\flows\\flow_1\\contourPreprocess.flow.json",
+        "innerFlowJson": "",
+        "bindingsJson": "{}"
+      }
+    },
+    {
+      "Id": "a33020a5-000d-40cf-aed9-1813123d35f5",
+      "TypeId": "load_calibration_result",
+      "X": 866,
+      "Y": 476,
+      "Params": {
+        "filePath": "D:\\work\\calibrate-api\\flows\\flow_1\\calibration_result.json"
+      }
+    },
+    {
+      "Id": "47c98eca-35e1-4eb4-b2a0-d84d66340a9a",
+      "TypeId": "img_to_world",
+      "X": 1088,
+      "Y": 444,
+      "Params": {}
+    },
+    {
+      "Id": "8360f5e2-4d3f-429f-bf29-29af3d89b704",
+      "TypeId": "display",
+      "X": 1346,
+      "Y": 410,
+      "Params": {
+        "dotRadius": "3"
+      }
+    },
+    {
+      "Id": "9fb0d037-d3c7-40ab-901c-f9bea848db63",
+      "TypeId": "polyline_simplify_dp",
+      "X": 862,
+      "Y": 370,
+      "Params": {
+        "epsilon": "2.0",
+        "closed": "true"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "50892baa-4648-4a1a-ae9f-0ceffdbb75ed",
+      "FromPort": "Out",
+      "ToNodeId": "1e52dbba-25b8-42c6-8b0c-2f39d07c92ae",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "7d116a5f-c070-4a7a-a545-e3b0f9d71cbc",
+      "FromPort": "Image",
+      "ToNodeId": "15572a4b-62e3-466e-b891-c8d9d5ae35a7",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "15572a4b-62e3-466e-b891-c8d9d5ae35a7",
+      "FromPort": "Out",
+      "ToNodeId": "4ca9a20d-ccc5-4250-83b9-d89c13cc9176",
+      "ToPort": "Mask"
+    },
+    {
+      "FromNodeId": "7d116a5f-c070-4a7a-a545-e3b0f9d71cbc",
+      "FromPort": "Image",
+      "ToNodeId": "6a20c99e-ee0b-4c12-82c1-ccfa91ebec0e",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "6a20c99e-ee0b-4c12-82c1-ccfa91ebec0e",
+      "FromPort": "Out",
+      "ToNodeId": "4ca9a20d-ccc5-4250-83b9-d89c13cc9176",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "4ca9a20d-ccc5-4250-83b9-d89c13cc9176",
+      "FromPort": "Out",
+      "ToNodeId": "57911ca1-537f-421a-954c-2cd7b61809c1",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "57911ca1-537f-421a-954c-2cd7b61809c1",
+      "FromPort": "Out",
+      "ToNodeId": "a73161e3-931f-4b58-9090-fc0b26183c40",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "a73161e3-931f-4b58-9090-fc0b26183c40",
+      "FromPort": "Out",
+      "ToNodeId": "50892baa-4648-4a1a-ae9f-0ceffdbb75ed",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "50892baa-4648-4a1a-ae9f-0ceffdbb75ed",
+      "FromPort": "Contours",
+      "ToNodeId": "cccd0504-756c-4631-8844-faeebd1d8db6",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "a33020a5-000d-40cf-aed9-1813123d35f5",
+      "FromPort": "Transform",
+      "ToNodeId": "47c98eca-35e1-4eb4-b2a0-d84d66340a9a",
+      "ToPort": "Transform"
+    },
+    {
+      "FromNodeId": "47c98eca-35e1-4eb4-b2a0-d84d66340a9a",
+      "FromPort": "World",
+      "ToNodeId": "8360f5e2-4d3f-429f-bf29-29af3d89b704",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "50892baa-4648-4a1a-ae9f-0ceffdbb75ed",
+      "FromPort": "Out",
+      "ToNodeId": "8360f5e2-4d3f-429f-bf29-29af3d89b704",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "9fb0d037-d3c7-40ab-901c-f9bea848db63",
+      "FromPort": "Out",
+      "ToNodeId": "47c98eca-35e1-4eb4-b2a0-d84d66340a9a",
+      "ToPort": "Pixel"
+    },
+    {
+      "FromNodeId": "cccd0504-756c-4631-8844-faeebd1d8db6",
+      "FromPort": "Out",
+      "ToNodeId": "9fb0d037-d3c7-40ab-901c-f9bea848db63",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "9fb0d037-d3c7-40ab-901c-f9bea848db63",
+      "FromPort": "Out",
+      "ToNodeId": "1e52dbba-25b8-42c6-8b0c-2f39d07c92ae",
+      "ToPort": "Points"
+    }
+  ]
+}
