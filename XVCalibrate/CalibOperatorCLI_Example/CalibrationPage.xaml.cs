@@ -1,5 +1,8 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -32,6 +35,15 @@ namespace CalibOperatorCLI_Example
         private System.Windows.Point _lastMousePos;
         private System.Windows.Input.MouseButton _dragButton;
 
+        /// <summary>连续回调采图是否开启（在相机回调线程与 UI 线程间协调）。</summary>
+        private int _continuousGrabActive;
+
+        /// <summary>连续预览：只保留最新一帧；后台转 BitmapSource，避免 UI 线程堆积与卡顿。</summary>
+        private readonly object _liveDisplayGate = new object();
+        private CalibImage? _queuedLiveCalib;
+        private bool _livePumpScheduled;
+        private int _liveBitmapGeneration;
+
         private readonly Point2D[] _worldPoints = new[]
         {
             new Point2D(100, 100), new Point2D(400, 100), new Point2D(700, 100),
@@ -44,8 +56,15 @@ namespace CalibOperatorCLI_Example
             InitializeComponent();
             _imageScaleTransform = ImageScaleTransform;
             BtnGrabImage.IsEnabled = false;
+            BtnContinuousGrab.IsEnabled = false;
+            Unloaded += CalibrationPage_Unloaded;
             Log("Calibration Page Loaded");
             UpdateButtonStates();
+        }
+
+        private void CalibrationPage_Unloaded(object sender, RoutedEventArgs e)
+        {
+            StopContinuousGrabInternal(silent: true);
         }
 
         private void Log(string message)
@@ -91,6 +110,29 @@ namespace CalibOperatorCLI_Example
             catch (Exception ex)
             {
                 Log($"[ERROR] DisplayImage: {ex.Message}");
+            }
+        }
+
+        [DllImport("gdi32.dll", EntryPoint = "DeleteObject")]
+        private static extern bool DeleteObject(IntPtr hObject);
+
+        /// <summary>在任意线程调用：生成已 Freeze 的 <see cref="BitmapSource"/>，并释放 GDI 位图句柄。</summary>
+        private static BitmapSource? CreateFrozenBitmapSourceFromCalib(CalibImage img)
+        {
+            using var bmp = img.ToBitmap();
+            if (bmp == null)
+                return null;
+            IntPtr hBitmap = bmp.GetHbitmap();
+            try
+            {
+                var src = System.Windows.Interop.Imaging.CreateBitmapSourceFromHBitmap(
+                    hBitmap, IntPtr.Zero, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                src.Freeze();
+                return src;
+            }
+            finally
+            {
+                DeleteObject(hBitmap);
             }
         }
 
@@ -161,10 +203,13 @@ namespace CalibOperatorCLI_Example
 
                 if (camera.IsConnected)
                 {
+                    StopContinuousGrabInternal(silent: true);
                     // 断开
                     camera.Disconnect();
                     BtnConnectCamera.Content = "🔌 Connect";
                     BtnGrabImage.IsEnabled = false;
+                    BtnContinuousGrab.IsEnabled = false;
+                    BtnContinuousGrab.Content = "连续采图";
                     Log("[CAMERA] Disconnected");
                     return;
                 }
@@ -211,6 +256,7 @@ namespace CalibOperatorCLI_Example
 
                 BtnConnectCamera.Content = "🔌 Disconnect";
                 BtnGrabImage.IsEnabled = true;
+                BtnContinuousGrab.IsEnabled = true;
                 Log("[CAMERA] Connected successfully");
             }
             catch (Exception ex)
@@ -228,6 +274,12 @@ namespace CalibOperatorCLI_Example
                 if (camera == null || !camera.IsConnected)
                 {
                     MessageBox.Show("请先连接相机", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                if (Volatile.Read(ref _continuousGrabActive) != 0)
+                {
+                    MessageBox.Show("请先停止「连续采图」再使用单次采图。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
@@ -257,6 +309,235 @@ namespace CalibOperatorCLI_Example
                 Log($"[CAMERA ERROR] {ex.Message}");
                 MessageBox.Show($"采图异常: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private void BtnContinuousGrab_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var camera = MainWindow.Camera;
+                if (camera == null || !camera.IsConnected)
+                {
+                    MessageBox.Show("请先连接相机", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                if (Volatile.Read(ref _continuousGrabActive) != 0)
+                {
+                    StopContinuousGrabInternal(silent: false);
+                    return;
+                }
+
+                camera.FrameGrabbed -= OnContinuousFrameGrabbed;
+                camera.FrameGrabbed += OnContinuousFrameGrabbed;
+                if (!camera.StartGrabbing())
+                {
+                    camera.FrameGrabbed -= OnContinuousFrameGrabbed;
+                    MessageBox.Show("启动连续采集失败（StartGrabbing）", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                Volatile.Write(ref _continuousGrabActive, 1);
+                BtnContinuousGrab.Content = "停止连续";
+                BtnGrabImage.IsEnabled = false;
+                Log("[CAMERA] Continuous grab started");
+            }
+            catch (Exception ex)
+            {
+                Log($"[CAMERA ERROR] {ex.Message}");
+                MessageBox.Show(ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void OnContinuousFrameGrabbed(IFrameOut frameOut)
+        {
+            if (Volatile.Read(ref _continuousGrabActive) == 0)
+                return;
+
+            var camera = MainWindow.Camera;
+            if (camera == null)
+                return;
+
+            CalibImage? copy = camera.CloneFrameToCalibImage(frameOut);
+            if (copy == null)
+                return;
+
+            lock (_liveDisplayGate)
+            {
+                _queuedLiveCalib?.Dispose();
+                _queuedLiveCalib = copy;
+                if (_livePumpScheduled)
+                    return;
+                _livePumpScheduled = true;
+            }
+
+            Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                new Action(PumpLiveCalibQueueKick));
+        }
+
+        private void PumpLiveCalibQueueKick()
+        {
+            CalibImage? img;
+            lock (_liveDisplayGate)
+            {
+                img = _queuedLiveCalib;
+                _queuedLiveCalib = null;
+                if (img == null)
+                {
+                    _livePumpScheduled = false;
+                }
+            }
+
+            if (img == null)
+            {
+                FinishLivePumpAndReschedule();
+                return;
+            }
+
+            if (Volatile.Read(ref _continuousGrabActive) == 0)
+            {
+                img.Dispose();
+                FinishLivePumpAndReschedule();
+                return;
+            }
+
+            int gen = Volatile.Read(ref _liveBitmapGeneration);
+            _ = Task.Run(() =>
+            {
+                BitmapSource? bmpSource = null;
+                try
+                {
+                    bmpSource = CreateFrozenBitmapSourceFromCalib(img);
+                }
+                catch
+                {
+                    bmpSource = null;
+                }
+
+                if (bmpSource == null)
+                {
+                    img.Dispose();
+                    Dispatcher.BeginInvoke(
+                        System.Windows.Threading.DispatcherPriority.Background,
+                        new Action(FinishLivePumpAndReschedule));
+                    return;
+                }
+
+                if (Volatile.Read(ref _liveBitmapGeneration) != gen)
+                {
+                    img.Dispose();
+                    Dispatcher.BeginInvoke(
+                        System.Windows.Threading.DispatcherPriority.Background,
+                        new Action(FinishLivePumpAndReschedule));
+                    return;
+                }
+
+                Dispatcher.BeginInvoke(
+                    System.Windows.Threading.DispatcherPriority.Background,
+                    new Action(() =>
+                    {
+                        try
+                        {
+                            if (Volatile.Read(ref _liveBitmapGeneration) != gen
+                                || Volatile.Read(ref _continuousGrabActive) == 0)
+                            {
+                                img.Dispose();
+                                return;
+                            }
+
+                            _currentImage?.Dispose();
+                            _currentImage = img;
+                            ImageDisplay.Source = bmpSource;
+                            _currentStep = 2;
+                            _detectedPoints = null;
+                            _calibrationResult = null;
+                            UpdateButtonStates();
+                        }
+                        finally
+                        {
+                            FinishLivePumpAndReschedule();
+                        }
+                    }));
+            });
+        }
+
+        private void FinishLivePumpAndReschedule()
+        {
+            bool needPump;
+            lock (_liveDisplayGate)
+            {
+                _livePumpScheduled = false;
+                needPump = _queuedLiveCalib != null && Volatile.Read(ref _continuousGrabActive) != 0;
+                if (needPump)
+                    _livePumpScheduled = true;
+            }
+
+            if (needPump)
+            {
+                Dispatcher.BeginInvoke(
+                    System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                    new Action(PumpLiveCalibQueueKick));
+            }
+        }
+
+        private void StopContinuousGrabInternal(bool silent)
+        {
+            if (Volatile.Read(ref _continuousGrabActive) == 0)
+            {
+                var cam = MainWindow.Camera;
+                if (cam != null && cam.IsGrabbing)
+                {
+                    try
+                    {
+                        cam.FrameGrabbed -= OnContinuousFrameGrabbed;
+                        cam.StopGrabbing();
+                    }
+                    catch { /* ignored */ }
+                }
+
+                Dispatcher.Invoke(() =>
+                {
+                    BtnContinuousGrab.Content = "连续采图";
+                    if (MainWindow.Camera != null && MainWindow.Camera.IsConnected)
+                        BtnGrabImage.IsEnabled = true;
+                });
+                return;
+            }
+
+            Volatile.Write(ref _continuousGrabActive, 0);
+            Interlocked.Increment(ref _liveBitmapGeneration);
+            lock (_liveDisplayGate)
+            {
+                _queuedLiveCalib?.Dispose();
+                _queuedLiveCalib = null;
+                _livePumpScheduled = false;
+            }
+
+            var camera = MainWindow.Camera;
+            if (camera != null)
+            {
+                try
+                {
+                    camera.FrameGrabbed -= OnContinuousFrameGrabbed;
+                    camera.StopGrabbing();
+                }
+                catch (Exception ex)
+                {
+                    if (!silent)
+                        Log($"[CAMERA] Stop continuous: {ex.Message}");
+                }
+            }
+
+            Dispatcher.Invoke(() =>
+            {
+                BtnContinuousGrab.Content = "连续采图";
+                if (camera != null && camera.IsConnected)
+                    BtnGrabImage.IsEnabled = true;
+            });
+
+            if (!silent)
+                Log("[CAMERA] Continuous grab stopped");
         }
 
         private void BtnDetectCircles_Click(object sender, RoutedEventArgs e)

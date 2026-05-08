@@ -6,39 +6,6 @@
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResize"
         WindowStyle="SingleBorderWindow">
-    <Window.Resources>
-        <SolidColorBrush x:Key="NavBarBrush" Color="#2D2D2D"/>
-        <SolidColorBrush x:Key="NavHoverBrush" Color="#404040"/>
-        <SolidColorBrush x:Key="NavAccentBrush" Color="#007ACC"/>
-        <Style x:Key="NavTabButtonStyle" TargetType="Button">
-            <Setter Property="Width" Value="100"/>
-            <Setter Property="Height" Value="36"/>
-            <Setter Property="Background" Value="{StaticResource NavBarBrush}"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="Padding" Value="10,6"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="NavBorder"
-                                Background="{TemplateBinding Background}"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="NavBorder" Property="Background" Value="{StaticResource NavHoverBrush}"/>
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="NavBorder" Property="Background" Value="{StaticResource NavAccentBrush}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-    </Window.Resources>
     <DockPanel>
         <Border DockPanel.Dock="Top" Background="{StaticResource NavBarBrush}" Padding="0">
             <StackPanel Orientation="Horizontal">
@@ -63,11 +30,7 @@
             </StackPanel>
         </Border>
 
-        <Border DockPanel.Dock="Top" Height="2">
-            <Border.Background>
-                <SolidColorBrush x:Name="ActiveTabLine" Color="#007ACC"/>
-            </Border.Background>
-        </Border>
+        <Border DockPanel.Dock="Top" Height="2" Background="{StaticResource NavAccentBrush}"/>
 
         <Frame x:Name="MainFrame" NavigationUIVisibility="Hidden"/>
     </DockPanel>

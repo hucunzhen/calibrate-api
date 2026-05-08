@@ -14,7 +14,7 @@ namespace CalibOperatorCLI_Example
         private TrajectoryPage _trajectoryPage;
         private PlcPage _plcPage;
         private HistogramPage _histogramPage;
-        private FlowPage _flowPage;
+        private FlowHostPage _flowHostPage;
         private YoloSegTrainPage _yoloSegTrainPage;
 
         /// <summary>
@@ -41,8 +41,8 @@ namespace CalibOperatorCLI_Example
             _trajectoryPage = new TrajectoryPage();
             _plcPage = new PlcPage();
             _histogramPage = new HistogramPage();
-            _flowPage = new FlowPage();
-            _flowPage.FlowLoaded += SaveLastFlowPath;
+            _flowHostPage = new FlowHostPage();
+            _flowHostPage.FlowLoaded += SaveLastFlowPath;
             _yoloSegTrainPage = new YoloSegTrainPage();
 
             // 将轨迹检测结果获取委托注入 PlcPage，使其可访问最新轨迹
@@ -127,7 +127,7 @@ namespace CalibOperatorCLI_Example
 
         private void NavFlow_Click(object sender, RoutedEventArgs e)
         {
-            NavigateTo(_flowPage);
+            NavigateTo(_flowHostPage);
             HighlightTab("Flow");
             TryAutoLoadLastFlowOnFlowPageSwitch();
         }
@@ -145,21 +145,26 @@ namespace CalibOperatorCLI_Example
             if (!File.Exists(flowFilePath))
                 throw new FileNotFoundException("Flow 文件不存在", flowFilePath);
 
-            NavigateTo(_flowPage);
+            NavigateTo(_flowHostPage);
             HighlightTab("Flow");
 
-            bool loaded = _flowPage.LoadFlowFromFile(flowFilePath, showErrorDialog: false);
+            var fp = _flowHostPage.ActiveFlowOrFirst();
+            if (fp == null)
+                return false;
+            bool loaded = fp.LoadFlowFromFile(flowFilePath, showErrorDialog: false);
             if (!loaded) return false;
 
             SaveLastFlowPath(flowFilePath);
-            _flowPage.MirrorErrorsToStderr = true;
+            fp.MirrorErrorsToStderr = true;
             try
             {
-                return await _flowPage.RunAllAsync(clearLog: true, preferNativeEngine: true);
+                // 与组态页「执行全部」一致走托管引擎：保证与界面相同的算子集（含 save_calibration_result 等），
+                // 且避免 C++ 引擎与组态端口名不一致（如 detect_circles 的 Image）导致只跑部分节点后误以为成功。
+                return await fp.RunAllAsync(clearLog: true, preferNativeEngine: false);
             }
             finally
             {
-                _flowPage.MirrorErrorsToStderr = false;
+                fp.MirrorErrorsToStderr = false;
             }
         }
 
@@ -171,7 +176,7 @@ namespace CalibOperatorCLI_Example
             return Path.Combine(dir, LastFlowFileName);
         }
 
-        private static void SaveLastFlowPath(string flowPath)
+        private static void SaveLastFlowPath(string? flowPath)
         {
             if (string.IsNullOrWhiteSpace(flowPath)) return;
             try
@@ -210,11 +215,7 @@ namespace CalibOperatorCLI_Example
             string? lastPath = TryReadLastFlowPath();
             if (string.IsNullOrWhiteSpace(lastPath) || !File.Exists(lastPath)) return;
 
-            string full = Path.GetFullPath(lastPath);
-            string current = _flowPage.CurrentFlowFilePath ?? string.Empty;
-            if (string.Equals(full, current, StringComparison.OrdinalIgnoreCase)) return;
-
-            _flowPage.LoadFlowFromFile(full, showErrorDialog: false);
+            _flowHostPage.TryAutoLoadLastFlowIfApplicable(lastPath);
         }
     }
 }

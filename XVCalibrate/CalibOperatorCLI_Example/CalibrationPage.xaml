@@ -18,6 +18,7 @@
             <Button x:Name="BtnLoadImage" Content="② 加载图像" MinWidth="120" Height="32" Margin="0,0,8,8" Padding="10,0" Click="BtnLoadImage_Click"
                     ToolTip="从文件加载 BMP 等图像"/>
             <Button x:Name="BtnGrabImage" Content="③ 相机采图" MinWidth="120" Height="32" Margin="0,0,8,8" Padding="10,0" Click="BtnGrabImage_Click" ToolTip="从相机采集一帧图像"/>
+            <Button x:Name="BtnContinuousGrab" Content="连续采图" MinWidth="100" Height="32" Margin="0,0,8,8" Padding="10,0" Click="BtnContinuousGrab_Click" ToolTip="开启后按回调连续刷新预览；再次点击停止（需已连接相机）"/>
             <Button x:Name="BtnConnectCamera" Content="连接相机" MinWidth="100" Height="32" Margin="0,0,8,8" Padding="10,0" Click="BtnConnectCamera_Click" ToolTip="连接或断开相机"/>
             <Button x:Name="BtnDetectCircles" Content="④ 检测圆点" MinWidth="120" Height="32" Margin="0,0,8,8" Padding="10,0" Click="BtnDetectCircles_Click"
                     ToolTip="检测标定圆并提取圆心"/>

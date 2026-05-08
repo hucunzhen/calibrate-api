@@ -250,19 +250,45 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>
-        /// 将相机帧转换为 CalibImage
-        /// 相机输出为 BGR 8bit，转换为 CalibImage 的 BGR 格式
+        /// 从回调帧拷贝像素到 <see cref="CalibImage"/>，不释放 <paramref name="frameOut"/>（由 SDK 回调路径统一释放）。
+        /// </summary>
+        public CalibImage? CloneFrameToCalibImage(IFrameOut frameOut)
+        {
+            return BuildCalibImageFromFrameOut(frameOut);
+        }
+
+        /// <summary>
+        /// 将相机帧转换为 CalibImage；成功后释放 <paramref name="frameOut"/>（与 <see cref="GrabOneFrame"/> 的 FreeImageBuffer 配套使用）。
         /// </summary>
         private CalibImage? FrameToCalibImage(IFrameOut frameOut)
         {
             try
             {
-                var camImg = frameOut.Image;
-                if (camImg.PixelDataPtr == IntPtr.Zero || camImg.Width <= 0 || camImg.Height <= 0)
+                var calibImg = BuildCalibImageFromFrameOut(frameOut);
+                if (calibImg == null)
                 {
                     frameOut.Dispose();
                     return null;
                 }
+
+                frameOut.Dispose();
+                return calibImg;
+            }
+            catch (Exception)
+            {
+                frameOut?.Dispose();
+                return null;
+            }
+        }
+
+        /// <summary>像素拷贝；不释放 <paramref name="frameOut"/>。</summary>
+        private static CalibImage? BuildCalibImageFromFrameOut(IFrameOut frameOut)
+        {
+            try
+            {
+                var camImg = frameOut.Image;
+                if (camImg.PixelDataPtr == IntPtr.Zero || camImg.Width <= 0 || camImg.Height <= 0)
+                    return null;
 
                 int channels = 3;  // BGR
                 int width = (int)camImg.Width;
@@ -270,32 +296,25 @@ namespace CalibOperatorCLI_Example
 
                 CalibImage calibImg = new CalibImage(width, height, channels);
 
-                // CalibImage 的 rowSize 是 4 字节对齐的
                 int dstRowSize = width * channels;
                 if (dstRowSize % 4 != 0) dstRowSize = ((dstRowSize / 4) + 1) * 4;
 
-                // 相机图像的 pixel format 需要判断
-                // PixelType_GVSP_RGB8_Packed = 0x02180015 (RGB)
-                // PixelType_GVSP_BGR8_Packed = 0x0218000F (BGR)
-                // PixelType_GVSP_Mono8 = 0x01080001
                 uint pixelFormat = (uint)camImg.PixelType;
-                bool isMono = (pixelFormat == 0x01080001);  // Mono8
-                bool isRGB = (pixelFormat == 0x02180015);   // RGB
-                bool isBGR = (pixelFormat == 0x0218000F);   // BGR
+                bool isMono = (pixelFormat == 0x01080001);
+                bool isRGB = (pixelFormat == 0x02180015);
+                bool isBGR = (pixelFormat == 0x0218000F);
 
-                // 获取 NativeImage data 指针
                 var native = calibImg.GetNativeStruct();
                 IntPtr dstData = native.data;
                 IntPtr srcData = camImg.PixelDataPtr;
 
                 if (isMono)
                 {
-                    // 灰度 -> 转为 3 通道 BGR
                     channels = 3;
                     calibImg = new CalibImage(width, height, 3);
                     native = calibImg.GetNativeStruct();
                     dstData = native.data;
-                    int srcRowSize = (int)camImg.Width;  // mono: 1 byte per pixel
+                    int srcRowSize = (int)camImg.Width;
 
                     unsafe
                     {
@@ -307,9 +326,9 @@ namespace CalibOperatorCLI_Example
                             {
                                 byte gray = src[y * srcRowSize + x];
                                 int dstIdx = y * dstRowSize + x * 3;
-                                dst[dstIdx + 0] = gray;  // B
-                                dst[dstIdx + 1] = gray;  // G
-                                dst[dstIdx + 2] = gray;  // R
+                                dst[dstIdx + 0] = gray;
+                                dst[dstIdx + 1] = gray;
+                                dst[dstIdx + 2] = gray;
                             }
                         }
                     }
@@ -319,7 +338,6 @@ namespace CalibOperatorCLI_Example
                     int srcRowSize = (int)camImg.Width * 3;
                     if (isRGB)
                     {
-                        // RGB -> BGR（CalibImage 使用 BGR 格式）
                         unsafe
                         {
                             byte* dst = (byte*)dstData;
@@ -330,16 +348,15 @@ namespace CalibOperatorCLI_Example
                                 {
                                     int srcIdx = y * srcRowSize + x * 3;
                                     int dstIdx = y * dstRowSize + x * 3;
-                                    dst[dstIdx + 0] = src[srcIdx + 2];  // B = R
-                                    dst[dstIdx + 1] = src[srcIdx + 1];  // G = G
-                                    dst[dstIdx + 2] = src[srcIdx + 0];  // R = B
+                                    dst[dstIdx + 0] = src[srcIdx + 2];
+                                    dst[dstIdx + 1] = src[srcIdx + 1];
+                                    dst[dstIdx + 2] = src[srcIdx + 0];
                                 }
                             }
                         }
                     }
                     else
                     {
-                        // BGR -> BGR（直接拷贝，注意 pitch 对齐）
                         for (int y = 0; y < height; y++)
                         {
                             IntPtr srcRow = IntPtr.Add(srcData, y * srcRowSize);
@@ -349,12 +366,10 @@ namespace CalibOperatorCLI_Example
                     }
                 }
 
-                frameOut.Dispose();
                 return calibImg;
             }
             catch (Exception)
             {
-                frameOut?.Dispose();
                 return null;
             }
         }

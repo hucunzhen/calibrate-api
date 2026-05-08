@@ -867,6 +867,27 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         out["World"] = vout;
         return true;
     }
+    if (n.type == "polyline_simplify_dp") {
+        Value ptsIn = InputOf(e, n.id, "In");
+        if (ptsIn.kind != Value::Kind::Points) { err = "polyline_simplify_dp: missing In"; return false; }
+        if (ptsIn.points.empty()) { err = "polyline_simplify_dp: empty Points"; return false; }
+        double eps = ToDouble(NodeParam(n, "epsilon", "2.0"), 2.0);
+        if (eps <= 0) eps = 1e-6;
+        std::string closedStr = NodeParam(n, "closed", "true");
+        for (auto& c : closedStr) c = (char)std::tolower((unsigned char)c);
+        bool closed = !(closedStr == "0" || closedStr == "false");
+        std::vector<cv::Point2f> curve;
+        curve.reserve(ptsIn.points.size());
+        for (auto& p : ptsIn.points) curve.emplace_back((float)p.x, (float)p.y);
+        std::vector<cv::Point2f> approx;
+        cv::approxPolyDP(curve, approx, eps, closed);
+        Value vout;
+        vout.kind = Value::Kind::Points;
+        vout.points.reserve(approx.size());
+        for (auto& q : approx) vout.points.push_back(Point2D{ (double)q.x, (double)q.y });
+        out["Out"] = vout;
+        return true;
+    }
     if (n.type == "points_to_text") {
         Value ptsIn = InputOf(e, n.id, "Points");
         if (ptsIn.kind != Value::Kind::Points) { err = "points_to_text: missing Points"; return false; }
@@ -881,8 +902,9 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         return true;
     }
     if (n.type == "detect_circles") {
-        Value in = InputOf(e, n.id, "In");
-        if (in.kind != Value::Kind::Image) { err = "detect_circles: missing In"; return false; }
+        Value in = InputOf(e, n.id, "Image");
+        if (in.kind != Value::Kind::Image) in = InputOf(e, n.id, "In");
+        if (in.kind != Value::Kind::Image) { err = "detect_circles: missing Image/In"; return false; }
         cv::Mat gray = EnsureGray(in.img);
         std::vector<cv::Vec3f> circles;
         cv::HoughCircles(gray, circles, cv::HOUGH_GRADIENT, 1.0, 20.0, 120, 20, 3, 60);

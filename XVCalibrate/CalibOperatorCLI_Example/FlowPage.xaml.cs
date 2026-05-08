@@ -21,10 +21,13 @@ using HalconDotNet;
 
 namespace CalibOperatorCLI_Example
 {
-    public partial class FlowPage : Page
+    public partial class FlowPage : UserControl
     {
         public string? CurrentFlowFilePath { get; private set; }
-        public event Action<string>? FlowLoaded;
+        public event Action<string?>? FlowLoaded;
+
+        /// <summary>若宿主支持多标签，返回 true 表示已在其它标签打开路径；否则走当前页加载。</summary>
+        public Func<string, bool>? TryLoadFlowInNewTab { get; set; }
 
         /// <summary>
         /// CLI <c>--flow</c> 自动执行时为 true：流程日志里标记为错误的行同时写入标准错误输出。
@@ -108,7 +111,7 @@ namespace CalibOperatorCLI_Example
                 DisplayName = "JiT采样",
                 Description =
                     "Just Image Transformers（Li&He / flow-matching，像素空间 ViT）ImageNet 类条件采样；需克隆 jkyl/just-image-transformer、uv sync、下载权重 npz；GPU Ampere+",
-                Category = "输入",
+                Category = "AI模型",
                 Params =
                 {
                     new OperatorParam { Name = "pythonPath", DisplayName = "Python", DefaultValue = "python", Description = "已安装该 JiT 仓库依赖的解释器（常用仓库内 .venv）" },
@@ -377,7 +380,7 @@ namespace CalibOperatorCLI_Example
                 TypeId = "dip_denoise",
                 DisplayName = "DIP去噪",
                 Description = "Deep Image Prior（PyTorch U-Net 迭代优化）去噪；需安装 torch，详见 DIP_Inference/requirements-dip.txt",
-                Category = "预处理",
+                Category = "AI模型",
                 Ports =
                 {
                     new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
@@ -400,7 +403,7 @@ namespace CalibOperatorCLI_Example
                 TypeId = "swin_transformer",
                 DisplayName = "Swin特征",
                 Description = "timm Swin：可选 ImageNet Top-K 分类、全局特征向量 JSON、最后一层特征的空间范数热力图（显著性/粗分割可视化，非实例分割）。依赖 Swin_Inference/requirements-swin.txt",
-                Category = "预处理",
+                Category = "AI模型",
                 Ports =
                 {
                     new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
@@ -433,7 +436,7 @@ namespace CalibOperatorCLI_Example
                 TypeId = "yolo_seg_infer",
                 DisplayName = "YOLO分割推理",
                 Description = "Ultralytics YOLO-Seg：加载自定义 .pt（如 runs/.../weights/best.pt），输出原图透传、可视化叠加图、检测 JSON（含 polygon_norm）。依赖 pip install ultralytics",
-                Category = "预处理",
+                Category = "AI模型",
                 Ports =
                 {
                     new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
@@ -492,7 +495,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "gray_range_binary",
                 DisplayName = "灰度范围二值化",
-                Description = "按指定灰度区间[low,high]二值化",
+                Description = "fixed：固定灰度区间 [grayLow,grayHigh] 内置信为白；percentile：按整图灰度直方图分位数定上下限（如剔除最暗10%、最亮10%，中间约80%像素对应的灰度段）",
                 Category = "预处理",
                 Ports =
                 {
@@ -501,8 +504,18 @@ namespace CalibOperatorCLI_Example
                 },
                 Params =
                 {
-                    new OperatorParam { Name = "grayLow", DisplayName = "灰度下限", DefaultValue = "5", Description = "灰度范围下界 (0~255)" },
-                    new OperatorParam { Name = "grayHigh", DisplayName = "灰度上限", DefaultValue = "50", Description = "灰度范围上界 (0~255)" }
+                    new OperatorParam
+                    {
+                        Name = "rangeMode",
+                        DisplayName = "区间模式",
+                        DefaultValue = "fixed",
+                        Description = "fixed=使用 grayLow/grayHigh；percentile=按百分比分位数自动定上下限",
+                        Options = new List<string> { "fixed", "percentile" }
+                    },
+                    new OperatorParam { Name = "grayLow", DisplayName = "灰度下限", DefaultValue = "5", Description = "仅 fixed：范围下界 0~255" },
+                    new OperatorParam { Name = "grayHigh", DisplayName = "灰度上限", DefaultValue = "50", Description = "仅 fixed：范围上界 0~255" },
+                    new OperatorParam { Name = "percentileExcludeLow", DisplayName = "剔除最暗比例(%)", DefaultValue = "10", Description = "仅 percentile：累计占比达到该百分比处的灰度作为下限（约等于「低于该灰度的像素占图中比例」）" },
+                    new OperatorParam { Name = "percentileExcludeHigh", DisplayName = "剔除最亮比例(%)", DefaultValue = "10", Description = "仅 percentile：累计占比达到 (100−该值)% 处的灰度作为上限；与剔除最暗合计宜小于100" }
                 }
             },
             new OperatorDef
@@ -543,6 +556,42 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "iterations", DisplayName = "迭代次数", DefaultValue = "1", Description = ">=1" },
                     new OperatorParam { Name = "foregroundThreshold", DisplayName = "前景阈", DefaultValue = "0", Description = "灰度大于阈值为前景；-1 表示非零即前景" },
                     new OperatorParam { Name = "minComponentPixels", DisplayName = "最小连通像素", DefaultValue = "0", Description = "形态学后剔除小于该像素数的 4-连通域；0 表示关闭" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "gray_erode_rect",
+                DisplayName = "灰度腐蚀",
+                Description = "单通道灰度矩形腐蚀（邻域取最小值）；彩色输入先按 ITU-R BT.601 权重复制为灰度。边界按边缘复制延拓",
+                Category = "预处理",
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" }
+                },
+                Params =
+                {
+                    new OperatorParam { Name = "kernelW", DisplayName = "结构元宽度", DefaultValue = "5", Description = "奇数，≥1；非奇数自动调整为下一个奇数" },
+                    new OperatorParam { Name = "kernelH", DisplayName = "结构元高度", DefaultValue = "5", Description = "奇数，≥1" },
+                    new OperatorParam { Name = "iterations", DisplayName = "迭代次数", DefaultValue = "1", Description = ">=1，重复腐蚀" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "gray_dilate_rect",
+                DisplayName = "灰度膨胀",
+                Description = "单通道灰度矩形膨胀（邻域取最大值）；彩色输入先转灰度。边界按边缘复制延拓",
+                Category = "预处理",
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" }
+                },
+                Params =
+                {
+                    new OperatorParam { Name = "kernelW", DisplayName = "结构元宽度", DefaultValue = "5", Description = "奇数，≥1" },
+                    new OperatorParam { Name = "kernelH", DisplayName = "结构元高度", DefaultValue = "5", Description = "奇数，≥1" },
+                    new OperatorParam { Name = "iterations", DisplayName = "迭代次数", DefaultValue = "1", Description = ">=1，重复膨胀" }
                 }
             },
             new OperatorDef
@@ -1089,6 +1138,23 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "polyline_simplify_dp",
+                DisplayName = "轮廓点简化",
+                Description = "对有序采样点列做 Douglas–Peucker 多边形近似：在最大偏差 ε（像素）内用更少顶点保持形状。closed=true 时视为闭合轮廓（如沿边界等弧长采样）；false 时为开折线。",
+                Category = "预处理",
+                Params =
+                {
+                    new OperatorParam { Name = "epsilon", DisplayName = "偏差阈值 ε", DefaultValue = "2.0", Description = "像素；越大顶点越少、形状越粗糙" },
+                    new OperatorParam { Name = "closed", DisplayName = "闭合轮廓", DefaultValue = "true", Description = "true=首尾闭合；false=开折线" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "world_coords",
                 DisplayName = "世界坐标",
                 Description = "通过参数配置九点标定的世界坐标",
@@ -1204,6 +1270,44 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "save_calibration_result",
+                DisplayName = "保存标定结果",
+                Description = "将 CalibrationJson（棋盘多视图）、Affine / Homography / Poly2D、Intrinsics 以 JSON 落盘（可同时写入多项）。至少连接一路输入。filePath 为空或未配置绝对路径时相对程序目录。",
+                Category = "标定",
+                Params =
+                {
+                    new OperatorParam { Name = "filePath", DisplayName = "保存路径", DefaultValue = "calibration_result.json", Description = "UTF-8 JSON；目录不存在时自动创建" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Transform", Direction = PortDirection.Input, DataType = typeof(AffineTransform), ColorHex = "#E91E63", IsOptional = true },
+                    new PortDef { Name = "H", Direction = PortDirection.Input, DataType = typeof(HomographyTransform), ColorHex = "#E91E63", IsOptional = true },
+                    new PortDef { Name = "Poly", Direction = PortDirection.Input, DataType = typeof(Poly2DTransform), ColorHex = "#E91E63", IsOptional = true },
+                    new PortDef { Name = "Intrinsics", Direction = PortDirection.Input, DataType = typeof(CameraIntrinsics), ColorHex = "#E91E63", IsOptional = true }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "load_calibration_result",
+                DisplayName = "读取标定结果",
+                Description = "从 JSON 文件恢复标定数据（由「保存标定结果」生成）。仅连接需要的输出端口；若某输出已连线但文件中无对应数据将报错。",
+                Category = "标定",
+                Params =
+                {
+                    new OperatorParam { Name = "filePath", DisplayName = "文件路径", DefaultValue = "", Description = "可选；填写后自动读取（相对路径相对程序目录）；留空则弹窗选择" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "CalibrationJson", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" },
+                    new PortDef { Name = "Transform", Direction = PortDirection.Output, DataType = typeof(AffineTransform), ColorHex = "#E91E63" },
+                    new PortDef { Name = "H", Direction = PortDirection.Output, DataType = typeof(HomographyTransform), ColorHex = "#E91E63" },
+                    new PortDef { Name = "Poly", Direction = PortDirection.Output, DataType = typeof(Poly2DTransform), ColorHex = "#E91E63" },
+                    new PortDef { Name = "Intrinsics", Direction = PortDirection.Output, DataType = typeof(CameraIntrinsics), ColorHex = "#E91E63" }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "plc_connect",
                 DisplayName = "PLC连接",
                 Description = "连接 PLC (Modbus TCP)",
@@ -1310,7 +1414,7 @@ namespace CalibOperatorCLI_Example
                 TypeId = "sam_onnx_segment",
                 DisplayName = "SAM 图像分割",
                 Description = "Segment Anything ONNX：点提示或文本提示（OWLv2 ONNX→多框→SAM）。OWLv2 经 NMS 保留的目标数由 textMaxDetections 决定（见 GroundingJson）。仅 1 目标时 Mask～Mask4 为 SAM 多掩码候选；多目标时 encoder 一次、decoder 次数为 min(检出数, maskMergeMax)。MaskAll 为 3 通道图：黑底上各路掩码用不同颜色、固定 alpha 叠加以模拟透明。Mask～Mask4 仍为前 4 实例单通道掩码。Flow 参数上限见 FlowSamMaskMergeParamUpperBound。需 OWLv2 ONNX + tokenizer.json。",
-                Category = "分割",
+                Category = "AI模型",
                 Params =
                 {
                     new OperatorParam { Name = "encoderPath", DisplayName = "Encoder ONNX", DefaultValue = SamOnnxSegmentation.DefaultEncoderRepoRelative, Description = "相对源码树 models/onnx（或 exe 目录）；不存在时自动向上查找仓库根；可为绝对路径" },
@@ -2019,7 +2123,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "composite",
                 DisplayName = "组合算子",
-                Description = "嵌入子流程(.flow.json)：在参数中指定子图路径或 JSON，并用 bindingsJson 绑定外部端口与子节点端口",
+                Description = "嵌入子流程(.flow.json)：innerFlowPath 或 innerFlowJson。bindingsJson 可选；子流程中可用「组合绑定入/出」经连线绑定父端口，此时未绑定的输入/输出不再自动处理",
                 Category = "流程",
                 DefaultWidth = 200,
                 DefaultHeight = 88,
@@ -2049,9 +2153,56 @@ namespace CalibOperatorCLI_Example
                     {
                         Name = "bindingsJson",
                         DisplayName = "端口绑定JSON",
-                        DefaultValue = "{\"inputs\":[{\"external\":\"In\",\"nodeId\":\"00000000-0000-0000-0000-000000000000\",\"port\":\"In\"}],\"outputs\":[{\"external\":\"Out\",\"nodeId\":\"00000000-0000-0000-0000-000000000000\",\"port\":\"Out\"}]}",
-                        Description = "external=组合算子端口名；nodeId/port=子节点 GUID 与端口名；可将输出映射到 Out 或 Out2"
+                        DefaultValue = "{}",
+                        Description = "可选。inputs/outputs 数组：external=组合算子端口，nodeId+port=子节点。可留空 {}：未声明的输入按端口同名或 In→子图源节点 In/Image/Img 自动绑定；未声明的输出按子图末端未连线输出映射到 Out、Out2。子图中使用「组合绑定入/出」并通过连线绑定时，存在绑定入则关闭输入自动补全，存在绑定出则关闭输出自动映射（仍可与 JSON 混用）"
                     }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "composite_bind_in",
+                DisplayName = "组合绑定入",
+                Description = "仅用于「组合算子」子流程：填写父组合输入端口名，将 Out 连到子算子输入以绑定数据来源。子图中存在本算子时关闭未绑定输入的自动补全",
+                Category = "流程",
+                DefaultWidth = 200,
+                DefaultHeight = 76,
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "externalPort",
+                        DisplayName = "父组合输入端口名",
+                        DefaultValue = "In",
+                        Description = "与父组合算子上的输入端口名一致，如 In"
+                    }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "composite_bind_out",
+                DisplayName = "组合绑定出",
+                Description = "仅用于「组合算子」子流程：将上游输出连到 In，并填写父组合输出端口名。子图中存在本算子时关闭未绑定输出的自动映射",
+                Category = "流程",
+                DefaultWidth = 200,
+                DefaultHeight = 76,
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "externalPort",
+                        DisplayName = "父组合输出端口名",
+                        DefaultValue = "Out",
+                        Description = "与父组合算子上的输出端口名一致，如 Out、Out2"
+                    }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B" }
                 }
             },
         };
@@ -2084,6 +2235,9 @@ namespace CalibOperatorCLI_Example
 
             // 结果摘要文本
             public string? ResultSummary { get; set; }
+
+            /// <summary>组合算子标题下显示子流程文件名（仅 UI）</summary>
+            public TextBlock? CompositeCaptionText { get; set; }
 
             public FlowNode(OperatorDef def, double x, double y, Guid? fixedId = null)
             {
@@ -2191,6 +2345,13 @@ namespace CalibOperatorCLI_Example
 
         private int _nodeCounter;
 
+        private const int MaxFlowUndoSteps = 80;
+        private static readonly JsonSerializerOptions FlowSnapshotJsonOptions = new JsonSerializerOptions { WriteIndented = false };
+        private readonly List<string> _flowUndoStack = new List<string>();
+        private readonly List<string> _flowRedoStack = new List<string>();
+        private bool _suppressFlowUndoRecording;
+        private string? _pendingDragUndoSnapshotJson;
+
         public FlowPage()
         {
             InitializeComponent();
@@ -2199,6 +2360,7 @@ namespace CalibOperatorCLI_Example
             _canvasTransform.Children.Add(_canvasTranslate);
             FlowCanvas.RenderTransform = _canvasTransform;
             if (StopRunButton != null) StopRunButton.IsEnabled = false;
+            RefreshFlowUndoRedoButtons();
         }
 
         private void ThrowIfExecutionCancelled()
@@ -2270,6 +2432,7 @@ namespace CalibOperatorCLI_Example
             string[] categoryOrder =
             {
                 "输入",
+                "AI模型",
                 "预处理",
                 "后处理",
                 "验证",
@@ -2333,6 +2496,7 @@ namespace CalibOperatorCLI_Example
 
             var def = (OperatorDef)e.Data.GetData("OperatorDef");
             var pos = e.GetPosition(FlowCanvas);
+            PushFlowUndoSnapshotBeforeChange();
             AddNode(def, pos.X - def.DefaultWidth / 2, pos.Y - def.DefaultHeight / 2);
             e.Handled = true;
         }
@@ -2341,9 +2505,9 @@ namespace CalibOperatorCLI_Example
         // 节点创建
         // ================================================================
 
-        private FlowNode AddNode(OperatorDef def, double x, double y)
+        private FlowNode AddNode(OperatorDef def, double x, double y, Guid? restoreId = null)
         {
-            var node = new FlowNode(def, x, y);
+            var node = new FlowNode(def, x, y, restoreId);
             _nodes.Add(node);
             CreateNodeVisual(node);
             return node;
@@ -2357,8 +2521,12 @@ namespace CalibOperatorCLI_Example
             int outputCount = def.Ports.Count(p => p.Direction == PortDirection.Output);
             int rowCount = Math.Max(inputCount, outputCount);
             if (rowCount == 0) rowCount = 1;
+            string? capStrForHeight = null;
+            if (def.TypeId == "composite")
+                capStrForHeight = FormatCompositeNodeSubtitleStatic(node);
+            bool showCompositeCaption = def.TypeId == "composite" && !string.IsNullOrWhiteSpace(capStrForHeight);
             // 标题+端口区+摘要的最小自适应高度，避免新增端口被裁切
-            double minAutoHeight = 52 + rowCount * 18 + 18;
+            double minAutoHeight = 52 + rowCount * 18 + 18 + (showCompositeCaption ? 16 : 0);
             double h = Math.Max(def.DefaultHeight, minAutoHeight);
 
             // 主容器
@@ -2399,7 +2567,29 @@ namespace CalibOperatorCLI_Example
                 FontSize = 12,
                 FontWeight = FontWeights.SemiBold
             };
-            titleBorder.Child = titleText;
+            if (def.TypeId == "composite")
+            {
+                var cap = new TextBlock
+                {
+                    Foreground = new SolidColorBrush(Color.FromRgb(0x85, 0x85, 0x85)),
+                    FontSize = 10,
+                    FontWeight = FontWeights.Normal,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    MaxWidth = w - 16
+                };
+                node.CompositeCaptionText = cap;
+                string capInit = FormatCompositeNodeSubtitleStatic(node);
+                cap.Text = capInit;
+                cap.Visibility = string.IsNullOrWhiteSpace(capInit) ? Visibility.Collapsed : Visibility.Visible;
+                var titleStack = new StackPanel();
+                titleStack.Children.Add(titleText);
+                titleStack.Children.Add(cap);
+                titleBorder.Child = titleStack;
+            }
+            else
+            {
+                titleBorder.Child = titleText;
+            }
             panel.Children.Add(titleBorder);
 
             // 端口区域
@@ -2488,8 +2678,56 @@ namespace CalibOperatorCLI_Example
             FlowCanvas.Children.Add(border);
             node.Visual = border;
 
-            // 初始化端口位置
+            if (def.TypeId == "composite")
+                RefreshCompositeNodeCaption(node);
+            else
+                UpdatePortPositions(node);
+        }
+
+        private static string FormatCompositeNodeSubtitleStatic(FlowNode node)
+        {
+            string path = node.Params.GetValueOrDefault("innerFlowPath", "")?.Trim() ?? "";
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                try
+                {
+                    return System.IO.Path.GetFileName(path);
+                }
+                catch
+                {
+                    return path;
+                }
+            }
+
+            string emb = node.Params.GetValueOrDefault("innerFlowJson", "")?.Trim() ?? "";
+            if (!string.IsNullOrWhiteSpace(emb))
+                return "内嵌 JSON";
+            return "";
+        }
+
+        private static double MeasureCompositeNodeMinHeight(FlowNode node)
+        {
+            var def = node.Def;
+            int inputCount = def.Ports.Count(p => p.Direction == PortDirection.Input);
+            int outputCount = def.Ports.Count(p => p.Direction == PortDirection.Output);
+            int rowCount = Math.Max(Math.Max(inputCount, outputCount), 1);
+            bool showCap = node.Def.TypeId == "composite" && !string.IsNullOrWhiteSpace(FormatCompositeNodeSubtitleStatic(node));
+            double minAutoHeight = 52 + rowCount * 18 + 18 + (showCap ? 16 : 0);
+            return Math.Max(def.DefaultHeight, minAutoHeight);
+        }
+
+        private void RefreshCompositeNodeCaption(FlowNode node)
+        {
+            if (node.Def.TypeId != "composite" || node.CompositeCaptionText == null) return;
+            string cap = FormatCompositeNodeSubtitleStatic(node);
+            node.CompositeCaptionText.Text = cap;
+            node.CompositeCaptionText.Visibility = string.IsNullOrWhiteSpace(cap) ? Visibility.Collapsed : Visibility.Visible;
+
+            if (node.Visual is Border b)
+                b.Height = MeasureCompositeNodeMinHeight(node);
+
             UpdatePortPositions(node);
+            UpdateAllConnections();
         }
 
         private void UpdatePortPositions(FlowNode node)
@@ -2530,6 +2768,7 @@ namespace CalibOperatorCLI_Example
                 _dragNode = node;
                 _dragStart = e.GetPosition(FlowCanvas);
                 _nodeStartPos = new Point(Canvas.GetLeft(node.Visual), Canvas.GetTop(node.Visual));
+                _pendingDragUndoSnapshotJson = _suppressFlowUndoRecording ? null : SerializeFlowSnapshotCompact();
                 fe.CaptureMouse();
                 e.Handled = true;
             }
@@ -2618,10 +2857,23 @@ namespace CalibOperatorCLI_Example
             // 结束节点拖拽
             if (_isDraggingNode && _dragNode?.Visual != null)
             {
-                _dragNode.Visual.ReleaseMouseCapture();
+                var dragged = _dragNode;
+                double curX = Canvas.GetLeft(dragged.Visual);
+                double curY = Canvas.GetTop(dragged.Visual);
+                double dx = curX - _nodeStartPos.X;
+                double dy = curY - _nodeStartPos.Y;
+                bool movedMeaningfully = dx * dx + dy * dy > 9;
+
+                dragged.Visual.ReleaseMouseCapture();
                 _isDraggingNode = false;
                 _dragNode = null;
+
+                if (movedMeaningfully && _pendingDragUndoSnapshotJson != null)
+                    PushPreSerializedFlowUndoEntry(_pendingDragUndoSnapshotJson);
+                _pendingDragUndoSnapshotJson = null;
             }
+            else
+                _pendingDragUndoSnapshotJson = null;
 
             // 结束连线（检查是否落在目标端口上）
             if (_connectingFromPort != null)
@@ -2689,6 +2941,8 @@ namespace CalibOperatorCLI_Example
 
         private void CreateConnection(PortVisual from, PortVisual to)
         {
+            PushFlowUndoSnapshotBeforeChange();
+
             // 确保 from 是 output，to 是 input
             var outPort = from.Definition.Direction == PortDirection.Output ? from : to;
             var inPort = from.Definition.Direction == PortDirection.Input ? from : to;
@@ -2879,6 +3133,7 @@ namespace CalibOperatorCLI_Example
             if (sender is Path path && path.Tag is FlowConnection conn)
             {
                 // 右键删除连线
+                PushFlowUndoSnapshotBeforeChange();
                 _connections.Remove(conn);
                 if (conn.PathVisual != null)
                     FlowCanvas.Children.Remove(conn.PathVisual);
@@ -3009,6 +3264,8 @@ namespace CalibOperatorCLI_Example
                 var json = JsonSerializer.Serialize(data, options);
                 System.IO.File.WriteAllText(dlg.FileName, json);
 
+                CurrentFlowFilePath = System.IO.Path.GetFullPath(dlg.FileName);
+                FlowLoaded?.Invoke(CurrentFlowFilePath);
                 StatusText.Text = $"已保存: {System.IO.Path.GetFileName(dlg.FileName)}";
             }
             catch (Exception ex)
@@ -3039,6 +3296,174 @@ namespace CalibOperatorCLI_Example
             return new FlowData { Nodes = nodes, Connections = connections };
         }
 
+        private string SerializeFlowSnapshotCompact()
+            => JsonSerializer.Serialize(BuildCurrentFlowData(), FlowSnapshotJsonOptions);
+
+        private void TrimFlowUndoListFromOldest(List<string> list)
+        {
+            while (list.Count > MaxFlowUndoSteps)
+                list.RemoveAt(0);
+        }
+
+        private void PushFlowUndoSnapshotBeforeChange()
+        {
+            if (_suppressFlowUndoRecording) return;
+            _flowRedoStack.Clear();
+            _flowUndoStack.Add(SerializeFlowSnapshotCompact());
+            TrimFlowUndoListFromOldest(_flowUndoStack);
+            RefreshFlowUndoRedoButtons();
+        }
+
+        private void PushPreSerializedFlowUndoEntry(string snapshotJson)
+        {
+            if (_suppressFlowUndoRecording) return;
+            _flowRedoStack.Clear();
+            _flowUndoStack.Add(snapshotJson);
+            TrimFlowUndoListFromOldest(_flowUndoStack);
+            RefreshFlowUndoRedoButtons();
+        }
+
+        private void RefreshFlowUndoRedoButtons()
+        {
+            if (UndoFlowButton != null) UndoFlowButton.IsEnabled = _flowUndoStack.Count > 0;
+            if (RedoFlowButton != null) RedoFlowButton.IsEnabled = _flowRedoStack.Count > 0;
+        }
+
+        private void ClearCanvasCore()
+        {
+            foreach (var conn in _connections)
+            {
+                if (conn.PathVisual != null)
+                    FlowCanvas.Children.Remove(conn.PathVisual);
+            }
+            _connections.Clear();
+
+            foreach (var node in _nodes)
+            {
+                if (node.Visual != null)
+                    FlowCanvas.Children.Remove(node.Visual);
+            }
+            _nodes.Clear();
+
+            _nodeCounter = 0;
+        }
+
+        private void PopulateCanvasFromFlowData(FlowData data)
+        {
+            var defLookup = OperatorRegistry.ToDictionary(d => d.TypeId);
+            var nodeLookup = new Dictionary<string, FlowNode>();
+            foreach (var nd in data.Nodes)
+            {
+                if (!defLookup.TryGetValue(nd.TypeId, out var def))
+                    throw new Exception($"未知算子类型: {nd.TypeId}");
+                Guid? restoreId = Guid.TryParse(nd.Id, out var gid) ? gid : null;
+                var node = AddNode(def, nd.X, nd.Y, restoreId);
+                if (nd.Params != null)
+                {
+                    foreach (var kv in nd.Params)
+                    {
+                        if (node.Params.ContainsKey(kv.Key))
+                            node.Params[kv.Key] = kv.Value;
+                    }
+                }
+                nodeLookup[nd.Id] = node;
+            }
+
+            foreach (var cd in data.Connections)
+            {
+                if (!nodeLookup.TryGetValue(cd.FromNodeId, out var fromNode))
+                    continue;
+                if (!nodeLookup.TryGetValue(cd.ToNodeId, out var toNode))
+                    continue;
+
+                var fromPort = fromNode.PortVisuals.FirstOrDefault(p =>
+                    p.Definition.Name == cd.FromPort && p.Definition.Direction == PortDirection.Output);
+                string toPortName = NormalizeHoughLinesInputPort(toNode, cd.ToPort);
+                var toPort = toNode.PortVisuals.FirstOrDefault(p =>
+                    p.Definition.Name == toPortName && p.Definition.Direction == PortDirection.Input);
+
+                if (fromPort != null && toPort != null && CanConnect(fromPort, toPort))
+                    CreateConnection(fromPort, toPort);
+            }
+
+            FlowCanvas.UpdateLayout();
+            foreach (var n in _nodes) UpdatePortPositions(n);
+            UpdateAllConnections();
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                FlowCanvas.UpdateLayout();
+                foreach (var n in _nodes) UpdatePortPositions(n);
+                UpdateAllConnections();
+            }), System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+
+        private void RestoreFlowFromSnapshotJson(string json)
+        {
+            var data = JsonSerializer.Deserialize<FlowData>(json);
+            if (data == null) return;
+            _suppressFlowUndoRecording = true;
+            try
+            {
+                ClearCanvasCore();
+                PopulateCanvasFromFlowData(data);
+            }
+            finally
+            {
+                _suppressFlowUndoRecording = false;
+            }
+        }
+
+        private void UndoFlow_Click(object sender, RoutedEventArgs e) => PerformFlowUndo();
+
+        private void RedoFlow_Click(object sender, RoutedEventArgs e) => PerformFlowRedo();
+
+        private void FlowPage_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Z)
+            {
+                PerformFlowUndo();
+                e.Handled = true;
+                return;
+            }
+            if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Y)
+            {
+                PerformFlowRedo();
+                e.Handled = true;
+                return;
+            }
+            if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && e.Key == Key.Z)
+            {
+                PerformFlowRedo();
+                e.Handled = true;
+            }
+        }
+
+        private void PerformFlowUndo()
+        {
+            if (_flowUndoStack.Count == 0) return;
+            var previous = _flowUndoStack[_flowUndoStack.Count - 1];
+            _flowUndoStack.RemoveAt(_flowUndoStack.Count - 1);
+            var current = SerializeFlowSnapshotCompact();
+            _flowRedoStack.Add(current);
+            TrimFlowUndoListFromOldest(_flowRedoStack);
+            RestoreFlowFromSnapshotJson(previous);
+            StatusText.Text = "已撤销";
+            RefreshFlowUndoRedoButtons();
+        }
+
+        private void PerformFlowRedo()
+        {
+            if (_flowRedoStack.Count == 0) return;
+            var next = _flowRedoStack[_flowRedoStack.Count - 1];
+            _flowRedoStack.RemoveAt(_flowRedoStack.Count - 1);
+            var current = SerializeFlowSnapshotCompact();
+            _flowUndoStack.Add(current);
+            TrimFlowUndoListFromOldest(_flowUndoStack);
+            RestoreFlowFromSnapshotJson(next);
+            StatusText.Text = "已重做";
+            RefreshFlowUndoRedoButtons();
+        }
+
         public bool LoadFlowFromFile(string filePath, bool showErrorDialog = true)
         {
             try
@@ -3047,60 +3472,19 @@ namespace CalibOperatorCLI_Example
                 var data = JsonSerializer.Deserialize<FlowData>(json);
                 if (data == null) throw new Exception("文件内容为空");
 
-                // 先清空画布
-                ClearCanvas_Click(this, new RoutedEventArgs());
-
-                // 按 Id 查找算子定义
-                var defLookup = OperatorRegistry.ToDictionary(d => d.TypeId);
-
-                // 第一遍：创建所有节点
-                var nodeLookup = new Dictionary<string, FlowNode>();
-                foreach (var nd in data.Nodes)
+                PushFlowUndoSnapshotBeforeChange();
+                _suppressFlowUndoRecording = true;
+                try
                 {
-                    if (!defLookup.TryGetValue(nd.TypeId, out var def))
-                        throw new Exception($"未知算子类型: {nd.TypeId}");
-                    var node = AddNode(def, nd.X, nd.Y);
-                    // 恢复参数
-                    if (nd.Params != null)
-                    {
-                        foreach (var kv in nd.Params)
-                        {
-                            if (node.Params.ContainsKey(kv.Key))
-                                node.Params[kv.Key] = kv.Value;
-                        }
-                    }
-                    nodeLookup[nd.Id] = node;
+                    ClearCanvasCore();
+                    PopulateCanvasFromFlowData(data);
                 }
-
-                // 第二遍：建立连线
-                foreach (var cd in data.Connections)
+                finally
                 {
-                    if (!nodeLookup.TryGetValue(cd.FromNodeId, out var fromNode))
-                        continue;
-                    if (!nodeLookup.TryGetValue(cd.ToNodeId, out var toNode))
-                        continue;
-
-                    var fromPort = fromNode.PortVisuals.FirstOrDefault(p =>
-                        p.Definition.Name == cd.FromPort && p.Definition.Direction == PortDirection.Output);
-                    string toPortName = NormalizeHoughLinesInputPort(toNode, cd.ToPort);
-                    var toPort = toNode.PortVisuals.FirstOrDefault(p =>
-                        p.Definition.Name == toPortName && p.Definition.Direction == PortDirection.Input);
-
-                    if (fromPort != null && toPort != null && CanConnect(fromPort, toPort))
-                        CreateConnection(fromPort, toPort);
+                    _suppressFlowUndoRecording = false;
                 }
-
-                // 节点和端口在刚创建后可能尚未完成布局，端口中心点会是默认值。
-                // 强制刷新布局后重算端口与连线，避免“加载后不显示线，拖一下节点才显示”。
-                FlowCanvas.UpdateLayout();
-                foreach (var n in _nodes) UpdatePortPositions(n);
-                UpdateAllConnections();
-                Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    FlowCanvas.UpdateLayout();
-                    foreach (var n in _nodes) UpdatePortPositions(n);
-                    UpdateAllConnections();
-                }), System.Windows.Threading.DispatcherPriority.Loaded);
+                _flowRedoStack.Clear();
+                RefreshFlowUndoRedoButtons();
 
                 CurrentFlowFilePath = System.IO.Path.GetFullPath(filePath);
                 FlowLoaded?.Invoke(CurrentFlowFilePath);
@@ -3127,6 +3511,40 @@ namespace CalibOperatorCLI_Example
             };
             if (dlg.ShowDialog() != true) return;
             LoadFlowFromFile(dlg.FileName, showErrorDialog: true);
+        }
+
+        private void LoadFlowNewTab_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new OpenFileDialog
+            {
+                Filter = "组态文件|*.flow.json|所有文件|*.*",
+                DefaultExt = ".flow.json",
+                Title = "在新标签打开组态"
+            };
+            if (dlg.ShowDialog() != true) return;
+            if (TryLoadFlowInNewTab?.Invoke(dlg.FileName) == true)
+                return;
+            LoadFlowFromFile(dlg.FileName, showErrorDialog: true);
+        }
+
+        /// <summary>清空画布并重置路径（保留单标签时用于「关闭」语义）。</summary>
+        public void ResetToEmptyDocument()
+        {
+            _suppressFlowUndoRecording = true;
+            try
+            {
+                ClearCanvasCore();
+                CurrentFlowFilePath = null;
+                _flowUndoStack.Clear();
+                _flowRedoStack.Clear();
+                RefreshFlowUndoRedoButtons();
+                StatusText.Text = "未命名";
+                FlowLoaded?.Invoke(null);
+            }
+            finally
+            {
+                _suppressFlowUndoRecording = false;
+            }
         }
 
         // ================================================================
@@ -3171,28 +3589,16 @@ namespace CalibOperatorCLI_Example
 
         private void ClearCanvas_Click(object sender, RoutedEventArgs e)
         {
-            // 删除所有连线
-            foreach (var conn in _connections)
-            {
-                if (conn.PathVisual != null)
-                    FlowCanvas.Children.Remove(conn.PathVisual);
-            }
-            _connections.Clear();
-
-            // 删除所有节点
-            foreach (var node in _nodes)
-            {
-                if (node.Visual != null)
-                    FlowCanvas.Children.Remove(node.Visual);
-            }
-            _nodes.Clear();
-
-            _nodeCounter = 0;
+            PushFlowUndoSnapshotBeforeChange();
+            ClearCanvasCore();
             StatusText.Text = "画布已清空";
+            RefreshFlowUndoRedoButtons();
         }
 
         private void DeleteNode(FlowNode node)
         {
+            PushFlowUndoSnapshotBeforeChange();
+
             // 删除与该节点相关的所有连线
             var toRemove = _connections.Where(c => c.FromPort.Owner == node || c.ToPort.Owner == node).ToList();
             foreach (var conn in toRemove)
@@ -3213,6 +3619,8 @@ namespace CalibOperatorCLI_Example
         private void AutoLayout_Click(object sender, RoutedEventArgs e)
         {
             if (_nodes.Count == 0) return;
+
+            PushFlowUndoSnapshotBeforeChange();
 
             // 拓扑排序 + 自动布局
             var sorted = TopologicalSort();
@@ -4687,6 +5095,115 @@ namespace CalibOperatorCLI_Example
             return outImg;
         }
 
+        /// <summary>
+        /// 按灰度直方图分位数确定 [low,high]，区间内为 255，否则 0。excludeLowPercent / excludeHighPercent 为要剥离的暗端、亮端像素占全图比例（0~100）。
+        /// </summary>
+        private static CalibImage GrayRangeBinaryPercentile(CalibImage src, double excludeLowPercent, double excludeHighPercent, out int usedLow, out int usedHigh)
+        {
+            var n = src.GetNativeStruct();
+            int w = n.width, h = n.height;
+            int count = w * h;
+            if (count <= 0)
+                throw new InvalidOperationException("灰度范围二值化: 图像为空");
+
+            excludeLowPercent = Math.Clamp(excludeLowPercent, 0.0, 100.0);
+            excludeHighPercent = Math.Clamp(excludeHighPercent, 0.0, 100.0);
+            if (excludeLowPercent + excludeHighPercent >= 100.0)
+                throw new InvalidOperationException($"灰度范围二值化: 两端剔除比例之和须小于 100%（当前 {excludeLowPercent + excludeHighPercent:F1}%）");
+
+            var gray = new byte[count];
+            FillGrayBytesFromCalib(src, gray);
+            var hist = new int[256];
+            for (int i = 0; i < count; i++)
+                hist[gray[i]]++;
+
+            double total = count;
+            double lowMass = excludeLowPercent * 0.01 * total;
+            double highMass = (100.0 - excludeHighPercent) * 0.01 * total;
+
+            usedLow = 255;
+            int cum = 0;
+            for (int i = 0; i < 256; i++)
+            {
+                cum += hist[i];
+                if (cum >= lowMass - 1e-9)
+                {
+                    usedLow = i;
+                    break;
+                }
+            }
+
+            usedHigh = 0;
+            cum = 0;
+            for (int i = 0; i < 256; i++)
+            {
+                cum += hist[i];
+                if (cum >= highMass - 1e-9)
+                {
+                    usedHigh = i;
+                    break;
+                }
+            }
+
+            if (usedLow > usedHigh)
+                (usedLow, usedHigh) = (usedHigh, usedLow);
+
+            var bin = new byte[count];
+            for (int i = 0; i < count; i++)
+            {
+                byte g = gray[i];
+                bin[i] = (g >= usedLow && g <= usedHigh) ? (byte)255 : (byte)0;
+            }
+
+            var outImg = new CalibImage(w, h, 1);
+            var no = outImg.GetNativeStruct();
+            Marshal.Copy(bin, 0, no.data, count);
+            return outImg;
+        }
+
+        /// <summary>矩形灰度形态：腐蚀=min、膨胀=max；输出单通道灰度。</summary>
+        private static CalibImage GrayMorphRectCalibImage(CalibImage src, bool dilate, int kh, int kw)
+        {
+            var n = src.GetNativeStruct();
+            int w = n.width, h = n.height;
+            int nPix = w * h;
+            var gray = new byte[nPix];
+            FillGrayBytesFromCalib(src, gray);
+            var dst = new byte[nPix];
+            int rh = kh / 2;
+            int rw = kw / 2;
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    byte v = dilate ? (byte)0 : (byte)255;
+                    for (int dy = -rh; dy <= rh; dy++)
+                    {
+                        int yy = Math.Clamp(y + dy, 0, h - 1);
+                        int row = yy * w;
+                        for (int dx = -rw; dx <= rw; dx++)
+                        {
+                            int xx = Math.Clamp(x + dx, 0, w - 1);
+                            byte g = gray[row + xx];
+                            if (dilate)
+                            {
+                                if (g > v) v = g;
+                            }
+                            else
+                            {
+                                if (g < v) v = g;
+                            }
+                        }
+                    }
+                    dst[y * w + x] = v;
+                }
+            }
+            var outImg = new CalibImage(w, h, 1);
+            var no = outImg.GetNativeStruct();
+            Marshal.Copy(dst, 0, no.data, nPix);
+            return outImg;
+        }
+
         private static CalibImage SobelEdgeImage(CalibImage src, int threshold)
         {
             using var bmp = src.ToBitmap();
@@ -5794,6 +6311,184 @@ namespace CalibOperatorCLI_Example
             }
         }
 
+        private static void AutoFillUnboundCompositeInnerInputs(
+            FlowNode inner,
+            Dictionary<string, object?> innerInputs,
+            Dictionary<string, object?> compositeInputs,
+            bool innerIsSourceInSubgraph)
+        {
+            foreach (var pd in inner.Def.Ports)
+            {
+                if (pd.Direction != PortDirection.Input)
+                    continue;
+                string p = pd.Name;
+                if (innerInputs.TryGetValue(p, out var existing) && existing != null)
+                    continue;
+
+                if (compositeInputs.TryGetValue(p, out var sameName) && sameName != null)
+                {
+                    innerInputs[p] = sameName;
+                    continue;
+                }
+
+                if (!innerIsSourceInSubgraph)
+                    continue;
+
+                if (!compositeInputs.TryGetValue("In", out var inVal) || inVal == null)
+                    continue;
+
+                if (string.Equals(p, "In", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(p, "Image", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(p, "Img", StringComparison.OrdinalIgnoreCase))
+                {
+                    innerInputs[p] = inVal;
+                }
+            }
+        }
+
+        private static (FlowNode node, string port)? PickUnusedTerminalInnerOutput(
+            List<FlowNode> sortedAsc,
+            List<(Guid FromId, string FromPort, Guid ToId, string ToPort)> edges,
+            HashSet<(Guid NodeId, string Port)> consumed)
+        {
+            for (int i = sortedAsc.Count - 1; i >= 0; i--)
+            {
+                var inner = sortedAsc[i];
+                foreach (var po in inner.Def.Ports)
+                {
+                    if (po.Direction != PortDirection.Output)
+                        continue;
+                    if (edges.Any(e => e.FromId == inner.Id && string.Equals(e.FromPort, po.Name, StringComparison.Ordinal)))
+                        continue;
+                    if (!inner.Outputs.TryGetValue(po.Name, out var val) || val == null)
+                        continue;
+                    if (consumed.Contains((inner.Id, po.Name)))
+                        continue;
+                    return (inner, po.Name);
+                }
+            }
+            return null;
+        }
+
+        private static List<CompositeIoBind> BuildEffectiveCompositeOutputBinds(
+            FlowNode compositeNode,
+            CompositeBindingsSpec spec,
+            List<FlowNode> sortedInner,
+            List<(Guid FromId, string FromPort, Guid ToId, string ToPort)> edges,
+            bool allowAutoTerminalPick,
+            Dictionary<Guid, FlowNode> idMap)
+        {
+            var list = new List<CompositeIoBind>();
+            if (spec.Outputs != null)
+            {
+                foreach (var ob in spec.Outputs)
+                {
+                    if (ob == null || string.IsNullOrWhiteSpace(ob.External) ||
+                        string.IsNullOrWhiteSpace(ob.NodeId) || string.IsNullOrWhiteSpace(ob.Port))
+                        continue;
+                    list.Add(ob);
+                }
+            }
+
+            if (!allowAutoTerminalPick)
+                return list;
+
+            var consumed = new HashSet<(Guid NodeId, string Port)>();
+            foreach (var ob in list)
+            {
+                if (Guid.TryParse(ob.NodeId.Trim(), out var g))
+                    consumed.Add((g, ob.Port.Trim()));
+            }
+
+            foreach (var e in edges)
+            {
+                if (!idMap.TryGetValue(e.ToId, out var toN) || toN.Def.TypeId != "composite_bind_out")
+                    continue;
+                if (!string.Equals(e.ToPort, "In", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                consumed.Add((e.FromId, (e.FromPort ?? "").Trim()));
+            }
+
+            foreach (var extDef in compositeNode.Def.Ports.Where(p => p.Direction == PortDirection.Output))
+            {
+                string ext = extDef.Name;
+                if (list.Any(b => string.Equals(b.External, ext, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+                var pick = PickUnusedTerminalInnerOutput(sortedInner, edges, consumed);
+                if (pick == null)
+                    continue;
+                list.Add(new CompositeIoBind
+                {
+                    External = ext,
+                    NodeId = pick.Value.node.Id.ToString("D"),
+                    Port = pick.Value.port
+                });
+                consumed.Add((pick.Value.node.Id, pick.Value.port));
+            }
+
+            return list;
+        }
+
+        private static void AppendCompositeOutputBindsFromWiredBindOuts(
+            Dictionary<Guid, FlowNode> idMap,
+            List<(Guid FromId, string FromPort, Guid ToId, string ToPort)> edges,
+            CompositeBindingsSpec spec)
+        {
+            if (spec.Outputs == null) spec.Outputs = new List<CompositeIoBind>();
+
+            foreach (var e in edges)
+            {
+                if (!idMap.TryGetValue(e.ToId, out var toN) || toN.Def.TypeId != "composite_bind_out")
+                    continue;
+                if (!string.Equals(e.ToPort, "In", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                string ext = toN.Params.GetValueOrDefault("externalPort", "Out")?.Trim() ?? "Out";
+                if (string.IsNullOrWhiteSpace(ext)) continue;
+                string fromPort = (e.FromPort ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(fromPort)) continue;
+                spec.Outputs.Add(new CompositeIoBind
+                {
+                    External = ext,
+                    NodeId = e.FromId.ToString("D"),
+                    Port = fromPort
+                });
+            }
+        }
+
+        private static void AppendCompositeBindsFromMarkerNodes(
+            Dictionary<Guid, FlowNode> idMap,
+            CompositeBindingsSpec spec)
+        {
+            if (spec.Inputs == null) spec.Inputs = new List<CompositeIoBind>();
+            if (spec.Outputs == null) spec.Outputs = new List<CompositeIoBind>();
+
+            foreach (var n in idMap.Values)
+            {
+                if (n.Def.TypeId == "composite_bind_in")
+                {
+                    string ext = n.Params.GetValueOrDefault("externalPort", "")?.Trim() ?? "";
+                    string nid = n.Params.GetValueOrDefault("innerNodeId", "")?.Trim() ?? "";
+                    string port = n.Params.GetValueOrDefault("innerPort", "")?.Trim() ?? "";
+                    if (string.IsNullOrWhiteSpace(ext) || string.IsNullOrWhiteSpace(nid) || string.IsNullOrWhiteSpace(port))
+                        continue;
+                    if (!Guid.TryParse(nid, out var gid) || !idMap.ContainsKey(gid))
+                        continue;
+                    spec.Inputs.Add(new CompositeIoBind { External = ext, NodeId = nid, Port = port });
+                }
+                else if (n.Def.TypeId == "composite_bind_out")
+                {
+                    string ext = n.Params.GetValueOrDefault("externalPort", "")?.Trim() ?? "";
+                    string nid = n.Params.GetValueOrDefault("innerNodeId", "")?.Trim() ?? "";
+                    string port = n.Params.GetValueOrDefault("innerPort", "")?.Trim() ?? "";
+                    if (string.IsNullOrWhiteSpace(ext) || string.IsNullOrWhiteSpace(nid) || string.IsNullOrWhiteSpace(port))
+                        continue;
+                    if (!Guid.TryParse(nid, out var gid) || !idMap.ContainsKey(gid))
+                        continue;
+                    spec.Outputs.Add(new CompositeIoBind { External = ext, NodeId = nid, Port = port });
+                }
+            }
+        }
+
         private void ExecuteCompositeSubFlow(FlowNode compositeNode, Dictionary<string, object?> compositeInputs)
         {
             string path = compositeNode.Params.GetValueOrDefault("innerFlowPath", "")?.Trim() ?? "";
@@ -5813,17 +6508,33 @@ namespace CalibOperatorCLI_Example
             else
                 throw new InvalidOperationException("组合算子: 请设置 innerFlowPath 或 innerFlowJson");
 
-            if (string.IsNullOrWhiteSpace(bindRaw.Trim()))
-                throw new InvalidOperationException("组合算子: 请填写 bindingsJson（端口绑定）");
-
             var jOpts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
             var data = JsonSerializer.Deserialize<FlowData>(jsonText, jOpts);
             if (data?.Nodes == null || data.Nodes.Count == 0)
                 throw new InvalidOperationException("组合算子: 子流程为空");
 
-            var spec = JsonSerializer.Deserialize<CompositeBindingsSpec>(bindRaw.Trim(), jOpts);
-            if (spec?.Outputs == null || spec.Outputs.Count == 0)
-                throw new InvalidOperationException("组合算子: bindingsJson 至少包含 outputs 数组");
+            CompositeBindingsSpec spec;
+            if (string.IsNullOrWhiteSpace(bindRaw.Trim()))
+            {
+                spec = new CompositeBindingsSpec { Inputs = new List<CompositeIoBind>(), Outputs = new List<CompositeIoBind>() };
+            }
+            else
+            {
+                try
+                {
+                    spec = JsonSerializer.Deserialize<CompositeBindingsSpec>(bindRaw.Trim(), jOpts)
+                           ?? new CompositeBindingsSpec { Inputs = new List<CompositeIoBind>(), Outputs = new List<CompositeIoBind>() };
+                }
+                catch (JsonException ex)
+                {
+                    throw new InvalidOperationException($"组合算子: bindingsJson 解析失败: {ex.Message}");
+                }
+
+                if (spec.Inputs == null)
+                    spec.Inputs = new List<CompositeIoBind>();
+                if (spec.Outputs == null)
+                    spec.Outputs = new List<CompositeIoBind>();
+            }
 
             var defLookup = OperatorRegistry.ToDictionary(d => d.TypeId);
             var idMap = new Dictionary<Guid, FlowNode>();
@@ -5837,10 +6548,7 @@ namespace CalibOperatorCLI_Example
                 if (nd.Params != null)
                 {
                     foreach (var kv in nd.Params)
-                    {
-                        if (fn.Params.ContainsKey(kv.Key))
-                            fn.Params[kv.Key] = kv.Value;
-                    }
+                        fn.Params[kv.Key] = kv.Value;
                 }
                 idMap[nid] = fn;
             }
@@ -5857,6 +6565,11 @@ namespace CalibOperatorCLI_Example
                 edges.Add((fid, cd.FromPort ?? "", tid, toPort));
             }
 
+            AppendCompositeBindsFromMarkerNodes(idMap, spec);
+            AppendCompositeOutputBindsFromWiredBindOuts(idMap, edges, spec);
+            bool strictCompositeInputBinding = idMap.Values.Any(n => n.Def.TypeId == "composite_bind_in");
+            bool strictCompositeOutputBinding = idMap.Values.Any(n => n.Def.TypeId == "composite_bind_out");
+
             var innerList = idMap.Values.ToList();
             var sorted = TopologicalSortInner(innerList, edges, idMap);
 
@@ -5864,11 +6577,19 @@ namespace CalibOperatorCLI_Example
             {
                 var innerInputs = BuildInnerInputsFromEdges(inner.Id, edges, idMap);
                 MergeCompositeExternalInputs(inner, innerInputs, compositeInputs, spec);
-                ExecuteNode(inner, innerInputs);
+                bool innerIsSource = !edges.Any(e => e.ToId == inner.Id);
+                if (!strictCompositeInputBinding)
+                    AutoFillUnboundCompositeInnerInputs(inner, innerInputs, compositeInputs, innerIsSource);
+                ExecuteNode(inner, innerInputs, compositeInputs);
             }
 
+            var effectiveOutputs = BuildEffectiveCompositeOutputBinds(
+                compositeNode, spec, sorted, edges, allowAutoTerminalPick: !strictCompositeOutputBinding, idMap);
+            if (effectiveOutputs.Count == 0)
+                throw new InvalidOperationException("组合算子: 无有效输出绑定（请将子节点输出连到「组合绑定出」的 In、在 bindingsJson.outputs 中声明，或保证子图存在未连出线的末端输出端口）");
+
             compositeNode.Outputs.Clear();
-            foreach (var ob in spec.Outputs)
+            foreach (var ob in effectiveOutputs)
             {
                 if (ob == null || string.IsNullOrWhiteSpace(ob.External) ||
                     string.IsNullOrWhiteSpace(ob.NodeId) || string.IsNullOrWhiteSpace(ob.Port))
@@ -5892,6 +6613,128 @@ namespace CalibOperatorCLI_Example
         {
             public double X_x, X_y, X_1, X_x2, X_xy, X_y2;
             public double Y_x, Y_y, Y_1, Y_x2, Y_xy, Y_y2;
+        }
+
+        private static readonly JsonSerializerOptions CalibrationResultFileJsonOptions = new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            WriteIndented = true,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        };
+
+        private sealed class CalibrationResultFileV1
+        {
+            public int SchemaVersion { get; set; } = 1;
+            public string? CalibrationJson { get; set; }
+            public AffineCalibrationSaveV1? Affine { get; set; }
+            public HomographyCalibrationSaveV1? Homography { get; set; }
+            public Poly2DCalibrationSaveV1? Poly2d { get; set; }
+            public IntrinsicsCalibrationSaveV1? Intrinsics { get; set; }
+        }
+
+        private sealed class AffineCalibrationSaveV1
+        {
+            public double A { get; set; }
+            public double B { get; set; }
+            public double C { get; set; }
+            public double D { get; set; }
+            public double E { get; set; }
+            public double F { get; set; }
+
+            public static AffineCalibrationSaveV1 From(AffineTransform t) =>
+                new AffineCalibrationSaveV1 { A = t.A, B = t.B, C = t.C, D = t.D, E = t.E, F = t.F };
+
+            public AffineTransform ToAffine() =>
+                new AffineTransform { A = A, B = B, C = C, D = D, E = E, F = F };
+        }
+
+        private sealed class HomographyCalibrationSaveV1
+        {
+            public double H11 { get; set; }
+            public double H12 { get; set; }
+            public double H13 { get; set; }
+            public double H21 { get; set; }
+            public double H22 { get; set; }
+            public double H23 { get; set; }
+            public double H31 { get; set; }
+            public double H32 { get; set; }
+            public double H33 { get; set; }
+
+            public static HomographyCalibrationSaveV1 From(HomographyTransform h) =>
+                new HomographyCalibrationSaveV1
+                {
+                    H11 = h.H11, H12 = h.H12, H13 = h.H13,
+                    H21 = h.H21, H22 = h.H22, H23 = h.H23,
+                    H31 = h.H31, H32 = h.H32, H33 = h.H33
+                };
+
+            public HomographyTransform ToHomography() =>
+                new HomographyTransform
+                {
+                    H11 = H11, H12 = H12, H13 = H13,
+                    H21 = H21, H22 = H22, H23 = H23,
+                    H31 = H31, H32 = H32, H33 = H33
+                };
+        }
+
+        private sealed class Poly2DCalibrationSaveV1
+        {
+            public double X_x { get; set; }
+            public double X_y { get; set; }
+            public double X_1 { get; set; }
+            public double X_x2 { get; set; }
+            public double X_xy { get; set; }
+            public double X_y2 { get; set; }
+            public double Y_x { get; set; }
+            public double Y_y { get; set; }
+            public double Y_1 { get; set; }
+            public double Y_x2 { get; set; }
+            public double Y_xy { get; set; }
+            public double Y_y2 { get; set; }
+
+            public static Poly2DCalibrationSaveV1 From(Poly2DTransform p) =>
+                new Poly2DCalibrationSaveV1
+                {
+                    X_x = p.X_x, X_y = p.X_y, X_1 = p.X_1, X_x2 = p.X_x2, X_xy = p.X_xy, X_y2 = p.X_y2,
+                    Y_x = p.Y_x, Y_y = p.Y_y, Y_1 = p.Y_1, Y_x2 = p.Y_x2, Y_xy = p.Y_xy, Y_y2 = p.Y_y2
+                };
+
+            public Poly2DTransform ToPoly() =>
+                new Poly2DTransform
+                {
+                    X_x = X_x, X_y = X_y, X_1 = X_1, X_x2 = X_x2, X_xy = X_xy, X_y2 = X_y2,
+                    Y_x = Y_x, Y_y = Y_y, Y_1 = Y_1, Y_x2 = Y_x2, Y_xy = Y_xy, Y_y2 = Y_y2
+                };
+        }
+
+        private sealed class IntrinsicsCalibrationSaveV1
+        {
+            public double Fx { get; set; }
+            public double Fy { get; set; }
+            public double Cx { get; set; }
+            public double Cy { get; set; }
+            public double K1 { get; set; }
+            public double K2 { get; set; }
+            public double P1 { get; set; }
+            public double P2 { get; set; }
+            public double K3 { get; set; }
+            public double Rms { get; set; }
+
+            public static IntrinsicsCalibrationSaveV1 From(CameraIntrinsics i) =>
+                new IntrinsicsCalibrationSaveV1
+                {
+                    Fx = i.Fx, Fy = i.Fy, Cx = i.Cx, Cy = i.Cy,
+                    K1 = i.K1, K2 = i.K2, P1 = i.P1, P2 = i.P2, K3 = i.K3,
+                    Rms = i.Rms
+                };
+
+            public CameraIntrinsics ToIntrinsics() =>
+                new CameraIntrinsics
+                {
+                    Fx = Fx, Fy = Fy, Cx = Cx, Cy = Cy,
+                    K1 = K1, K2 = K2, P1 = P1, P2 = P2, K3 = K3,
+                    Rms = Rms
+                };
         }
 
         private static bool SolveLinear(double[,] a, double[] b, out double[] x)
@@ -6309,7 +7152,19 @@ namespace CalibOperatorCLI_Example
             return result;
         }
 
-        private void ExecuteNode(FlowNode node, Dictionary<string, object?>? explicitInputs = null)
+        private bool IsFlowOutputPortWired(FlowNode node, string outputPortName)
+        {
+            foreach (var c in _connections)
+            {
+                if (!ReferenceEquals(c.FromPort.Owner, node))
+                    continue;
+                if (string.Equals(c.FromPort.Definition.Name, outputPortName, StringComparison.Ordinal))
+                    return true;
+            }
+            return false;
+        }
+
+        private void ExecuteNode(FlowNode node, Dictionary<string, object?>? explicitInputs = null, Dictionary<string, object?>? compositeExternalInputsForBindIn = null)
         {
             var inputs = explicitInputs ?? GetNodeInputs(node);
             node.Outputs.Clear();
@@ -6497,13 +7352,42 @@ namespace CalibOperatorCLI_Example
                     {
                         var srcImg = inputs["In"] as CalibImage;
                         if (srcImg == null) throw new InvalidOperationException("灰度范围二值化: 缺少输入图像");
-                        int grayLow = int.Parse(node.Params["grayLow"]);
-                        int grayHigh = int.Parse(node.Params["grayHigh"]);
-                        using var detector = new TrajectoryStepDetector();
-                        detector.ConvertToGrayscale(srcImg);
-                        detector.GrayRangeBinary(grayLow, grayHigh);
-                        var grayBinImg = detector.GetStepImage(2);
-                        node.Outputs["Out"] = grayBinImg;
+                        string rangeMode = (node.Params.GetValueOrDefault("rangeMode", "fixed") ?? "fixed").Trim().ToLowerInvariant();
+                        if (rangeMode == "percentile")
+                        {
+                            double exL = double.TryParse(
+                                node.Params.GetValueOrDefault("percentileExcludeLow"),
+                                System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                out var pl)
+                                ? pl
+                                : 10.0;
+                            double exH = double.TryParse(
+                                node.Params.GetValueOrDefault("percentileExcludeHigh"),
+                                System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                out var ph)
+                                ? ph
+                                : 10.0;
+                            var grayBinImg = GrayRangeBinaryPercentile(srcImg, exL, exH, out var usedLo, out var usedHi);
+                            node.Outputs["Out"] = grayBinImg;
+                            node.ResultSummary = $"gray_bin pct −{exL:0.#}%/−{exH:0.#}% → [{usedLo},{usedHi}]";
+                        }
+                        else
+                        {
+                            int grayLow = int.TryParse(node.Params.GetValueOrDefault("grayLow"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var gl) ? gl : 5;
+                            int grayHigh = int.TryParse(node.Params.GetValueOrDefault("grayHigh"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var gh) ? gh : 50;
+                            grayLow = Math.Clamp(grayLow, 0, 255);
+                            grayHigh = Math.Clamp(grayHigh, 0, 255);
+                            if (grayLow > grayHigh)
+                                (grayLow, grayHigh) = (grayHigh, grayLow);
+                            using var detector = new TrajectoryStepDetector();
+                            detector.ConvertToGrayscale(srcImg);
+                            detector.GrayRangeBinary(grayLow, grayHigh);
+                            var grayBinImg = detector.GetStepImage(2);
+                            node.Outputs["Out"] = grayBinImg;
+                            node.ResultSummary = $"gray_bin [{grayLow},{grayHigh}]";
+                        }
                         break;
                     }
 
@@ -6575,6 +7459,50 @@ namespace CalibOperatorCLI_Example
                             bin = RemoveSmallComponents(bin, minComp);
                         node.Outputs["Out"] = BinaryToCalibImage(bin);
                         node.ResultSummary = $"{op} rect {kw}x{kh} x{iterations}";
+                        break;
+                    }
+
+                    case "gray_erode_rect":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("灰度腐蚀: 缺少输入图像");
+                        int kw = int.TryParse(node.Params.GetValueOrDefault("kernelW"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var kwp) ? kwp : 5;
+                        int kh = int.TryParse(node.Params.GetValueOrDefault("kernelH"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var khp) ? khp : 5;
+                        EnsureOddKernel(ref kw);
+                        EnsureOddKernel(ref kh);
+                        int iterations = int.TryParse(node.Params.GetValueOrDefault("iterations"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var it) ? Math.Max(1, it) : 1;
+                        CalibImage cur = inImg;
+                        for (int i = 0; i < iterations; i++)
+                        {
+                            var next = GrayMorphRectCalibImage(cur, dilate: false, kh, kw);
+                            if (i > 0)
+                                cur.Dispose();
+                            cur = next;
+                        }
+                        node.Outputs["Out"] = cur;
+                        node.ResultSummary = $"gray_erode {kw}x{kh} x{iterations}";
+                        break;
+                    }
+
+                    case "gray_dilate_rect":
+                    {
+                        var inImg = inputs["In"] as CalibImage;
+                        if (inImg == null) throw new InvalidOperationException("灰度膨胀: 缺少输入图像");
+                        int kw = int.TryParse(node.Params.GetValueOrDefault("kernelW"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var kwp2) ? kwp2 : 5;
+                        int kh = int.TryParse(node.Params.GetValueOrDefault("kernelH"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var khp2) ? khp2 : 5;
+                        EnsureOddKernel(ref kw);
+                        EnsureOddKernel(ref kh);
+                        int iterations = int.TryParse(node.Params.GetValueOrDefault("iterations"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var it2) ? Math.Max(1, it2) : 1;
+                        CalibImage cur = inImg;
+                        for (int i = 0; i < iterations; i++)
+                        {
+                            var next = GrayMorphRectCalibImage(cur, dilate: true, kh, kw);
+                            if (i > 0)
+                                cur.Dispose();
+                            cur = next;
+                        }
+                        node.Outputs["Out"] = cur;
+                        node.ResultSummary = $"gray_dilate {kw}x{kh} x{iterations}";
                         break;
                     }
 
@@ -7750,6 +8678,126 @@ namespace CalibOperatorCLI_Example
                         break;
                     }
 
+                    case "save_calibration_result":
+                    {
+                        var dto = new CalibrationResultFileV1 { SchemaVersion = 1 };
+                        bool any = false;
+                        if (inputs.TryGetValue("CalibrationJson", out var cjObj) && cjObj is string cjStr && !string.IsNullOrWhiteSpace(cjStr))
+                        {
+                            dto.CalibrationJson = cjStr;
+                            any = true;
+                        }
+                        if (inputs.TryGetValue("Transform", out var affObj) && affObj is AffineTransform aff)
+                        {
+                            dto.Affine = AffineCalibrationSaveV1.From(aff);
+                            any = true;
+                        }
+                        if (inputs.TryGetValue("H", out var hObj) && hObj is HomographyTransform hh)
+                        {
+                            dto.Homography = HomographyCalibrationSaveV1.From(hh);
+                            any = true;
+                        }
+                        if (inputs.TryGetValue("Poly", out var polyObj) && polyObj is Poly2DTransform pp)
+                        {
+                            dto.Poly2d = Poly2DCalibrationSaveV1.From(pp);
+                            any = true;
+                        }
+                        if (inputs.TryGetValue("Intrinsics", out var intrObj) && intrObj is CameraIntrinsics intr)
+                        {
+                            dto.Intrinsics = IntrinsicsCalibrationSaveV1.From(intr);
+                            any = true;
+                        }
+                        if (!any)
+                            throw new InvalidOperationException("保存标定结果: 请至少连接 CalibrationJson / Transform / H / Poly / Intrinsics 之一");
+
+                        var pathParam = node.Params.GetValueOrDefault("filePath", "calibration_result.json");
+                        if (string.IsNullOrWhiteSpace(pathParam))
+                            pathParam = "calibration_result.json";
+                        var resolvedPath = System.IO.Path.IsPathRooted(pathParam)
+                            ? System.IO.Path.GetFullPath(pathParam)
+                            : System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, pathParam));
+                        var dir = System.IO.Path.GetDirectoryName(resolvedPath);
+                        if (!string.IsNullOrWhiteSpace(dir))
+                            System.IO.Directory.CreateDirectory(dir);
+
+                        string outJson = JsonSerializer.Serialize(dto, CalibrationResultFileJsonOptions);
+                        System.IO.File.WriteAllText(resolvedPath, outJson, Encoding.UTF8);
+                        node.ResultSummary = $"标定结果已保存: {System.IO.Path.GetFileName(resolvedPath)}";
+                        break;
+                    }
+
+                    case "load_calibration_result":
+                    {
+                        string configuredPath = node.Params.GetValueOrDefault("filePath", "")?.Trim() ?? "";
+                        string resolvedPath = configuredPath;
+                        if (!string.IsNullOrWhiteSpace(configuredPath) && !System.IO.Path.IsPathRooted(configuredPath))
+                            resolvedPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, configuredPath));
+
+                        if (string.IsNullOrWhiteSpace(resolvedPath))
+                        {
+                            var dlg = new OpenFileDialog
+                            {
+                                Filter = "JSON|*.json|所有文件|*.*",
+                                Title = "选择标定结果 JSON"
+                            };
+                            if (dlg.ShowDialog() != true)
+                            {
+                                node.ErrorMessage = "用户取消";
+                                break;
+                            }
+                            resolvedPath = dlg.FileName;
+                        }
+                        else if (!System.IO.File.Exists(resolvedPath))
+                            throw new System.IO.FileNotFoundException($"读取标定结果: 文件不存在: {resolvedPath}");
+
+                        string raw = System.IO.File.ReadAllText(resolvedPath, Encoding.UTF8);
+                        CalibrationResultFileV1? dto;
+                        try
+                        {
+                            dto = JsonSerializer.Deserialize<CalibrationResultFileV1>(raw, CalibrationResultFileJsonOptions);
+                        }
+                        catch (JsonException ex)
+                        {
+                            throw new InvalidOperationException($"读取标定结果: JSON 解析失败 — {ex.Message}");
+                        }
+                        if (dto == null || dto.SchemaVersion < 1)
+                            throw new InvalidOperationException("读取标定结果: 无效的 schemaVersion（需要 >= 1）");
+
+                        if (IsFlowOutputPortWired(node, "CalibrationJson"))
+                        {
+                            if (string.IsNullOrWhiteSpace(dto.CalibrationJson))
+                                throw new InvalidOperationException("读取标定结果: 文件不含 calibrationJson，请去掉该输出的连线或更换文件");
+                            node.Outputs["CalibrationJson"] = dto.CalibrationJson;
+                        }
+                        if (IsFlowOutputPortWired(node, "Transform"))
+                        {
+                            if (dto.Affine == null)
+                                throw new InvalidOperationException("读取标定结果: 文件不含 affine，请去掉 Transform 输出连线或更换文件");
+                            node.Outputs["Transform"] = dto.Affine.ToAffine();
+                        }
+                        if (IsFlowOutputPortWired(node, "H"))
+                        {
+                            if (dto.Homography == null)
+                                throw new InvalidOperationException("读取标定结果: 文件不含 homography，请去掉 H 输出连线或更换文件");
+                            node.Outputs["H"] = dto.Homography.ToHomography();
+                        }
+                        if (IsFlowOutputPortWired(node, "Poly"))
+                        {
+                            if (dto.Poly2d == null)
+                                throw new InvalidOperationException("读取标定结果: 文件不含 poly2d，请去掉 Poly 输出连线或更换文件");
+                            node.Outputs["Poly"] = dto.Poly2d.ToPoly();
+                        }
+                        if (IsFlowOutputPortWired(node, "Intrinsics"))
+                        {
+                            if (dto.Intrinsics == null)
+                                throw new InvalidOperationException("读取标定结果: 文件不含 intrinsics，请去掉 Intrinsics 输出连线或更换文件");
+                            node.Outputs["Intrinsics"] = dto.Intrinsics.ToIntrinsics();
+                        }
+
+                        node.ResultSummary = $"标定结果已加载: {System.IO.Path.GetFileName(resolvedPath)}";
+                        break;
+                    }
+
                     case "display":
                     {
                         // 显示图像到预览窗口：可选背景图 Img，Image 作为前景层，Points 透明叠加；Xld 单独叠加折线
@@ -7828,6 +8876,35 @@ namespace CalibOperatorCLI_Example
                         string t = sb.ToString();
                         node.Outputs["Text"] = t;
                         node.ResultSummary = $"{pts.Length} points";
+                        break;
+                    }
+
+                    case "polyline_simplify_dp":
+                    {
+                        var pts = inputs["In"] as Point2D[];
+                        if (pts == null || pts.Length == 0)
+                            throw new InvalidOperationException("轮廓点简化: 缺少输入点列 In");
+                        double epsilon = 2.0;
+                        if (node.Params.TryGetValue("epsilon", out var epsText) &&
+                            !string.IsNullOrWhiteSpace(epsText) &&
+                            double.TryParse(epsText.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ep))
+                            epsilon = ep;
+                        if (epsilon <= 0)
+                            epsilon = 1e-6;
+                        var closedRaw = (node.Params.GetValueOrDefault("closed", "true") ?? "true").Trim();
+                        bool closed = !string.Equals(closedRaw, "false", StringComparison.OrdinalIgnoreCase)
+                                      && !string.Equals(closedRaw, "0", StringComparison.OrdinalIgnoreCase);
+
+                        Point2D[] simplified;
+                        if (pts.Length <= 2)
+                            simplified = pts;
+                        else if (closed)
+                            simplified = SimplifyClosedPolyline(pts, epsilon);
+                        else
+                            simplified = SimplifyOpenPolyline(pts.ToList(), epsilon).ToArray();
+
+                        node.Outputs["Out"] = simplified;
+                        node.ResultSummary = $"{pts.Length} → {simplified.Length} pts, ε={epsilon:G}";
                         break;
                     }
 
@@ -8380,6 +9457,25 @@ namespace CalibOperatorCLI_Example
                     }
 #endif
 
+                    case "composite_bind_in":
+                    {
+                        if (compositeExternalInputsForBindIn == null)
+                            throw new InvalidOperationException("组合绑定入 仅用于组合算子子流程：填写父输入端口名，将 Out 连到子算子输入");
+                        string ext = node.Params.GetValueOrDefault("externalPort", "In")?.Trim() ?? "In";
+                        compositeExternalInputsForBindIn.TryGetValue(ext, out var v);
+                        node.Outputs["Out"] = v;
+                        node.ResultSummary = $"{ext}→子图";
+                        break;
+                    }
+
+                    case "composite_bind_out":
+                    {
+                        node.Outputs["Out"] = inputs.GetValueOrDefault("In");
+                        string ext = node.Params.GetValueOrDefault("externalPort", "Out")?.Trim() ?? "Out";
+                        node.ResultSummary = $"子图→{ext}";
+                        break;
+                    }
+
                     case "composite":
                     {
                         ExecuteCompositeSubFlow(node, inputs);
@@ -8572,6 +9668,7 @@ namespace CalibOperatorCLI_Example
 
             btnOk.Click += (_, _) =>
             {
+                PushFlowUndoSnapshotBeforeChange();
                 for (int i = 0; i < node.Def.Params.Count; i++)
                 {
                     string value = inputs[i] switch
@@ -8582,6 +9679,8 @@ namespace CalibOperatorCLI_Example
                     };
                     node.Params[node.Def.Params[i].Name] = value;
                 }
+                if (node.Def.TypeId == "composite")
+                    RefreshCompositeNodeCaption(node);
                 win.DialogResult = true;
                 win.Close();
             };
@@ -8734,7 +9833,7 @@ namespace CalibOperatorCLI_Example
 
         /// <summary>
         /// 显示图像预览窗口，支持缩放和平移，可选叠加点位
-        /// 滚轮缩放；右键按住拖拽平移（轻微移动仍可弹出菜单）；右键菜单或 F 适应窗口，1 重置100%
+        /// 滚轮缩放；右键按住拖拽平移（轻微移动仍可弹出菜单）；右键菜单「保存图像」或 F 适应窗口，1 重置100%
         /// </summary>
         /// <param name="previewSlotKey">每个槽位独立窗口；默认 <see cref="LivePreviewSingletonSlotKey"/> 供连线预览等共用。</param>
         /// <param name="titlePrefix">窗口标题前缀（例如「显示图像 [节点短Guid]」）；空则用默认「图像预览」。</param>
@@ -8932,6 +10031,47 @@ namespace CalibOperatorCLI_Example
                 };
                 previewContextMenu.Items.Add(miFit);
                 previewContextMenu.Items.Add(mi100);
+                previewContextMenu.Items.Add(new Separator());
+                var miSave = new MenuItem { Header = "保存图像..." };
+                miSave.Click += (_, _) =>
+                {
+                    if (imageCtrl.Source is not System.Windows.Media.Imaging.BitmapSource bs)
+                        return;
+                    var dlg = new SaveFileDialog
+                    {
+                        Title = "保存预览图像",
+                        Filter = "PNG 图像|*.png|JPEG 图像|*.jpg;*.jpeg|BMP 图像|*.bmp",
+                        DefaultExt = ".png",
+                        FileName = "preview.png"
+                    };
+                    if (dlg.ShowDialog() != true) return;
+                    try
+                    {
+                        System.Windows.Media.Imaging.BitmapEncoder enc;
+                        string ext = System.IO.Path.GetExtension(dlg.FileName).ToLowerInvariant();
+                        switch (ext)
+                        {
+                            case ".jpg":
+                            case ".jpeg":
+                                enc = new System.Windows.Media.Imaging.JpegBitmapEncoder();
+                                break;
+                            case ".bmp":
+                                enc = new System.Windows.Media.Imaging.BmpBitmapEncoder();
+                                break;
+                            default:
+                                enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                                break;
+                        }
+                        enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bs));
+                        using (var fs = System.IO.File.Create(dlg.FileName))
+                            enc.Save(fs);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"保存失败: {ex.Message}", "图像预览", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                };
+                previewContextMenu.Items.Add(miSave);
                 border.ContextMenu = previewContextMenu;
 
                 // ---- 鼠标滚轮缩放（以鼠标位置为中心） ----

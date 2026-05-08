@@ -1,11 +1,17 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 
 namespace CalibOperatorCLI_Example
 {
     public partial class App : Application
     {
+        private const uint AttachParentProcess = 0xFFFFFFFFu;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool AttachConsole(uint dwProcessId);
+
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
@@ -15,6 +21,9 @@ namespace CalibOperatorCLI_Example
             string? flowPath = TryParseFlowPathArg(e.Args);
             if (!string.IsNullOrWhiteSpace(flowPath))
             {
+                // 从终端启动时可挂上父控制台，便于看到简要结果（WinExe 默认无控制台）
+                try { AttachConsole(AttachParentProcess); } catch { /* ignore */ }
+
                 // 后台自动执行模式：隐藏窗口，执行完成后以退出码返回结果
                 mainWindow.WindowState = WindowState.Minimized;
                 mainWindow.ShowInTaskbar = false;
@@ -28,15 +37,30 @@ namespace CalibOperatorCLI_Example
                     }
                     catch (Exception ex)
                     {
-                        Console.Error.WriteLine($"[FlowRunner] {ex.Message}");
+                        TryConsoleError($"[FlowRunner] {ex.Message}");
                         if (ex.InnerException != null)
-                            Console.Error.WriteLine($"[FlowRunner] Inner: {ex.InnerException}");
+                            TryConsoleError($"[FlowRunner] Inner: {ex.InnerException}");
                     }
 
                     Environment.ExitCode = ok ? 0 : 1;
+                    TryConsoleLine(ok
+                        ? "[FlowRunner] 成功 (exit 0)"
+                        : "[FlowRunner] 失败 (exit 1)：常见原因 — load_image 路径不存在、中间算子报错；错误详情见 FlowPage 日志（启用 MirrorErrorsToStderr 时已写入 stderr）。");
                     Shutdown();
                 }), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             }
+        }
+
+        private static void TryConsoleLine(string msg)
+        {
+            try { Console.WriteLine(msg); }
+            catch { /* ignore */ }
+        }
+
+        private static void TryConsoleError(string msg)
+        {
+            try { Console.Error.WriteLine(msg); }
+            catch { /* ignore */ }
         }
 
         private static string? TryParseFlowPathArg(string[] args)
