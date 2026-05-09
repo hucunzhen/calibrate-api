@@ -2351,8 +2351,6 @@ namespace CalibOperatorCLI_Example
         private ModbusTcpNet? _flowPlc;
         private bool _flowPlcConnected;
 
-        private int _nodeCounter;
-
         private const int MaxFlowUndoSteps = 80;
         private static readonly JsonSerializerOptions FlowSnapshotJsonOptions = new JsonSerializerOptions { WriteIndented = false };
 
@@ -3562,8 +3560,6 @@ namespace CalibOperatorCLI_Example
                     FlowCanvas.Children.Remove(node.Visual);
             }
             _nodes.Clear();
-
-            _nodeCounter = 0;
         }
 
         private void PopulateCanvasFromFlowData(FlowData data)
