@@ -9,12 +9,6 @@
     <DockPanel>
         <Border DockPanel.Dock="Top" Background="{StaticResource NavBarBrush}" Padding="0">
             <StackPanel Orientation="Horizontal">
-                <Button x:Name="NavCalibration" Content="标定" Style="{StaticResource NavTabButtonStyle}"
-                        Click="NavCalibration_Click"
-                        AutomationProperties.Name="标定"/>
-                <Button x:Name="NavTrajectory" Content="轨迹检测" Style="{StaticResource NavTabButtonStyle}"
-                        Click="NavTrajectory_Click"
-                        AutomationProperties.Name="轨迹检测"/>
                 <Button x:Name="NavPlc" Content="PLC" Style="{StaticResource NavTabButtonStyle}"
                         Click="NavPlc_Click"
                         AutomationProperties.Name="PLC"/>

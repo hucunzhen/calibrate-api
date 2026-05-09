@@ -506,14 +506,17 @@ namespace CalibOperatorCLI_Example
         {
             if (GetTrajectoryResult == null)
             {
-                MessageBox.Show("未连接轨迹检测模块，请联系开发人员检查初始化代码。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(
+                    "未注入轨迹数据源。「标定 / 轨迹检测」独立页面已移除；请通过 MainWindow 注入 GetTrajectoryResult，或使用组态导出轨迹后再配置 GVAR。",
+                    "无法导入轨迹", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
             var trajResult = GetTrajectoryResult();
             if (trajResult == null || !trajResult.Success || trajResult.Points == null || trajResult.Count == 0)
             {
-                MessageBox.Show("当前没有可用的轨迹检测结果。\n请先在「轨迹检测」页面完成检测（Step10 或 AutoDetect）。",
+                MessageBox.Show(
+                    "当前没有可用的轨迹检测结果。\n请在组态中运行含轨迹输出的流程，或通过代码注入 TrajectoryResult。",
                     "无轨迹数据", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }

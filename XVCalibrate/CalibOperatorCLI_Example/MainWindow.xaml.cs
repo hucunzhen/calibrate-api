@@ -10,36 +10,26 @@ namespace CalibOperatorCLI_Example
     public partial class MainWindow : Window
     {
         private const string LastFlowFileName = "last_flow_path.txt";
-        private CalibrationPage _calibrationPage;
-        private TrajectoryPage _trajectoryPage;
         private PlcPage _plcPage;
         private HistogramPage _histogramPage;
         private FlowHostPage _flowHostPage;
         private YoloSegTrainPage _yoloSegTrainPage;
         private SamTrainPage _samTrainPage;
 
-        /// <summary>
-        /// 全局相机服务实例
-        /// </summary>
-        public static CameraService? Camera { get; private set; }
-
         public MainWindow()
         {
             InitializeComponent();
 
-            // 初始化海康 SDK
+            // 海康 SDK：进程级初始化一次（组态 camera_loop 等会创建独立 CameraService）
             try
             {
                 CameraService.InitializeSDK();
-                Camera = new CameraService();
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"相机 SDK 初始化失败: {ex.Message}", "警告", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
 
-            _calibrationPage = new CalibrationPage();
-            _trajectoryPage = new TrajectoryPage();
             _plcPage = new PlcPage();
             _histogramPage = new HistogramPage();
             _flowHostPage = new FlowHostPage();
@@ -47,22 +37,15 @@ namespace CalibOperatorCLI_Example
             _yoloSegTrainPage = new YoloSegTrainPage();
             _samTrainPage = new SamTrainPage();
 
-            // 将轨迹检测结果获取委托注入 PlcPage，使其可访问最新轨迹
-            _plcPage.GetTrajectoryResult = () => _trajectoryPage.LastResult;
-
-            // 默认显示标定页
-            NavigateTo(_calibrationPage);
-            HighlightTab("Calibration");
+            NavigateTo(_flowHostPage);
+            HighlightTab("Flow");
+            TryAutoLoadLastFlowOnFlowPageSwitch();
         }
 
         protected override void OnClosed(EventArgs e)
         {
             base.OnClosed(e);
-
-            // 释放相机资源 + 反初始化 SDK
-            Camera?.Dispose();
-            Camera = null;
-            CameraService.FinalizeSDK();
+            try { CameraService.FinalizeSDK(); } catch { /* ignored */ }
         }
 
         private void NavigateTo(Page page)
@@ -72,9 +55,6 @@ namespace CalibOperatorCLI_Example
 
         private void HighlightTab(string tab)
         {
-            // Reset all tabs
-            NavCalibration.Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
-            NavTrajectory.Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
             NavPlc.Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
             NavHistogram.Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
             NavFlow.Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
@@ -83,12 +63,6 @@ namespace CalibOperatorCLI_Example
 
             switch (tab)
             {
-                case "Calibration":
-                    NavCalibration.Background = new SolidColorBrush(Color.FromRgb(0x00, 0x7A, 0xCC));
-                    break;
-                case "Trajectory":
-                    NavTrajectory.Background = new SolidColorBrush(Color.FromRgb(0x00, 0x7A, 0xCC));
-                    break;
                 case "Plc":
                     NavPlc.Background = new SolidColorBrush(Color.FromRgb(0x00, 0x7A, 0xCC));
                     break;
@@ -105,18 +79,6 @@ namespace CalibOperatorCLI_Example
                     NavSamOnnx.Background = new SolidColorBrush(Color.FromRgb(0x00, 0x7A, 0xCC));
                     break;
             }
-        }
-
-        private void NavCalibration_Click(object sender, RoutedEventArgs e)
-        {
-            NavigateTo(_calibrationPage);
-            HighlightTab("Calibration");
-        }
-
-        private void NavTrajectory_Click(object sender, RoutedEventArgs e)
-        {
-            NavigateTo(_trajectoryPage);
-            HighlightTab("Trajectory");
         }
 
         private void NavPlc_Click(object sender, RoutedEventArgs e)
@@ -171,8 +133,6 @@ namespace CalibOperatorCLI_Example
             fp.TraceEnginePathToConsole = true;
             try
             {
-                // 默认 false：与组态页「执行全部」一致走托管引擎（算子集、端口名与界面一致）。
-                // CLI 传入 --prefer-native-engine 时为 true：优先 C++ NativeFlowEngine，失败仍回退托管。
                 return await fp.RunAllAsync(clearLog: true, preferNativeEngine: preferNativeEngine);
             }
             finally
