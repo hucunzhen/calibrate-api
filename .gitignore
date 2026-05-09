@@ -20,6 +20,7 @@ debug_autotest.log
 *_log.txt
 *_output.txt
 build_output.txt
+build_out.txt
 build_log.txt
 compile_log.txt
 diagnostic_output.txt

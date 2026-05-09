@@ -197,7 +197,6 @@
                     <Button x:Name="BtnClearGvar" Content="Clear" Width="55" Height="26" Margin="0,0,4,0" Click="BtnClearGvar_Click" Foreground="#D32F2F"/>
                     <Button x:Name="BtnAddGvar" Content="+" Width="26" Height="26" Margin="0,0,4,0" Click="BtnAddGvar_Click" FontWeight="Bold" FontSize="14"/>
                     <Button x:Name="BtnRemoveGvar" Content="-" Width="26" Height="26" Margin="0,0,8,0" Click="BtnRemoveGvar_Click" FontWeight="Bold" FontSize="14" Foreground="#D32F2F"/>
-                    <Button x:Name="BtnImportTrajectoryToGvar" Content="导入轨迹" Width="75" Height="26" Margin="0,0,0,0" Click="BtnImportTrajectoryToGvar_Click" Foreground="#7B1FA2" FontWeight="Bold" ToolTip="将轨迹检测结果导入为 GVAR 直线段列表（需先在轨迹页完成检测）"/>
                 </StackPanel>
                 <DataGrid x:Name="DgGvarList"
                           AutoGenerateColumns="False"

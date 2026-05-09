@@ -93,11 +93,21 @@
                     BorderThickness="0,0,0,1">
                 <WrapPanel Orientation="Horizontal">
                     <Button Style="{StaticResource FlowToolbarPrimaryBtnStyle}"
-                            ToolTip="全部运行 (F5)" Click="RunAll_Click"
+                            ToolTip="全部运行 (F5)，托管引擎逐节点执行（便于连线查看端口数据）" Click="RunAll_Click"
                             AutomationProperties.Name="全部运行">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE768;" FontSize="14" VerticalAlignment="Center"/>
                             <TextBlock Text="运行" Foreground="White" Margin="6,0,0,0" VerticalAlignment="Center" FontSize="12"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource FlowToolbarPrimaryBtnStyle}"
+                            Margin="4,0,0,4"
+                            ToolTip="Native 运行：优先使用 C++ NativeFlowEngine；失败则自动回退托管执行"
+                            Click="RunAllNative_Click"
+                            AutomationProperties.Name="Native 运行">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE9F5;" FontSize="14" VerticalAlignment="Center"/>
+                            <TextBlock Text="Native" Foreground="#9CDCFE" Margin="6,0,0,0" VerticalAlignment="Center" FontSize="12"/>
                         </StackPanel>
                     </Button>
                     <Button x:Name="StopRunButton" Style="{StaticResource FlowToolbarPrimaryBtnStyle}"
@@ -169,8 +179,8 @@
                 </WrapPanel>
             </Border>
 
-            <!-- 画布（右下角快捷键提示） -->
-            <Grid Grid.Row="1">
+            <!-- 画布（右下角快捷键提示）；裁剪变换溢出，避免露出外层固定底色 -->
+            <Grid Grid.Row="1" ClipToBounds="True" Background="#1E1E1E">
                 <Canvas x:Name="FlowCanvas" Background="#1E1E1E"
                         AllowDrop="True"
                         DragOver="FlowCanvas_DragOver"

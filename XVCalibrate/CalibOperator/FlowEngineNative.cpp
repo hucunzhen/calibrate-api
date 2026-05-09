@@ -72,6 +72,22 @@ static std::string TrimFlowToken(std::string s) {
     return s;
 }
 
+static bool PathLessInsensitive(const std::string& a, const std::string& b) {
+#if defined(_WIN32)
+    return _stricmp(a.c_str(), b.c_str()) < 0;
+#else
+    return a < b;
+#endif
+}
+
+static bool PathEqInsensitive(const std::string& a, const std::string& b) {
+#if defined(_WIN32)
+    return _stricmp(a.c_str(), b.c_str()) == 0;
+#else
+    return a == b;
+#endif
+}
+
 /// 二进制读入标定 JSON；去掉 UTF-8 BOM / 前导空白，避免 OpenCV FileStorage 报 “left-brace of top level is missing”。
 static bool ReadCalibrationJsonFileForOpenCv(const std::string& path, std::string& utf8Json, std::string& err) {
     std::ifstream ifs(path, std::ios::binary);
@@ -835,9 +851,205 @@ static std::vector<std::string> TopoSort(NativeFlowEngineImpl* e) {
     return order;
 }
 
+/// 从 rootId 沿连线正向可达的节点集合（含自身）。
+static std::unordered_set<std::string> DownstreamIdsFrom(const NativeFlowEngineImpl* e, const std::string& rootId) {
+    std::unordered_set<std::string> seen;
+    std::queue<std::string> q;
+    seen.insert(rootId);
+    q.push(rootId);
+    while (!q.empty()) {
+        std::string id = q.front();
+        q.pop();
+        for (const auto& c : e->conns) {
+            if (c.fromNodeId != id) continue;
+            if (seen.insert(c.toNodeId).second)
+                q.push(c.toNodeId);
+        }
+    }
+    return seen;
+}
+
+static std::string GlobSuffixFromToken(std::string tok) {
+    tok = TrimFlowToken(tok);
+    if (tok.empty()) return "";
+    if (tok.size() >= 2 && tok[0] == '*' && tok[1] == '.') return tok;
+    if (!tok.empty() && tok[0] == '.') return "*" + tok;
+    return "*." + tok;
+}
+
+static void CollectImagePathsFromDir(const std::string& dir, const std::string& extSpec, std::vector<std::string>& paths) {
+    paths.clear();
+    std::stringstream ss(extSpec);
+    std::string rawTok;
+    while (std::getline(ss, rawTok, ';')) {
+        std::string suf = GlobSuffixFromToken(rawTok);
+        if (suf.empty()) continue;
+        std::string globPat = dir;
+        if (!globPat.empty()) {
+            char last = globPat.back();
+            if (last != '\\' && last != '/') globPat += '\\';
+        }
+        globPat += suf;
+        std::vector<cv::String> cvpaths;
+        cv::glob(globPat, cvpaths, false);
+        for (const auto& p : cvpaths) paths.emplace_back(std::string(p));
+    }
+    std::sort(paths.begin(), paths.end(), PathLessInsensitive);
+    paths.erase(std::unique(paths.begin(), paths.end(), PathEqInsensitive), paths.end());
+}
+
+static bool FillLoadImageDirOutputsForPath(NativeFlowEngineImpl* e, const NodeDef& n, const std::string& path, int totalCount,
+    std::string& err) {
+    cv::Mat img = cv::imread(path, cv::IMREAD_UNCHANGED);
+    if (img.empty()) {
+        err = "failed to read " + path;
+        return false;
+    }
+    auto& out = e->outputs[n.id];
+    out.clear();
+    out["Image"] = MakeImage(img.channels() == 1 ? img : EnsureBgr(img));
+    Value cnt;
+    cnt.kind = Value::Kind::Int;
+    cnt.i = totalCount;
+    out["Count"] = cnt;
+    Value vp;
+    vp.kind = Value::Kind::String;
+    vp.str = path;
+    out["Path"] = vp;
+    return true;
+}
+
+static bool HasCameraLoopPerFrame(const NativeFlowEngineImpl* e) {
+    for (const auto& n : e->nodes) {
+        if (n.type != "camera_loop") continue;
+        std::string m = TrimFlowToken(NodeParam(n, "mode", "last_only"));
+        for (char& ch : m) ch = (char)std::tolower((unsigned char)ch);
+        if (m == "per_frame") return true;
+    }
+    return false;
+}
+
+/// 解析唯一的 load_image_dir(mode=each)；多个 each 返回 false 并写 err。
+static bool ResolveLoadImageDirEachLoopId(const NativeFlowEngineImpl* e, std::string& outLoopId, std::string& err) {
+    outLoopId.clear();
+    err.clear();
+    for (const auto& n : e->nodes) {
+        if (n.type != "load_image_dir") continue;
+        std::string mode = TrimFlowToken(NodeParam(n, "mode", "each"));
+        for (char& ch : mode) ch = (char)std::tolower((unsigned char)ch);
+        if (mode != "each") continue;
+        if (!outLoopId.empty()) {
+            err = "load_image_dir: multiple mode=each not supported";
+            return false;
+        }
+        outLoopId = n.id;
+    }
+    return true;
+}
+
 static const NodeDef* FindNode(const NativeFlowEngineImpl* e, const std::string& id) {
     for (const auto& n : e->nodes) if (n.id == id) return &n;
     return nullptr;
+}
+
+static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& err);
+
+static bool RunLoadImageDirEach(NativeFlowEngineImpl* e, const std::string& loopId, NativeFlowRunResult& rr) {
+    const NodeDef* loopNode = FindNode(e, loopId);
+    if (!loopNode) {
+        e->lastError = "load_image_dir: loop node not found";
+        rr.executedNodes = 0;
+        rr.success = 0;
+        return false;
+    }
+
+    auto down = DownstreamIdsFrom(e, loopId);
+    auto order = TopoSort(e);
+    int executed = 0;
+
+    for (const auto& id : order) {
+        if (down.count(id)) continue;
+        const NodeDef* n = FindNode(e, id);
+        if (!n) continue;
+        std::string err;
+        if (!ExecuteNode(e, *n, err)) {
+            e->nodeErrors[id] = err;
+            e->lastError = n->type + ": " + err;
+            rr.executedNodes = executed;
+            rr.success = 0;
+            return false;
+        }
+        executed++;
+    }
+
+    std::string dir = TrimFlowToken(NodeParam(*loopNode, "directory", ""));
+    if (dir.empty()) {
+        e->lastError = "load_image_dir: directory empty";
+        rr.executedNodes = executed;
+        rr.success = 0;
+        return false;
+    }
+
+    std::vector<std::string> paths;
+    CollectImagePathsFromDir(dir, NodeParam(*loopNode, "extensions", ".bmp;.png;.jpg;.jpeg;.tif;.tiff"), paths);
+    if (paths.empty()) {
+        e->lastError = "load_image_dir: no matching images in " + dir;
+        rr.executedNodes = executed;
+        rr.success = 0;
+        return false;
+    }
+
+    int okImages = 0;
+    for (size_t ii = 0; ii < paths.size(); ii++) {
+        std::string ferr;
+        if (!FillLoadImageDirOutputsForPath(e, *loopNode, paths[ii], (int)paths.size(), ferr)) {
+            std::fprintf(stderr, "[FlowNative] skip image %s: %s\n", paths[ii].c_str(), ferr.c_str());
+            continue;
+        }
+        okImages++;
+        for (const auto& id : order) {
+            if (!down.count(id) || id == loopId) continue;
+            const NodeDef* n = FindNode(e, id);
+            if (!n) continue;
+            std::string err;
+            if (!ExecuteNode(e, *n, err)) {
+                e->nodeErrors[id] = err;
+                e->lastError = n->type + ": " + err;
+                rr.executedNodes = executed;
+                rr.success = 0;
+                return false;
+            }
+            executed++;
+        }
+    }
+
+    if (okImages <= 0) {
+        e->lastError = "load_image_dir: could not decode any image";
+        rr.executedNodes = executed;
+        rr.success = 0;
+        return false;
+    }
+
+    rr.executedNodes = rr.totalNodes;
+    rr.success = 1;
+    return true;
+}
+
+static void FinalizeFlowRunReport(NativeFlowEngineImpl* e, NativeFlowRunResult& rr) {
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"success\":" << (rr.success ? "true" : "false") << ",";
+    oss << "\"executedNodes\":" << rr.executedNodes << ",";
+    oss << "\"totalNodes\":" << rr.totalNodes << ",";
+    oss << "\"error\":\"";
+    for (char ch : e->lastError) {
+        if (ch == '\"') oss << "\\\"";
+        else if (ch == '\\') oss << "\\\\";
+        else if (ch == '\n') oss << "\\n";
+        else oss << ch;
+    }
+    oss << "\"}";
+    e->lastReportJson = oss.str();
 }
 
 static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& err) {
@@ -850,6 +1062,39 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         cv::Mat img = cv::imread(path, cv::IMREAD_UNCHANGED);
         if (img.empty()) { err = "load_image: failed to read " + path; return false; }
         out["Image"] = MakeImage(img.channels() == 1 ? img : EnsureBgr(img));
+        return true;
+    }
+    if (n.type == "load_image_dir") {
+        std::string mode = TrimFlowToken(NodeParam(n, "mode", "each"));
+        for (char& c : mode) c = (char)std::tolower((unsigned char)c);
+        if (mode == "each") {
+            err = "internal: mode each is executed by FlowEngine_Run (not a single ExecuteNode step)";
+            return false;
+        }
+
+        std::string dir = TrimFlowToken(NodeParam(n, "directory", ""));
+        if (dir.empty()) { err = "load_image_dir: directory empty"; return false; }
+        std::string extSpec = NodeParam(n, "extensions", ".bmp;.png;.jpg;.jpeg;.tif;.tiff");
+        int idx = ToInt(NodeParam(n, "index", "0"), 0);
+
+        std::vector<std::string> paths;
+        CollectImagePathsFromDir(dir, extSpec, paths);
+
+        if (paths.empty()) { err = "load_image_dir: no matching images in " + dir; return false; }
+        if (idx < 0) idx = 0;
+        if (idx >= (int)paths.size()) idx = (int)paths.size() - 1;
+
+        cv::Mat img = cv::imread(paths[(size_t)idx], cv::IMREAD_UNCHANGED);
+        if (img.empty()) { err = "load_image_dir: failed to read " + paths[(size_t)idx]; return false; }
+        out["Image"] = MakeImage(img.channels() == 1 ? img : EnsureBgr(img));
+        Value cnt;
+        cnt.kind = Value::Kind::Int;
+        cnt.i = (int)paths.size();
+        out["Count"] = cnt;
+        Value vp;
+        vp.kind = Value::Kind::String;
+        vp.str = paths[(size_t)idx];
+        out["Path"] = vp;
         return true;
     }
     if (n.type == "grayscale") {
@@ -1630,8 +1875,15 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
     }
     if (n.type == "polyline_simplify_dp") {
         Value ptsIn = InputOf(e, n.id, "In");
-        if (ptsIn.kind != Value::Kind::Points) { err = "polyline_simplify_dp: missing In"; return false; }
-        if (ptsIn.points.empty()) { err = "polyline_simplify_dp: empty Points"; return false; }
+        // err 勿再加算子名前缀：调用方会写入 lastError = type + ": " + err
+        if (ptsIn.kind != Value::Kind::Points) { err = "missing In (need Points)"; return false; }
+        if (ptsIn.points.empty()) {
+            Value vout;
+            vout.kind = Value::Kind::Points;
+            vout.points.clear();
+            out["Out"] = vout;
+            return true;
+        }
         double eps = ToDouble(NodeParam(n, "epsilon", "2.0"), 2.0);
         if (eps <= 0) eps = 1e-6;
         std::string closedStr = NodeParam(n, "closed", "true");
@@ -1932,6 +2184,29 @@ NativeFlowRunResult FlowEngine_Run(NativeFlowEngineHandle handle) {
     e->lastError.clear();
     rr.totalNodes = (int)e->nodes.size();
 
+    std::string dirEachId;
+    std::string resolveErr;
+    if (!ResolveLoadImageDirEachLoopId(e, dirEachId, resolveErr)) {
+        e->lastError = resolveErr;
+        rr.success = 0;
+        rr.executedNodes = 0;
+        FinalizeFlowRunReport(e, rr);
+        return rr;
+    }
+
+    if (!dirEachId.empty()) {
+        if (HasCameraLoopPerFrame(e)) {
+            e->lastError = "load_image_dir(each) cannot be used with camera_loop(per_frame)";
+            rr.success = 0;
+            rr.executedNodes = 0;
+            FinalizeFlowRunReport(e, rr);
+            return rr;
+        }
+        RunLoadImageDirEach(e, dirEachId, rr);
+        FinalizeFlowRunReport(e, rr);
+        return rr;
+    }
+
     auto order = TopoSort(e);
     for (const auto& id : order) {
         const NodeDef* n = FindNode(e, id);
@@ -1952,20 +2227,7 @@ NativeFlowRunResult FlowEngine_Run(NativeFlowEngineHandle handle) {
     }
     rr.success = rr.executedNodes == rr.totalNodes ? 1 : 0;
 
-    std::ostringstream oss;
-    oss << "{";
-    oss << "\"success\":" << (rr.success ? "true" : "false") << ",";
-    oss << "\"executedNodes\":" << rr.executedNodes << ",";
-    oss << "\"totalNodes\":" << rr.totalNodes << ",";
-    oss << "\"error\":\"";
-    for (char ch : e->lastError) {
-        if (ch == '\"') oss << "\\\"";
-        else if (ch == '\\') oss << "\\\\";
-        else if (ch == '\n') oss << "\\n";
-        else oss << ch;
-    }
-    oss << "\"}";
-    e->lastReportJson = oss.str();
+    FinalizeFlowRunReport(e, rr);
     return rr;
 }
 

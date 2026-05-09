@@ -7,7 +7,6 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using System.Text.Json;
-using CalibOperatorPInvoke;
 using HslCommunication.ModBus;
 
 namespace CalibOperatorCLI_Example
@@ -22,11 +21,6 @@ namespace CalibOperatorCLI_Example
         private PlcConfig? _config;
 
         private int HdModbusOffset => _config?.HdModbusOffset ?? 0xA080;
-
-        /// <summary>
-        /// 由 MainWindow 注入：获取轨迹检测最新结果的委托
-        /// </summary>
-        public Func<TrajectoryResult?>? GetTrajectoryResult { get; set; }
 
         public PlcPage()
         {
@@ -496,55 +490,6 @@ namespace CalibOperatorCLI_Example
                 DgGvarList.ItemsSource = items;
                 Log($"[PLC] 已删除第 {selected.Index} 条 GVAR");
             }
-        }
-
-        /// <summary>
-        /// 将轨迹检测得到的点序列转换为 GVAR 直线段列表，并刷新 DataGrid
-        /// 每两个相邻轨迹点构成一条 GVAR 线段（type1=0，p0/p1 填 x/y，z=0，圆弧参数置零）
-        /// </summary>
-        private void BtnImportTrajectoryToGvar_Click(object sender, RoutedEventArgs e)
-        {
-            if (GetTrajectoryResult == null)
-            {
-                MessageBox.Show(
-                    "未注入轨迹数据源。「标定 / 轨迹检测」独立页面已移除；请通过 MainWindow 注入 GetTrajectoryResult，或使用组态导出轨迹后再配置 GVAR。",
-                    "无法导入轨迹", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-
-            var trajResult = GetTrajectoryResult();
-            if (trajResult == null || !trajResult.Success || trajResult.Points == null || trajResult.Count == 0)
-            {
-                MessageBox.Show(
-                    "当前没有可用的轨迹检测结果。\n请在组态中运行含轨迹输出的流程，或通过代码注入 TrajectoryResult。",
-                    "无轨迹数据", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            var pts = trajResult.Points;
-            int n = trajResult.Count;
-
-            // 每两个相邻点构成一条直线段 GVAR（type1 = 0）
-            // 最后一段：n-1 → 0（闭合）
-            var gvarList = new List<GVAR>();
-            for (int i = 0; i < n; i++)
-            {
-                var p0 = pts[i];
-                var p1 = pts[(i + 1) % n];
-                gvarList.Add(new GVAR
-                {
-                    type1 = 0,
-                    spVec3_p0 = new SpVec3((float)p0.X, (float)p0.Y, 0f),
-                    spVec3_p1 = new SpVec3((float)p1.X, (float)p1.Y, 0f),
-                    cx = 0f, cy = 0f, r = 0f,
-                    start_deg = 0f, end_deg = 0f,
-                    z0 = 0f, z1 = 0f
-                });
-            }
-
-            _gvarList = gvarList.ToArray();
-            RefreshGvarGrid();
-            Log($"[PLC] 已从轨迹导入 {gvarList.Count} 条 GVAR 直线段（{n} 个轨迹点）");
         }
 
         private DispatcherTimer? _holdTimer;

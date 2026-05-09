@@ -113,6 +113,51 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "load_image_dir",
+                DisplayName = "加载图像目录",
+                Description = "扫描目录下图像（非递归），按文件名排序；each=运行流程时对每张图各驱动下游执行一遍；single=始终只加载序号所指的一张",
+                Category = "输入",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "mode",
+                        DisplayName = "模式",
+                        DefaultValue = "each",
+                        Description = "each=「运行」时对目录内每张图像循环执行下游（托管与 Native 均支持）；single=仅加载一张",
+                        Options = new List<string> { "each", "single" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "directory",
+                        DisplayName = "目录路径",
+                        DefaultValue = "",
+                        Description = "托管执行：相对 exe 目录；Native：建议绝对路径（与 load_image 一致）。留空时在界面线程弹出选文件夹"
+                    },
+                    new OperatorParam
+                    {
+                        Name = "extensions",
+                        DisplayName = "扩展名",
+                        DefaultValue = ".bmp;.png;.jpg;.jpeg;.tif;.tiff",
+                        Description = "分号分隔；可写 .png 或 png；也可用 *.png"
+                    },
+                    new OperatorParam
+                    {
+                        Name = "index",
+                        DisplayName = "序号",
+                        DefaultValue = "0",
+                        Description = "single 模式或单节点调试时：排序后的文件索引（从 0 起）；each 模式下「运行」时忽略此项"
+                    }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Image", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Count", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#607D8B" },
+                    new PortDef { Name = "Path", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#9CCC65" }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "jit_sample",
                 DisplayName = "JiT采样",
                 Description =
@@ -1146,7 +1191,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "polyline_simplify_dp",
                 DisplayName = "轮廓点简化",
-                Description = "对有序采样点列做 Douglas–Peucker 多边形近似：在最大偏差 ε（像素）内用更少顶点保持形状。closed=true 时视为闭合轮廓（如沿边界等弧长采样）；false 时为开折线。",
+                Description = "对有序采样点列做 Douglas–Peucker 多边形近似：在最大偏差 ε（像素）内用更少顶点保持形状。closed=true 时视为闭合轮廓（如沿边界等弧长采样）；false 时为开折线。若 In 为 0 个点则跳过（Out 输出空点列，不报错）。",
                 Category = "预处理",
                 Params =
                 {
@@ -2367,6 +2412,8 @@ namespace CalibOperatorCLI_Example
             InitializeToolbox();
             _canvasTransform.Children.Add(_canvasScale);
             _canvasTransform.Children.Add(_canvasTranslate);
+            // 与 Scale→Translate 的增量公式一致；默认中心原点会导致缩放偏移并露出外层背景
+            FlowCanvas.RenderTransformOrigin = new Point(0, 0);
             FlowCanvas.RenderTransform = _canvasTransform;
             if (StopRunButton != null) StopRunButton.IsEnabled = false;
             RefreshFlowUndoRedoButtons();
@@ -2392,10 +2439,19 @@ namespace CalibOperatorCLI_Example
         /// </summary>
         private static bool ExecuteNodeRequiresUiDispatcher(FlowNode node)
         {
-            if (node.Def.TypeId != "load_image")
-                return false;
-            string configuredPath = node.Params.GetValueOrDefault("filePath", "")?.Trim() ?? "";
-            return string.IsNullOrWhiteSpace(configuredPath);
+            if (node.Def.TypeId == "load_image")
+            {
+                string configuredPath = node.Params.GetValueOrDefault("filePath", "")?.Trim() ?? "";
+                return string.IsNullOrWhiteSpace(configuredPath);
+            }
+
+            if (node.Def.TypeId == "load_image_dir")
+            {
+                string configuredDir = node.Params.GetValueOrDefault("directory", "")?.Trim() ?? "";
+                return string.IsNullOrWhiteSpace(configuredDir);
+            }
+
+            return false;
         }
 
         private async System.Threading.Tasks.Task ExecuteNodeForRunAsync(FlowNode node, string? timingScope = null)
@@ -2607,7 +2663,10 @@ namespace CalibOperatorCLI_Example
             var menuParams = new MenuItem { Header = "参数设置" };
             menuParams.Click += (s, e) => EditNodeParams(node);
 
-            border.ContextMenu = new ContextMenu { Items = { menuCopy, menuPaste, new Separator(), menuParams, menuDelete } };
+            var menuRunTo = new MenuItem { Header = "执行到此节点（含上游）" };
+            menuRunTo.Click += (_, _) => { _ = RunUpstreamToNodeAsync(node); };
+
+            border.ContextMenu = new ContextMenu { Items = { menuCopy, menuPaste, new Separator(), menuParams, menuRunTo, menuDelete } };
 
             var panel = new StackPanel();
 
@@ -3167,15 +3226,15 @@ namespace CalibOperatorCLI_Example
             double newScale = Math.Max(0.2, Math.Min(5.0, _canvasScale.ScaleX * factor));
             if (Math.Abs(newScale - _canvasScale.ScaleX) < 1e-9) return;
 
-            // 以鼠标位置为缩放中心，保持指针下内容不跳动
-            var p = e.GetPosition(this);
-            double worldX = (p.X - _canvasTranslate.X) / _canvasScale.ScaleX;
-            double worldY = (p.Y - _canvasTranslate.Y) / _canvasScale.ScaleY;
+            // 以鼠标在画布逻辑坐标系下的点为锚点（与 RenderTransformOrigin 左上原点 + Scale→Translate 一致）
+            var mouseCanvas = e.GetPosition(FlowCanvas);
+            double parentX = _canvasScale.ScaleX * mouseCanvas.X + _canvasTranslate.X;
+            double parentY = _canvasScale.ScaleY * mouseCanvas.Y + _canvasTranslate.Y;
 
             _canvasScale.ScaleX = newScale;
             _canvasScale.ScaleY = newScale;
-            _canvasTranslate.X = p.X - worldX * newScale;
-            _canvasTranslate.Y = p.Y - worldY * newScale;
+            _canvasTranslate.X = parentX - newScale * mouseCanvas.X;
+            _canvasTranslate.Y = parentY - newScale * mouseCanvas.Y;
 
             e.Handled = true;
         }
@@ -3986,6 +4045,28 @@ namespace CalibOperatorCLI_Example
             }
 
             return result;
+        }
+
+        /// <summary>从目标节点沿输入边反向遍历，得到运行该节点所需的全部上游（含自身）。</summary>
+        private HashSet<FlowNode> CollectPredecessorsIncludingSelf(FlowNode target)
+        {
+            var set = new HashSet<FlowNode>();
+            var q = new Queue<FlowNode>();
+            q.Enqueue(target);
+            set.Add(target);
+            while (q.Count > 0)
+            {
+                var n = q.Dequeue();
+                foreach (var c in _connections)
+                {
+                    if (!ReferenceEquals(c.ToPort.Owner, n)) continue;
+                    var pred = c.FromPort.Owner;
+                    if (set.Add(pred))
+                        q.Enqueue(pred);
+                }
+            }
+
+            return set;
         }
 
         // ================================================================
@@ -7416,6 +7497,58 @@ namespace CalibOperatorCLI_Example
             return false;
         }
 
+        /// <summary>枚举目录内匹配扩展名的图像路径，去重后按文件名排序（OrdinalIgnoreCase）。</summary>
+        private static List<string> CollectSortedImagePathsFromDirectory(string resolvedDir, string extensionsSpec)
+        {
+            if (!System.IO.Directory.Exists(resolvedDir))
+                throw new System.IO.DirectoryNotFoundException($"目录不存在: {resolvedDir}");
+
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var raw in (extensionsSpec ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var tok = raw.Trim();
+                if (tok.Length == 0)
+                    continue;
+                string pattern;
+                if (tok.StartsWith("*.", StringComparison.Ordinal))
+                    pattern = tok;
+                else if (tok.StartsWith(".", StringComparison.Ordinal))
+                    pattern = "*" + tok;
+                else
+                    pattern = "*." + tok;
+
+                foreach (var p in System.IO.Directory.GetFiles(resolvedDir, pattern, System.IO.SearchOption.TopDirectoryOnly))
+                    set.Add(System.IO.Path.GetFullPath(p));
+            }
+
+            var list = set.ToList();
+            list.Sort(StringComparer.OrdinalIgnoreCase);
+            return list;
+        }
+
+        /// <summary>解析「加载图像目录」的根路径；相对路径相对 exe。目录为空时弹出选文件夹；取消则返回 false。</summary>
+        private static bool TryResolveLoadImageDirectory(FlowNode node, out string resolvedDir)
+        {
+            resolvedDir = "";
+            string configuredDir = node.Params.GetValueOrDefault("directory", "")?.Trim() ?? "";
+            resolvedDir = configuredDir;
+            if (!string.IsNullOrWhiteSpace(configuredDir) && !System.IO.Path.IsPathRooted(configuredDir))
+                resolvedDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, configuredDir));
+
+            if (!string.IsNullOrWhiteSpace(resolvedDir))
+                return true;
+
+            using var fbd = new System.Windows.Forms.FolderBrowserDialog
+            {
+                Description = "选择图像所在目录",
+                UseDescriptionForTitle = true
+            };
+            if (fbd.ShowDialog() != System.Windows.Forms.DialogResult.OK)
+                return false;
+            resolvedDir = fbd.SelectedPath;
+            return true;
+        }
+
         private void ExecuteNode(FlowNode node, Dictionary<string, object?>? explicitInputs = null, Dictionary<string, object?>? compositeExternalInputsForBindIn = null)
         {
             var inputs = explicitInputs ?? GetNodeInputs(node);
@@ -7457,6 +7590,43 @@ namespace CalibOperatorCLI_Example
                         {
                             node.ErrorMessage = "用户取消";
                         }
+                        break;
+                    }
+
+                    case "load_image_dir":
+                    {
+                        if (!TryResolveLoadImageDirectory(node, out var resolvedDir))
+                        {
+                            node.ErrorMessage = "用户取消";
+                            break;
+                        }
+
+                        string extSpec = node.Params.GetValueOrDefault("extensions", ".bmp;.png;.jpg;.jpeg;.tif;.tiff")
+                                         ?? ".bmp;.png;.jpg;.jpeg;.tif;.tiff";
+                        int idx = int.TryParse(
+                            node.Params.GetValueOrDefault("index"),
+                            System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var ix)
+                            ? ix
+                            : 0;
+                        var paths = CollectSortedImagePathsFromDirectory(resolvedDir, extSpec);
+                        if (paths.Count == 0)
+                        {
+                            throw new InvalidOperationException(
+                                $"加载图像目录: 目录内无匹配图像 ({resolvedDir})，扩展名: {extSpec}");
+                        }
+
+                        if (idx < 0)
+                            idx = 0;
+                        else if (idx >= paths.Count)
+                            idx = paths.Count - 1;
+
+                        var img = CalibAPI.LoadImage(paths[idx]);
+                        node.Outputs["Image"] = img;
+                        node.Outputs["Count"] = paths.Count;
+                        node.Outputs["Path"] = paths[idx];
+                        node.ResultSummary = $"{paths.Count} 张 · #{idx} {System.IO.Path.GetFileName(paths[idx])}";
                         break;
                     }
 
@@ -9134,8 +9304,15 @@ namespace CalibOperatorCLI_Example
                     case "polyline_simplify_dp":
                     {
                         var pts = inputs["In"] as Point2D[];
-                        if (pts == null || pts.Length == 0)
-                            throw new InvalidOperationException("轮廓点简化: 缺少输入点列 In");
+                        if (pts == null)
+                            throw new InvalidOperationException("轮廓点简化: 缺少输入点列 In（未连接或非 Point2D[]）");
+                        if (pts.Length == 0)
+                        {
+                            node.Outputs["Out"] = Array.Empty<Point2D>();
+                            node.ResultSummary = "skip: 0 pts → empty Out";
+                            break;
+                        }
+
                         double epsilon = 2.0;
                         if (node.Params.TryGetValue("epsilon", out var epsText) &&
                             !string.IsNullOrWhiteSpace(epsText) &&
@@ -9861,6 +10038,26 @@ namespace CalibOperatorCLI_Example
                         };
                         if (ofd.ShowDialog() == true && input is TextBox pathBox)
                             pathBox.Text = ofd.FileName;
+                    };
+                }
+                else if (param.Name == "directory" && node.Def.TypeId == "load_image_dir")
+                {
+                    browseBtn = new Button
+                    {
+                        Content = "...",
+                        Width = 28,
+                        Margin = new Thickness(6, 0, 0, 0),
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    browseBtn.Click += (_, _) =>
+                    {
+                        using var fbd = new System.Windows.Forms.FolderBrowserDialog
+                        {
+                            Description = "选择图像目录",
+                            UseDescriptionForTitle = true
+                        };
+                        if (fbd.ShowDialog() == System.Windows.Forms.DialogResult.OK && input is TextBox dirBox)
+                            dirBox.Text = fbd.SelectedPath;
                     };
                 }
                 else if (param.Name == "innerFlowPath")
@@ -10590,7 +10787,7 @@ namespace CalibOperatorCLI_Example
                 ThrowIfExecutionCancelled();
                 if (preferNativeEngine)
                 {
-                    // C++ 原生流程引擎：后台执行优先走 native；UI 保留托管执行保证交互输出可用
+                    // C++ 原生流程引擎：整段 Run 在线程池执行，避免长时间占用 UI 线程导致窗口卡死、日志不刷新
                     if (TraceEnginePathToConsole)
                         TryTraceEnginePathToConsole("[FlowRunner] 尝试 NativeFlowEngine（C++ 调度）…");
                     var flowData = BuildCurrentFlowData();
@@ -10598,9 +10795,18 @@ namespace CalibOperatorCLI_Example
                     await System.Threading.Tasks.Task.Yield();
                     ThrowIfExecutionCancelled();
 
-                    using var engine = new NativeFlowEngine();
-                    engine.LoadFromJson(flowJson);
-                    var run = engine.Run();
+                    AppendLog("[NATIVE] 正在后台线程执行 NativeFlowEngine（窗口应保持响应）…");
+                    await System.Threading.Tasks.Task.Delay(1);
+
+                    var token = _runCts?.Token ?? System.Threading.CancellationToken.None;
+                    FlowEngineRunResult run = await System.Threading.Tasks.Task.Run(() =>
+                    {
+                        token.ThrowIfCancellationRequested();
+                        using var engine = new NativeFlowEngine();
+                        engine.LoadFromJson(flowJson);
+                        token.ThrowIfCancellationRequested();
+                        return engine.Run();
+                    }, token);
 
                     if (run.Success)
                     {
@@ -10617,6 +10823,8 @@ namespace CalibOperatorCLI_Example
                             TryTraceEnginePathToConsole($"[FlowRunner] 全程由 NativeFlowEngine 完成（{run.ExecutedNodes}/{run.TotalNodes} 节点），未回退托管。");
                         if (!string.IsNullOrWhiteSpace(run.ReportJson))
                             AppendLog($"[NATIVE] Report: {run.ReportJson}");
+                        AppendLog(
+                            "[NATIVE] 说明: C++ 引擎一次性调度，此日志区不会出现「每个算子一行」的逐步输出；逐算子耗时在控制台 stderr 的 [FlowNative][Timing]。若需要界面里逐步日志，请点「运行」（托管）或对节点右键「执行到此节点（含上游）」。");
                         AppendLog("========== 执行完成 ==========");
                         return true;
                     }
@@ -10678,12 +10886,140 @@ namespace CalibOperatorCLI_Example
                                     "per_frame", StringComparison.OrdinalIgnoreCase))
                     .ToList();
 
+                var dirEachLoops = sorted
+                    .Where(n => n.Def.TypeId == "load_image_dir" &&
+                                string.Equals((n.Params.GetValueOrDefault("mode", "each") ?? "each").Trim(),
+                                    "each", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
                 if (perFrameLoops.Count > 1)
                 {
                     StatusText.Text = "执行失败: 当前仅支持一个 per_frame camera_loop 节点";
                     StatusText.Foreground = new SolidColorBrush(Colors.Red);
                     AppendLog("[ERROR] 检测到多个 per_frame camera_loop，当前版本仅支持一个", true);
                     return false;
+                }
+
+                if (dirEachLoops.Count > 1)
+                {
+                    StatusText.Text = "执行失败: 当前仅支持一个「遍历目录」加载图像目录节点 (mode=each)";
+                    StatusText.Foreground = new SolidColorBrush(Colors.Red);
+                    AppendLog("[ERROR] 检测到多个 load_image_dir(mode=each)，当前版本仅支持一个", true);
+                    return false;
+                }
+
+                if (dirEachLoops.Count == 1 && perFrameLoops.Count == 1)
+                {
+                    StatusText.Text = "执行失败: load_image_dir(遍历) 不可与 per_frame camera_loop 同时使用";
+                    StatusText.Foreground = new SolidColorBrush(Colors.Red);
+                    AppendLog("[ERROR] 不能同时使用 load_image_dir(mode=each) 与 camera_loop(per_frame)", true);
+                    return false;
+                }
+
+                if (dirEachLoops.Count == 1)
+                {
+                    var loopNode = dirEachLoops[0];
+                    var downstream = GetDownstreamNodes(loopNode);
+                    var preNodes = sorted.Where(n => !downstream.Contains(n)).ToList();
+                    var postNodes = sorted.Where(n => downstream.Contains(n) && n != loopNode).ToList();
+
+                    AppendLog($"检测到 load_image_dir(遍历): {loopNode.Def.DisplayName}，前置 {preNodes.Count} 节点，下游 {postNodes.Count} 节点");
+
+                    int successCountPre = 0;
+                    for (int i = 0; i < preNodes.Count; i++)
+                    {
+                        ThrowIfExecutionCancelled();
+                        var node = preNodes[i];
+                        StatusText.Text = $"执行前置 [{i + 1}/{preNodes.Count}] {node.Def.DisplayName}...";
+                        AppendLog($"[PRE {i + 1}/{preNodes.Count}] 执行: {node.Def.DisplayName}");
+                        await System.Threading.Tasks.Task.Yield();
+                        try
+                        {
+                            await ExecuteNodeForRunAsync(node, "PRE");
+                            successCountPre++;
+                        }
+                        catch (FlowExecutionGracefulStopException ex)
+                        {
+                            AppendLog($"[PRE][STOP] {node.Def.DisplayName}: {ex.Message}", true);
+                            if (ex.InnerException != null)
+                                AppendLog($"  {ex.InnerException.Message}", true);
+                            StatusText.Text = ex.Message;
+                            StatusText.Foreground = new SolidColorBrush(Colors.Orange);
+                            AppendLog("========== 执行中止 ==========");
+                            return false;
+                        }
+                    }
+
+                    if (!TryResolveLoadImageDirectory(loopNode, out var resolvedDir))
+                        throw new InvalidOperationException("加载图像目录: 未选择文件夹");
+
+                    string extSpec = loopNode.Params.GetValueOrDefault("extensions", ".bmp;.png;.jpg;.jpeg;.tif;.tiff")
+                                     ?? ".bmp;.png;.jpg;.jpeg;.tif;.tiff";
+                    var paths = CollectSortedImagePathsFromDirectory(resolvedDir, extSpec);
+                    if (paths.Count == 0)
+                        throw new InvalidOperationException($"加载图像目录(遍历): 无匹配图像 ({resolvedDir})，扩展名: {extSpec}");
+
+                    int okImages = 0;
+                    for (int ii = 0; ii < paths.Count; ii++)
+                    {
+                        ThrowIfExecutionCancelled();
+                        string path = paths[ii];
+                        CalibImage? frame = null;
+                        try
+                        {
+                            frame = CalibAPI.LoadImage(path);
+                        }
+                        catch (Exception ex)
+                        {
+                            AppendLog($"[IMG {ii + 1}/{paths.Count}] 读取失败: {path} — {ex.Message}", true);
+                            continue;
+                        }
+
+                        okImages++;
+                        loopNode.Outputs.Clear();
+                        loopNode.Outputs["Image"] = frame;
+                        loopNode.Outputs["Count"] = paths.Count;
+                        loopNode.Outputs["Path"] = path;
+                        loopNode.Executed = true;
+                        loopNode.ErrorMessage = null;
+                        SetNodeStatus(loopNode, false);
+                        loopNode.ResultSummary = $"each {ii + 1}/{paths.Count} {System.IO.Path.GetFileName(path)}";
+                        UpdateNodeSummary(loopNode);
+
+                        AppendLog($"[IMG {ii + 1}/{paths.Count}] 开始 {path}");
+                        for (int j = 0; j < postNodes.Count; j++)
+                        {
+                            ThrowIfExecutionCancelled();
+                            var node = postNodes[j];
+                            node.Outputs.Clear();
+                            node.ErrorMessage = null;
+                            node.Executed = false;
+                            StatusText.Text = $"Img[{ii + 1}/{paths.Count}] 执行 [{j + 1}/{postNodes.Count}] {node.Def.DisplayName}...";
+                            await System.Threading.Tasks.Task.Yield();
+                            try
+                            {
+                                await ExecuteNodeForRunAsync(node, $"I{ii + 1}");
+                            }
+                            catch (FlowExecutionGracefulStopException ex)
+                            {
+                                AppendLog($"[IMG][STOP] {node.Def.DisplayName}: {ex.Message}", true);
+                                if (ex.InnerException != null)
+                                    AppendLog($"  {ex.InnerException.Message}", true);
+                                StatusText.Text = ex.Message;
+                                StatusText.Foreground = new SolidColorBrush(Colors.Orange);
+                                AppendLog("========== 执行中止 ==========");
+                                return false;
+                            }
+                        }
+                    }
+
+                    if (okImages <= 0)
+                        throw new InvalidOperationException("加载图像目录(遍历): 未能成功解码任何图像");
+
+                    StatusText.Text = $"目录遍历完成: 前置 {successCountPre}/{preNodes.Count}, 有效图 {okImages}/{paths.Count}";
+                    StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
+                    AppendLog($"========== load_image_dir(遍历) 完成: images={okImages}/{paths.Count} ==========");
+                    return true;
                 }
 
                 if (perFrameLoops.Count == 1)
@@ -10863,9 +11199,110 @@ namespace CalibOperatorCLI_Example
             }
         }
 
+        /// <summary>
+        /// 仅执行到达指定节点所需的子图（拓扑序），日志格式与全量托管运行一致（含 [Timing]）。
+        /// </summary>
+        public async System.Threading.Tasks.Task<bool> RunUpstreamToNodeAsync(FlowNode target)
+        {
+            if (_isRunInProgress)
+            {
+                AppendLog("[WARN] 已有执行在进行中，忽略「执行到此节点」");
+                return false;
+            }
+
+            _isRunInProgress = true;
+            _runCts?.Cancel();
+            _runCts?.Dispose();
+            _runCts = new System.Threading.CancellationTokenSource();
+            if (StopRunButton != null) StopRunButton.IsEnabled = true;
+            StatusText.Text = "运行中(到此节点)...";
+            StatusText.Foreground = new SolidColorBrush(Colors.Orange);
+            AppendLog($"========== 执行到此节点: {target.Def.DisplayName} ==========");
+
+            try
+            {
+                ThrowIfExecutionCancelled();
+                var sortedFull = TopologicalSort();
+                if (sortedFull.Count != _nodes.Count)
+                {
+                    StatusText.Text = "错误: 检测到循环依赖!";
+                    StatusText.Foreground = new SolidColorBrush(Colors.Red);
+                    AppendLog("[ERROR] 检测到循环依赖，无法执行!", true);
+                    return false;
+                }
+
+                var need = CollectPredecessorsIncludingSelf(target);
+                var chain = sortedFull.Where(need.Contains).ToList();
+                AppendLog($"链内共 {chain.Count} 个节点（含本节点及全部上游）");
+
+                int successCount = 0;
+                for (int i = 0; i < chain.Count; i++)
+                {
+                    ThrowIfExecutionCancelled();
+                    var node = chain[i];
+                    StatusText.Text = $"到此节点 [{i + 1}/{chain.Count}] {node.Def.DisplayName}...";
+                    AppendLog($"[{i + 1}/{chain.Count}] 执行: {node.Def.DisplayName}");
+                    await System.Threading.Tasks.Task.Yield();
+                    try
+                    {
+                        await ExecuteNodeForRunAsync(node, "STEP");
+                        successCount++;
+                        AppendLog($"  -> OK: {node.Def.DisplayName}");
+                    }
+                    catch (FlowExecutionGracefulStopException ex)
+                    {
+                        AppendLog($"  -> [STOP] {node.Def.DisplayName}: {ex.Message}", true);
+                        if (ex.InnerException != null)
+                            AppendLog($"     {ex.InnerException.Message}", true);
+                        StatusText.Text = ex.Message;
+                        StatusText.Foreground = new SolidColorBrush(Colors.Orange);
+                        AppendLog("========== 执行中止 ==========");
+                        return false;
+                    }
+                    catch (Exception ex)
+                    {
+                        AppendLog($"  -> [ERROR] {node.Def.DisplayName}: {ex.Message}", true);
+                        if (MirrorErrorsToStderr && ex.InnerException != null)
+                            AppendLog($"     Inner: {ex.InnerException}", true);
+                        if (MirrorErrorsToStderr)
+                        {
+                            try { Console.Error.WriteLine(ex.ToString()); } catch { /* ignored */ }
+                        }
+                        StatusText.Text = $"执行失败: {node.Def.DisplayName} - {ex.Message}";
+                        StatusText.Foreground = new SolidColorBrush(Colors.Red);
+                        AppendLog("========== 执行中止 ==========");
+                        return false;
+                    }
+                }
+
+                StatusText.Text = $"到此节点完成: {successCount}/{chain.Count}";
+                StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
+                AppendLog($"========== 到此节点执行完成: {successCount}/{chain.Count} ==========");
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText.Text = "执行已停止";
+                StatusText.Foreground = new SolidColorBrush(Colors.OrangeRed);
+                AppendLog("[STOP] 用户中断执行");
+                AppendLog("========== 执行中止 ==========");
+                return false;
+            }
+            finally
+            {
+                _isRunInProgress = false;
+                if (StopRunButton != null) StopRunButton.IsEnabled = false;
+            }
+        }
+
         private async void RunAll_Click(object sender, RoutedEventArgs e)
         {
             await RunAllAsync(clearLog: true, preferNativeEngine: false);
+        }
+
+        private async void RunAllNative_Click(object sender, RoutedEventArgs e)
+        {
+            await RunAllAsync(clearLog: true, preferNativeEngine: true);
         }
 
         private void StopRun_Click(object sender, RoutedEventArgs e)
