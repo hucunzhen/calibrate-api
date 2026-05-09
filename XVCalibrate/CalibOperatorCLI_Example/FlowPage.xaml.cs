@@ -34,6 +34,11 @@ namespace CalibOperatorCLI_Example
         /// </summary>
         public bool MirrorErrorsToStderr { get; set; }
 
+        /// <summary>
+        /// CLI 后台跑 Flow 时为 true：将「实际使用的引擎路径」简要写入标准输出，便于确认 Native 是否成功或未回退托管。
+        /// </summary>
+        public bool TraceEnginePathToConsole { get; set; }
+
         // ================================================================
         // 算子定义模型
         // ================================================================
@@ -4019,6 +4024,12 @@ namespace CalibOperatorCLI_Example
                     // 最后追加的行标红不方便，改为整体不改色，靠前缀 [ERROR] 区分
                 }
             });
+        }
+
+        private static void TryTraceEnginePathToConsole(string message)
+        {
+            try { Console.Out.WriteLine(message); }
+            catch { /* ignore */ }
         }
 
         private void ClearLog_Click(object sender, RoutedEventArgs e)
@@ -10517,6 +10528,8 @@ namespace CalibOperatorCLI_Example
                 if (preferNativeEngine)
                 {
                     // C++ 原生流程引擎：后台执行优先走 native；UI 保留托管执行保证交互输出可用
+                    if (TraceEnginePathToConsole)
+                        TryTraceEnginePathToConsole("[FlowRunner] 尝试 NativeFlowEngine（C++ 调度）…");
                     var flowData = BuildCurrentFlowData();
                     var flowJson = JsonSerializer.Serialize(flowData, new JsonSerializerOptions { WriteIndented = false });
                     await System.Threading.Tasks.Task.Yield();
@@ -10537,6 +10550,8 @@ namespace CalibOperatorCLI_Example
                         StatusText.Text = $"执行完成: {run.ExecutedNodes}/{run.TotalNodes} 个节点成功";
                         StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
                         AppendLog($"[NATIVE] 执行成功: {run.ExecutedNodes}/{run.TotalNodes}");
+                        if (TraceEnginePathToConsole)
+                            TryTraceEnginePathToConsole($"[FlowRunner] 全程由 NativeFlowEngine 完成（{run.ExecutedNodes}/{run.TotalNodes} 节点），未回退托管。");
                         if (!string.IsNullOrWhiteSpace(run.ReportJson))
                             AppendLog($"[NATIVE] Report: {run.ReportJson}");
                         AppendLog("========== 执行完成 ==========");
@@ -10546,6 +10561,8 @@ namespace CalibOperatorCLI_Example
                     StatusText.Text = $"Native执行失败，回退托管: {run.ErrorMessage}";
                     StatusText.Foreground = new SolidColorBrush(Colors.OrangeRed);
                     AppendLog($"[NATIVE][ERROR] {run.ErrorMessage}", true);
+                    if (TraceEnginePathToConsole)
+                        TryTraceEnginePathToConsole("[FlowRunner] NativeFlowEngine 未成功，将回退到托管引擎（逐节点，通常更慢）…");
                     if (!string.IsNullOrWhiteSpace(run.ReportJson))
                         AppendLog($"[NATIVE] Report: {run.ReportJson}");
                     AppendLog("[NATIVE] 回退托管执行...");
@@ -10566,6 +10583,8 @@ namespace CalibOperatorCLI_Example
             catch (Exception ex)
             {
                 AppendLog($"[WARN] 执行异常，回退到托管执行: {ex.Message}");
+                if (preferNativeEngine && TraceEnginePathToConsole)
+                    TryTraceEnginePathToConsole($"[FlowRunner] NativeFlowEngine 异常（{ex.Message}），回退托管…");
                 return await RunAllManagedFallbackAsync();
             }
             finally
@@ -10579,6 +10598,8 @@ namespace CalibOperatorCLI_Example
         {
             try
             {
+                if (TraceEnginePathToConsole)
+                    TryTraceEnginePathToConsole("[FlowRunner] 托管引擎执行中（C# 逐节点调度）…");
                 var sorted = TopologicalSort();
                 if (sorted.Count != _nodes.Count)
                 {

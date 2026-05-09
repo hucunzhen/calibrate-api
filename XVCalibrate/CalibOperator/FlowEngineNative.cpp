@@ -2,10 +2,12 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <opencv2/opencv.hpp>
 #include <unordered_map>
+#include <unordered_set>
 #include <queue>
 #include <sstream>
 #include <iomanip>
@@ -60,12 +62,366 @@ static std::string NodeParam(const NodeDef& node, const char* key, const char* d
     return it->second;
 }
 
+static std::string TrimFlowToken(std::string s) {
+    while (!s.empty() && (unsigned char)s.front() <= 32)
+        s.erase(s.begin());
+    while (!s.empty() && (unsigned char)s.back() <= 32)
+        s.pop_back();
+    return s;
+}
+
+/// 二进制读入标定 JSON；去掉 UTF-8 BOM / 前导空白，避免 OpenCV FileStorage 报 “left-brace of top level is missing”。
+static bool ReadCalibrationJsonFileForOpenCv(const std::string& path, std::string& utf8Json, std::string& err) {
+    std::ifstream ifs(path, std::ios::binary);
+    if (!ifs) {
+        err = "cannot read file: " + path;
+        return false;
+    }
+    std::ostringstream oss;
+    oss << ifs.rdbuf();
+    utf8Json = oss.str();
+    if (utf8Json.size() >= 3 && (unsigned char)utf8Json[0] == 0xEF && (unsigned char)utf8Json[1] == 0xBB &&
+        (unsigned char)utf8Json[2] == 0xBF)
+        utf8Json.erase(0, 3);
+    if (utf8Json.size() >= 2 && (unsigned char)utf8Json[0] == 0xFF && (unsigned char)utf8Json[1] == 0xFE) {
+        err = "calibration JSON is UTF-16 LE; save as UTF-8 (preferably without BOM)";
+        return false;
+    }
+    if (utf8Json.size() >= 2 && (unsigned char)utf8Json[0] == 0xFE && (unsigned char)utf8Json[1] == 0xFF) {
+        err = "calibration JSON is UTF-16 BE; save as UTF-8 (preferably without BOM)";
+        return false;
+    }
+    size_t start = 0;
+    while (start < utf8Json.size()) {
+        unsigned char c = (unsigned char)utf8Json[start];
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
+            ++start;
+        else
+            break;
+    }
+    if (start > 0)
+        utf8Json.erase(0, start);
+    if (utf8Json.empty() || utf8Json.front() != '{') {
+        err = "calibration JSON must be UTF-8 object starting with '{' (remove BOM / fix encoding)";
+        return false;
+    }
+    return true;
+}
+
+/// 从标定结果 JSON 中解析 affine（不经过 OpenCV FileStorage，避免其 JSON 方言/异常与 BOM 问题）。
+static bool FindAffineObjectBounds(const std::string& json, size_t& innerBegin, size_t& innerEnd, std::string& err) {
+    size_t keyPos = json.find("\"affine\"");
+    if (keyPos == std::string::npos)
+        keyPos = json.find("\"Affine\"");
+    if (keyPos == std::string::npos) {
+        err = "missing \"affine\" object";
+        return false;
+    }
+    size_t i = keyPos;
+    while (i < json.size() && json[i] != ':')
+        ++i;
+    if (i >= json.size()) {
+        err = "affine: missing ':'";
+        return false;
+    }
+    ++i;
+    while (i < json.size() && std::isspace((unsigned char)json[i]))
+        ++i;
+    if (i >= json.size() || json[i] != '{') {
+        err = "affine: expected '{'";
+        return false;
+    }
+    const size_t startBrace = i;
+    int depth = 0;
+    bool inStr = false;
+    bool esc = false;
+    for (; i < json.size(); ++i) {
+        const char c = json[i];
+        if (inStr) {
+            if (esc) {
+                esc = false;
+                continue;
+            }
+            if (c == '\\') {
+                esc = true;
+                continue;
+            }
+            if (c == '"')
+                inStr = false;
+            continue;
+        }
+        if (c == '"') {
+            inStr = true;
+            continue;
+        }
+        if (c == '{')
+            ++depth;
+        else if (c == '}') {
+            --depth;
+            if (depth == 0) {
+                innerBegin = startBrace + 1;
+                innerEnd = i;
+                return true;
+            }
+        }
+    }
+    err = "affine: unclosed '}'";
+    return false;
+}
+
+static bool ParseAffineSixDoubles(const std::string& slice, AffineTransform& t, std::string& err) {
+    const char* names[] = { "a", "b", "c", "d", "e", "f" };
+    double* ptrs[] = { &t.a, &t.b, &t.c, &t.d, &t.e, &t.f };
+    for (int k = 0; k < 6; ++k) {
+        const std::string q = std::string("\"") + names[k] + "\"";
+        size_t p = slice.find(q);
+        if (p == std::string::npos) {
+            err = std::string("missing affine field \"") + names[k] + "\"";
+            return false;
+        }
+        p = slice.find(':', p);
+        if (p == std::string::npos) {
+            err = "affine: malformed ':'";
+            return false;
+        }
+        ++p;
+        while (p < slice.size() && std::isspace((unsigned char)slice[p]))
+            ++p;
+        char* endPtr = nullptr;
+        const char* base = slice.c_str() + p;
+        double v = std::strtod(base, &endPtr);
+        if (endPtr == base) {
+            err = std::string("affine: invalid number for \"") + names[k] + "\"";
+            return false;
+        }
+        *ptrs[k] = v;
+    }
+    return true;
+}
+
+static bool ParseCalibrationResultJsonMinimal(const std::string& json, AffineTransform& t, std::string* calibrationJsonOut, std::string& err) {
+    size_t innerBegin = 0, innerEnd = 0;
+    if (!FindAffineObjectBounds(json, innerBegin, innerEnd, err))
+        return false;
+    if (innerEnd <= innerBegin) {
+        err = "affine: empty object";
+        return false;
+    }
+    std::string slice = json.substr(innerBegin, innerEnd - innerBegin);
+    if (!ParseAffineSixDoubles(slice, t, err))
+        return false;
+
+    if (calibrationJsonOut) {
+        calibrationJsonOut->clear();
+        size_t k = json.find("\"calibrationJson\"");
+        if (k == std::string::npos)
+            k = json.find("\"CalibrationJson\"");
+        if (k != std::string::npos) {
+            size_t i = json.find(':', k);
+            if (i != std::string::npos) {
+                ++i;
+                while (i < json.size() && std::isspace((unsigned char)json[i]))
+                    ++i;
+                if (i < json.size() && json[i] == '"') {
+                    ++i;
+                    std::string acc;
+                    bool esc2 = false;
+                    for (; i < json.size(); ++i) {
+                        char c = json[i];
+                        if (esc2) {
+                            if (c == 'n')
+                                acc.push_back('\n');
+                            else if (c == 'r')
+                                acc.push_back('\r');
+                            else if (c == 't')
+                                acc.push_back('\t');
+                            else
+                                acc.push_back(c);
+                            esc2 = false;
+                            continue;
+                        }
+                        if (c == '\\') {
+                            esc2 = true;
+                            continue;
+                        }
+                        if (c == '"')
+                            break;
+                        acc.push_back(c);
+                    }
+                    *calibrationJsonOut = std::move(acc);
+                }
+            }
+        }
+    }
+    return true;
+}
+
 static int ToInt(const std::string& s, int defVal) {
     try { return std::stoi(s); } catch (...) { return defVal; }
 }
 
 static double ToDouble(const std::string& s, double defVal) {
     try { return std::stod(s); } catch (...) { return defVal; }
+}
+
+// Polyline helpers aligned with FlowPage.xaml.cs (SimplifyOpenPolyline / closed / resample / smooth / splits).
+
+static double FlowPtLineDist(Point2D p, Point2D a, Point2D b) {
+    double vx = b.x - a.x;
+    double vy = b.y - a.y;
+    double wx = p.x - a.x;
+    double wy = p.y - a.y;
+    double c1 = vx * wx + vy * wy;
+    if (c1 <= 0) return std::hypot(wx, wy);
+    double c2 = vx * vx + vy * vy;
+    if (c2 <= 1e-9) return std::hypot(p.x - a.x, p.y - a.y);
+    double t = c1 / c2;
+    double px = a.x + t * vx;
+    double py = a.y + t * vy;
+    return std::hypot(p.x - px, p.y - py);
+}
+
+static std::vector<Point2D> FlowSimplifyOpenPolyline(const std::vector<Point2D>& points, double epsilon) {
+    if (points.size() <= 2) return points;
+    int index = -1;
+    double maxDist = -1;
+    Point2D start = points.front();
+    Point2D end = points.back();
+    for (size_t i = 1; i + 1 < points.size(); ++i) {
+        double dist = FlowPtLineDist(points[i], start, end);
+        if (dist > maxDist) {
+            maxDist = dist;
+            index = (int)i;
+        }
+    }
+    if (maxDist <= epsilon || index <= 0) return { start, end };
+    std::vector<Point2D> left(points.begin(), points.begin() + index + 1);
+    std::vector<Point2D> right(points.begin() + index, points.end());
+    auto L = FlowSimplifyOpenPolyline(left, epsilon);
+    auto R = FlowSimplifyOpenPolyline(right, epsilon);
+    if (!L.empty()) L.pop_back();
+    L.insert(L.end(), R.begin(), R.end());
+    return L;
+}
+
+static std::vector<Point2D> FlowSimplifyClosedPolyline(const std::vector<Point2D>& pts, double epsilon) {
+    if (pts.size() < 4 || epsilon <= 0) return pts;
+    std::vector<Point2D> open = pts;
+    open.push_back(pts[0]);
+    auto simplified = FlowSimplifyOpenPolyline(open, epsilon);
+    if (simplified.size() > 1) simplified.pop_back();
+    return simplified;
+}
+
+static std::vector<Point2D> FlowResampleClosedPolyline(const std::vector<Point2D>& points, int targetCount) {
+    if (points.empty() || targetCount <= 0) return {};
+    if (points.size() == 1) return std::vector<Point2D>((size_t)targetCount, points[0]);
+    int n = (int)points.size();
+    std::vector<double> cum((size_t)n + 1);
+    cum[0] = 0;
+    for (int i = 0; i < n; ++i) {
+        double dx = points[(size_t)((i + 1) % n)].x - points[(size_t)i].x;
+        double dy = points[(size_t)((i + 1) % n)].y - points[(size_t)i].y;
+        cum[(size_t)i + 1] = cum[(size_t)i] + std::hypot(dx, dy);
+    }
+    double perimeter = cum[(size_t)n];
+    if (perimeter <= 1e-6) return std::vector<Point2D>((size_t)targetCount, points[0]);
+    std::vector<Point2D> result((size_t)targetCount);
+    for (int i = 0; i < targetCount; ++i) {
+        double s = (i * perimeter) / targetCount;
+        int seg = 0;
+        while (seg < n - 1 && cum[(size_t)seg + 1] < s) seg++;
+        double segStart = cum[(size_t)seg];
+        double segLen = cum[(size_t)seg + 1] - segStart;
+        Point2D a = points[(size_t)seg];
+        Point2D b = points[(size_t)((seg + 1) % n)];
+        double t = segLen <= 1e-9 ? 0 : (s - segStart) / segLen;
+        result[(size_t)i].x = a.x + (b.x - a.x) * t;
+        result[(size_t)i].y = a.y + (b.y - a.y) * t;
+    }
+    return result;
+}
+
+static std::vector<Point2D> FlowSmoothPointsClosed(const std::vector<Point2D>& points, int windowRadius) {
+    if (points.size() < 3 || windowRadius <= 0) return points;
+    int n = (int)points.size();
+    std::vector<Point2D> smoothed((size_t)n);
+    for (int i = 0; i < n; ++i) {
+        double sx = 0, sy = 0;
+        int cnt = 0;
+        for (int k = -windowRadius; k <= windowRadius; ++k) {
+            int idx = i + k;
+            while (idx < 0) idx += n;
+            while (idx >= n) idx -= n;
+            sx += points[(size_t)idx].x;
+            sy += points[(size_t)idx].y;
+            cnt++;
+        }
+        smoothed[(size_t)i].x = sx / cnt;
+        smoothed[(size_t)i].y = sy / cnt;
+    }
+    return smoothed;
+}
+
+static std::vector<std::vector<Point2D>> FlowSplitIntoClosedRegions(const std::vector<Point2D>& points, double splitGapFactor, int minRegionPoints) {
+    std::vector<std::vector<Point2D>> regions;
+    if (points.empty()) return regions;
+    int minR = std::max(3, minRegionPoints);
+    if (points.size() < 4) {
+        regions.push_back(points);
+        return regions;
+    }
+    std::vector<double> steps;
+    steps.reserve(points.size() - 1);
+    for (size_t i = 0; i + 1 < points.size(); ++i)
+        steps.push_back(std::hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y));
+    std::vector<double> ordered = steps;
+    std::sort(ordered.begin(), ordered.end());
+    double medianStep = ordered.empty() ? 0 : ordered[ordered.size() / 2];
+    if (medianStep <= 1e-9 || splitGapFactor <= 1.0) {
+        regions.push_back(points);
+        return regions;
+    }
+    double threshold = medianStep * splitGapFactor;
+    size_t start = 0;
+    for (size_t i = 0; i < steps.size(); ++i) {
+        if (steps[i] <= threshold) continue;
+        int len = (int)(i - start + 1);
+        if (len >= minR)
+            regions.emplace_back(points.begin() + (std::ptrdiff_t)start, points.begin() + (std::ptrdiff_t)(i + 1));
+        start = i + 1;
+    }
+    int tailLen = (int)(points.size() - start);
+    if (tailLen >= minR)
+        regions.emplace_back(points.begin() + (std::ptrdiff_t)start, points.end());
+    if (regions.empty())
+        regions.push_back(points);
+    return regions;
+}
+
+static std::vector<std::pair<std::vector<Point2D>, std::vector<int>>> FlowSplitRegionsByBarIds(
+    const std::vector<Point2D>& points, const std::vector<int>& barIds, int minRegionPoints) {
+    std::vector<std::pair<std::vector<Point2D>, std::vector<int>>> regions;
+    if (points.empty() || barIds.size() != points.size()) return regions;
+    int minR = std::max(3, minRegionPoints);
+    size_t start = 0;
+    for (size_t i = 1; i < barIds.size(); ++i) {
+        if (barIds[i] == barIds[i - 1]) continue;
+        size_t len = i - start;
+        if ((int)len >= minR) {
+            regions.emplace_back(
+                std::vector<Point2D>(points.begin() + (std::ptrdiff_t)start, points.begin() + (std::ptrdiff_t)i),
+                std::vector<int>(barIds.begin() + (std::ptrdiff_t)start, barIds.begin() + (std::ptrdiff_t)i));
+        }
+        start = i;
+    }
+    size_t tailLen = barIds.size() - start;
+    if ((int)tailLen >= minR) {
+        regions.emplace_back(
+            std::vector<Point2D>(points.begin() + (std::ptrdiff_t)start, points.end()),
+            std::vector<int>(barIds.begin() + (std::ptrdiff_t)start, barIds.end()));
+    }
+    return regions;
 }
 
 static cv::Mat EnsureGray(const cv::Mat& src) {
@@ -174,6 +530,261 @@ static void LinesJsonNmsBucket(const std::vector<cv::Vec4i>& in, double angleTol
     out.reserve(best.size());
     for (const auto& kv : best)
         out.push_back(kv.second);
+}
+
+static void GrayMorphRectGrayIter(cv::Mat& gray, bool dilate, int kw, int kh, int iterations) {
+    kw = std::max(1, kw | 1);
+    kh = std::max(1, kh | 1);
+    iterations = std::max(1, iterations);
+    cv::Mat ker = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(kw, kh));
+    for (int i = 0; i < iterations; ++i) {
+        cv::Mat next;
+        if (dilate)
+            cv::dilate(gray, next, ker);
+        else
+            cv::erode(gray, next, ker);
+        gray = next;
+    }
+}
+
+static bool GrayRangeBinaryPercentile(const cv::Mat& grayIn, double excludeLowPct, double excludeHighPct, cv::Mat& binOut, std::string& err) {
+    if (grayIn.empty()) {
+        err = "gray_range_binary: empty image";
+        return false;
+    }
+    excludeLowPct = std::max(0.0, std::min(100.0, excludeLowPct));
+    excludeHighPct = std::max(0.0, std::min(100.0, excludeHighPct));
+    if (excludeLowPct + excludeHighPct >= 100.0) {
+        err = "gray_range_binary: percentile excludes must sum to < 100%";
+        return false;
+    }
+    cv::Mat gray = EnsureGray(grayIn);
+    int count = gray.rows * gray.cols;
+    int hist[256]{};
+    const uchar* p = gray.ptr<uchar>();
+    for (int i = 0; i < count; ++i)
+        hist[p[i]]++;
+
+    double total = (double)count;
+    double lowMass = excludeLowPct * 0.01 * total;
+    double highMass = (100.0 - excludeHighPct) * 0.01 * total;
+
+    int usedLow = 255;
+    int cum = 0;
+    for (int i = 0; i < 256; ++i) {
+        cum += hist[i];
+        if (cum >= lowMass - 1e-9) {
+            usedLow = i;
+            break;
+        }
+    }
+    int usedHigh = 0;
+    cum = 0;
+    for (int i = 0; i < 256; ++i) {
+        cum += hist[i];
+        if (cum >= highMass - 1e-9) {
+            usedHigh = i;
+            break;
+        }
+    }
+    if (usedLow > usedHigh)
+        std::swap(usedLow, usedHigh);
+
+    binOut = cv::Mat::zeros(gray.size(), CV_8UC1);
+    uchar* d = binOut.ptr<uchar>();
+    for (int i = 0; i < count; ++i) {
+        uchar g = p[i];
+        d[i] = (g >= usedLow && g <= usedHigh) ? (uchar)255 : (uchar)0;
+    }
+    return true;
+}
+
+static bool ReadFlowGraph(cv::FileStorage& fs, std::vector<NodeDef>& nodes, std::vector<ConnDef>& conns, std::string& err) {
+    nodes.clear();
+    conns.clear();
+    cv::FileNode fnNodes = fs["Nodes"];
+    cv::FileNode fnConns = fs["Connections"];
+    if (fnNodes.type() != cv::FileNode::SEQ) {
+        err = "flow json missing Nodes";
+        return false;
+    }
+    if (fnConns.type() != cv::FileNode::SEQ) {
+        err = "flow json missing Connections";
+        return false;
+    }
+    for (auto it = fnNodes.begin(); it != fnNodes.end(); ++it) {
+        NodeDef nd;
+        nd.id = TrimFlowToken((std::string)(*it)["Id"]);
+        nd.type = TrimFlowToken((std::string)(*it)["TypeId"]);
+        cv::FileNode params = (*it)["Params"];
+        if (params.type() == cv::FileNode::MAP) {
+            std::vector<cv::String> keys = params.keys();
+            for (const auto& k : keys)
+                nd.params[(std::string)k] = (std::string)params[k];
+        }
+        nodes.push_back(std::move(nd));
+    }
+    for (auto it = fnConns.begin(); it != fnConns.end(); ++it) {
+        ConnDef cd;
+        cd.fromNodeId = (std::string)(*it)["FromNodeId"];
+        cd.fromPort = (std::string)(*it)["FromPort"];
+        cd.toNodeId = (std::string)(*it)["ToNodeId"];
+        cd.toPort = (std::string)(*it)["ToPort"];
+        auto tit = std::find_if(nodes.begin(), nodes.end(), [&](const NodeDef& nd) { return nd.id == cd.toNodeId; });
+        if (tit != nodes.end() && tit->type == "hough_lines" && cd.toPort == "Image")
+            cd.toPort = "Edge";
+        conns.push_back(std::move(cd));
+    }
+    return true;
+}
+
+static bool ExpandOneComposite(NativeFlowEngineImpl* e, size_t compositeIdx, std::string& err) {
+    if (compositeIdx >= e->nodes.size()) {
+        err = "composite: invalid index";
+        return false;
+    }
+    const NodeDef& comp = e->nodes[compositeIdx];
+    std::string path = NodeParam(comp, "innerFlowPath", "");
+    std::string embedded = NodeParam(comp, "innerFlowJson", "");
+
+    cv::FileStorage fs;
+    if (!path.empty()) {
+        fs.open(path, cv::FileStorage::READ | cv::FileStorage::FORMAT_JSON);
+        if (!fs.isOpened()) {
+            err = "composite: cannot open innerFlowPath: " + path;
+            return false;
+        }
+    } else if (!embedded.empty()) {
+        if (!fs.open(embedded, cv::FileStorage::READ | cv::FileStorage::FORMAT_JSON | cv::FileStorage::MEMORY)) {
+            err = "composite: innerFlowJson is not valid JSON";
+            return false;
+        }
+    } else {
+        err = "composite: need innerFlowPath or innerFlowJson";
+        return false;
+    }
+
+    std::vector<NodeDef> innerNodes;
+    std::vector<ConnDef> innerConns;
+    if (!ReadFlowGraph(fs, innerNodes, innerConns, err)) {
+        fs.release();
+        return false;
+    }
+    fs.release();
+
+    std::unordered_map<std::string, std::pair<std::string, std::string>> bindInMap;
+    std::unordered_map<std::string, std::pair<std::string, std::string>> bindOutMap;
+    std::unordered_set<std::string> bindIds;
+
+    for (const auto& inn : innerNodes) {
+        if (inn.type == "composite_bind_in") {
+            bindIds.insert(inn.id);
+            std::string ext = NodeParam(inn, "externalPort", "In");
+            for (const auto& ic : innerConns) {
+                if (ic.fromNodeId == inn.id && ic.fromPort == "Out") {
+                    bindInMap[ext] = { ic.toNodeId, ic.toPort };
+                    break;
+                }
+            }
+        } else if (inn.type == "composite_bind_out") {
+            bindIds.insert(inn.id);
+            std::string ext = NodeParam(inn, "externalPort", "Out");
+            for (const auto& ic : innerConns) {
+                if (ic.toNodeId == inn.id && ic.toPort == "In") {
+                    bindOutMap[ext] = { ic.fromNodeId, ic.fromPort };
+                    break;
+                }
+            }
+        }
+    }
+
+    const std::string prefix = comp.id + "__";
+
+    std::vector<NodeDef> newNodes;
+    std::vector<ConnDef> newConns;
+    newNodes.reserve(e->nodes.size() + innerNodes.size());
+    newConns.reserve(e->conns.size() + innerConns.size() + 8);
+
+    for (size_t i = 0; i < e->nodes.size(); ++i) {
+        if (i == compositeIdx)
+            continue;
+        newNodes.push_back(e->nodes[i]);
+    }
+
+    for (const auto& inn : innerNodes) {
+        if (bindIds.count(inn.id))
+            continue;
+        NodeDef nn = inn;
+        nn.id = prefix + inn.id;
+        newNodes.push_back(std::move(nn));
+    }
+
+    for (const auto& c : e->conns) {
+        if (c.fromNodeId == comp.id || c.toNodeId == comp.id)
+            continue;
+        newConns.push_back(c);
+    }
+
+    for (const auto& ic : innerConns) {
+        if (bindIds.count(ic.fromNodeId) || bindIds.count(ic.toNodeId))
+            continue;
+        ConnDef nc = ic;
+        nc.fromNodeId = prefix + ic.fromNodeId;
+        nc.toNodeId = prefix + ic.toNodeId;
+        newConns.push_back(std::move(nc));
+    }
+
+    for (const auto& c : e->conns) {
+        if (c.toNodeId != comp.id)
+            continue;
+        auto it = bindInMap.find(c.toPort);
+        if (it == bindInMap.end()) {
+            err = "composite: no composite_bind_in for external input port '" + c.toPort + "'";
+            return false;
+        }
+        ConnDef nc;
+        nc.fromNodeId = c.fromNodeId;
+        nc.fromPort = c.fromPort;
+        nc.toNodeId = prefix + it->second.first;
+        nc.toPort = it->second.second;
+        newConns.push_back(std::move(nc));
+    }
+
+    for (const auto& c : e->conns) {
+        if (c.fromNodeId != comp.id)
+            continue;
+        auto it = bindOutMap.find(c.fromPort);
+        if (it == bindOutMap.end()) {
+            err = "composite: no composite_bind_out for external output port '" + c.fromPort + "'";
+            return false;
+        }
+        ConnDef nc;
+        nc.fromNodeId = prefix + it->second.first;
+        nc.fromPort = it->second.second;
+        nc.toNodeId = c.toNodeId;
+        nc.toPort = c.toPort;
+        newConns.push_back(std::move(nc));
+    }
+
+    e->nodes = std::move(newNodes);
+    e->conns = std::move(newConns);
+    return true;
+}
+
+static bool ExpandAllCompositeNodes(NativeFlowEngineImpl* e, std::string& err) {
+    for (;;) {
+        size_t idx = SIZE_MAX;
+        for (size_t i = 0; i < e->nodes.size(); ++i) {
+            if (e->nodes[i].type == "composite") {
+                idx = i;
+                break;
+            }
+        }
+        if (idx == SIZE_MAX)
+            return true;
+        if (!ExpandOneComposite(e, idx, err))
+            return false;
+    }
 }
 
 static void LinesJsonThresholdLen(const std::vector<cv::Vec4i>& in, double minLen, double maxLen, std::vector<cv::Vec4i>& out) {
@@ -324,24 +935,66 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
     if (n.type == "binarize") {
         Value vin = InputOf(e, n.id, "In");
         if (vin.kind != Value::Kind::Image) { err = "binarize: missing In"; return false; }
-        cv::Mat gray = EnsureGray(vin.img), blur, bin;
-        int b = ToInt(NodeParam(n, "blurSize", "7"), 7); if ((b & 1) == 0) b += 1;
-        cv::GaussianBlur(gray, blur, cv::Size(std::max(3, b), std::max(3, b)), 0);
-        cv::threshold(blur, bin, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
-        int m = ToInt(NodeParam(n, "morphSize", "5"), 5); if ((m & 1) == 0) m += 1;
-        cv::Mat k = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(std::max(3, m), std::max(3, m)));
-        cv::morphologyEx(bin, bin, cv::MORPH_CLOSE, k);
-        out["Out"] = MakeImage(bin);
+        // 与托管 TrajectoryStepDetector.PreprocessAndFindContours 同源：Step_PreprocessAndFindContours
+        cv::Mat grayWork = EnsureGray(vin.img).clone();
+        cv::Mat binaryBright, morphed, mask, coloredMask;
+        std::vector<std::vector<cv::Point>> outerContours;
+        int blur = ToInt(NodeParam(n, "blurSize", "7"), 7);
+        int morph = ToInt(NodeParam(n, "morphSize", "5"), 5);
+        Step_PreprocessAndFindContours(&grayWork, &binaryBright, &morphed, &mask, &coloredMask, &outerContours,
+            blur, morph, false, 0.0);
+        if (binaryBright.empty()) { err = "binarize: empty output"; return false; }
+        out["Out"] = MakeImage(binaryBright);
         return true;
     }
     if (n.type == "gray_range_binary") {
         Value vin = InputOf(e, n.id, "In");
         if (vin.kind != Value::Kind::Image) { err = "gray_range_binary: missing In"; return false; }
-        cv::Mat gray = EnsureGray(vin.img), bin;
-        int lo = ToInt(NodeParam(n, "grayLow", "5"), 5);
-        int hi = ToInt(NodeParam(n, "grayHigh", "50"), 50);
-        cv::inRange(gray, lo, hi, bin);
+        std::string rangeMode = NodeParam(n, "rangeMode", "fixed");
+        for (auto& c : rangeMode) c = (char)std::tolower((unsigned char)c);
+        cv::Mat bin;
+        if (rangeMode == "percentile") {
+            double exL = ToDouble(NodeParam(n, "percentileExcludeLow", "10"), 10.0);
+            double exH = ToDouble(NodeParam(n, "percentileExcludeHigh", "10"), 10.0);
+            if (!GrayRangeBinaryPercentile(vin.img, exL, exH, bin, err))
+                return false;
+        } else {
+            cv::Mat gray = EnsureGray(vin.img);
+            int lo = ToInt(NodeParam(n, "grayLow", "5"), 5);
+            int hi = ToInt(NodeParam(n, "grayHigh", "50"), 50);
+            cv::inRange(gray, lo, hi, bin);
+        }
         out["Out"] = MakeImage(bin);
+        return true;
+    }
+    if (n.type == "gray_erode_rect") {
+        Value vin = InputOf(e, n.id, "In");
+        if (vin.kind != Value::Kind::Image) { err = "gray_erode_rect: missing In"; return false; }
+        int kw = ToInt(NodeParam(n, "kernelW", "5"), 5);
+        int kh = ToInt(NodeParam(n, "kernelH", "5"), 5);
+        int iterations = std::max(1, ToInt(NodeParam(n, "iterations", "1"), 1));
+        if ((kw & 1) == 0) kw++;
+        if ((kh & 1) == 0) kh++;
+        kw = std::max(1, kw);
+        kh = std::max(1, kh);
+        cv::Mat gray = EnsureGray(vin.img).clone();
+        GrayMorphRectGrayIter(gray, false, kw, kh, iterations);
+        out["Out"] = MakeImage(gray);
+        return true;
+    }
+    if (n.type == "gray_dilate_rect") {
+        Value vin = InputOf(e, n.id, "In");
+        if (vin.kind != Value::Kind::Image) { err = "gray_dilate_rect: missing In"; return false; }
+        int kw = ToInt(NodeParam(n, "kernelW", "5"), 5);
+        int kh = ToInt(NodeParam(n, "kernelH", "5"), 5);
+        int iterations = std::max(1, ToInt(NodeParam(n, "iterations", "1"), 1));
+        if ((kw & 1) == 0) kw++;
+        if ((kh & 1) == 0) kh++;
+        kw = std::max(1, kw);
+        kh = std::max(1, kh);
+        cv::Mat gray = EnsureGray(vin.img).clone();
+        GrayMorphRectGrayIter(gray, true, kw, kh, iterations);
+        out["Out"] = MakeImage(gray);
         return true;
     }
     if (n.type == "binary_merge") {
@@ -459,16 +1112,38 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
     if (n.type == "find_contours") {
         Value vin = InputOf(e, n.id, "In");
         if (vin.kind != Value::Kind::Image) { err = "find_contours: missing In"; return false; }
-        cv::Mat bin = EnsureGray(vin.img);
-        std::vector<std::vector<cv::Point>> contours;
-        cv::findContours(bin, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
-        std::sort(contours.begin(), contours.end(), [](const auto& a, const auto& b) { return cv::contourArea(a) > cv::contourArea(b); });
-        cv::Mat vis = cv::Mat::zeros(bin.size(), CV_8UC1);
-        for (size_t i = 0; i < contours.size(); ++i) cv::drawContours(vis, contours, (int)i, cv::Scalar(255), 1);
-        Value c = MakeContours(contours);
+        // 与托管 SetDarkBinary + FindAndSortDarkContoursEx 同源
+        cv::Mat darkBin = EnsureGray(vin.img).clone();
+        int w = darkBin.cols, h = darkBin.rows;
+        std::vector<std::pair<double, int>> sortedBars;
+        std::vector<std::vector<cv::Point>> darkContours;
+        std::string minAreaStr = NodeParam(n, "minContourArea", "");
+        double minArea = -1.0;
+        if (!minAreaStr.empty()) {
+            try {
+                minArea = std::stod(minAreaStr);
+            } catch (...) {
+                minArea = -1.0;
+            }
+        }
+        Step_FindAndSortDarkContours(&darkBin, w, h, &sortedBars, &darkContours, minArea);
+        std::vector<std::vector<cv::Point>> ordered;
+        ordered.reserve(sortedBars.size());
+        for (const auto& sb : sortedBars) {
+            int ci = sb.second;
+            if (ci >= 0 && ci < (int)darkContours.size())
+                ordered.push_back(darkContours[ci]);
+        }
+        cv::Mat vis = darkBin.clone();
+        for (size_t i = 0; i < sortedBars.size(); ++i) {
+            int ci = sortedBars[i].second;
+            if (ci >= 0 && ci < (int)darkContours.size())
+                cv::drawContours(vis, darkContours, ci, cv::Scalar(128), 2);
+        }
+        Value c = MakeContours(ordered);
         out["Contours"] = c;
         out["Out"] = MakeImage(vis);
-        Value cnt; cnt.kind = Value::Kind::Int; cnt.i = (int)contours.size();
+        Value cnt; cnt.kind = Value::Kind::Int; cnt.i = (int)ordered.size();
         out["Count"] = cnt;
         return true;
     }
@@ -479,7 +1154,21 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         auto contours = ToContours(vc.contours);
         if (contours.empty()) { err = "create_mask: empty contours"; return false; }
         int idx = ToInt(NodeParam(n, "contourIdx", "-1"), -1);
-        if (idx < 0 || idx >= (int)contours.size()) idx = 0;
+        if (idx < 0) {
+            double bestA = -1.0;
+            int bestI = 0;
+            for (size_t i = 0; i < contours.size(); ++i) {
+                double a = cv::contourArea(contours[i]);
+                if (a > bestA) {
+                    bestA = a;
+                    bestI = (int)i;
+                }
+            }
+            idx = bestI;
+        } else if (idx >= (int)contours.size()) {
+            err = "create_mask: contourIdx out of range";
+            return false;
+        }
         int w = vi.kind == Value::Kind::Image ? vi.img.cols : CALIB_IMAGE_WIDTH;
         int h = vi.kind == Value::Kind::Image ? vi.img.rows : CALIB_IMAGE_HEIGHT;
         cv::Mat mask = cv::Mat::zeros(h, w, CV_8UC1);
@@ -512,12 +1201,13 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
     if (n.type == "morphology") {
         Value in = InputOf(e, n.id, "In");
         if (in.kind != Value::Kind::Image) { err = "morphology: missing In"; return false; }
-        cv::Mat bin = EnsureGray(in.img);
-        int k = ToInt(NodeParam(n, "kernelSize", "5"), 5); if ((k & 1) == 0) k += 1;
-        cv::Mat ker = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(std::max(3, k), std::max(3, k)));
-        cv::morphologyEx(bin, bin, cv::MORPH_OPEN, ker);
-        cv::morphologyEx(bin, bin, cv::MORPH_CLOSE, ker);
-        out["Out"] = MakeImage(bin);
+        // 与托管 TrajectoryStepDetector.MorphologyCleanup 同源：Step_MorphologyCleanup
+        cv::Mat dark = EnsureGray(in.img).clone();
+        int k = ToInt(NodeParam(n, "kernelSize", "5"), 5);
+        int bk = ToInt(NodeParam(n, "blurKsize", "9"), 9);
+        double sigma = ToDouble(NodeParam(n, "blurSigma", "2.0"), 2.0);
+        Step_MorphologyCleanup(&dark, k, bk, sigma);
+        out["Out"] = MakeImage(dark);
         return true;
     }
     if (n.type == "expand_edge") {
@@ -709,16 +1399,20 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
     if (n.type == "dedup") {
         Value v = InputOf(e, n.id, "In");
         if (v.kind != Value::Kind::Points) { err = "dedup: missing In"; return false; }
-        std::vector<cv::Point> pts;
-        pts.reserve(v.points.size());
-        for (auto& p : v.points) pts.emplace_back((int)std::round(p.x), (int)std::round(p.y));
-        std::vector<int> bars = v.barIds;
-        if (bars.size() != pts.size()) bars.assign(pts.size(), 0);
-        Step_DeduplicateAndSort(&pts, &bars);
+        // Match FlowPage: GroupBy($"{Round(X,3)}_{Round(Y,3)}").Select(g => g.First())
+        std::unordered_set<std::string> seen;
+        seen.reserve(v.points.size() * 2);
         Value ov; ov.kind = Value::Kind::Points;
-        ov.points.reserve(pts.size());
-        for (auto& p : pts) ov.points.push_back(Point2D{ (double)p.x, (double)p.y });
-        ov.barIds = bars;
+        for (size_t i = 0; i < v.points.size(); ++i) {
+            double rx = std::round(v.points[i].x * 1000.0) / 1000.0;
+            double ry = std::round(v.points[i].y * 1000.0) / 1000.0;
+            std::ostringstream ks;
+            ks << std::fixed << std::setprecision(3) << rx << '_' << ry;
+            std::string key = ks.str();
+            if (!seen.insert(key).second) continue;
+            ov.points.push_back(v.points[i]);
+            if (i < v.barIds.size()) ov.barIds.push_back(v.barIds[i]);
+        }
         out["Out"] = ov;
         return true;
     }
@@ -726,21 +1420,81 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         Value v = InputOf(e, n.id, "In");
         Value vb = InputOf(e, n.id, "BarIds");
         if (v.kind != Value::Kind::Points) { err = "fit_shape: missing In"; return false; }
-        std::vector<cv::Point> cvPts;
-        cvPts.reserve(v.points.size());
-        for (auto& p : v.points) cvPts.emplace_back((int)std::round(p.x), (int)std::round(p.y));
-        std::vector<int> barIds = !vb.barIds.empty() ? vb.barIds : v.barIds;
-        if (barIds.size() != cvPts.size()) barIds.assign(cvPts.size(), 0);
-        int fitMode = 0;
+        const auto& inPts = v.points;
+        if (inPts.size() < 3) {
+            out["Out"] = v;
+            Value emptyBid; emptyBid.kind = Value::Kind::Points;
+            out["OutBarIds"] = emptyBid;
+            return true;
+        }
+
         std::string mode = NodeParam(n, "mode", "hybrid");
-        if (mode == "simplify") fitMode = 1;
-        double eps = ToDouble(NodeParam(n, "epsilon", "2.0"), 2.0);
-        Step_FitShape(&cvPts, &barIds, CALIB_IMAGE_WIDTH, CALIB_IMAGE_HEIGHT, fitMode, eps);
-        Value ov; ov.kind = Value::Kind::Points;
-        ov.points.reserve(cvPts.size());
-        for (auto& p : cvPts) ov.points.push_back(Point2D{ (double)p.x, (double)p.y });
-        ov.barIds = barIds;
+        for (auto& c : mode) c = (char)std::tolower((unsigned char)c);
+
+        int windowRadius = ToInt(NodeParam(n, "windowRadius", "1"), 1);
+        if (windowRadius < 0) windowRadius = 0;
+
+        double epsilon = ToDouble(NodeParam(n, "epsilon", "2.0"), 2.0);
+        if (epsilon < 0) epsilon = 0;
+
+        double splitGapFactor = ToDouble(NodeParam(n, "splitGapFactor", "3.0"), 3.0);
+        if (splitGapFactor < 1.2) splitGapFactor = 1.2;
+
+        int minRegionPoints = ToInt(NodeParam(n, "minRegionPoints", "16"), 16);
+        if (minRegionPoints < 3) minRegionPoints = 3;
+
+        std::vector<int> inputBarIds = !vb.barIds.empty() ? vb.barIds : v.barIds;
+        if (inputBarIds.size() != inPts.size())
+            inputBarIds.clear();
+
+        auto FitOneRegion = [&](const std::vector<Point2D>& region) -> std::vector<Point2D> {
+            if (region.size() < 3) return region;
+            int wr = windowRadius <= 0 ? 1 : windowRadius;
+            double epsUse = epsilon <= 0 ? 1.0 : epsilon;
+            if (mode == "moving_avg")
+                return FlowSmoothPointsClosed(region, wr);
+            if (mode == "simplify") {
+                auto simplified = FlowSimplifyClosedPolyline(region, epsUse);
+                return FlowResampleClosedPolyline(simplified, (int)region.size());
+            }
+            auto simplified = FlowSimplifyClosedPolyline(region, epsUse);
+            auto resampled = FlowResampleClosedPolyline(simplified, (int)region.size());
+            return FlowSmoothPointsClosed(resampled, wr);
+        };
+
+        std::vector<Point2D> fitPts;
+        std::vector<int> outBarIds;
+
+        auto barRegions = FlowSplitRegionsByBarIds(inPts, inputBarIds, minRegionPoints);
+        if (!barRegions.empty()) {
+            for (auto& pr : barRegions) {
+                auto fitted = FitOneRegion(pr.first);
+                fitPts.insert(fitPts.end(), fitted.begin(), fitted.end());
+                if (fitted.size() == pr.second.size())
+                    outBarIds.insert(outBarIds.end(), pr.second.begin(), pr.second.end());
+                else {
+                    int bid = pr.second.empty() ? -1 : pr.second[0];
+                    outBarIds.insert(outBarIds.end(), fitted.size(), (size_t)bid);
+                }
+            }
+        } else {
+            auto regions = FlowSplitIntoClosedRegions(inPts, splitGapFactor, minRegionPoints);
+            std::vector<Point2D> merged;
+            merged.reserve(inPts.size());
+            for (auto& region : regions)
+                merged.insert(merged.end(), region.begin(), region.end());
+            if (merged.size() == inPts.size())
+                fitPts = std::move(merged);
+            else
+                fitPts = FitOneRegion(inPts);
+            if (inputBarIds.size() == fitPts.size())
+                outBarIds = inputBarIds;
+        }
+
+        Value ov; ov.kind = Value::Kind::Points; ov.points = std::move(fitPts);
+        Value obid; obid.kind = Value::Kind::Points; obid.barIds = std::move(outBarIds);
         out["Out"] = ov;
+        out["OutBarIds"] = obid;
         return true;
     }
     if (n.type == "detect_hollow") {
@@ -792,9 +1546,14 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         return true;
     }
     if (n.type == "img_to_world") {
-        Value pts = InputOf(e, n.id, "Points");
+        Value pts = InputOf(e, n.id, "Pixel");
+        if (pts.kind != Value::Kind::Points)
+            pts = InputOf(e, n.id, "Points");
         Value tr = InputOf(e, n.id, "Transform");
-        if (pts.kind != Value::Kind::Points || tr.kind != Value::Kind::Transform) { err = "img_to_world: missing input"; return false; }
+        if (pts.kind != Value::Kind::Points || tr.kind != Value::Kind::Transform) {
+            err = "img_to_world: missing Pixel/Points or Transform";
+            return false;
+        }
         Value outPts; outPts.kind = Value::Kind::Points;
         outPts.points.reserve(pts.points.size());
         for (auto& p : pts.points) outPts.points.push_back(ImageToWorld(p, tr.trans));
@@ -876,15 +1635,16 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         std::string closedStr = NodeParam(n, "closed", "true");
         for (auto& c : closedStr) c = (char)std::tolower((unsigned char)c);
         bool closed = !(closedStr == "0" || closedStr == "false");
-        std::vector<cv::Point2f> curve;
-        curve.reserve(ptsIn.points.size());
-        for (auto& p : ptsIn.points) curve.emplace_back((float)p.x, (float)p.y);
-        std::vector<cv::Point2f> approx;
-        cv::approxPolyDP(curve, approx, eps, closed);
+        std::vector<Point2D> simplified;
+        if (ptsIn.points.size() <= 2)
+            simplified = ptsIn.points;
+        else if (closed)
+            simplified = FlowSimplifyClosedPolyline(ptsIn.points, eps);
+        else
+            simplified = FlowSimplifyOpenPolyline(ptsIn.points, eps);
         Value vout;
         vout.kind = Value::Kind::Points;
-        vout.points.reserve(approx.size());
-        for (auto& q : approx) vout.points.push_back(Point2D{ (double)q.x, (double)q.y });
+        vout.points = std::move(simplified);
         out["Out"] = vout;
         return true;
     }
@@ -1060,6 +1820,35 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         if (pts.kind == Value::Kind::Points) out["Points"] = pts;
         return true;
     }
+    if (n.type == "load_calibration_result") {
+        std::string path = NodeParam(n, "filePath", "");
+        if (path.empty()) {
+            err = "load_calibration_result: filePath empty";
+            return false;
+        }
+        std::string jsonBuf;
+        if (!ReadCalibrationJsonFileForOpenCv(path, jsonBuf, err)) {
+            err = "load_calibration_result: " + err;
+            return false;
+        }
+        std::string calJsonField;
+        AffineTransform t{};
+        if (!ParseCalibrationResultJsonMinimal(jsonBuf, t, &calJsonField, err)) {
+            err = "load_calibration_result: " + err;
+            return false;
+        }
+        Value tv;
+        tv.kind = Value::Kind::Transform;
+        tv.trans = t;
+        out["Transform"] = tv;
+        if (!calJsonField.empty()) {
+            Value vs;
+            vs.kind = Value::Kind::String;
+            vs.str = std::move(calJsonField);
+            out["CalibrationJson"] = vs;
+        }
+        return true;
+    }
     if (n.type == "save_image") {
         Value img = InputOf(e, n.id, "Image");
         if (img.kind != Value::Kind::Image) { err = "save_image: missing Image"; return false; }
@@ -1085,38 +1874,9 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
 }
 
 static bool LoadFlowFromCvFileStorage(NativeFlowEngineImpl* e, cv::FileStorage& fs, std::string& err) {
-    e->nodes.clear();
-    e->conns.clear();
-    cv::FileNode nodes = fs["Nodes"];
-    cv::FileNode conns = fs["Connections"];
-    if (nodes.type() != cv::FileNode::SEQ) { err = "flow json missing Nodes"; return false; }
-    if (conns.type() != cv::FileNode::SEQ) { err = "flow json missing Connections"; return false; }
-    for (auto it = nodes.begin(); it != nodes.end(); ++it) {
-        NodeDef nd;
-        nd.id = (std::string)(*it)["Id"];
-        nd.type = (std::string)(*it)["TypeId"];
-        cv::FileNode params = (*it)["Params"];
-        if (params.type() == cv::FileNode::MAP) {
-            // OpenCV 4.13 的 FileNodeIterator 不提供 name()，改用 keys() 兼容写法
-            std::vector<cv::String> keys = params.keys();
-            for (const auto& k : keys) {
-                nd.params[(std::string)k] = (std::string)params[k];
-            }
-        }
-        e->nodes.push_back(std::move(nd));
-    }
-    for (auto it = conns.begin(); it != conns.end(); ++it) {
-        ConnDef cd;
-        cd.fromNodeId = (std::string)(*it)["FromNodeId"];
-        cd.fromPort = (std::string)(*it)["FromPort"];
-        cd.toNodeId = (std::string)(*it)["ToNodeId"];
-        cd.toPort = (std::string)(*it)["ToPort"];
-        auto tit = std::find_if(e->nodes.begin(), e->nodes.end(), [&](const NodeDef& nd) { return nd.id == cd.toNodeId; });
-        if (tit != e->nodes.end() && tit->type == "hough_lines" && cd.toPort == "Image")
-            cd.toPort = "Edge";
-        e->conns.push_back(std::move(cd));
-    }
-    return true;
+    if (!ReadFlowGraph(fs, e->nodes, e->conns, err))
+        return false;
+    return ExpandAllCompositeNodes(e, err);
 }
 
 } // namespace

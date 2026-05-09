@@ -150,7 +150,7 @@ namespace CalibOperatorCLI_Example
             HighlightTab("SamOnnx");
         }
 
-        public async Task<bool> RunFlowConfigInBackgroundAsync(string flowFilePath)
+        public async Task<bool> RunFlowConfigInBackgroundAsync(string flowFilePath, bool preferNativeEngine = false)
         {
             if (string.IsNullOrWhiteSpace(flowFilePath))
                 throw new ArgumentException("Flow 文件路径为空", nameof(flowFilePath));
@@ -168,15 +168,17 @@ namespace CalibOperatorCLI_Example
 
             SaveLastFlowPath(flowFilePath);
             fp.MirrorErrorsToStderr = true;
+            fp.TraceEnginePathToConsole = true;
             try
             {
-                // 与组态页「执行全部」一致走托管引擎：保证与界面相同的算子集（含 save_calibration_result 等），
-                // 且避免 C++ 引擎与组态端口名不一致（如 detect_circles 的 Image）导致只跑部分节点后误以为成功。
-                return await fp.RunAllAsync(clearLog: true, preferNativeEngine: false);
+                // 默认 false：与组态页「执行全部」一致走托管引擎（算子集、端口名与界面一致）。
+                // CLI 传入 --prefer-native-engine 时为 true：优先 C++ NativeFlowEngine，失败仍回退托管。
+                return await fp.RunAllAsync(clearLog: true, preferNativeEngine: preferNativeEngine);
             }
             finally
             {
                 fp.MirrorErrorsToStderr = false;
+                fp.TraceEnginePathToConsole = false;
             }
         }
 
