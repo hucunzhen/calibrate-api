@@ -809,7 +809,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "filter_contours",
                 DisplayName = "规则轮廓筛选",
-                Description = "按面积/长宽比/圆度筛选规整轮廓",
+                Description = "按面积/长宽比/圆度筛选规整轮廓。轮廓条数为 0 时跳过（输出空 Contours，Count=0）。",
                 Category = "检测",
                 Ports =
                 {
@@ -833,7 +833,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "match_contours",
                 DisplayName = "形状匹配筛选",
-                Description = "基于模板轮廓做形状匹配并筛选",
+                Description = "基于模板轮廓做形状匹配并筛选。轮廓条数为 0 时跳过（输出空 Contours，Count=0）。",
                 Category = "检测",
                 Ports =
                 {
@@ -882,7 +882,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "fuse_contours_template",
                 DisplayName = "融合轮廓模板",
-                Description = "将轮廓集合融合为模板图",
+                Description = "将轮廓集合融合为模板图。轮廓条数为 0 时跳过（输出空白 Template）。",
                 Category = "检测",
                 Ports =
                 {
@@ -930,7 +930,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "create_mask",
                 DisplayName = "生成Mask",
-                Description = "Step2.5: 按轮廓索引填充内部生成Mask（-1=自动选最大）",
+                Description = "Step2.5: 按轮廓索引填充内部生成Mask（-1=自动选最大）。无轮廓时输出全黑 Mask，不报错。",
                 Category = "检测",
                 Params =
                 {
@@ -1018,7 +1018,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "sample",
                 DisplayName = "采样",
-                Description = "使用上游轮廓数据进行等弧长采样",
+                Description = "使用上游轮廓数据进行等弧长采样。若轮廓条数为 0 则跳过（Points / BarIds 输出空数组，不报错）。",
                 Category = "输出",
                 Ports =
                 {
@@ -1036,7 +1036,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "fit_shape",
                 DisplayName = "形状拟合",
-                Description = "Step7.5: Stadium拟合/曲率去噪",
+                Description = "Step7.5: Stadium拟合/曲率去噪。输入 0 个点时跳过（空 Out / OutBarIds）。",
                 Category = "输出",
                 Ports =
                 {
@@ -1065,7 +1065,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "verify_mask",
                 DisplayName = "Mask验证",
-                Description = "Step8: 通过mask验证轨迹",
+                Description = "Step8: 通过mask验证轨迹。输入 0 个点时跳过（空 Out）。",
                 Category = "验证",
                 Ports =
                 {
@@ -1077,7 +1077,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "dedup",
                 DisplayName = "去重排序",
-                Description = "Step9: 去重+排序",
+                Description = "Step9: 去重+排序。输入 0 个点时跳过（空 Out）。",
                 Category = "验证",
                 Ports =
                 {
@@ -1089,7 +1089,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "convert_output",
                 DisplayName = "输出转换",
-                Description = "Step10: 转换为输出格式",
+                Description = "Step10: 转换为输出格式。输入 0 个点时仍输出 Result（Success=false），不报错。",
                 Category = "输出",
                 Ports =
                 {
@@ -1101,7 +1101,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "draw_color",
                 DisplayName = "绘制彩色轨迹",
-                Description = "Step11: 绘制彩色结果",
+                Description = "Step11: 绘制彩色结果。轨迹为空时输出空白画布，不报错。",
                 Category = "可视化",
                 Ports =
                 {
@@ -1175,7 +1175,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "points_to_text",
                 DisplayName = "点列转文本",
-                Description = "将 Point2D[] 转为每行 x,y 文本，便于接「保存文本」落盘（如棋盘平面 mm 轨迹）",
+                Description = "将 Point2D[] 转为每行 x,y 文本，便于接「保存文本」落盘（如棋盘平面 mm 轨迹）。0 个点时输出空字符串，不报错。",
                 Category = "可视化",
                 Params =
                 {
@@ -1242,7 +1242,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "img_to_world",
                 DisplayName = "坐标转换",
-                Description = "像素坐标→世界坐标",
+                Description = "像素坐标→世界坐标。0 个点时跳过（空 World）。",
                 Category = "标定",
                 Ports =
                 {
@@ -1268,7 +1268,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "img_to_world_homography",
                 DisplayName = "坐标转换(H)",
-                Description = "使用单应矩阵进行像素->世界坐标转换",
+                Description = "使用单应矩阵进行像素->世界坐标转换。0 个点时跳过（空 World）。",
                 Category = "标定",
                 Ports =
                 {
@@ -1294,7 +1294,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "img_to_world_poly2d",
                 DisplayName = "坐标转换(Poly2D)",
-                Description = "使用二次多项式进行像素->世界坐标转换",
+                Description = "使用二次多项式进行像素->世界坐标转换。0 个点时跳过（空 World）。",
                 Category = "标定",
                 Ports =
                 {
@@ -1541,7 +1541,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "chessboard_pixels_to_world",
                 DisplayName = "棋盘像素→世界(mm)",
-                Description = "将像素轨迹投影到标定棋盘平面 Z=0：先 undistort，再按选定视图外参求射线与平面交点，输出 XY 与 squareSizeMm 同单位。CalibrationJson 来自「棋盘格内参标定」；viewIndex 对应 extrinsicsPerView 顺序（与成功标定图像顺序一致）。轨迹须与该视图成像几何一致（如同机位、或静止场景下同 pose）。",
+                Description = "将像素轨迹投影到标定棋盘平面 Z=0：先 undistort，再按选定视图外参求射线与平面交点，输出 XY 与 squareSizeMm 同单位。CalibrationJson 来自「棋盘格内参标定」；viewIndex 对应 extrinsicsPerView 顺序（与成功标定图像顺序一致）。轨迹须与该视图成像几何一致（如同机位、或静止场景下同 pose）。0 个点时跳过（空 World）。",
                 Category = "标定",
                 Params =
                 {
@@ -6465,7 +6465,7 @@ namespace CalibOperatorCLI_Example
         {
             var (flatX, flatY, contourLengths, contourCount) = contourData;
             if (contourCount <= 0 || contourLengths == null || contourLengths.Length == 0)
-                throw new InvalidOperationException("Contours 为空，无法生成 Mask");
+                return new CalibImage(width, height, 1);
 
             int selected = contourIdx;
             if (selected < 0)
@@ -7554,6 +7554,7 @@ namespace CalibOperatorCLI_Example
             var inputs = explicitInputs ?? GetNodeInputs(node);
             node.Outputs.Clear();
             node.ErrorMessage = null;
+            node.ResultSummary = null;
             SetNodeStatus(node, true);
 
             try
@@ -8247,6 +8248,15 @@ namespace CalibOperatorCLI_Example
                         {
                             int w = inImg?.Width ?? CalibAPI.ImageWidth;
                             int h = inImg?.Height ?? CalibAPI.ImageHeight;
+                            var (_, _, _, fc) = contourData;
+                            if (fc <= 0)
+                            {
+                                maskImg = new CalibImage(w, h, 1);
+                                node.Outputs["Mask"] = maskImg;
+                                node.ResultSummary = "skip: empty contours → black Mask";
+                                break;
+                            }
+
                             maskImg = BuildMaskFromContours(contourData, contourIdx, w, h);
                         }
                         else
@@ -8256,7 +8266,14 @@ namespace CalibOperatorCLI_Example
                             detector.ConvertToGrayscale(inImg);
                             detector.PreprocessAndFindContours();
                             int ret = detector.CreateMaskFromLargestContour(contourIdx);
-                            if (ret != 0) throw new InvalidOperationException("生成Mask: 轮廓为空或查找失败");
+                            if (ret != 0)
+                            {
+                                maskImg = new CalibImage(inImg.Width, inImg.Height, 1);
+                                node.Outputs["Mask"] = maskImg;
+                                node.ResultSummary = "skip: no contour from image → black Mask";
+                                break;
+                            }
+
                             maskImg = detector.GetStepImage(3) ?? throw new InvalidOperationException("生成Mask: 获取输出失败");
                         }
                         node.Outputs["Mask"] = maskImg;
@@ -8362,7 +8379,13 @@ namespace CalibOperatorCLI_Example
                             throw new InvalidOperationException("采样: 轮廓数据格式错误");
                         var (flatX, flatY, contourLengths, contourCount) = contourData;
                         if (contourCount <= 0)
-                            throw new InvalidOperationException("采样: 轮廓为空，请先执行查找轮廓");
+                        {
+                            node.Outputs["Points"] = Array.Empty<Point2D>();
+                            node.Outputs["BarIds"] = Array.Empty<int>();
+                            node.ResultSummary = "skip: empty contours → empty Points";
+                            break;
+                        }
+
                         int targetBars = int.Parse(node.Params["targetBars"]);
                         int spacing = int.Parse(node.Params["spacing"]);
                         var (pts, barIds) = CalibAPI.SampleContoursFromPointsWithBarIds(flatX, flatY, contourLengths,
@@ -8378,6 +8401,13 @@ namespace CalibOperatorCLI_Example
                             throw new InvalidOperationException("轮廓筛选: 缺少输入轮廓数据");
                         if (contourObj is not ValueTuple<int[], int[], int[], int> contourData)
                             throw new InvalidOperationException("轮廓筛选: 轮廓数据格式错误");
+                        if (contourData.Item4 <= 0)
+                        {
+                            node.Outputs["Contours"] = (Array.Empty<int>(), Array.Empty<int>(), Array.Empty<int>(), 0);
+                            node.Outputs["Count"] = 0;
+                            node.ResultSummary = "skip: empty contours";
+                            break;
+                        }
 
                         double ParseInv(string key, double defVal)
                         {
@@ -8412,6 +8442,13 @@ namespace CalibOperatorCLI_Example
                             throw new InvalidOperationException("形状匹配: 缺少输入轮廓数据");
                         if (contourObj is not ValueTuple<int[], int[], int[], int> contourData)
                             throw new InvalidOperationException("形状匹配: 轮廓数据格式错误");
+                        if (contourData.Item4 <= 0)
+                        {
+                            node.Outputs["Contours"] = (Array.Empty<int>(), Array.Empty<int>(), Array.Empty<int>(), 0);
+                            node.Outputs["Count"] = 0;
+                            node.ResultSummary = "skip: empty contours";
+                            break;
+                        }
 
                         int templateIndex = int.Parse(node.Params["templateIndex"]);
                         double maxDistance = double.Parse(node.Params["maxDistance"]);
@@ -8495,6 +8532,14 @@ namespace CalibOperatorCLI_Example
                             throw new InvalidOperationException("融合模板: 缺少输入轮廓数据");
                         if (contourObj is not ValueTuple<int[], int[], int[], int> contourData)
                             throw new InvalidOperationException("融合模板: 轮廓数据格式错误");
+                        int canvasSizeEarly = Math.Max(16, int.Parse(node.Params["canvasSize"]));
+                        if (contourData.Item4 <= 0)
+                        {
+                            var emptyBin = new bool[canvasSizeEarly, canvasSizeEarly];
+                            node.Outputs["Template"] = BinaryToCalibImage(emptyBin);
+                            node.ResultSummary = "skip: empty contours → blank Template";
+                            break;
+                        }
 
                         int templateBars = int.Parse(node.Params["templateBars"]);
                         int canvasSize = int.Parse(node.Params["canvasSize"]);
@@ -8518,9 +8563,19 @@ namespace CalibOperatorCLI_Example
                     {
                         var inPts = inputs["In"] as Point2D[];
                         if (inPts == null) throw new InvalidOperationException("拟合: 缺少输入点");
+                        if (inPts.Length == 0)
+                        {
+                            node.Outputs["Out"] = Array.Empty<Point2D>();
+                            node.Outputs["OutBarIds"] = Array.Empty<int>();
+                            node.ResultSummary = "skip: 0 pts → empty Out";
+                            break;
+                        }
+
                         if (inPts.Length < 3)
                         {
                             node.Outputs["Out"] = inPts;
+                            var bidEarly = inputs.TryGetValue("BarIds", out var boe) ? boe as int[] : null;
+                            node.Outputs["OutBarIds"] = bidEarly != null && bidEarly.Length == inPts.Length ? bidEarly : Array.Empty<int>();
                             break;
                         }
 
@@ -8604,6 +8659,13 @@ namespace CalibOperatorCLI_Example
                     {
                         var inPts = inputs["In"] as Point2D[];
                         if (inPts == null) throw new InvalidOperationException("验证: 缺少输入点");
+                        if (inPts.Length == 0)
+                        {
+                            node.Outputs["Out"] = Array.Empty<Point2D>();
+                            node.ResultSummary = "skip: 0 pts → empty Out";
+                            break;
+                        }
+
                         var verPts = FilterPointsInImage(inPts, CalibAPI.ImageWidth, CalibAPI.ImageHeight);
                         node.Outputs["Out"] = verPts;
                         break;
@@ -8613,6 +8675,13 @@ namespace CalibOperatorCLI_Example
                     {
                         var inPts = inputs["In"] as Point2D[];
                         if (inPts == null) throw new InvalidOperationException("去重: 缺少输入点");
+                        if (inPts.Length == 0)
+                        {
+                            node.Outputs["Out"] = Array.Empty<Point2D>();
+                            node.ResultSummary = "skip: 0 pts → empty Out";
+                            break;
+                        }
+
                         var dedupPts = inPts
                             .GroupBy(p => $"{Math.Round(p.X, 3)}_{Math.Round(p.Y, 3)}")
                             .Select(g => g.First())
@@ -8632,16 +8701,19 @@ namespace CalibOperatorCLI_Example
                             Points = inPts
                         };
                         node.Outputs["Result"] = result;
+                        if (inPts.Length == 0)
+                            node.ResultSummary = "skip: 0 pts → Result.Success=false";
                         break;
                     }
 
                     case "draw_color":
                     {
                         var result = inputs["Result"] as TrajectoryResult;
-                        if (result == null || result.Points == null || result.Points.Length == 0)
-                            throw new InvalidOperationException("绘制彩色: 缺少轨迹结果");
                         var colorImg = new CalibImage(CalibAPI.ImageWidth, CalibAPI.ImageHeight, 3);
-                        CalibAPI.DrawTrajectoryColored(colorImg, result.Points, result.BarIds);
+                        if (result?.Points != null && result.Points.Length > 0)
+                            CalibAPI.DrawTrajectoryColored(colorImg, result.Points, result.BarIds);
+                        else
+                            node.ResultSummary = "skip: empty trajectory → blank Image";
                         node.Outputs["Image"] = colorImg;
                         break;
                     }
@@ -8975,8 +9047,15 @@ namespace CalibOperatorCLI_Example
                     case "chessboard_pixels_to_world":
                     {
                         var pts = inputs["Points"] as Point2D[];
-                        if (pts == null || pts.Length == 0)
+                        if (pts == null)
                             throw new InvalidOperationException("棋盘像素→世界: 缺少像素点列 Points（轨迹或角点）");
+                        if (pts.Length == 0)
+                        {
+                            node.Outputs["World"] = Array.Empty<Point2D>();
+                            node.ResultSummary = "skip: 0 pts → empty World";
+                            break;
+                        }
+
                         if (!inputs.TryGetValue("CalibrationJson", out var cjObj) || cjObj is not string calJson || string.IsNullOrWhiteSpace(calJson))
                             throw new InvalidOperationException("棋盘像素→世界: 缺少 CalibrationJson（须为多视图标定输出的完整 JSON）");
                         int viewIdx = int.TryParse(node.Params.GetValueOrDefault("viewIndex"), out int vi) ? vi : 0;
@@ -9006,6 +9085,13 @@ namespace CalibOperatorCLI_Example
                         var transform = inputs["Transform"] as AffineTransform?;
                         if (pixelPts == null || transform == null)
                             throw new InvalidOperationException("坐标转换: 缺少输入点或变换矩阵");
+                        if (pixelPts.Length == 0)
+                        {
+                            node.Outputs["World"] = Array.Empty<Point2D>();
+                            node.ResultSummary = "skip: 0 pts → empty World";
+                            break;
+                        }
+
                         CalibAPI.SetTransform(transform.Value);
                         var worldPts2 = pixelPts.Select(p => CalibAPI.ImageToWorld(p, transform.Value)).ToArray();
                         node.Outputs["World"] = worldPts2;
@@ -9034,6 +9120,13 @@ namespace CalibOperatorCLI_Example
                             throw new InvalidOperationException("坐标转换(H): 缺少H矩阵");
                         if (pixelPts == null)
                             throw new InvalidOperationException("坐标转换(H): 缺少输入点");
+                        if (pixelPts.Length == 0)
+                        {
+                            node.Outputs["World"] = Array.Empty<Point2D>();
+                            node.ResultSummary = "skip: 0 pts → empty World";
+                            break;
+                        }
+
                         node.Outputs["World"] = pixelPts.Select(p => ApplyHomography(p, h)).ToArray();
                         break;
                     }
@@ -9060,6 +9153,13 @@ namespace CalibOperatorCLI_Example
                             throw new InvalidOperationException("坐标转换(Poly2D): 缺少Poly参数");
                         if (pixelPts == null)
                             throw new InvalidOperationException("坐标转换(Poly2D): 缺少输入点");
+                        if (pixelPts.Length == 0)
+                        {
+                            node.Outputs["World"] = Array.Empty<Point2D>();
+                            node.ResultSummary = "skip: 0 pts → empty World";
+                            break;
+                        }
+
                         node.Outputs["World"] = pixelPts.Select(p => ApplyPoly2D(p, poly)).ToArray();
                         break;
                     }
@@ -9283,8 +9383,15 @@ namespace CalibOperatorCLI_Example
                     case "points_to_text":
                     {
                         var pts = inputs["Points"] as Point2D[];
-                        if (pts == null || pts.Length == 0)
+                        if (pts == null)
                             throw new InvalidOperationException("点列转文本: 缺少 Points");
+                        if (pts.Length == 0)
+                        {
+                            node.Outputs["Text"] = "";
+                            node.ResultSummary = "skip: 0 pts → empty Text";
+                            break;
+                        }
+
                         var sep = (node.Params.GetValueOrDefault("lineSeparator", "lf") ?? "lf").Trim().ToLowerInvariant();
                         string nl = sep == "crlf" ? "\r\n" : "\n";
                         var sb = new System.Text.StringBuilder();
@@ -9881,7 +9988,7 @@ namespace CalibOperatorCLI_Example
                         int maxBars = int.TryParse(node.Params.GetValueOrDefault("maxBars"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var mb) ? mb : 16;
                         var pts = HalconFlowBridge.SamplePointsFromXldBundle(xb, spacing, maxBars);
                         node.Outputs["Points"] = pts;
-                        node.ResultSummary = $"HALCON xld_pts {pts.Length}";
+                        node.ResultSummary = pts.Length == 0 ? "skip: empty XLD → empty Points" : $"HALCON xld_pts {pts.Length}";
                         break;
                     }
 #endif
@@ -9917,7 +10024,10 @@ namespace CalibOperatorCLI_Example
 
                 node.Executed = true;
                 SetNodeStatus(node, false);
-                UpdateNodeSummary(node);
+                if (node.ResultSummary == null)
+                    UpdateNodeSummary(node);
+                else
+                    ApplyResultSummaryTextToNodeVisual(node, node.ResultSummary);
             }
             catch (FlowExecutionGracefulStopException ex)
             {
@@ -10152,6 +10262,26 @@ namespace CalibOperatorCLI_Example
         /// <summary>
         /// 更新节点上的结果摘要文本
         /// </summary>
+        private static void ApplyResultSummaryTextToNodeVisual(FlowNode node, string? summary)
+        {
+            if (node.Visual is not Border border)
+                return;
+            border.Dispatcher.Invoke(() =>
+            {
+                if (border.Child is StackPanel panel)
+                {
+                    foreach (var child in panel.Children)
+                    {
+                        if (child is TextBlock tb && (string)tb.Tag == "SummaryText")
+                        {
+                            tb.Text = summary ?? "";
+                            break;
+                        }
+                    }
+                }
+            });
+        }
+
         private void UpdateNodeSummary(FlowNode node)
         {
             // 构建摘要
@@ -10178,25 +10308,7 @@ namespace CalibOperatorCLI_Example
             }
 
             node.ResultSummary = summary;
-
-            // 更新 UI
-            if (node.Visual is Border border)
-            {
-                border.Dispatcher.Invoke(() =>
-                {
-                    if (border.Child is StackPanel panel)
-                    {
-                        foreach (var child in panel.Children)
-                        {
-                            if (child is TextBlock tb && (string)tb.Tag == "SummaryText")
-                            {
-                                tb.Text = summary ?? "";
-                                break;
-                            }
-                        }
-                    }
-                });
-            }
+            ApplyResultSummaryTextToNodeVisual(node, summary);
         }
 
         /// <summary>
