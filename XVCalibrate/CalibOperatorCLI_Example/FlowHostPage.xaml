@@ -6,10 +6,12 @@
     <DockPanel>
         <Border DockPanel.Dock="Top"
                 Background="{StaticResource NavBarBrush}"
-                Padding="0">
+                Padding="4,2">
             <StackPanel Orientation="Horizontal">
                 <Button x:Name="NewTabButton"
                         Content="＋ 新建标签"
+                        MinWidth="108"
+                        Height="32"
                         Style="{StaticResource NavBarActionButtonStyle}"
                         Click="NewTabButton_Click"
                         AutomationProperties.Name="新建组态标签"/>

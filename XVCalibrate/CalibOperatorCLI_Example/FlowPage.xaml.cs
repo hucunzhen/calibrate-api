@@ -2311,6 +2311,8 @@ namespace CalibOperatorCLI_Example
         private readonly List<FlowNode> _nodes = new List<FlowNode>();
         private readonly List<FlowConnection> _connections = new List<FlowConnection>();
         private readonly ObservableCollection<ToolboxGroup> _toolboxGroups = new ObservableCollection<ToolboxGroup>();
+        /// <summary>完整工具箱目录（用于筛选时克隆子集到 <see cref="_toolboxGroups"/>）。</summary>
+        private readonly List<ToolboxGroup> _toolboxCatalog = new List<ToolboxGroup>();
 
         // 拖拽状态
         private bool _isDraggingNode;
@@ -2459,7 +2461,7 @@ namespace CalibOperatorCLI_Example
                 "HALCON"
             };
 
-            _toolboxGroups.Clear();
+            _toolboxCatalog.Clear();
             var grouped = OperatorRegistry
                 .GroupBy(o => o.Category ?? "")
                 .ToDictionary(g => g.Key, g => g.OrderBy(x => x.DisplayName).ToList());
@@ -2469,7 +2471,7 @@ namespace CalibOperatorCLI_Example
                 if (!grouped.TryGetValue(category, out var ops) || ops.Count == 0) continue;
                 var group = new ToolboxGroup { Name = category, IsExpanded = true };
                 foreach (var op in ops) group.Operators.Add(op);
-                _toolboxGroups.Add(group);
+                _toolboxCatalog.Add(group);
                 grouped.Remove(category);
             }
 
@@ -2477,10 +2479,47 @@ namespace CalibOperatorCLI_Example
             {
                 var group = new ToolboxGroup { Name = kv.Key, IsExpanded = true };
                 foreach (var op in kv.Value) group.Operators.Add(op);
-                _toolboxGroups.Add(group);
+                _toolboxCatalog.Add(group);
             }
 
+            ApplyToolboxFilter(ToolboxFilterBox?.Text);
             OperatorToolbox.ItemsSource = _toolboxGroups;
+        }
+
+        private static ToolboxGroup CloneToolboxGroup(ToolboxGroup src)
+        {
+            var ng = new ToolboxGroup { Name = src.Name, IsExpanded = src.IsExpanded };
+            foreach (var op in src.Operators) ng.Operators.Add(op);
+            return ng;
+        }
+
+        private void ApplyToolboxFilter(string? rawQuery)
+        {
+            var q = (rawQuery ?? "").Trim();
+            _toolboxGroups.Clear();
+            if (string.IsNullOrEmpty(q))
+            {
+                foreach (var src in _toolboxCatalog)
+                    _toolboxGroups.Add(CloneToolboxGroup(src));
+                return;
+            }
+
+            foreach (var src in _toolboxCatalog)
+            {
+                var matching = src.Operators.Where(op =>
+                    (op.DisplayName?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (op.TypeId?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (!string.IsNullOrEmpty(op.Description) && op.Description.Contains(q, StringComparison.OrdinalIgnoreCase))).ToList();
+                if (matching.Count == 0) continue;
+                var ng = new ToolboxGroup { Name = src.Name, IsExpanded = true };
+                foreach (var op in matching) ng.Operators.Add(op);
+                _toolboxGroups.Add(ng);
+            }
+        }
+
+        private void ToolboxFilter_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            ApplyToolboxFilter(ToolboxFilterBox?.Text);
         }
 
         // ================================================================
@@ -3625,6 +3664,15 @@ namespace CalibOperatorCLI_Example
             {
                 PerformFlowRedo();
                 e.Handled = true;
+                return;
+            }
+
+            if (e.Key == Key.F5)
+            {
+                if (Keyboard.FocusedElement is TextBox or RichTextBox or PasswordBox)
+                    return;
+                e.Handled = true;
+                _ = RunAllAsync(clearLog: true, preferNativeEngine: false);
             }
         }
 

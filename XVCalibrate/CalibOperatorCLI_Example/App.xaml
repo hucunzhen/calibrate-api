@@ -17,7 +17,8 @@
         <SolidColorBrush x:Key="NavAccentBrush" Color="#007ACC"/>
 
         <Style x:Key="NavTabButtonStyle" TargetType="Button">
-            <Setter Property="Width" Value="100"/>
+            <Setter Property="MinWidth" Value="84"/>
+            <Setter Property="Padding" Value="14,8"/>
             <Setter Property="Height" Value="36"/>
             <Setter Property="Background" Value="{StaticResource NavBarBrush}"/>
             <Setter Property="Foreground" Value="White"/>
