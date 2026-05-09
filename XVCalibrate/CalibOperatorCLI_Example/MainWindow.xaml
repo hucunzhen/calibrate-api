@@ -12,18 +12,35 @@
                 <Button x:Name="NavPlc" Content="PLC" Style="{StaticResource NavTabButtonStyle}"
                         Click="NavPlc_Click"
                         AutomationProperties.Name="PLC"/>
-                <Button x:Name="NavHistogram" Content="直方图" Style="{StaticResource NavTabButtonStyle}"
-                        Click="NavHistogram_Click"
-                        AutomationProperties.Name="直方图"/>
                 <Button x:Name="NavFlow" Content="组态" Style="{StaticResource NavTabButtonStyle}"
                         Click="NavFlow_Click"
                         AutomationProperties.Name="组态流程"/>
-                <Button x:Name="NavYoloSeg" Content="YOLO分割" Style="{StaticResource NavTabButtonStyle}"
-                        Click="NavYoloSeg_Click"
-                        AutomationProperties.Name="YOLO分割训练"/>
-                <Button x:Name="NavSamOnnx" Content="SAM ONNX" Style="{StaticResource NavTabButtonStyle}"
-                        Click="NavSamOnnx_Click"
-                        AutomationProperties.Name="SAM ONNX 导出"/>
+                <Button x:Name="NavAdvanced" Content="高级功能 ▾" Style="{StaticResource NavTabButtonStyle}"
+                        MinWidth="108"
+                        Click="NavAdvanced_Click"
+                        AutomationProperties.Name="高级功能">
+                    <Button.ContextMenu>
+                        <ContextMenu Background="#2D2D2D" BorderBrush="#555" BorderThickness="1">
+                            <ContextMenu.Resources>
+                                <Style TargetType="MenuItem">
+                                    <Setter Property="Foreground" Value="White"/>
+                                    <Setter Property="Background" Value="#2D2D2D"/>
+                                    <Style.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Background" Value="#404040"/>
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ContextMenu.Resources>
+                            <MenuItem Header="直方图" Click="NavHistogram_Click"
+                                      AutomationProperties.Name="直方图"/>
+                            <MenuItem Header="YOLO分割" Click="NavYoloSeg_Click"
+                                      AutomationProperties.Name="YOLO分割训练"/>
+                            <MenuItem Header="SAM ONNX" Click="NavSamOnnx_Click"
+                                      AutomationProperties.Name="SAM ONNX 导出"/>
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                </Button>
             </StackPanel>
         </Border>
 

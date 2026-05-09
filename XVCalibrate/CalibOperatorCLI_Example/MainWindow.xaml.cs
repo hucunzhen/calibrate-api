@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 
 namespace CalibOperatorCLI_Example
@@ -55,29 +56,36 @@ namespace CalibOperatorCLI_Example
 
         private void HighlightTab(string tab)
         {
-            NavPlc.Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
-            NavHistogram.Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
-            NavFlow.Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
-            NavYoloSeg.Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
-            NavSamOnnx.Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
+            var dim = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
+            var accent = new SolidColorBrush(Color.FromRgb(0x00, 0x7A, 0xCC));
+            NavPlc.Background = dim;
+            NavFlow.Background = dim;
+            NavAdvanced.Background = dim;
 
             switch (tab)
             {
                 case "Plc":
-                    NavPlc.Background = new SolidColorBrush(Color.FromRgb(0x00, 0x7A, 0xCC));
-                    break;
-                case "Histogram":
-                    NavHistogram.Background = new SolidColorBrush(Color.FromRgb(0x00, 0x7A, 0xCC));
+                    NavPlc.Background = accent;
                     break;
                 case "Flow":
-                    NavFlow.Background = new SolidColorBrush(Color.FromRgb(0x00, 0x7A, 0xCC));
+                    NavFlow.Background = accent;
                     break;
+                case "Histogram":
                 case "YoloSeg":
-                    NavYoloSeg.Background = new SolidColorBrush(Color.FromRgb(0x00, 0x7A, 0xCC));
-                    break;
                 case "SamOnnx":
-                    NavSamOnnx.Background = new SolidColorBrush(Color.FromRgb(0x00, 0x7A, 0xCC));
+                    NavAdvanced.Background = accent;
                     break;
+            }
+        }
+
+        private void NavAdvanced_Click(object sender, RoutedEventArgs e)
+        {
+            e.Handled = true;
+            if (sender is Button btn && btn.ContextMenu != null)
+            {
+                btn.ContextMenu.PlacementTarget = btn;
+                btn.ContextMenu.Placement = PlacementMode.Bottom;
+                btn.ContextMenu.IsOpen = true;
             }
         }
 
