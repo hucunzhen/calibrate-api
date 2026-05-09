@@ -3,25 +3,8 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       Title="组态流程"
       Background="#252526">
-    <DockPanel>
-        <Border DockPanel.Dock="Top"
-                Background="{StaticResource NavBarBrush}"
-                Padding="4,2">
-            <StackPanel Orientation="Horizontal">
-                <Button x:Name="NewTabButton"
-                        Content="＋ 新建标签"
-                        MinWidth="108"
-                        Height="32"
-                        Style="{StaticResource NavBarActionButtonStyle}"
-                        Click="NewTabButton_Click"
-                        AutomationProperties.Name="新建组态标签"/>
-            </StackPanel>
-        </Border>
-
-        <Border DockPanel.Dock="Top" Height="2" Background="{StaticResource NavAccentBrush}"/>
-
-        <TabControl x:Name="FlowTabs"
-                    Style="{StaticResource FlowHostTabControlStyle}"
-                    ItemContainerStyle="{StaticResource FlowHostTabItemStyle}"/>
-    </DockPanel>
+    <!-- 单页内多标签仍保留（关闭 ×、工具栏「在新标签打开组态」）；不再单独提供空白「新建标签」顶栏 -->
+    <TabControl x:Name="FlowTabs"
+                Style="{StaticResource FlowHostTabControlStyle}"
+                ItemContainerStyle="{StaticResource FlowHostTabItemStyle}"/>
 </Page>

@@ -17,9 +17,6 @@ namespace CalibOperatorCLI_Example
             AddEmptyTab(switchToSelected: true);
         }
 
-        private void NewTabButton_Click(object sender, RoutedEventArgs e) =>
-            AddEmptyTab(switchToSelected: true);
-
         /// <summary>当前选中的组态页。</summary>
         public FlowPage? ActiveFlowPage => (FlowTabs.SelectedItem as TabItem)?.Content as FlowPage;
 
