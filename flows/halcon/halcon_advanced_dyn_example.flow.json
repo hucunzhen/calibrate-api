@@ -1,0 +1,195 @@
+{
+  "Nodes": [
+    {
+      "Id": "dd8826d9-94f9-441a-a4dd-1fa36e96433c",
+      "TypeId": "load_image",
+      "X": 80,
+      "Y": 40,
+      "Params": {
+        "filePath": "D:\\work\\calibrate-api\\test_images\\Image_20260417090632792.bmp"
+      }
+    },
+    {
+      "Id": "83c5d595-1d39-47da-a74b-9f821a40b0e5",
+      "TypeId": "grayscale",
+      "X": 79,
+      "Y": 258,
+      "Params": {}
+    },
+    {
+      "Id": "d2efdda8-f685-4f70-8810-1cbe323b6998",
+      "TypeId": "halcon_mean_image",
+      "X": 443,
+      "Y": 61,
+      "Params": {
+        "maskWidth": "31",
+        "maskHeight": "31"
+      }
+    },
+    {
+      "Id": "e0b9b3a9-d81c-4665-a4fd-256a7662b490",
+      "TypeId": "halcon_dyn_threshold",
+      "X": 568,
+      "Y": 250,
+      "Params": {
+        "offset": "12",
+        "lightDark": "dark"
+      }
+    },
+    {
+      "Id": "f3dc578e-05fb-480e-bd83-900a23419d1c",
+      "TypeId": "display",
+      "X": 810,
+      "Y": 175,
+      "Params": {
+        "dotRadius": "2"
+      }
+    },
+    {
+      "Id": "0746a5ed-4543-460c-8264-d9cba4b468f9",
+      "TypeId": "halcon_illuminate",
+      "X": 302,
+      "Y": 414,
+      "Params": {
+        "maskWidth": "41",
+        "maskHeight": "41",
+        "factor": "0.7"
+      }
+    },
+    {
+      "Id": "0988ee18-a1cc-4d91-ac1f-72e00b4d5cf8",
+      "TypeId": "display",
+      "X": 973,
+      "Y": 431,
+      "Params": {
+        "dotRadius": "3"
+      }
+    },
+    {
+      "Id": "27ed9f08-e462-41d7-9289-cd3be58f855a",
+      "TypeId": "halcon_gray_closing_rect",
+      "X": 277,
+      "Y": 704,
+      "Params": {
+        "maskHeight": "5",
+        "maskWidth": "5"
+      }
+    },
+    {
+      "Id": "e389cba8-7c96-4bd9-a71b-bdde8f8fdb9a",
+      "TypeId": "halcon_gray_opening_rect",
+      "X": 68,
+      "Y": 576,
+      "Params": {
+        "maskHeight": "3",
+        "maskWidth": "3"
+      }
+    },
+    {
+      "Id": "3e9cc75b-b9a1-4711-bf3c-ba959b7468bf",
+      "TypeId": "halcon_threshold_bin",
+      "X": 481,
+      "Y": 602,
+      "Params": {
+        "minGray": "128",
+        "maxGray": "255"
+      }
+    },
+    {
+      "Id": "11a2c5d3-b2f2-4cfd-977d-36bcda0bbf9c",
+      "TypeId": "halcon_emphasize",
+      "X": 41,
+      "Y": 396,
+      "Params": {
+        "maskWidth": "7",
+        "maskHeight": "7",
+        "factor": "1.0"
+      }
+    },
+    {
+      "Id": "fc9954a0-5b8a-47b2-8447-8ae442943819",
+      "TypeId": "morphology",
+      "X": 709,
+      "Y": 450,
+      "Params": {
+        "kernelSize": "1",
+        "blurKsize": "1",
+        "blurSigma": "2.0"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "dd8826d9-94f9-441a-a4dd-1fa36e96433c",
+      "FromPort": "Image",
+      "ToNodeId": "83c5d595-1d39-47da-a74b-9f821a40b0e5",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "d2efdda8-f685-4f70-8810-1cbe323b6998",
+      "FromPort": "Out",
+      "ToNodeId": "e0b9b3a9-d81c-4665-a4fd-256a7662b490",
+      "ToPort": "Ref"
+    },
+    {
+      "FromNodeId": "e0b9b3a9-d81c-4665-a4fd-256a7662b490",
+      "FromPort": "Out",
+      "ToNodeId": "f3dc578e-05fb-480e-bd83-900a23419d1c",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "83c5d595-1d39-47da-a74b-9f821a40b0e5",
+      "FromPort": "Out",
+      "ToNodeId": "0746a5ed-4543-460c-8264-d9cba4b468f9",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "0746a5ed-4543-460c-8264-d9cba4b468f9",
+      "FromPort": "Out",
+      "ToNodeId": "d2efdda8-f685-4f70-8810-1cbe323b6998",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "0746a5ed-4543-460c-8264-d9cba4b468f9",
+      "FromPort": "Out",
+      "ToNodeId": "e0b9b3a9-d81c-4665-a4fd-256a7662b490",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "e389cba8-7c96-4bd9-a71b-bdde8f8fdb9a",
+      "FromPort": "Out",
+      "ToNodeId": "27ed9f08-e462-41d7-9289-cd3be58f855a",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "27ed9f08-e462-41d7-9289-cd3be58f855a",
+      "FromPort": "Out",
+      "ToNodeId": "3e9cc75b-b9a1-4711-bf3c-ba959b7468bf",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "83c5d595-1d39-47da-a74b-9f821a40b0e5",
+      "FromPort": "Out",
+      "ToNodeId": "11a2c5d3-b2f2-4cfd-977d-36bcda0bbf9c",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "11a2c5d3-b2f2-4cfd-977d-36bcda0bbf9c",
+      "FromPort": "Out",
+      "ToNodeId": "e389cba8-7c96-4bd9-a71b-bdde8f8fdb9a",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "3e9cc75b-b9a1-4711-bf3c-ba959b7468bf",
+      "FromPort": "Out",
+      "ToNodeId": "fc9954a0-5b8a-47b2-8447-8ae442943819",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "fc9954a0-5b8a-47b2-8447-8ae442943819",
+      "FromPort": "Out",
+      "ToNodeId": "0988ee18-a1cc-4d91-ac1f-72e00b4d5cf8",
+      "ToPort": "Image"
+    }
+  ]
+}

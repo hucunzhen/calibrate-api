@@ -1,0 +1,65 @@
+{
+  "Nodes": [
+    {
+      "Id": "209152ab-12ec-4c82-8e25-a164fbb94465",
+      "TypeId": "load_image",
+      "X": 80,
+      "Y": 120,
+      "Params": {
+        "filePath": "D:\\work\\calibrate-api\\test_images\\Image_20260417090632792.bmp"
+      }
+    },
+    {
+      "Id": "c39fcaf3-ebfd-41d3-81de-758f731fdb64",
+      "TypeId": "sam_onnx_segment",
+      "X": 319,
+      "Y": 285,
+      "Params": {
+        "encoderPath": "models/onnx/sam_vit_b_encoder.onnx",
+        "decoderPath": "models/onnx/sam_vit_b_decoder.onnx",
+        "clickX": "320",
+        "clickY": "240",
+        "maskThreshold": "0",
+        "useGpu": "false"
+      }
+    },
+    {
+      "Id": "b93c4f63-ec0f-4788-870d-33fb6f4767e2",
+      "TypeId": "save_image",
+      "X": 580,
+      "Y": 60,
+      "Params": {
+        "filePath": "../../../../../test_images/sam_onnx_mask.bmp"
+      }
+    },
+    {
+      "Id": "217fb218-add3-4098-85aa-6678600ba805",
+      "TypeId": "save_image",
+      "X": 580,
+      "Y": 200,
+      "Params": {
+        "filePath": "../../../../../test_images/sam_onnx_vis.bmp"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "209152ab-12ec-4c82-8e25-a164fbb94465",
+      "FromPort": "Image",
+      "ToNodeId": "c39fcaf3-ebfd-41d3-81de-758f731fdb64",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "c39fcaf3-ebfd-41d3-81de-758f731fdb64",
+      "FromPort": "Mask",
+      "ToNodeId": "b93c4f63-ec0f-4788-870d-33fb6f4767e2",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "c39fcaf3-ebfd-41d3-81de-758f731fdb64",
+      "FromPort": "Vis",
+      "ToNodeId": "217fb218-add3-4098-85aa-6678600ba805",
+      "ToPort": "Image"
+    }
+  ]
+}

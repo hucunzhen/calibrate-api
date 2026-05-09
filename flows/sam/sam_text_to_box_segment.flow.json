@@ -1,0 +1,118 @@
+{
+  "Nodes": [
+    {
+      "Id": "4f773578-f4e3-441b-9ee3-22a91336e357",
+      "TypeId": "load_image",
+      "X": 163,
+      "Y": 139,
+      "Params": {
+        "filePath": "D:\\work\\calibrate-api\\test_images\\Image_20260417090632792.bmp"
+      }
+    },
+    {
+      "Id": "12ced757-fef1-4cbb-bcfa-565e1e7303a9",
+      "TypeId": "display",
+      "X": 1164,
+      "Y": 96,
+      "Params": {
+        "dotRadius": "3"
+      }
+    },
+    {
+      "Id": "2f8e348c-85f7-4c8a-ada2-0b126eff9c91",
+      "TypeId": "sam_onnx_segment",
+      "X": 429,
+      "Y": 147,
+      "Params": {
+        "encoderPath": "models/onnx/sam_vit_b_encoder.onnx",
+        "decoderPath": "models/onnx/sam_vit_b_decoder.onnx",
+        "textPrompt": "dark rectangular stripe",
+        "textThreshold": "0.01",
+        "textRawQuery": "false",
+        "owlv2OnnxPath": "models/onnx/owlv2_base_patch16_ensemble.onnx",
+        "owlv2TokenizerJson": "models/onnx/owlv2_tokenizer/tokenizer.json",
+        "textMaxDetections": "16",
+        "textNmsIou": "0.5",
+        "clickX": "512",
+        "clickY": "512",
+        "maskThreshold": "0",
+        "maskMergeMax": "16",
+        "useGpu": "false"
+      }
+    },
+    {
+      "Id": "bdc52e27-791a-4ee1-9510-c06196a23219",
+      "TypeId": "display",
+      "X": 1174,
+      "Y": 314,
+      "Params": {
+        "dotRadius": "3"
+      }
+    },
+    {
+      "Id": "3553de69-a4d3-4dd3-9512-75e3ed167bfc",
+      "TypeId": "display",
+      "X": 1180,
+      "Y": 475,
+      "Params": {
+        "dotRadius": "3"
+      }
+    },
+    {
+      "Id": "f929c072-216c-4a3b-9496-1eb7b702bfec",
+      "TypeId": "display",
+      "X": 963,
+      "Y": 533,
+      "Params": {
+        "dotRadius": "3"
+      }
+    },
+    {
+      "Id": "310b5031-632c-4202-93f5-7bc69a8ee196",
+      "TypeId": "display",
+      "X": 731,
+      "Y": 581,
+      "Params": {
+        "dotRadius": "3"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "4f773578-f4e3-441b-9ee3-22a91336e357",
+      "FromPort": "Image",
+      "ToNodeId": "2f8e348c-85f7-4c8a-ada2-0b126eff9c91",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "2f8e348c-85f7-4c8a-ada2-0b126eff9c91",
+      "FromPort": "Mask",
+      "ToNodeId": "12ced757-fef1-4cbb-bcfa-565e1e7303a9",
+      "ToPort": "Img"
+    },
+    {
+      "FromNodeId": "2f8e348c-85f7-4c8a-ada2-0b126eff9c91",
+      "FromPort": "Mask2",
+      "ToNodeId": "bdc52e27-791a-4ee1-9510-c06196a23219",
+      "ToPort": "Img"
+    },
+    {
+      "FromNodeId": "2f8e348c-85f7-4c8a-ada2-0b126eff9c91",
+      "FromPort": "Mask3",
+      "ToNodeId": "3553de69-a4d3-4dd3-9512-75e3ed167bfc",
+      "ToPort": "Img"
+    },
+    {
+      "FromNodeId": "2f8e348c-85f7-4c8a-ada2-0b126eff9c91",
+      "FromPort": "Mask4",
+      "ToNodeId": "f929c072-216c-4a3b-9496-1eb7b702bfec",
+      "ToPort": "Img"
+    },
+    {
+      "FromNodeId": "2f8e348c-85f7-4c8a-ada2-0b126eff9c91",
+      "FromPort": "MaskAll",
+      "ToNodeId": "310b5031-632c-4202-93f5-7bc69a8ee196",
+      "ToPort": "Img"
+    }
+  ]
+}

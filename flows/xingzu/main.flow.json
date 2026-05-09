@@ -40,7 +40,7 @@
       "X": 216.67857142857156,
       "Y": 245.07142857142867,
       "Params": {
-        "innerFlowPath": "D:\\work\\calibrate-api\\flows\\flow_1\\genMask.flow.json",
+        "innerFlowPath": "D:\\work\\calibrate-api\\flows\\xingzu\\genMask.flow.json",
         "innerFlowJson": "",
         "bindingsJson": "{}"
       }
@@ -51,7 +51,7 @@
       "X": 221.3928571428571,
       "Y": 110.7857142857143,
       "Params": {
-        "innerFlowPath": "D:\\work\\calibrate-api\\flows\\flow_1\\grayPreprocess.flow.json",
+        "innerFlowPath": "D:\\work\\calibrate-api\\flows\\xingzu\\grayPreprocess.flow.json",
         "innerFlowJson": "",
         "bindingsJson": "{}"
       }
@@ -75,7 +75,7 @@
       "X": 641.1785714285713,
       "Y": 299.7857142857142,
       "Params": {
-        "innerFlowPath": "D:\\work\\calibrate-api\\flows\\flow_1\\binPreprocess.flow.json",
+        "innerFlowPath": "D:\\work\\calibrate-api\\flows\\xingzu\\binPreprocess.flow.json",
         "innerFlowJson": "",
         "bindingsJson": "{}"
       }
@@ -86,7 +86,7 @@
       "X": 860.5182857142856,
       "Y": 237.49982857142857,
       "Params": {
-        "innerFlowPath": "D:\\work\\calibrate-api\\flows\\flow_1\\contourPreprocess.flow.json",
+        "innerFlowPath": "D:\\work\\calibrate-api\\flows\\xingzu\\contourPreprocess.flow.json",
         "innerFlowJson": "",
         "bindingsJson": "{}"
       }
@@ -97,7 +97,7 @@
       "X": 866,
       "Y": 476,
       "Params": {
-        "filePath": "D:\\work\\calibrate-api\\flows\\flow_1\\calibration_result.json"
+        "filePath": "D:\\work\\calibrate-api\\flows\\xingzu\\calibration_result.json"
       }
     },
     {
