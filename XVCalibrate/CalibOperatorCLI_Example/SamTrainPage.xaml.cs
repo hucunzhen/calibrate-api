@@ -338,6 +338,8 @@ namespace CalibOperatorCLI_Example
                     args.AddRange(new[] { "--device", device });
                 if (ChkTrainImageEncoder.IsChecked == true)
                     args.Add("--train-image-encoder");
+                if (ChkTrainAugment.IsChecked != true)
+                    args.Add("--no-augment");
 
                 int exit = await FlowPythonRunner.RunPythonStreamingAsync(py, workDir, args, Dispatcher, AppendLog).ConfigureAwait(true);
 

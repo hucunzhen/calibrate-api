@@ -100,6 +100,7 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <TextBlock Grid.Row="0" Grid.Column="0" Text="数据集根目录" VerticalAlignment="Center"/>
                             <TextBox x:Name="TxtTrainDataRoot" Grid.Row="0" Grid.Column="1" Height="24" VerticalContentAlignment="Center" Margin="4,0"/>
@@ -122,9 +123,12 @@
                                 <TextBox x:Name="TxtTrainDevice" Width="100" Height="24" VerticalContentAlignment="Center"
                                          ToolTip="cuda:0 或 cpu；空=自动"/>
                             </StackPanel>
-                            <CheckBox x:Name="ChkTrainImageEncoder" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Margin="4,8,0,0"
+                            <CheckBox x:Name="ChkTrainAugment" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Margin="4,8,0,0" IsChecked="True"
+                                      Content="启用数据增强（同步翻转/旋转掩膜；颜色仅图像；需 torchvision）"
+                                      ToolTip="关闭时向脚本传入 --no-augment；详细强度见 train_sam_finetune.py 命令行参数"/>
+                            <CheckBox x:Name="ChkTrainImageEncoder" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Margin="4,8,0,0"
                                       Content="同时微调 image encoder（显存占用高，慎用）"/>
-                            <Button x:Name="BtnRunTrain" Grid.Row="6" Grid.Column="1" Content="开始微调" Width="120" Height="30" HorizontalAlignment="Left" Margin="4,12,0,0" Click="BtnRunTrain_Click"/>
+                            <Button x:Name="BtnRunTrain" Grid.Row="7" Grid.Column="1" Content="开始微调" Width="120" Height="30" HorizontalAlignment="Left" Margin="4,12,0,0" Click="BtnRunTrain_Click"/>
                         </Grid>
                     </StackPanel>
                 </Border>

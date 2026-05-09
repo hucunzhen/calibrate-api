@@ -2347,6 +2347,9 @@ namespace CalibOperatorCLI_Example
 
         private const int MaxFlowUndoSteps = 80;
         private static readonly JsonSerializerOptions FlowSnapshotJsonOptions = new JsonSerializerOptions { WriteIndented = false };
+
+        /// <summary>剪贴板自定义格式（另同步写入文本 JSON，便于外部编辑器粘贴）。</summary>
+        private const string FlowClipboardDataFormat = "application/x-calibrate-flow-nodes+json";
         private readonly List<string> _flowUndoStack = new List<string>();
         private readonly List<string> _flowRedoStack = new List<string>();
         private bool _suppressFlowUndoRecording;
@@ -2543,13 +2546,19 @@ namespace CalibOperatorCLI_Example
             border.MouseLeftButtonDown += Node_MouseLeftButtonDown;
 
             // 右键菜单
+            var menuCopy = new MenuItem { Header = "复制算子" };
+            menuCopy.Click += (_, _) => CopyNodesToClipboard(new[] { node });
+
+            var menuPaste = new MenuItem { Header = "粘贴算子" };
+            menuPaste.Click += (_, _) => PasteNodesFromClipboard(node, 120, 120);
+
             var menuDelete = new MenuItem { Header = "删除算子" };
             menuDelete.Click += (s, e) => DeleteNode(node);
 
             var menuParams = new MenuItem { Header = "参数设置" };
             menuParams.Click += (s, e) => EditNodeParams(node);
 
-            border.ContextMenu = new ContextMenu { Items = { menuParams, menuDelete } };
+            border.ContextMenu = new ContextMenu { Items = { menuCopy, menuPaste, new Separator(), menuParams, menuDelete } };
 
             var panel = new StackPanel();
 
@@ -3296,6 +3305,164 @@ namespace CalibOperatorCLI_Example
             return new FlowData { Nodes = nodes, Connections = connections };
         }
 
+        private FlowData BuildClipboardFlowSubset(IReadOnlyList<FlowNode> nodes)
+        {
+            var set = new HashSet<FlowNode>(nodes);
+            var nodeDatas = nodes
+                .Select(n => new FlowNodeData
+                {
+                    Id = n.Id.ToString(),
+                    TypeId = n.Def.TypeId,
+                    X = n.X,
+                    Y = n.Y,
+                    Params = new Dictionary<string, string>(n.Params),
+                })
+                .ToList();
+            var connections = _connections
+                .Where(c => set.Contains(c.FromPort.Owner) && set.Contains(c.ToPort.Owner))
+                .Select(c => new FlowConnData
+                {
+                    FromNodeId = c.FromPort.Owner.Id.ToString(),
+                    FromPort = c.FromPort.Definition.Name,
+                    ToNodeId = c.ToPort.Owner.Id.ToString(),
+                    ToPort = c.ToPort.Definition.Name,
+                })
+                .ToList();
+            return new FlowData { Nodes = nodeDatas, Connections = connections };
+        }
+
+        private void CopyNodesToClipboard(IReadOnlyList<FlowNode> nodes)
+        {
+            if (nodes == null || nodes.Count == 0) return;
+            try
+            {
+                var payload = BuildClipboardFlowSubset(nodes);
+                string json = JsonSerializer.Serialize(payload, FlowSnapshotJsonOptions);
+                var pkg = new DataObject();
+                pkg.SetData(FlowClipboardDataFormat, json);
+                pkg.SetText(json);
+                Clipboard.SetDataObject(pkg, copy: true);
+                StatusText.Text = $"已复制 {nodes.Count} 个算子（可粘贴到本画布或其它实例）";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"复制失败: {ex.Message}", "复制算子", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        private static bool TryDeserializeClipboardFlow(string? json, out FlowData? data)
+        {
+            data = null;
+            if (string.IsNullOrWhiteSpace(json)) return false;
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<FlowData>(json);
+                if (parsed?.Nodes == null || parsed.Nodes.Count == 0) return false;
+                data = parsed;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool TryGetFlowDataFromClipboard(out FlowData? data)
+        {
+            data = null;
+            try
+            {
+                IDataObject? clip = Clipboard.GetDataObject();
+                if (clip == null) return false;
+                string? json = clip.GetData(FlowClipboardDataFormat) as string;
+                if (string.IsNullOrWhiteSpace(json) && clip.GetDataPresent(DataFormats.Text))
+                    json = clip.GetData(DataFormats.UnicodeText) as string ?? clip.GetData(DataFormats.Text) as string;
+                return TryDeserializeClipboardFlow(json, out data);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 粘贴剪贴板中的算子子图；<paramref name="anchorNode"/> 存在时以其左上角为参照偏移 (+40,+40)，否则使用画布坐标。
+        /// </summary>
+        private void PasteNodesFromClipboard(FlowNode? anchorNode, double fallbackCanvasX, double fallbackCanvasY)
+        {
+            if (!TryGetFlowDataFromClipboard(out var data) || data == null)
+            {
+                MessageBox.Show("剪贴板中没有可用的流程算子数据（需为本工具复制的 JSON）。", "粘贴算子", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var defLookup = OperatorRegistry.ToDictionary(d => d.TypeId);
+            foreach (var nd in data.Nodes)
+            {
+                if (!defLookup.ContainsKey(nd.TypeId))
+                {
+                    MessageBox.Show($"剪贴板包含未知算子类型「{nd.TypeId}」，当前工具箱未注册。", "粘贴算子", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+            }
+
+            double minX = data.Nodes.Min(n => n.X);
+            double minY = data.Nodes.Min(n => n.Y);
+            double anchorX = anchorNode != null ? anchorNode.X + 40 : fallbackCanvasX;
+            double anchorY = anchorNode != null ? anchorNode.Y + 40 : fallbackCanvasY;
+            double ox = anchorX - minX;
+            double oy = anchorY - minY;
+
+            PushFlowUndoSnapshotBeforeChange();
+
+            var mapOldIdToNode = new Dictionary<string, FlowNode>(StringComparer.Ordinal);
+            foreach (var nd in data.Nodes)
+            {
+                var def = defLookup[nd.TypeId];
+                var fn = AddNode(def, nd.X + ox, nd.Y + oy, Guid.NewGuid());
+                if (nd.Params != null)
+                {
+                    foreach (var kv in nd.Params)
+                    {
+                        if (fn.Params.ContainsKey(kv.Key))
+                            fn.Params[kv.Key] = kv.Value;
+                    }
+                }
+
+                mapOldIdToNode[nd.Id] = fn;
+            }
+
+            var conns = data.Connections ?? new List<FlowConnData>();
+            foreach (var cd in conns)
+            {
+                if (!mapOldIdToNode.TryGetValue(cd.FromNodeId, out var fromN)) continue;
+                if (!mapOldIdToNode.TryGetValue(cd.ToNodeId, out var toN)) continue;
+                var fromPort = fromN.PortVisuals.FirstOrDefault(p =>
+                    p.Definition.Name == cd.FromPort && p.Definition.Direction == PortDirection.Output);
+                string toPortName = NormalizeHoughLinesInputPort(toN, cd.ToPort);
+                var toPort = toN.PortVisuals.FirstOrDefault(p =>
+                    p.Definition.Name == toPortName && p.Definition.Direction == PortDirection.Input);
+                if (fromPort != null && toPort != null && CanConnect(fromPort, toPort))
+                    CreateConnection(fromPort, toPort);
+            }
+
+            FlowCanvas.UpdateLayout();
+            foreach (var n in mapOldIdToNode.Values)
+                UpdatePortPositions(n);
+            UpdateAllConnections();
+            Dispatcher.BeginInvoke(
+                new Action(() =>
+                {
+                    FlowCanvas.UpdateLayout();
+                    foreach (var n in mapOldIdToNode.Values)
+                        UpdatePortPositions(n);
+                    UpdateAllConnections();
+                }),
+                System.Windows.Threading.DispatcherPriority.Loaded);
+
+            StatusText.Text = $"已粘贴 {data.Nodes.Count} 个算子";
+        }
+
         private string SerializeFlowSnapshotCompact()
             => JsonSerializer.Serialize(BuildCurrentFlowData(), FlowSnapshotJsonOptions);
 
@@ -3419,6 +3586,17 @@ namespace CalibOperatorCLI_Example
 
         private void FlowPage_PreviewKeyDown(object sender, KeyEventArgs e)
         {
+            if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.V)
+            {
+                // 不用 TextBoxBase（部分目标框架/引用下不可见）；排除常见文本编辑控件即可
+                if (Keyboard.FocusedElement is TextBox or RichTextBox or PasswordBox)
+                    return;
+                var p = Mouse.GetPosition(FlowCanvas);
+                PasteNodesFromClipboard(anchorNode: null, fallbackCanvasX: p.X, fallbackCanvasY: p.Y);
+                e.Handled = true;
+                return;
+            }
+
             if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Z)
             {
                 PerformFlowUndo();

@@ -12,7 +12,10 @@
 
 产物为完整 state_dict .pth，可与 export_sam_onnx.py 相同方式导出 ONNX。
 
-依赖: pip install -r SAM_Tools/requirements-sam-train.txt 且已安装 segment-anything
+依赖: pip install -r SAM_Tools/requirements-sam-train.txt 且已安装 segment-anything、torchvision。
+
+数据增强（默认开启）: 图像与掩膜同步水平/垂直翻转与平面旋转；颜色抖动仅作用 RGB。
+  关闭: --no-augment；细调见 --aug-* 参数。
 
 示例:
   python train_sam_finetune.py --data-root D:/data/sam_ft --checkpoint D:/w/sam_vit_b_01ec64.pth --model-type vit_b --epochs 5 --out D:/out/sam_ft_best.pth
@@ -21,7 +24,7 @@
 from __future__ import annotations
 
 import argparse
-import os
+from dataclasses import dataclass
 import random
 import sys
 from pathlib import Path
@@ -39,6 +42,13 @@ import torch.nn.functional as F
 from PIL import Image
 from torch import nn
 from tqdm import tqdm
+
+try:
+    from torchvision.transforms import InterpolationMode
+    from torchvision.transforms import functional as TF_vis
+except ImportError:
+    TF_vis = None  # type: ignore[misc, assignment]
+    InterpolationMode = None  # type: ignore[misc, assignment]
 
 try:
     from segment_anything import sam_model_registry
@@ -101,6 +111,85 @@ def list_pairs(data_root: Path, images_subdir: str = "", masks_subdir: str = "")
 def load_binary_mask(path: Path) -> np.ndarray:
     g = np.array(Image.open(path).convert("L"))
     return (g > 127).astype(np.float32)
+
+
+@dataclass
+class AugmentConfig:
+    """训练阶段对「图像 + 掩膜」同步几何变换，颜色仅作用图像。"""
+
+    enabled: bool = True
+    p_hflip: float = 0.5
+    p_vflip: float = 0.0
+    rotate_deg_max: float = 12.0
+    p_rotate: float = 0.85
+    p_color: float = 0.6
+    brightness_delta: float = 0.22
+    contrast_delta: float = 0.22
+    saturation_delta: float = 0.22
+    hue_delta: float = 0.04
+
+
+def _color_jitter_pil(pil_rgb: Image.Image, rng: random.Random, cfg: AugmentConfig) -> Image.Image:
+    img = pil_rgb
+    if cfg.brightness_delta > 0:
+        f = 1.0 + rng.uniform(-cfg.brightness_delta, cfg.brightness_delta)
+        img = TF_vis.adjust_brightness(img, max(0.01, f))
+    if cfg.contrast_delta > 0:
+        f = 1.0 + rng.uniform(-cfg.contrast_delta, cfg.contrast_delta)
+        img = TF_vis.adjust_contrast(img, max(0.01, f))
+    if cfg.saturation_delta > 0:
+        f = 1.0 + rng.uniform(-cfg.saturation_delta, cfg.saturation_delta)
+        img = TF_vis.adjust_saturation(img, max(0.01, f))
+    if cfg.hue_delta > 0:
+        hf = rng.uniform(-cfg.hue_delta, cfg.hue_delta)
+        hf = max(-0.45, min(0.45, hf))
+        img = TF_vis.adjust_hue(img, hf)
+    return img
+
+
+def augment_training_pair(
+    image_rgb: np.ndarray,
+    mask_bin: np.ndarray,
+    rng: random.Random,
+    cfg: AugmentConfig,
+) -> tuple[np.ndarray, np.ndarray]:
+    """返回增强后的 RGB uint8 与 float32 二值掩膜 [0,1]。"""
+    if not cfg.enabled or TF_vis is None:
+        return image_rgb, mask_bin
+
+    pil_im = Image.fromarray(image_rgb.astype(np.uint8), mode="RGB")
+    pil_m = Image.fromarray((mask_bin * 255.0).clip(0, 255).astype(np.uint8), mode="L")
+
+    if cfg.p_hflip > 0 and rng.random() < cfg.p_hflip:
+        pil_im = TF_vis.hflip(pil_im)
+        pil_m = TF_vis.hflip(pil_m)
+    if cfg.p_vflip > 0 and rng.random() < cfg.p_vflip:
+        pil_im = TF_vis.vflip(pil_im)
+        pil_m = TF_vis.vflip(pil_m)
+
+    if cfg.rotate_deg_max > 0 and cfg.p_rotate > 0 and rng.random() < cfg.p_rotate:
+        angle = rng.uniform(-cfg.rotate_deg_max, cfg.rotate_deg_max)
+        pil_im = TF_vis.rotate(
+            pil_im,
+            angle,
+            interpolation=InterpolationMode.BILINEAR,
+            expand=False,
+            fill=[0, 0, 0],
+        )
+        pil_m = TF_vis.rotate(
+            pil_m,
+            angle,
+            interpolation=InterpolationMode.NEAREST,
+            expand=False,
+            fill=[0],
+        )
+
+    if cfg.p_color > 0 and rng.random() < cfg.p_color:
+        pil_im = _color_jitter_pil(pil_im, rng, cfg)
+
+    out_im = np.asarray(pil_im, dtype=np.uint8)
+    out_m = (np.asarray(pil_m) > 127).astype(np.float32)
+    return out_im, out_m
 
 
 def mask_to_gt_low(mask_bin: np.ndarray, transform: ResizeLongestSide, device: torch.device, img_size: int) -> torch.Tensor:
@@ -170,6 +259,7 @@ def train_one_epoch(
     epoch: int,
     seed: int,
     use_amp: bool,
+    augment: AugmentConfig,
 ) -> float:
     rng = random.Random(seed + epoch)
     rng.shuffle(pairs)
@@ -183,6 +273,8 @@ def train_one_epoch(
         if image.shape[0] != mask_bin.shape[0] or image.shape[1] != mask_bin.shape[1]:
             print(f"[WARN] 尺寸不一致，跳过: {img_path.name}", file=sys.stderr)
             continue
+
+        image, mask_bin = augment_training_pair(image, mask_bin, rng, augment)
 
         sp = sample_points(mask_bin, rng)
         if sp is None:
@@ -279,6 +371,16 @@ def main() -> int:
     ap.add_argument("--train-image-encoder", action="store_true", help="同时微调 image encoder（显存大、慢）")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--no-amp", action="store_true", help="禁用 CUDA 混合精度")
+    ap.add_argument("--no-augment", action="store_true", help="关闭数据增强")
+    ap.add_argument("--aug-hflip", type=float, default=0.5, help="水平翻转概率")
+    ap.add_argument("--aug-vflip", type=float, default=0.0, help="垂直翻转概率（对称物体可酌情调高）")
+    ap.add_argument("--aug-rotate-max", type=float, default=12.0, help="随机旋转最大角度（度）；0 关闭")
+    ap.add_argument("--aug-rotate-p", type=float, default=0.85, help="应用旋转的概率")
+    ap.add_argument("--aug-color-p", type=float, default=0.6, help="颜色抖动概率（仅图像）")
+    ap.add_argument("--aug-brightness", type=float, default=0.22, help="亮度相对抖动幅度")
+    ap.add_argument("--aug-contrast", type=float, default=0.22, help="对比度相对抖动幅度")
+    ap.add_argument("--aug-saturation", type=float, default=0.22, help="饱和度相对抖动幅度")
+    ap.add_argument("--aug-hue", type=float, default=0.04, help="色调抖动幅度（内部已裁剪）")
     args = ap.parse_args()
 
     data_root = args.data_root.resolve()
@@ -310,9 +412,25 @@ def main() -> int:
 
     pairs = list_pairs(data_root, args.images_subdir, args.masks_subdir)
     img_d, m_d = resolve_image_mask_dirs(data_root, args.images_subdir, args.masks_subdir)
+    aug = AugmentConfig(
+        enabled=not args.no_augment and TF_vis is not None,
+        p_hflip=max(0.0, min(1.0, args.aug_hflip)),
+        p_vflip=max(0.0, min(1.0, args.aug_vflip)),
+        rotate_deg_max=max(0.0, args.aug_rotate_max),
+        p_rotate=max(0.0, min(1.0, args.aug_rotate_p)),
+        p_color=max(0.0, min(1.0, args.aug_color_p)),
+        brightness_delta=max(0.0, args.aug_brightness),
+        contrast_delta=max(0.0, args.aug_contrast),
+        saturation_delta=max(0.0, args.aug_saturation),
+        hue_delta=max(0.0, args.aug_hue),
+    )
+    if TF_vis is None and not args.no_augment:
+        print("[WARN] 未安装 torchvision，数据增强已跳过；请 pip install torchvision", file=sys.stderr)
+
     print(f"[INFO] 图像目录: {img_d}")
     print(f"[INFO] 掩膜目录: {m_d}")
     print(f"[INFO] 配对样本数: {len(pairs)}，设备: {device}，AMP: {use_amp}，微调 encoder: {args.train_image_encoder}")
+    print(f"[INFO] 数据增强: {'开' if aug.enabled else '关'} (hflip={aug.p_hflip}, vflip={aug.p_vflip}, rot±{aug.rotate_deg_max}°, color_p={aug.p_color})")
 
     sam = sam_model_registry[args.model_type](checkpoint=str(ckpt))
     sam.to(device)
@@ -336,6 +454,7 @@ def main() -> int:
             epoch,
             args.seed,
             use_amp,
+            aug,
         )
         print(f"[epoch {epoch + 1}/{args.epochs}] loss={avg:.4f}")
         if avg < best_loss:
