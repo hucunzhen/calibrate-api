@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Text;
@@ -2397,9 +2398,10 @@ namespace CalibOperatorCLI_Example
             return string.IsNullOrWhiteSpace(configuredPath);
         }
 
-        private async System.Threading.Tasks.Task ExecuteNodeForRunAsync(FlowNode node)
+        private async System.Threading.Tasks.Task ExecuteNodeForRunAsync(FlowNode node, string? timingScope = null)
         {
             ThrowIfExecutionCancelled();
+            var sw = Stopwatch.StartNew();
             try
             {
                 if (ExecuteNodeRequiresUiDispatcher(node))
@@ -2432,6 +2434,11 @@ namespace CalibOperatorCLI_Example
                 throw new FlowExecutionGracefulStopException(
                     $"节点「{node.Def.DisplayName}」执行失败，流程已中止。",
                     ex);
+            }
+            finally
+            {
+                sw.Stop();
+                LogOperatorTiming(node, sw.Elapsed.TotalMilliseconds, timingScope);
             }
         }
 
@@ -4024,6 +4031,15 @@ namespace CalibOperatorCLI_Example
                     // 最后追加的行标红不方便，改为整体不改色，靠前缀 [ERROR] 区分
                 }
             });
+        }
+
+        private void LogOperatorTiming(FlowNode node, double elapsedMs, string? timingScope = null)
+        {
+            string scope = string.IsNullOrEmpty(timingScope) ? "" : $"[{timingScope}] ";
+            string line = $"{scope}[Timing] {node.Def.TypeId} ({node.Def.DisplayName}) {elapsedMs:F2} ms";
+            AppendLog(line);
+            if (TraceEnginePathToConsole)
+                TryTraceEnginePathToConsole(line);
         }
 
         private static void TryTraceEnginePathToConsole(string message)
@@ -6769,7 +6785,10 @@ namespace CalibOperatorCLI_Example
                 bool innerIsSource = !edges.Any(e => e.ToId == inner.Id);
                 if (!strictCompositeInputBinding)
                     AutoFillUnboundCompositeInnerInputs(inner, innerInputs, compositeInputs, innerIsSource);
+                var swInner = Stopwatch.StartNew();
                 ExecuteNode(inner, innerInputs, compositeInputs);
+                swInner.Stop();
+                LogOperatorTiming(inner, swInner.Elapsed.TotalMilliseconds, "composite");
             }
 
             var effectiveOutputs = BuildEffectiveCompositeOutputBinds(
@@ -10642,7 +10661,7 @@ namespace CalibOperatorCLI_Example
                         await System.Threading.Tasks.Task.Yield();
                         try
                         {
-                            await ExecuteNodeForRunAsync(node);
+                            await ExecuteNodeForRunAsync(node, "PRE");
                             successCountPre++;
                         }
                         catch (FlowExecutionGracefulStopException ex)
@@ -10702,7 +10721,7 @@ namespace CalibOperatorCLI_Example
                             await System.Threading.Tasks.Task.Yield();
                             try
                             {
-                                await ExecuteNodeForRunAsync(node);
+                                await ExecuteNodeForRunAsync(node, $"F{fi + 1}");
                             }
                             catch (FlowExecutionGracefulStopException ex)
                             {

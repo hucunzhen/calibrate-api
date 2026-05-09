@@ -1,7 +1,9 @@
 #include "FlowEngineNative.h"
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -1935,7 +1937,13 @@ NativeFlowRunResult FlowEngine_Run(NativeFlowEngineHandle handle) {
         const NodeDef* n = FindNode(e, id);
         if (!n) continue;
         std::string err;
-        if (!ExecuteNode(e, *n, err)) {
+        auto t0 = std::chrono::steady_clock::now();
+        bool ok = ExecuteNode(e, *n, err);
+        auto t1 = std::chrono::steady_clock::now();
+        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        std::fprintf(stderr, "[FlowNative][Timing] %s id=%s %.2f ms%s\n", n->type.c_str(), n->id.c_str(), ms,
+            ok ? "" : " (failed)");
+        if (!ok) {
             e->nodeErrors[id] = err;
             e->lastError = n->type + ": " + err;
             break;
