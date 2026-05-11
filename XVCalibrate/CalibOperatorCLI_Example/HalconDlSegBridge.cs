@@ -107,6 +107,30 @@ namespace CalibOperatorCLI_Example
             throw new InvalidOperationException($"分割标签应为单通道（或 RGB 可降灰度），当前 {c} 通道: {segPath}");
         }
 
+        /// <summary>
+        /// 将分割标签转为 uint2 类型（HALCON train_dl_model_batch 要求 segmentation_image 为 uint2 类型的类别索引图）。
+        /// 输入的 byte 图像像素值即为类别 ID（0..N-1），直接类型转换即可，不做值缩放。
+        /// </summary>
+        internal static HObject ConvertDlSegmentationToUint2(HObject hoSeg)
+        {
+            HOperatorSet.GetImageType(hoSeg, out HTuple typ);
+            string ts = typ.Length >= 1 ? typ[0].S : typ.S;
+            if (ts == "uint2")
+                return hoSeg;
+            HOperatorSet.ConvertImageType(hoSeg, out HObject segU2, "uint2");
+            hoSeg.Dispose();
+            return segU2;
+        }
+
+        /// <summary>均匀权重图：始终用 real 1.0，与 gen_dl_segmentation_weights 官方输出一致。</summary>
+        internal static HObject CreateDlTrainingUniformWeightRealAlways(int width, int height)
+        {
+            HOperatorSet.GenImageConst(out HObject w0, new HTuple("real"), new HTuple(width), new HTuple(height));
+            HOperatorSet.ScaleImage(w0, out HObject w1, new HTuple(0.0), new HTuple(1.0));
+            w0.Dispose();
+            return w1;
+        }
+
         /// <summary>将缩放后的 byte 多通道图转为 real，灰度按 /255 映射到约 [0,1]。</summary>
         internal static HObject ConvertDlTrainingByteImageToReal01(HObject imgByte)
         {

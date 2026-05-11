@@ -161,10 +161,14 @@ namespace CalibOperatorCLI_Example
             }
         }
 
-        /// <summary>构建单张 DLSample：image、segmentation_image、weight_image（均匀权重）。</summary>
+        /// <summary>构建单张 DLSample：image、segmentation_image、weight_image。</summary>
         /// <remarks>
-        /// segmentation_image 为 byte。
-        /// image 为 real [0,1] 时 weight_image 为 real 1；image 为 byte 时 weight_image 为 byte 255（避免与 byte 输入混用 real 权重触发 #9001）。
+        /// 经测试确认正确的类型组合：
+        ///   image:               real [0,1]（compact / enhanced 预训练模型均要求）
+        ///   segmentation_image:  uint2（类别索引图，像素值为 0..N_classes-1）
+        ///   weight_image:        real 1.0（与官方 gen_dl_segmentation_weights 一致）
+        /// CPU 模式下 train_dl_model_batch 对 compact 模型不支持，会报 #9001；
+        /// GPU 模式在 image_type 正确后需要 cuBLAS（CUDA Toolkit），缺失时报 #7717。
         /// </remarks>
         private static HDict BuildSample(
             string imgPath,
@@ -208,38 +212,29 @@ namespace CalibOperatorCLI_Example
                 hoWork.Dispose();
                 hoWork = null;
                 if (diagLog != null)
-                    DiagDescribeImage(
-                        normalizeImageToReal01 ? "⑤ image Zoom 后（byte，将转 real）" : "⑤ image Zoom 后（byte，保持 byte）",
-                        imgZ,
-                        diagLog);
+                    DiagDescribeImage("⑤ image Zoom 后（byte，将转 real）", imgZ, diagLog);
 
                 HOperatorSet.ZoomImageSize(hoSeg, out segZ, targetW, targetH, "nearest_neighbor");
                 hoSeg.Dispose();
                 hoSeg = null;
                 if (diagLog != null)
-                    DiagDescribeImage("⑥ segmentation Zoom 后（byte 标签，FullDomain 前）", segZ, diagLog);
+                    DiagDescribeImage("⑥ segmentation Zoom 后（byte，将转 uint2）", segZ, diagLog);
 
-                if (normalizeImageToReal01)
-                {
-                    imgZ = HalconDlSegBridge.ConvertDlTrainingByteImageToReal01(imgZ);
-                    if (diagLog != null)
-                        DiagDescribeImage("⑦ image（real [0,1]，FullDomain 前）", imgZ, diagLog);
-                }
-                else if (diagLog != null)
-                    DiagDescribeImage("⑦ image（byte，与推理路径一致，FullDomain 前）", imgZ, diagLog);
+                // 分割标签必须转为 uint2（类别索引图）
+                segZ = HalconDlSegBridge.ConvertDlSegmentationToUint2(segZ);
+                if (diagLog != null)
+                    DiagDescribeImage("⑥b segmentation → uint2", segZ, diagLog);
 
-                if (normalizeImageToReal01)
-                {
-                    wimg = HalconDlSegBridge.CreateDlTrainingUniformWeightReal(targetW, targetH);
-                    if (diagLog != null)
-                        DiagDescribeImage("⑧ weight_image（real 1，FullDomain 前）", wimg, diagLog);
-                }
-                else
-                {
-                    wimg = HalconDlSegBridge.CreateDlTrainingUniformWeightByte(targetW, targetH);
-                    if (diagLog != null)
-                        DiagDescribeImage("⑧ weight_image（byte 255，与 byte image 一致，FullDomain 前）", wimg, diagLog);
-                }
+                // image 始终 normalize 为 real [0,1]（compact/enhanced 模型要求）
+                // normalizeImageToReal01 参数保留用于兼容，但 compact 模型必须 real
+                imgZ = HalconDlSegBridge.ConvertDlTrainingByteImageToReal01(imgZ);
+                if (diagLog != null)
+                    DiagDescribeImage("⑦ image → real [0,1]", imgZ, diagLog);
+
+                // weight_image 始终 real 1.0（与 gen_dl_segmentation_weights 一致）
+                wimg = HalconDlSegBridge.CreateDlTrainingUniformWeightRealAlways(targetW, targetH);
+                if (diagLog != null)
+                    DiagDescribeImage("⑧ weight_image（real 1.0）", wimg, diagLog);
 
                 imgZ = HalconDlSegBridge.EnsureDlTrainingFullDomain(imgZ);
                 segZ = HalconDlSegBridge.EnsureDlTrainingFullDomain(segZ);
@@ -325,14 +320,18 @@ namespace CalibOperatorCLI_Example
                 throw new InvalidOperationException($"无效的 image_dimensions: {targetW}x{targetH}");
             log($"模型输入尺寸: {targetW} x {targetH}");
             int modelChannels = HalconDlSegBridge.TryGetDlModelInputChannels(model, log);
-            if (opt.NormalizeTrainingImageToReal01)
-                log("训练张量：image → real [0,1]；weight_image → real 1；segmentation_image → byte；三者 FullDomain 后写入 DLSample。");
-            else
-                log("训练张量：image → byte（与本页推理一致）；weight_image → byte 255；segmentation_image → byte；三者 FullDomain 后写入 DLSample。若仍 #9001，可勾选「训练 image 使用 real [0,1]」再试（权重将随之改为 real）。");
+
+            // 经测试：compact / enhanced 分割模型训练时 image 必须为 real [0,1]，
+            // image_type 参数在 compact 模型上不存在（#1302），不再依赖它自动检测。
+            // normalizeToReal01 始终强制 true。
+            bool normalizeToReal01 = true;
+            log($"[diag] 训练固定使用 real [0,1] image（compact 模型要求；image_type 参数在该模型不可用）。");
 
             int batchMult = TryGetBatchSizeMultiplier(model, log);
             int samplesPerTrainStep = Math.Max(1, checked(opt.BatchSize * batchMult));
-            log($"每步 TrainDlModelBatch 将提交 {samplesPerTrainStep} 个 DLSample（= batch_size {opt.BatchSize} × multiplier {batchMult}）。数量不符易触发 #9001。");
+            log($"每步 TrainDlModelBatch 将提交 {samplesPerTrainStep} 个 DLSample（= batch_size {opt.BatchSize} × multiplier {batchMult}）。");
+            log($"DLSample 类型: image=real[0,1], segmentation_image=uint2, weight_image=real 1.0, 全部 FullDomain。");
+            log($"注意: compact/enhanced 模型不支持 CPU 训练（#9001），GPU 训练需要 CUDA Toolkit（cuBLAS，#7717 表示缺失）。");
 
             TrySetParam(model, "batch_size", opt.BatchSize, log);
             TrySetParam(model, "learning_rate", new HTuple(opt.LearningRate), log);
@@ -377,7 +376,7 @@ namespace CalibOperatorCLI_Example
                                 targetH,
                                 modelChannels,
                                 dlog,
-                                opt.NormalizeTrainingImageToReal01);
+                                normalizeToReal01);
                         }
 
                         if (epoch == 0 && b == 0)

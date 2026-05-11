@@ -2658,7 +2658,7 @@ namespace CalibOperatorCLI_Example
             var menuDelete = new MenuItem { Header = "删除算子" };
             menuDelete.Click += (s, e) => DeleteNode(node);
 
-            var menuParams = new MenuItem { Header = "参数设置" };
+            var menuParams = new MenuItem { Header = "算子配置面板" };
             menuParams.Click += (s, e) => EditNodeParams(node);
 
             var menuRunTo = new MenuItem { Header = "执行到此节点（含上游）" };
@@ -10070,7 +10070,7 @@ namespace CalibOperatorCLI_Example
 
             var win = new Window
             {
-                Title = $"{node.Def.DisplayName} - 参数设置",
+                Title = $"{node.Def.DisplayName} - 算子配置面板",
                 Width = compositeUi ? 640 : 420,
                 Height = compositeUi ? Math.Min(420 + node.Def.Params.Count * 56, 680) : Math.Min(60 + node.Def.Params.Count * 60, 500),
                 MinWidth = compositeUi ? 520 : 380,
