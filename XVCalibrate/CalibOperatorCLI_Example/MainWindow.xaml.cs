@@ -15,6 +15,7 @@ namespace CalibOperatorCLI_Example
         private HistogramPage _histogramPage;
         private FlowHostPage _flowHostPage;
         private YoloSegTrainPage _yoloSegTrainPage;
+        private HalconDlSegPage _halconDlSegPage;
         private SamTrainPage _samTrainPage;
 
         public MainWindow()
@@ -36,6 +37,7 @@ namespace CalibOperatorCLI_Example
             _flowHostPage = new FlowHostPage();
             _flowHostPage.FlowLoaded += SaveLastFlowPath;
             _yoloSegTrainPage = new YoloSegTrainPage();
+            _halconDlSegPage = new HalconDlSegPage();
             _samTrainPage = new SamTrainPage();
 
             NavigateTo(_flowHostPage);
@@ -72,6 +74,7 @@ namespace CalibOperatorCLI_Example
                     break;
                 case "Histogram":
                 case "YoloSeg":
+                case "HalconDlSeg":
                 case "SamOnnx":
                     NavAdvanced.Background = accent;
                     break;
@@ -112,6 +115,12 @@ namespace CalibOperatorCLI_Example
         {
             NavigateTo(_yoloSegTrainPage);
             HighlightTab("YoloSeg");
+        }
+
+        private void NavHalconDlSeg_Click(object sender, RoutedEventArgs e)
+        {
+            NavigateTo(_halconDlSegPage);
+            HighlightTab("HalconDlSeg");
         }
 
         private void NavSamOnnx_Click(object sender, RoutedEventArgs e)

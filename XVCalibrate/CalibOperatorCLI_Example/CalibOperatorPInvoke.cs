@@ -483,8 +483,9 @@ namespace CalibOperatorPInvoke
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
         public static extern int CALIB_FlowEngine_LoadFromFile(IntPtr ctx, string flowFilePath);
 
+        /// <param name="flowRootDirectory">主流程目录；相对 innerFlowPath / 标定等依赖此项；无可传 null。</param>
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-        public static extern int CALIB_FlowEngine_LoadFromJson(IntPtr ctx, string flowJsonText);
+        public static extern int CALIB_FlowEngine_LoadFromJson(IntPtr ctx, string flowJsonText, string? flowRootDirectory);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern NativeFlowRunResult CALIB_FlowEngine_Run(IntPtr ctx);
@@ -2004,11 +2005,12 @@ namespace CalibOperatorPInvoke
                 throw new InvalidOperationException("NativeFlowEngine load failed: " + PtrToUtf8String(NativeAPI.CALIB_FlowEngine_GetLastError(_ctx)));
         }
 
-        public void LoadFromJson(string flowJson)
+        /// <param name="flowDirectoryForRelativePaths">当前组态文件所在目录；未保存到磁盘时可不传。</param>
+        public void LoadFromJson(string flowJson, string? flowDirectoryForRelativePaths = null)
         {
             if (string.IsNullOrWhiteSpace(flowJson))
                 throw new ArgumentException("flowJson is empty", nameof(flowJson));
-            int rc = NativeAPI.CALIB_FlowEngine_LoadFromJson(_ctx, flowJson);
+            int rc = NativeAPI.CALIB_FlowEngine_LoadFromJson(_ctx, flowJson, flowDirectoryForRelativePaths);
             if (rc != 0)
                 throw new InvalidOperationException("NativeFlowEngine load failed: " + PtrToUtf8String(NativeAPI.CALIB_FlowEngine_GetLastError(_ctx)));
         }

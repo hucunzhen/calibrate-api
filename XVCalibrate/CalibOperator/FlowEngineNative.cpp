@@ -15,6 +15,16 @@
 #include <iomanip>
 #include <vector>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+#endif
+
 namespace {
 
 struct ContoursData {
@@ -56,7 +66,42 @@ struct NativeFlowEngineImpl {
     std::unordered_map<std::string, std::string> nodeErrors;
     std::string lastError;
     std::string lastReportJson;
+    /// 主流程所在目录（LoadFromFile / LoadFromJson 设置）；解析相对 innerFlowPath、标定路径等。
+    std::string flowRootDir;
 };
+
+static bool FlowPathIsAbsolute(const std::string& p) {
+    if (p.empty()) return false;
+    if (p.size() >= 2 && (unsigned char)p[1] == ':') return true;
+    return p[0] == '/' || p[0] == '\\';
+}
+
+static std::string FlowDirName(const std::string& path) {
+    size_t pos = path.find_last_of("\\/");
+    if (pos == std::string::npos) return std::string();
+    return path.substr(0, pos);
+}
+
+static std::string FlowJoinPath(const std::string& base, const std::string& rel) {
+    if (base.empty()) return rel;
+    char last = base.back();
+    if (last == '\\' || last == '/') return base + rel;
+    return base + "\\" + rel;
+}
+
+#ifdef _WIN32
+static std::string FlowCanonicalPathA(const std::string& p) {
+    if (p.empty()) return p;
+    std::vector<char> buf(65536);
+    DWORD n = GetFullPathNameA(p.c_str(), (DWORD)buf.size(), buf.data(), nullptr);
+    if (n == 0 || n >= buf.size()) return p;
+    return std::string(buf.data(), n);
+}
+#else
+static std::string FlowCanonicalPathA(const std::string& p) {
+    return p;
+}
+#endif
 
 static std::string NodeParam(const NodeDef& node, const char* key, const char* defVal = "") {
     auto it = node.params.find(key);
@@ -667,7 +712,10 @@ static bool ExpandOneComposite(NativeFlowEngineImpl* e, size_t compositeIdx, std
 
     cv::FileStorage fs;
     if (!path.empty()) {
-        fs.open(path, cv::FileStorage::READ | cv::FileStorage::FORMAT_JSON);
+        std::string openPath = path;
+        if (!FlowPathIsAbsolute(path) && !e->flowRootDir.empty())
+            openPath = FlowJoinPath(e->flowRootDir, path);
+        fs.open(openPath, cv::FileStorage::READ | cv::FileStorage::FORMAT_JSON);
         if (!fs.isOpened()) {
             err = "composite: cannot open innerFlowPath: " + path;
             return false;
@@ -2080,8 +2128,11 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
             err = "load_calibration_result: filePath empty";
             return false;
         }
+        std::string rp = path;
+        if (!FlowPathIsAbsolute(path) && !e->flowRootDir.empty())
+            rp = FlowJoinPath(e->flowRootDir, path);
         std::string jsonBuf;
-        if (!ReadCalibrationJsonFileForOpenCv(path, jsonBuf, err)) {
+        if (!ReadCalibrationJsonFileForOpenCv(rp, jsonBuf, err)) {
             err = "load_calibration_result: " + err;
             return false;
         }
@@ -2107,7 +2158,10 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         Value img = InputOf(e, n.id, "Image");
         if (img.kind != Value::Kind::Image) { err = "save_image: missing Image"; return false; }
         std::string path = NodeParam(n, "filePath", "flow_output.bmp");
-        if (!cv::imwrite(path, img.img)) { err = "save_image: failed " + path; return false; }
+        std::string wp = path;
+        if (!path.empty() && !FlowPathIsAbsolute(path) && !e->flowRootDir.empty())
+            wp = FlowJoinPath(e->flowRootDir, path);
+        if (!cv::imwrite(wp, img.img)) { err = "save_image: failed " + wp; return false; }
         out["Out"] = img;
         return true;
     }
@@ -2115,10 +2169,13 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         Value v = InputOf(e, n.id, "Text");
         if (v.kind != Value::Kind::String) { err = "save_text: missing Text"; return false; }
         std::string path = NodeParam(n, "filePath", "flow_output.txt");
-        std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
-        if (!ofs) { err = "save_text: cannot open " + path; return false; }
+        std::string wp = path;
+        if (!path.empty() && !FlowPathIsAbsolute(path) && !e->flowRootDir.empty())
+            wp = FlowJoinPath(e->flowRootDir, path);
+        std::ofstream ofs(wp, std::ios::binary | std::ios::trunc);
+        if (!ofs) { err = "save_text: cannot open " + wp; return false; }
         ofs.write(v.str.data(), (std::streamsize)v.str.size());
-        if (!ofs.good()) { err = "save_text: write failed " + path; return false; }
+        if (!ofs.good()) { err = "save_text: write failed " + wp; return false; }
         Value ov; ov.kind = Value::Kind::String; ov.str = v.str; out["Out"] = ov;
         return true;
     }
@@ -2147,11 +2204,15 @@ int FlowEngine_LoadFromFile(NativeFlowEngineHandle handle, const char* flowFileP
     if (!handle || !flowFilePath) return -1;
     auto* e = static_cast<NativeFlowEngineImpl*>(handle);
     e->lastError.clear();
+    e->flowRootDir.clear();
     cv::FileStorage fs(flowFilePath, cv::FileStorage::READ | cv::FileStorage::FORMAT_JSON);
     if (!fs.isOpened()) {
         e->lastError = std::string("cannot open flow file: ") + flowFilePath;
         return -1;
     }
+    std::string dir = FlowDirName(std::string(flowFilePath));
+    if (!dir.empty())
+        e->flowRootDir = FlowCanonicalPathA(dir);
     std::string err;
     bool ok = LoadFlowFromCvFileStorage(e, fs, err);
     fs.release();
@@ -2159,10 +2220,13 @@ int FlowEngine_LoadFromFile(NativeFlowEngineHandle handle, const char* flowFileP
     return 0;
 }
 
-int FlowEngine_LoadFromJson(NativeFlowEngineHandle handle, const char* flowJsonText) {
+int FlowEngine_LoadFromJson(NativeFlowEngineHandle handle, const char* flowJsonText, const char* flowRootDirectoryOrNull) {
     if (!handle || !flowJsonText) return -1;
     auto* e = static_cast<NativeFlowEngineImpl*>(handle);
     e->lastError.clear();
+    e->flowRootDir.clear();
+    if (flowRootDirectoryOrNull && flowRootDirectoryOrNull[0])
+        e->flowRootDir = FlowCanonicalPathA(std::string(flowRootDirectoryOrNull));
     cv::FileStorage fs(std::string(flowJsonText), cv::FileStorage::READ | cv::FileStorage::FORMAT_JSON | cv::FileStorage::MEMORY);
     if (!fs.isOpened()) {
         e->lastError = "invalid flow json text";

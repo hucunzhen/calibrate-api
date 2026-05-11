@@ -10922,12 +10922,19 @@ namespace CalibOperatorCLI_Example
                     AppendLog("[NATIVE] 正在后台线程执行 NativeFlowEngine（窗口应保持响应）…");
                     await System.Threading.Tasks.Task.Delay(1);
 
+                    string? nativeFlowRootDir = null;
+                    if (!string.IsNullOrEmpty(CurrentFlowFilePath))
+                    {
+                        var d = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(CurrentFlowFilePath));
+                        if (!string.IsNullOrEmpty(d)) nativeFlowRootDir = d;
+                    }
+
                     var token = _runCts?.Token ?? System.Threading.CancellationToken.None;
                     FlowEngineRunResult run = await System.Threading.Tasks.Task.Run(() =>
                     {
                         token.ThrowIfCancellationRequested();
                         using var engine = new NativeFlowEngine();
-                        engine.LoadFromJson(flowJson);
+                        engine.LoadFromJson(flowJson, nativeFlowRootDir);
                         token.ThrowIfCancellationRequested();
                         return engine.Run();
                     }, token);

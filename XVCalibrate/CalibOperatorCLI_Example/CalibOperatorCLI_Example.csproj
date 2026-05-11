@@ -41,6 +41,8 @@
   </ItemGroup>
   <ItemGroup Condition="'$(HalconDotNetDll)' == ''">
     <Compile Remove="HalconFlowBridge.cs" />
+    <Compile Remove="HalconDlSegBridge.cs" />
+    <Compile Remove="HalconDlSegTrainRunner.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -36,6 +36,8 @@
                                       AutomationProperties.Name="直方图"/>
                             <MenuItem Header="YOLO分割" Click="NavYoloSeg_Click"
                                       AutomationProperties.Name="YOLO分割训练"/>
+                            <MenuItem Header="HALCON DL分割" Click="NavHalconDlSeg_Click"
+                                      AutomationProperties.Name="HALCON深度学习分割"/>
                             <MenuItem Header="SAM ONNX" Click="NavSamOnnx_Click"
                                       AutomationProperties.Name="SAM ONNX 导出"/>
                         </ContextMenu>

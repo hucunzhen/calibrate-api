@@ -878,8 +878,8 @@ CALIB_API int CALIB_FlowEngine_LoadFromFile(FlowEngineContext ctx, const char* f
     return FlowEngine_LoadFromFile(ctx, flowFilePath);
 }
 
-CALIB_API int CALIB_FlowEngine_LoadFromJson(FlowEngineContext ctx, const char* flowJsonText) {
-    return FlowEngine_LoadFromJson(ctx, flowJsonText);
+CALIB_API int CALIB_FlowEngine_LoadFromJson(FlowEngineContext ctx, const char* flowJsonText, const char* flowRootDirectoryOrNull) {
+    return FlowEngine_LoadFromJson(ctx, flowJsonText, flowRootDirectoryOrNull);
 }
 
 CALIB_API FlowRunResult CALIB_FlowEngine_Run(FlowEngineContext ctx) {

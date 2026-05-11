@@ -522,7 +522,7 @@ typedef struct {
 CALIB_API FlowEngineContext CALIB_FlowEngine_Create();
 CALIB_API void CALIB_FlowEngine_Free(FlowEngineContext ctx);
 CALIB_API int CALIB_FlowEngine_LoadFromFile(FlowEngineContext ctx, const char* flowFilePath);
-CALIB_API int CALIB_FlowEngine_LoadFromJson(FlowEngineContext ctx, const char* flowJsonText);
+CALIB_API int CALIB_FlowEngine_LoadFromJson(FlowEngineContext ctx, const char* flowJsonText, const char* flowRootDirectoryOrNull);
 CALIB_API FlowRunResult CALIB_FlowEngine_Run(FlowEngineContext ctx);
 CALIB_API const char* CALIB_FlowEngine_GetLastError(FlowEngineContext ctx);
 CALIB_API const char* CALIB_FlowEngine_GetLastReportJson(FlowEngineContext ctx);
