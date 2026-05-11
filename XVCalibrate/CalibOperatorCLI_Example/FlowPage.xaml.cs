@@ -1571,7 +1571,6 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "expandDist", DisplayName = "膨胀距离", DefaultValue = "15", Description = "边缘膨胀距离 (像素)" }
                 }
             },
-#if HALCON_ENABLED
             new OperatorDef
             {
                 TypeId = "halcon_rgb1_to_gray",
@@ -2169,7 +2168,6 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "Points", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
                 }
             },
-#endif
             new OperatorDef
             {
                 TypeId = "composite",
@@ -2191,7 +2189,7 @@ namespace CalibOperatorCLI_Example
                         Name = "innerFlowPath",
                         DisplayName = "子流程文件",
                         DefaultValue = "",
-                        Description = "可选；*.flow.json；可为相对路径（相对当前组态目录或程序目录）。若填空则用 innerFlowJson"
+                        Description = "可选；*.flow.json；相对路径相对于当前 flow.json 所在目录；嵌套子流程内则相对于该层子流程文件所在目录。若填空则用 innerFlowJson"
                     },
                     new OperatorParam
                     {
@@ -6550,12 +6548,15 @@ namespace CalibOperatorCLI_Example
             return mask;
         }
 
-        private string ResolveCompositeFlowPath(string path)
+        /// <param name="relativeBaseDirectory">嵌套组合算子时传入当前子流程 .flow.json 所在目录；顶层为 null 则用 CurrentFlowFilePath 目录。</param>
+        private string ResolveCompositeFlowPath(string path, string? relativeBaseDirectory = null)
         {
             if (string.IsNullOrWhiteSpace(path)) return path;
             path = path.Trim();
             if (System.IO.Path.IsPathRooted(path))
                 return System.IO.Path.GetFullPath(path);
+            if (!string.IsNullOrWhiteSpace(relativeBaseDirectory))
+                return System.IO.Path.GetFullPath(System.IO.Path.Combine(relativeBaseDirectory.Trim(), path));
             if (!string.IsNullOrEmpty(CurrentFlowFilePath))
             {
                 var dir = System.IO.Path.GetDirectoryName(CurrentFlowFilePath);
@@ -6819,22 +6820,28 @@ namespace CalibOperatorCLI_Example
             }
         }
 
-        private void ExecuteCompositeSubFlow(FlowNode compositeNode, Dictionary<string, object?> compositeInputs)
+        /// <param name="innerFlowResolveBaseDir">当前组合嵌套在上层子流程内时，为其 innerFlowPath 相对路径提供基准目录（通常为上层子流程 .flow.json 所在文件夹）。</param>
+        private void ExecuteCompositeSubFlow(FlowNode compositeNode, Dictionary<string, object?> compositeInputs, string? innerFlowResolveBaseDir = null)
         {
             string path = compositeNode.Params.GetValueOrDefault("innerFlowPath", "")?.Trim() ?? "";
             string embedded = compositeNode.Params.GetValueOrDefault("innerFlowJson", "") ?? "";
             string bindRaw = compositeNode.Params.GetValueOrDefault("bindingsJson", "") ?? "";
 
             string jsonText;
+            string? baseDirForNestedComposites;
             if (!string.IsNullOrWhiteSpace(path))
             {
-                var rp = ResolveCompositeFlowPath(path);
+                var rp = ResolveCompositeFlowPath(path, innerFlowResolveBaseDir);
                 if (!System.IO.File.Exists(rp))
                     throw new InvalidOperationException($"组合算子: 子流程文件不存在: {rp}");
                 jsonText = System.IO.File.ReadAllText(rp);
+                baseDirForNestedComposites = System.IO.Path.GetDirectoryName(rp);
             }
             else if (!string.IsNullOrWhiteSpace(embedded.Trim()))
+            {
                 jsonText = embedded.Trim();
+                baseDirForNestedComposites = innerFlowResolveBaseDir;
+            }
             else
                 throw new InvalidOperationException("组合算子: 请设置 innerFlowPath 或 innerFlowJson");
 
@@ -6911,7 +6918,7 @@ namespace CalibOperatorCLI_Example
                 if (!strictCompositeInputBinding)
                     AutoFillUnboundCompositeInnerInputs(inner, innerInputs, compositeInputs, innerIsSource);
                 var swInner = Stopwatch.StartNew();
-                ExecuteNode(inner, innerInputs, compositeInputs);
+                ExecuteNode(inner, innerInputs, compositeInputs, baseDirForNestedComposites);
                 swInner.Stop();
                 LogOperatorTiming(inner, swInner.Elapsed.TotalMilliseconds, "composite");
             }
@@ -7549,7 +7556,7 @@ namespace CalibOperatorCLI_Example
             return true;
         }
 
-        private void ExecuteNode(FlowNode node, Dictionary<string, object?>? explicitInputs = null, Dictionary<string, object?>? compositeExternalInputsForBindIn = null)
+        private void ExecuteNode(FlowNode node, Dictionary<string, object?>? explicitInputs = null, Dictionary<string, object?>? compositeExternalInputsForBindIn = null, string? compositeInnerFlowBaseDir = null)
         {
             var inputs = explicitInputs ?? GetNodeInputs(node);
             node.Outputs.Clear();
@@ -10014,11 +10021,16 @@ namespace CalibOperatorCLI_Example
 
                     case "composite":
                     {
-                        ExecuteCompositeSubFlow(node, inputs);
+                        ExecuteCompositeSubFlow(node, inputs, compositeInnerFlowBaseDir);
                         break;
                     }
 
                     default:
+#if !HALCON_ENABLED
+                        if ((node.Def.TypeId ?? "").StartsWith("halcon_", StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidOperationException(
+                                "流程包含 HALCON 算子，但当前 exe 未启用 HALCON（编译时未找到 HalconDotNet.dll）。请在本机「重新生成」项目：确认 HALCON 安装根目录下有 bin\\dotnetXX\\HalconDotNet.dll；勿让环境变量 HalconRoot 指向无 bin 的旧路径（可与 HALCONROOT 不一致时用 dotnet build -p:HalconRoot=正确根目录）。不需要 HALCON 时请从流程中移除相应节点。");
+#endif
                         throw new InvalidOperationException($"未知算子: {node.Def.TypeId}");
                 }
 

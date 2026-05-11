@@ -11,16 +11,25 @@
     <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
 
-  <!-- HALCON：未安装时跳过引用与算子（可通过 msbuild -p:HalconRoot=... 覆盖路径） -->
+  <!-- HALCON：未安装时跳过引用与算子。
+       MSBuild 会把「环境变量 HalconRoot」映射为同名属性；若误指向无 bin 的目录会挡住默认路径。
+       HalconRootEffective：仅在候选路径下存在 bin 时采纳，否则依次尝试 D:\HALCON、HALCONROOT，最后仍回退原 HalconRoot/D:\HALCON。 -->
   <PropertyGroup>
-    <HalconRoot Condition="'$(HalconRoot)'==''">C:\Users\WGDQ\AppData\Local\Programs\MVTec\HALCON-25.11-Progress</HalconRoot>
+    <HalconRootEffective Condition="'$(HalconRoot)' != '' and Exists('$(HalconRoot)\bin')">$(HalconRoot)</HalconRootEffective>
+    <HalconRootEffective Condition="'$(HalconRootEffective)'=='' and Exists('D:\HALCON\bin')">D:\HALCON</HalconRootEffective>
+    <HalconRootEffective Condition="'$(HalconRootEffective)'=='' and '$(HALCONROOT)' != '' and Exists('$(HALCONROOT)\bin')">$(HALCONROOT)</HalconRootEffective>
+    <HalconRootEffective Condition="'$(HalconRootEffective)'=='' and '$(HalconRoot)' != ''">$(HalconRoot)</HalconRootEffective>
+    <HalconRootEffective Condition="'$(HalconRootEffective)'==''">D:\HALCON</HalconRootEffective>
   </PropertyGroup>
   <PropertyGroup>
-    <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRoot)\bin\dotnet50\HalconDotNet.dll')">$(HalconRoot)\bin\dotnet50\HalconDotNet.dll</HalconDotNetDll>
-    <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRoot)\bin\dotnet45\HalconDotNet.dll')">$(HalconRoot)\bin\dotnet45\HalconDotNet.dll</HalconDotNetDll>
-    <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRoot)\bin\dotnet40\HalconDotNet.dll')">$(HalconRoot)\bin\dotnet40\HalconDotNet.dll</HalconDotNetDll>
-    <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRoot)\bin\dotnet35\HalconDotNet.dll')">$(HalconRoot)\bin\dotnet35\HalconDotNet.dll</HalconDotNetDll>
-    <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRoot)\bin\dotnetcore31\HalconDotNet.dll')">$(HalconRoot)\bin\dotnetcore31\HalconDotNet.dll</HalconDotNetDll>
+    <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRootEffective)\bin\dotnet60\HalconDotNet.dll')">$(HalconRootEffective)\bin\dotnet60\HalconDotNet.dll</HalconDotNetDll>
+    <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRootEffective)\bin\dotnet50\HalconDotNet.dll')">$(HalconRootEffective)\bin\dotnet50\HalconDotNet.dll</HalconDotNetDll>
+    <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRootEffective)\bin\dotnet48\HalconDotNet.dll')">$(HalconRootEffective)\bin\dotnet48\HalconDotNet.dll</HalconDotNetDll>
+    <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRootEffective)\bin\dotnet45\HalconDotNet.dll')">$(HalconRootEffective)\bin\dotnet45\HalconDotNet.dll</HalconDotNetDll>
+    <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRootEffective)\bin\dotnet40\HalconDotNet.dll')">$(HalconRootEffective)\bin\dotnet40\HalconDotNet.dll</HalconDotNetDll>
+    <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRootEffective)\bin\dotnet35\HalconDotNet.dll')">$(HalconRootEffective)\bin\dotnet35\HalconDotNet.dll</HalconDotNetDll>
+    <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRootEffective)\bin\dotnet20\HalconDotNet.dll')">$(HalconRootEffective)\bin\dotnet20\HalconDotNet.dll</HalconDotNetDll>
+    <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRootEffective)\bin\dotnetcore31\HalconDotNet.dll')">$(HalconRootEffective)\bin\dotnetcore31\HalconDotNet.dll</HalconDotNetDll>
   </PropertyGroup>
   <PropertyGroup Condition="'$(HalconDotNetDll)' != ''">
     <DefineConstants>$(DefineConstants);HALCON_ENABLED</DefineConstants>
@@ -129,9 +138,9 @@
   </PropertyGroup>
 
   <!-- HALCON x64 原生 DLL（与 exe 同目录，供 halconxl 等加载） -->
-  <Target Name="CopyHalconNativeDlls" AfterTargets="Build" Condition="Exists('$(HalconRoot)\bin\x64-win64')">
+  <Target Name="CopyHalconNativeDlls" AfterTargets="Build" Condition="Exists('$(HalconRootEffective)\bin\x64-win64')">
     <ItemGroup>
-      <_HalconNative Include="$(HalconRoot)\bin\x64-win64\*.dll" />
+      <_HalconNative Include="$(HalconRootEffective)\bin\x64-win64\*.dll" />
     </ItemGroup>
     <Copy SourceFiles="@(_HalconNative)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
   </Target>
