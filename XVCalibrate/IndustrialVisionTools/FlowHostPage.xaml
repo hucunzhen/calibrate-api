@@ -1,9 +1,9 @@
 <Page x:Class="CalibOperatorCLI_Example.FlowHostPage"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-      Title="组态流程"
+      Title="流程编排"
       Background="#252526">
-    <!-- 单页内多标签仍保留（关闭 ×、工具栏「在新标签打开组态」）；不再单独提供空白「新建标签」顶栏 -->
+    <!-- 单页内多标签仍保留（关闭 ×、工具栏「在新标签打开流程」）；不再单独提供空白「新建标签」顶栏 -->
     <TabControl x:Name="FlowTabs"
                 Style="{StaticResource FlowHostTabControlStyle}"
                 ItemContainerStyle="{StaticResource FlowHostTabItemStyle}"/>

@@ -65,7 +65,7 @@ namespace CalibOperatorPInvoke
                 throw new InvalidOperationException("NativeFlowEngine load failed: " + PtrToUtf8String(NativeAPI.CALIB_FlowEngine_GetLastError(_ctx)));
         }
 
-        /// <param name="flowDirectoryForRelativePaths">当前组态文件所在目录；未保存到磁盘时可不传。</param>
+        /// <param name="flowDirectoryForRelativePaths">当前流程文件所在目录；未保存到磁盘时可不传。</param>
         public void LoadFromJson(string flowJson, string? flowDirectoryForRelativePaths = null)
         {
             if (string.IsNullOrWhiteSpace(flowJson))

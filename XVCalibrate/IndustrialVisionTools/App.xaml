@@ -11,7 +11,7 @@
         <SolidColorBrush x:Key="Ui.LogConsoleFg" Color="#CCCCCC"/>
         <SolidColorBrush x:Key="Ui.Accent" Color="#007ACC"/>
 
-        <!-- 主窗口导航 / 组态宿主顶栏共用 -->
+        <!-- 主窗口导航 / 流程编排宿主顶栏共用 -->
         <SolidColorBrush x:Key="NavBarBrush" Color="#2D2D2D"/>
         <SolidColorBrush x:Key="NavHoverBrush" Color="#404040"/>
         <SolidColorBrush x:Key="NavAccentBrush" Color="#007ACC"/>
@@ -46,7 +46,7 @@
             </Setter>
         </Style>
 
-        <!-- 主导航同款交互，宽度随文案（组态「新建标签」等） -->
+        <!-- 主导航同款交互，宽度随文案（流程编排「新建标签」等） -->
         <Style x:Key="NavBarActionButtonStyle" TargetType="Button">
             <Setter Property="MinWidth" Value="120"/>
             <Setter Property="Height" Value="36"/>

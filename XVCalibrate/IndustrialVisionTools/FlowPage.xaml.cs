@@ -21,7 +21,7 @@ using HalconDotNet;
 #endif
 
 // 流程页分文件：算子目录 FlowPage.OperatorCatalog.cs；画布模型 FlowPage.CanvasModels.cs；
-// 组态 JSON DTO FlowPage.FlowDocumentJson.cs；标定几何 FlowPage.CalibrationGeometry.cs。
+// 流程编排 JSON DTO FlowPage.FlowDocumentJson.cs；标定几何 FlowPage.CalibrationGeometry.cs。
 
 namespace CalibOperatorCLI_Example
 {
@@ -1061,16 +1061,16 @@ namespace CalibOperatorCLI_Example
         // ================================================================
 
         // ================================================================
-        // 保存 / 加载组态
+        // 保存 / 加载流程编排
         // ================================================================
 
         private void SaveFlow_Click(object sender, RoutedEventArgs e)
         {
             var dlg = new SaveFileDialog
             {
-                Filter = "组态文件|*.flow.json|所有文件|*.*",
+                Filter = "流程文件|*.flow.json|所有文件|*.*",
                 DefaultExt = ".flow.json",
-                Title = "保存组态"
+                Title = "保存流程"
             };
             if (dlg.ShowDialog() != true) return;
 
@@ -1497,7 +1497,7 @@ namespace CalibOperatorCLI_Example
                 if (showErrorDialog)
                     MessageBox.Show($"加载失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                 StatusText.Text = $"加载失败: {ex.Message}";
-                AppendLog($"[ERROR] 加载组态失败: {ex.Message}", true);
+                AppendLog($"[ERROR] 加载流程失败: {ex.Message}", true);
                 return false;
             }
         }
@@ -1506,9 +1506,9 @@ namespace CalibOperatorCLI_Example
         {
             var dlg = new OpenFileDialog
             {
-                Filter = "组态文件|*.flow.json|所有文件|*.*",
+                Filter = "流程文件|*.flow.json|所有文件|*.*",
                 DefaultExt = ".flow.json",
-                Title = "加载组态"
+                Title = "加载流程"
             };
             if (dlg.ShowDialog() != true) return;
             LoadFlowFromFile(dlg.FileName, showErrorDialog: true);
@@ -1518,9 +1518,9 @@ namespace CalibOperatorCLI_Example
         {
             var dlg = new OpenFileDialog
             {
-                Filter = "组态文件|*.flow.json|所有文件|*.*",
+                Filter = "流程文件|*.flow.json|所有文件|*.*",
                 DefaultExt = ".flow.json",
-                Title = "在新标签打开组态"
+                Title = "在新标签打开流程"
             };
             if (dlg.ShowDialog() != true) return;
             if (TryLoadFlowInNewTab?.Invoke(dlg.FileName) == true)
@@ -1772,7 +1772,7 @@ namespace CalibOperatorCLI_Example
             return inputs;
         }
 
-        /// <summary>旧版霍夫线段输入端口名为 Image，现改为 Edge；加载组态时自动映射。</summary>
+        /// <summary>旧版霍夫线段输入端口名为 Image，现改为 Edge；加载流程时自动映射。</summary>
         private static string NormalizeHoughLinesInputPort(FlowNode toNode, string? toPort)
         {
             if (toNode.Def.TypeId == "hough_lines" && string.Equals(toPort, "Image", StringComparison.Ordinal))
@@ -7596,7 +7596,7 @@ namespace CalibOperatorCLI_Example
                         var ofd = new OpenFileDialog
                         {
                             Title = "选择子流程 flow.json",
-                            Filter = "组态文件|*.flow.json|所有文件|*.*"
+                            Filter = "流程文件|*.flow.json|所有文件|*.*"
                         };
                         if (ofd.ShowDialog() == true && input is TextBox pathBox)
                             pathBox.Text = ofd.FileName;

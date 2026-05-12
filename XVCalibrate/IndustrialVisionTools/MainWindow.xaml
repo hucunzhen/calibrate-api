@@ -12,9 +12,9 @@
                 <Button x:Name="NavPlc" Content="PLC" Style="{StaticResource NavTabButtonStyle}"
                         Click="NavPlc_Click"
                         AutomationProperties.Name="PLC"/>
-                <Button x:Name="NavFlow" Content="组态" Style="{StaticResource NavTabButtonStyle}"
+                <Button x:Name="NavFlow" Content="流程编排" Style="{StaticResource NavTabButtonStyle}"
                         Click="NavFlow_Click"
-                        AutomationProperties.Name="组态流程"/>
+                        AutomationProperties.Name="流程编排"/>
                 <Button x:Name="NavAdvanced" Content="高级功能 ▾" Style="{StaticResource NavTabButtonStyle}"
                         MinWidth="108"
                         Click="NavAdvanced_Click"

@@ -4,7 +4,7 @@
     <interface/>
     <body>
       <c>* ========================================================================</c>
-      <c>* 由 calibrate-api 组态导出：flows/xingzu/main.flow.json</c>
+      <c>* 由 calibrate-api 流程编排导出：flows/xingzu/main.flow.json</c>
       <c>* 说明：图中算子多为本工具原生/OpenCV 管线，并非 HALCON 同名算子。</c>
       <c>* 本文件供 HDevelop 查阅与手工对照；直接运行无法复现完整流程。</c>
       <c>* 子流程（composite）请打开同目录下对应 *.flow.json。</c>

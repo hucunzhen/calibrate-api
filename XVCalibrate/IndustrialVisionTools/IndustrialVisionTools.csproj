@@ -2,6 +2,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
+    <AssemblyName>IndustrialVisionTools</AssemblyName>
+    <RootNamespace>CalibOperatorCLI_Example</RootNamespace>
+    <AssemblyTitle>工业视觉工具</AssemblyTitle>
+    <Product>工业视觉工具</Product>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>

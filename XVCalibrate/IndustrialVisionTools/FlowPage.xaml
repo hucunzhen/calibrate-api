@@ -79,7 +79,7 @@
         <GridSplitter Grid.Column="1" Width="4" Background="#3C3C3C"
                       HorizontalAlignment="Center" VerticalAlignment="Stretch"/>
 
-        <!-- 右侧：组态画布 -->
+        <!-- 右侧：流程编排画布 -->
         <Grid Grid.Column="2">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -141,27 +141,27 @@
                     </Button>
                     <Separator Width="1" Background="#555" Margin="10,4,10,8"/>
                     <Button Style="{StaticResource FlowToolbarPrimaryBtnStyle}"
-                            ToolTip="保存组态" Click="SaveFlow_Click"
+                            ToolTip="保存流程" Click="SaveFlow_Click"
                             Foreground="#B8F4B8"
-                            AutomationProperties.Name="保存组态">
+                            AutomationProperties.Name="保存流程">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE74E;" FontSize="14" VerticalAlignment="Center"/>
                             <TextBlock Text="保存" Margin="6,0,0,0" VerticalAlignment="Center" FontSize="12"/>
                         </StackPanel>
                     </Button>
                     <Button Style="{StaticResource FlowToolbarPrimaryBtnStyle}" Margin="6,0,0,4"
-                            ToolTip="加载组态（当前标签）" Click="LoadFlow_Click"
+                            ToolTip="加载流程（当前标签）" Click="LoadFlow_Click"
                             Foreground="#B8F4B8"
-                            AutomationProperties.Name="加载组态">
+                            AutomationProperties.Name="加载流程">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8E5;" FontSize="14" VerticalAlignment="Center"/>
                             <TextBlock Text="加载" Margin="6,0,0,0" VerticalAlignment="Center" FontSize="12"/>
                         </StackPanel>
                     </Button>
                     <Button Style="{StaticResource FlowToolbarPrimaryBtnStyle}" Margin="6,0,0,4"
-                            ToolTip="在新标签打开组态" Click="LoadFlowNewTab_Click"
+                            ToolTip="在新标签打开流程" Click="LoadFlowNewTab_Click"
                             Foreground="#C8FFC8"
-                            AutomationProperties.Name="在新标签打开组态">
+                            AutomationProperties.Name="在新标签打开流程">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8A7;" FontSize="14" VerticalAlignment="Center"/>
                             <TextBlock Text="新标签" Margin="6,0,0,0" VerticalAlignment="Center" FontSize="12"/>

@@ -23,7 +23,7 @@ namespace CalibOperatorCLI_Example
 
         private static string ConfigPath => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "CalibOperatorCLI_Example",
+            AppProduct.AppDataFolderName,
             "halcon_dl_seg_ui.json");
 
         public static HalconDlSegUiSettings Load()

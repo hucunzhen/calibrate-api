@@ -22,7 +22,7 @@ namespace CalibOperatorCLI_Example
         {
             InitializeComponent();
 
-            // 海康 SDK：进程级初始化一次（组态 camera_loop 等会创建独立 CameraService）
+            // 海康 SDK：进程级初始化一次（流程编排 camera_loop 等会创建独立 CameraService）
             try
             {
                 CameraService.InitializeSDK();
@@ -163,7 +163,7 @@ namespace CalibOperatorCLI_Example
         {
             string dir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "CalibOperatorCLI_Example");
+                AppProduct.AppDataFolderName);
             return Path.Combine(dir, LastFlowFileName);
         }
 

@@ -423,7 +423,7 @@ namespace CalibOperatorCLI_Example
                     System.Windows.MessageBox.Show($"Python 退出码 {exit}，详见日志。", "导出 ONNX", MessageBoxButton.OK, MessageBoxImage.Warning);
                 else
                     System.Windows.MessageBox.Show(
-                        $"输出目录:\n{outDir}\n\n组态算子 encoderPath / decoderPath 可指向:\n{modelType} → sam_{modelType}_encoder.onnx / sam_{modelType}_decoder.onnx",
+                        $"输出目录:\n{outDir}\n\n流程编排算子 encoderPath / decoderPath 可指向:\n{modelType} → sam_{modelType}_encoder.onnx / sam_{modelType}_decoder.onnx",
                         "导出 ONNX",
                         MessageBoxButton.OK,
                         MessageBoxImage.Information);

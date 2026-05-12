@@ -72,6 +72,9 @@ models/onnx/*.onnx
 # Inno Setup 安装包输出
 installer/dist/
 
+# IndustrialVisionTools WPF host — local publish/build output
+XVCalibrate/IndustrialVisionTools/bin/
+
 # Third-party binary libs
 第三方库_调用算法需要/
 兴族图片.rar

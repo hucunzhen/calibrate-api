@@ -63,7 +63,7 @@ namespace CalibOperatorCLI_Example
         {
             return IoPath.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "CalibOperatorCLI_Example",
+                AppProduct.AppDataFolderName,
                 "halcon_dl_seg_ui.json");
         }
 

@@ -2182,7 +2182,7 @@ namespace CalibOperatorCLI_Example
                         Name = "innerFlowJson",
                         DisplayName = "子流程JSON",
                         DefaultValue = "",
-                        Description = "可选；与 innerFlowPath 二选一；内容为与保存组态相同的 JSON（nodes+connections）"
+                        Description = "可选；与 innerFlowPath 二选一；内容为与保存流程相同的 JSON（nodes+connections）"
                     },
                     new OperatorParam
                     {

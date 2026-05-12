@@ -7,7 +7,7 @@ using System.Windows.Media;
 namespace CalibOperatorCLI_Example
 {
     /// <summary>
-    /// 组态多标签宿主：每个标签一个 <see cref="FlowPage"/>，可同时编辑多个 .flow.json。
+    /// 流程编排多标签宿主：每个标签一个 <see cref="FlowPage"/>，可同时编辑多个 .flow.json。
     /// </summary>
     public sealed partial class FlowHostPage : Page
     {
@@ -17,7 +17,7 @@ namespace CalibOperatorCLI_Example
             AddEmptyTab(switchToSelected: true);
         }
 
-        /// <summary>当前选中的组态页。</summary>
+        /// <summary>当前选中的流程编排页。</summary>
         public FlowPage? ActiveFlowPage => (FlowTabs.SelectedItem as TabItem)?.Content as FlowPage;
 
         /// <summary>任一标签加载或保存路径变更时通知（路径为 null 表示清空为未命名）。</summary>

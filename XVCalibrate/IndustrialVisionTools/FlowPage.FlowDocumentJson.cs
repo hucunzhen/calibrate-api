@@ -1,4 +1,4 @@
-// 流程页分文件：组态 JSON 序列化用 DTO（FlowData / 组合绑定等）。
+// 流程页分文件：流程编排 JSON 序列化用 DTO（FlowData / 组合绑定等）。
 
 using System;
 using System.Collections.Generic;
