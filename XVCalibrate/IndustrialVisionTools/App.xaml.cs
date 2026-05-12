@@ -12,6 +12,21 @@ namespace CalibOperatorCLI_Example
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool AttachConsole(uint dwProcessId);
 
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool SetDllDirectory(string? lpPathName);
+
+        static App()
+        {
+            // 海康 MvCameraControl.Net 通过原生 MvCameraControl.dll 等加载；必须从 exe 目录解析（快捷方式/安装器工作目录可能不是 app 根）
+            try
+            {
+                string baseDir = Path.GetFullPath(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar);
+                Directory.SetCurrentDirectory(baseDir);
+                SetDllDirectory(baseDir);
+            }
+            catch { /* ignore */ }
+        }
+
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);

@@ -113,10 +113,11 @@
     </None>
   </ItemGroup>
 
-  <!-- 海康威视相机 SDK -->
+  <!-- 海康威视相机 SDK（Private 确保 publish 带上托管 DLL；原生 MvCameraControl.dll 来自 MVS Runtime 复制） -->
   <ItemGroup>
     <Reference Include="MvCameraControl.Net">
       <HintPath>..\..\Development\DotNet\win64\netstandard2.0\MvCameraControl.Net.dll</HintPath>
+      <Private>true</Private>
     </Reference>
   </ItemGroup>
 
@@ -157,15 +158,65 @@
     <Copy SourceFiles="@(_HalconNative)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
   </Target>
 
-  <!-- 编译后自动复制海康 MVS Runtime 原生 DLL -->
+  <!-- dotnet publish：在 SDK 拷贝到 PublishDir 之前写入，确保 Inno 与运行时一致 -->
+  <Target Name="CopyHalconArtifactsToPublish" BeforeTargets="CopyFilesToPublishDirectory" Condition="Exists('$(HalconRootEffective)\bin\x64-win64')">
+    <ItemGroup>
+      <_HalconNativePub Include="$(HalconRootEffective)\bin\x64-win64\*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_HalconNativePub)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(HalconDotNetDll)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" Condition="'$(HalconDotNetDll)' != '' and Exists('$(HalconDotNetDll)')" />
+  </Target>
+
+  <!-- 编译后自动复制海康 MVS Runtime（路径：先读 Windows 环境变量，再 MSBuild 属性；与资源管理器路径一致） -->
   <Target Name="CopyMvsRuntime" AfterTargets="Build" Condition="'$(PlatformTarget)' == 'x64'">
     <PropertyGroup>
-      <MvsRuntimeDir Condition="Exists('$(ProgramFiles(x86))\Common Files\MVS\Runtime\Win64_x64')">$(ProgramFiles(x86))\Common Files\MVS\Runtime\Win64_x64</MvsRuntimeDir>
-      <MvsRuntimeDir Condition="Exists('D:\MVS\Development\Bin') == 'false' and '$(MvsRuntimeDir)' == ''">$(MvsRuntimeDir)</MvsRuntimeDir>
+      <_MvsCp86>$([System.Environment]::GetEnvironmentVariable('CommonProgramFiles(x86)'))</_MvsCp86>
+      <_MvsPf86>$([System.Environment]::GetEnvironmentVariable('ProgramFiles(x86)'))</_MvsPf86>
+      <MvsRuntimeDir Condition="'$(MvsRuntimeDir)' == '' and '$(_MvsCp86)' != '' and Exists('$(_MvsCp86)\MVS\Runtime\Win64_x64')">$(_MvsCp86)\MVS\Runtime\Win64_x64</MvsRuntimeDir>
+      <MvsRuntimeDir Condition="'$(MvsRuntimeDir)' == '' and '$(_MvsPf86)' != '' and Exists('$(_MvsPf86)\Common Files\MVS\Runtime\Win64_x64')">$(_MvsPf86)\Common Files\MVS\Runtime\Win64_x64</MvsRuntimeDir>
+      <MvsRuntimeDir Condition="'$(MvsRuntimeDir)' == '' and Exists('$(CommonProgramFiles(x86))\MVS\Runtime\Win64_x64')">$(CommonProgramFiles(x86))\MVS\Runtime\Win64_x64</MvsRuntimeDir>
+      <MvsRuntimeDir Condition="'$(MvsRuntimeDir)' == '' and Exists('$(CommonProgramFiles)\MVS\Runtime\Win64_x64')">$(CommonProgramFiles)\MVS\Runtime\Win64_x64</MvsRuntimeDir>
+      <MvsRuntimeDir Condition="'$(MvsRuntimeDir)' == '' and Exists('$(ProgramFiles(x86))\Common Files\MVS\Runtime\Win64_x64')">$(ProgramFiles(x86))\Common Files\MVS\Runtime\Win64_x64</MvsRuntimeDir>
+      <MvsRuntimeDir Condition="'$(MvsRuntimeDir)' == '' and Exists('$(ProgramFiles)\Common Files\MVS\Runtime\Win64_x64')">$(ProgramFiles)\Common Files\MVS\Runtime\Win64_x64</MvsRuntimeDir>
+      <MvsRuntimeDir Condition="'$(MvsRuntimeDir)' == '' and Exists('D:\MVS\Runtime\Win64_x64')">D:\MVS\Runtime\Win64_x64</MvsRuntimeDir>
     </PropertyGroup>
-    <ItemGroup>
-      <MvsDll Include="$(MvsRuntimeDir)\*.dll" />
+    <ItemGroup Condition="'$(MvsRuntimeDir)' != ''">
+      <!-- 保留 Win64_x64 下子目录（GenICam 等）；勿扁平化为单一输出目录，否则同名 DLL 互相覆盖且 .cti/.xml 丢失 -->
+      <_MvsRuntimeFile Include="$(MvsRuntimeDir)\**\*.*" Exclude="$(MvsRuntimeDir)\**\*.pdb" />
     </ItemGroup>
-    <Copy SourceFiles="@(MvsDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="'$(MvsRuntimeDir)' != ''" />
+    <Copy SourceFiles="@(_MvsRuntimeFile)"
+          DestinationFiles="@(_MvsRuntimeFile->'$(OutputPath)%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          Condition="'@(_MvsRuntimeFile)' != ''" />
+  </Target>
+
+  <!-- 海康 MVS：在 SDK 冲突消解之后、增量清理读取 ResolvedFileToPublish 之前写入清单，否则会被 ResolveOverlapping / 孤儿清理丢掉。 -->
+  <Target Name="AddMvsRuntimeToResolvedFileToPublish" AfterTargets="ComputeResolvedFilesToPublishList" BeforeTargets="_GetCurrentAndPriorPublishFileWrites">
+    <PropertyGroup>
+      <_MvsCp86>$([System.Environment]::GetEnvironmentVariable('CommonProgramFiles(x86)'))</_MvsCp86>
+      <_MvsPf86>$([System.Environment]::GetEnvironmentVariable('ProgramFiles(x86)'))</_MvsPf86>
+      <_MvsRtPub Condition="'$(MvsRuntimeDir)' != '' and Exists('$(MvsRuntimeDir)')">$(MvsRuntimeDir)</_MvsRtPub>
+      <_MvsRtPub Condition="'$(_MvsRtPub)' == '' and '$(_MvsCp86)' != '' and Exists('$(_MvsCp86)\MVS\Runtime\Win64_x64')">$(_MvsCp86)\MVS\Runtime\Win64_x64</_MvsRtPub>
+      <_MvsRtPub Condition="'$(_MvsRtPub)' == '' and '$(_MvsPf86)' != '' and Exists('$(_MvsPf86)\Common Files\MVS\Runtime\Win64_x64')">$(_MvsPf86)\Common Files\MVS\Runtime\Win64_x64</_MvsRtPub>
+      <_MvsRtPub Condition="'$(_MvsRtPub)' == '' and Exists('$(CommonProgramFiles(x86))\MVS\Runtime\Win64_x64')">$(CommonProgramFiles(x86))\MVS\Runtime\Win64_x64</_MvsRtPub>
+      <_MvsRtPub Condition="'$(_MvsRtPub)' == '' and Exists('$(CommonProgramFiles)\MVS\Runtime\Win64_x64')">$(CommonProgramFiles)\MVS\Runtime\Win64_x64</_MvsRtPub>
+      <_MvsRtPub Condition="'$(_MvsRtPub)' == '' and Exists('$(ProgramFiles(x86))\Common Files\MVS\Runtime\Win64_x64')">$(ProgramFiles(x86))\Common Files\MVS\Runtime\Win64_x64</_MvsRtPub>
+      <_MvsRtPub Condition="'$(_MvsRtPub)' == '' and Exists('$(ProgramFiles)\Common Files\MVS\Runtime\Win64_x64')">$(ProgramFiles)\Common Files\MVS\Runtime\Win64_x64</_MvsRtPub>
+      <_MvsRtPub Condition="'$(_MvsRtPub)' == '' and Exists('D:\MVS\Runtime\Win64_x64')">D:\MVS\Runtime\Win64_x64</_MvsRtPub>
+    </PropertyGroup>
+    <Warning Text="未找到海康 MVS Win64_x64 运行时目录，publish 将不包含相机运行时文件；请安装 MVS 或设置 MvsRuntimeDir，或设置 SuppressMvsPublishMissingWarning=true。"
+             Condition="'$(_IsPublishing)' == 'true' and '$(_MvsRtPub)' == '' and '$(SuppressMvsPublishMissingWarning)' != 'true'" />
+    <ItemGroup Condition="'$(_MvsRtPub)' != ''">
+      <_MvsForPub Include="$(_MvsRtPub)\**\*.*" Exclude="$(_MvsRtPub)\**\*.pdb" />
+    </ItemGroup>
+    <ItemGroup Condition="'@(_MvsForPub)' != ''">
+      <ResolvedFileToPublish Include="@(_MvsForPub)" ExcludeFromSingleFile="true">
+        <RelativePath>%(_MvsForPub.RecursiveDir)%(_MvsForPub.Filename)%(_MvsForPub.Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+    <Message Text="[MVS] publish 已加入 ResolvedFileToPublish: $(_MvsRtPub) -> $(PublishDir)"
+             Condition="'$(_MvsRtPub)' != '' and '@(_MvsForPub)' != ''"
+             Importance="normal" />
   </Target>
 </Project>
