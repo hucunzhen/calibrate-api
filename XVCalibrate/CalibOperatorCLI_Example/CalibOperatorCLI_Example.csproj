@@ -42,6 +42,12 @@
   <ItemGroup Condition="'$(HalconDotNetDll)' == ''">
     <Compile Remove="HalconFlowBridge.cs" />
     <Compile Remove="HalconDlSegBridge.cs" />
+    <Compile Remove="HalconDlSegBridge.Preprocess.cs" />
+    <Compile Remove="HalconDlSegBridge.Inference.cs" />
+    <Compile Remove="HalconDlSegTrainOptions.cs" />
+    <Compile Remove="HalconDlSegTrainDiagnostics.cs" />
+    <Compile Remove="HalconDlSegTrainDataset.cs" />
+    <Compile Remove="HalconDlSegTrainSampleBuilder.cs" />
     <Compile Remove="HalconDlSegTrainRunner.cs" />
   </ItemGroup>
 
@@ -130,7 +136,7 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>CalibOperatorNative.dll</Link>
     </None>
-    <None Include="..\..\opencv_world4130.dll">
+    <None Include="..\..\opencv\build\x64\vc16\bin\opencv_world4130.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
