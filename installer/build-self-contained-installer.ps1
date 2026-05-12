@@ -7,11 +7,15 @@
   MyAppVersion:  Inno a.b.c.d from tag vX.Y.Z -> X.Y.Z.0, else 0.0.0.0.
   Side-by-side installs: deterministic AppId + install dir suffix per describe (see .iss).
   Output: installer\dist\IndustrialVisionTools_Setup_<describe>_win_x64_selfcontained.exe
+  Prerequisite: Visual Studio MSBuild (C++ workload) to build IndustrialVisionToolsNative before dotnet publish.
 .PARAMETER SkipPublish
   Skip publish; only run ISCC (publish folder must already exist).
+.PARAMETER SkipNativeBuild
+  Skip MSBuild of IndustrialVisionToolsNative (use only if bin\x64\Release\IndustrialVisionToolsNative.dll already exists).
 #>
 param(
-    [switch] $SkipPublish
+    [switch] $SkipPublish,
+    [switch] $SkipNativeBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,6 +57,7 @@ if ($describe -match '^v(\d+)\.(\d+)\.(\d+)') {
 # XVCalibrate.sln maps CLI project to Release|AnyCPU -> bin\Release\... (not bin\x64\Release\).
 $publishRel = 'XVCalibrate\IndustrialVisionTools\bin\Release\net8.0-windows\win-x64\publish'
 $publishDir = Join-Path $RepoRoot $publishRel
+$nativeDll = Join-Path $RepoRoot 'bin\x64\Release\IndustrialVisionToolsNative.dll'
 $publishedExe = Join-Path $publishDir 'IndustrialVisionTools.exe'
 
 Write-Host "Repo: $RepoRoot"
@@ -62,8 +67,20 @@ Write-Host "Inno coexist suffix (dir): $installSuffix"
 Write-Host "Inno AppId (deterministic): $instanceGuid"
 
 if (-not $SkipPublish) {
+    if (-not $SkipNativeBuild) {
+        Write-Host ""
+        Write-Host "[1/3] MSBuild IndustrialVisionToolsNative (Release|x64)..."
+        & (Join-Path $InstallerDir 'build-native-release.ps1') -RepoRoot $RepoRoot
+    } else {
+        Write-Host ""
+        Write-Host "[1/3] Skipping native build (-SkipNativeBuild)."
+        if (-not (Test-Path -LiteralPath $nativeDll)) {
+            throw "SkipNativeBuild set but missing: $nativeDll. Build IndustrialVisionToolsNative Release x64 first."
+        }
+    }
+
     Write-Host ""
-    Write-Host "[1/2] dotnet publish (self-contained win-x64)..."
+    Write-Host "[2/3] dotnet publish (self-contained win-x64)..."
     & dotnet publish (Join-Path $RepoRoot 'XVCalibrate\IndustrialVisionTools\IndustrialVisionTools.csproj') `
         -c Release `
         -r win-x64 `
@@ -71,10 +88,10 @@ if (-not $SkipPublish) {
         -p:PublishSingleFile=false `
         -p:PublishReadyToRun=false
     if ($LASTEXITCODE -ne 0) {
-        throw "dotnet publish failed (exit $LASTEXITCODE). Fix build errors above (e.g. CalibOperatorNative Release, OpenCV paths)."
+        throw "dotnet publish failed (exit $LASTEXITCODE). Fix build errors above (e.g. OpenCV paths in csproj)."
     }
     if (-not (Test-Path -LiteralPath $publishedExe)) {
-        throw "Publish output missing: $publishedExe. Build Release successfully first (CalibOperatorNative / OpenCV paths)."
+        throw "Publish output missing: $publishedExe."
     }
     Write-Host "Publish dir: $publishDir"
 } else {
@@ -143,7 +160,11 @@ Or set environment variable ISCC to the full path of ISCC.exe, e.g.:
 
 $iss = Join-Path $InstallerDir 'CalibOperatorCLI_SelfContained.iss'
 Write-Host ""
-Write-Host "[2/2] Inno Setup (ISCC)..."
+if ($SkipPublish) {
+    Write-Host "[2/2] Inno Setup (ISCC)..."
+} else {
+    Write-Host "[3/3] Inno Setup (ISCC)..."
+}
 Write-Host "ISCC: $iscc"
 & $iscc "/DMyAppVersion=$appVer" "/DMyGitDescribe=$describe" "/DMyAppInstanceGuid=$instanceGuid" "/DMyInstallSuffix=$installSuffix" $iss
 

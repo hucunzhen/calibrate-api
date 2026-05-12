@@ -7,7 +7,7 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CalibrationGUI", "Calibrati
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CalibOperator", "CalibOperator\CalibOperator.vcxproj", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CalibOperatorNative", "CalibOperator\CalibOperatorNative.vcxproj", "{D7E8F9A0-1234-5678-ABCD-EF1234567892}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "IndustrialVisionToolsNative", "CalibOperator\IndustrialVisionToolsNative.vcxproj", "{D7E8F9A0-1234-5678-ABCD-EF1234567892}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "工业视觉工具", "IndustrialVisionTools\IndustrialVisionTools.csproj", "{E8F9A0B1-2345-6789-ABCD-EF1234567893}"
 EndProject

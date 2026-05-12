@@ -122,13 +122,13 @@
 
   <!-- 复制依赖的 DLL 到输出目录 -->
   <ItemGroup Condition="'$(Configuration)' == 'Debug'">
-    <None Include="..\..\bin\x64\Debug\CalibOperatorNative.dll">
+    <None Include="..\..\bin\x64\Debug\IndustrialVisionToolsNative.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>CalibOperatorNative.dll</Link>
+      <Link>IndustrialVisionToolsNative.dll</Link>
     </None>
-    <None Include="..\..\bin\x64\Debug\CalibOperatorNative.pdb">
+    <None Include="..\..\bin\x64\Debug\IndustrialVisionToolsNative.pdb">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>CalibOperatorNative.pdb</Link>
+      <Link>IndustrialVisionToolsNative.pdb</Link>
     </None>
     <None Include="..\..\opencv\build\x64\vc16\bin\opencv_world4130d.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -136,9 +136,9 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(Configuration)' == 'Release'">
-    <None Include="..\..\bin\x64\Release\CalibOperatorNative.dll">
+    <None Include="..\..\bin\x64\Release\IndustrialVisionToolsNative.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>CalibOperatorNative.dll</Link>
+      <Link>IndustrialVisionToolsNative.dll</Link>
     </None>
     <None Include="..\..\opencv\build\x64\vc16\bin\opencv_world4130.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

@@ -22,7 +22,7 @@
     <VCProjectVersion>16.0</VCProjectVersion>
     <ProjectGuid>{D7E8F9A0-1234-5678-ABCD-EF1234567892}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
-    <RootNamespace>CalibOperatorNative</RootNamespace>
+    <RootNamespace>IndustrialVisionToolsNative</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />

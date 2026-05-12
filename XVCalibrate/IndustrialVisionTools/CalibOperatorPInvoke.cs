@@ -5,7 +5,7 @@
  * 避免了 C++/CLI 与 OpenCV intrinsics 的兼容性问题。
  * 
  * 使用方式:
- * 1. 先编译 CalibOperatorNative 项目生成 CalibOperatorNative.dll
+ * 1. 先编译 IndustrialVisionToolsNative 项目生成 IndustrialVisionToolsNative.dll
  * 2. 确保 opencv_world4130.dll 在同目录或 PATH 中
  * 3. 在 C# 项目中添加本文件或引用本命名空间
  * 
@@ -212,7 +212,7 @@ namespace CalibOperatorPInvoke
     /// </summary>
     internal static class NativeAPI
     {
-        private const string DllName = "CalibOperatorNative.dll";
+        private const string DllName = "IndustrialVisionToolsNative.dll";
 
         // Image management
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
