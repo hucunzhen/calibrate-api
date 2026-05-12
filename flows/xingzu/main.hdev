@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hdevelop file_version="1.1" halcon_version="20.11.1">
+  <procedure name="main">
+    <interface/>
+    <body>
+      <c>* ========================================================================</c>
+      <c>* 由 calibrate-api 组态导出：flows/xingzu/main.flow.json</c>
+      <c>* 说明：图中算子多为本工具原生/OpenCV 管线，并非 HALCON 同名算子。</c>
+      <c>* 本文件供 HDevelop 查阅与手工对照；直接运行无法复现完整流程。</c>
+      <c>* 子流程（composite）请打开同目录下对应 *.flow.json。</c>
+      <c>* ========================================================================</c>
+      <c>* </c>
+      <c>* --- 资源路径（摘自 flow JSON）---</c>
+      <c>* load_image_dir.directory = D:/work/calibrate-api/test_images</c>
+      <c>* load_calibration_result.filePath = D:/work/calibrate-api/flows/xingzu/calibration_result.json</c>
+      <c>* composite.innerFlowPath:</c>
+      <c>*   - genMask.flow.json</c>
+      <c>*   - grayPreprocess.flow.json</c>
+      <c>*   - binPreprocess.flow.json</c>
+      <c>*   - contourPreprocess.flow.json</c>
+      <c>* </c>
+      <c>* --- 节点（按 TypeId，便于与画布对照）---</c>
+      <c>* load_image_dir | apply_mask | find_contours | composite(x4)</c>
+      <c>* gray_range_binary | load_calibration_result | img_to_world</c>
+      <c>* polyline_simplify_dp | display(x2)</c>
+      <c>* </c>
+      <c>* --- 大致数据流（文字拓扑）---</c>
+      <c>* load_image_dir.Image -&gt; composite(grayPreprocess).In</c>
+      <c>* load_image_dir.Image -&gt; composite(genMask).In</c>
+      <c>* genMask.Out -&gt; apply_mask.Mask ; grayPreprocess.Out -&gt; apply_mask.Image</c>
+      <c>* apply_mask.Out -&gt; gray_range_binary.In</c>
+      <c>* gray_range_binary.Out -&gt; composite(binPreprocess).In</c>
+      <c>* binPreprocess.Out -&gt; find_contours.In</c>
+      <c>* find_contours.Contours -&gt; composite(contourPreprocess).In</c>
+      <c>* contourPreprocess.Out -&gt; polyline_simplify_dp.In</c>
+      <c>* polyline_simplify_dp.Out -&gt; img_to_world.Pixel ; calibration.Transform -&gt; img_to_world.Transform</c>
+      <c>* img_to_world.World -&gt; display.Points ; find_contours.Out -&gt; display.Image</c>
+      <c>* find_contours.Out -&gt; display(Image预览) ; polyline_simplify.Out -&gt; display(Points叠加)</c>
+      <c>* </c>
+      <c>* --- 参数摘录 ---</c>
+      <c>* find_contours.minContourArea = 120</c>
+      <c>* gray_range_binary: rangeMode=percentile, grayLow=2, grayHigh=50,</c>
+      <c>*   percentileExcludeLow=82.8, percentileExcludeHigh=9.7</c>
+      <c>* polyline_simplify_dp: epsilon=2.0, closed=true</c>
+      <c>* display.dotRadius = 3</c>
+      <c>* ========================================================================</c>
+      <c>* Placeholder (valid operator so HDevelop parses this file):</c>
+      <l>tuple_length ([1], TmpExportDummyLen)</l>
+    </body>
+    <docu id="main">
+      <parameters/>
+    </docu>
+  </procedure>
+</hdevelop>

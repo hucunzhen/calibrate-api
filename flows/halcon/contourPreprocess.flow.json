@@ -1,0 +1,64 @@
+{
+  "Nodes": [
+    {
+      "Id": "171af4cb-8672-41d3-9c85-e96953357d90",
+      "TypeId": "composite_bind_in",
+      "X": 74.5182857142857,
+      "Y": 77.49982857142864,
+      "Params": {
+        "externalPort": "In"
+      }
+    },
+    {
+      "Id": "41b50ee4-0f09-4548-936a-50dc26d58879",
+      "TypeId": "composite_bind_out",
+      "X": 745.5182857142856,
+      "Y": 314.49982857142857,
+      "Params": {
+        "externalPort": "Out"
+      }
+    },
+    {
+      "Id": "c28e909a-b185-4117-b3e3-da2be758a745",
+      "TypeId": "halcon_xld_sample_points",
+      "X": 471.8571428571431,
+      "Y": 314.2142857142859,
+      "Params": {
+        "spacing": "15",
+        "maxBars": "0"
+      }
+    },
+    {
+      "Id": "0f2f797c-e8a8-494b-a8e1-915aeb4507a9",
+      "TypeId": "halcon_segment_xld",
+      "X": 339.51828571428564,
+      "Y": 141.49982857142862,
+      "Params": {
+        "mode": "lines_circles",
+        "smoothCont": "5",
+        "maxLineDist1": "4",
+        "maxLineDist2": "2"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "c28e909a-b185-4117-b3e3-da2be758a745",
+      "FromPort": "Points",
+      "ToNodeId": "41b50ee4-0f09-4548-936a-50dc26d58879",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "171af4cb-8672-41d3-9c85-e96953357d90",
+      "FromPort": "Out",
+      "ToNodeId": "0f2f797c-e8a8-494b-a8e1-915aeb4507a9",
+      "ToPort": "Xld"
+    },
+    {
+      "FromNodeId": "0f2f797c-e8a8-494b-a8e1-915aeb4507a9",
+      "FromPort": "XldOut",
+      "ToNodeId": "c28e909a-b185-4117-b3e3-da2be758a745",
+      "ToPort": "Xld"
+    }
+  ]
+}

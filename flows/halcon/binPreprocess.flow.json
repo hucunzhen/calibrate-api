@@ -1,0 +1,64 @@
+{
+  "Nodes": [
+    {
+      "Id": "2a1ca3e0-0078-4415-94e3-309f676709c0",
+      "TypeId": "composite_bind_in",
+      "X": 97,
+      "Y": 116,
+      "Params": {
+        "externalPort": "In"
+      }
+    },
+    {
+      "Id": "9c92f7fc-05ac-4718-82db-f4f57b4bb046",
+      "TypeId": "composite_bind_out",
+      "X": 666,
+      "Y": 549,
+      "Params": {
+        "externalPort": "Out"
+      }
+    },
+    {
+      "Id": "fc1c07ca-d1e7-4af7-80ed-544119060894",
+      "TypeId": "halcon_binary_morph_circle",
+      "X": 370,
+      "Y": 227,
+      "Params": {
+        "op": "open",
+        "radius": "2",
+        "iterations": "1"
+      }
+    },
+    {
+      "Id": "6d6544ae-5cc2-49e0-bdc1-28236cd52eea",
+      "TypeId": "halcon_binary_morph_circle",
+      "X": 397,
+      "Y": 417,
+      "Params": {
+        "op": "close",
+        "radius": "4",
+        "iterations": "3"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "2a1ca3e0-0078-4415-94e3-309f676709c0",
+      "FromPort": "Out",
+      "ToNodeId": "fc1c07ca-d1e7-4af7-80ed-544119060894",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "fc1c07ca-d1e7-4af7-80ed-544119060894",
+      "FromPort": "Out",
+      "ToNodeId": "6d6544ae-5cc2-49e0-bdc1-28236cd52eea",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "6d6544ae-5cc2-49e0-bdc1-28236cd52eea",
+      "FromPort": "Out",
+      "ToNodeId": "9c92f7fc-05ac-4718-82db-f4f57b4bb046",
+      "ToPort": "In"
+    }
+  ]
+}

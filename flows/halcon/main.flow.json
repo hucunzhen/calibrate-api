@@ -1,0 +1,228 @@
+{
+  "Nodes": [
+    {
+      "Id": "1e52dbba-25b8-42c6-8b0c-2f39d07c92ae",
+      "TypeId": "display",
+      "X": 1266.9285714285716,
+      "Y": 19.285714285714334,
+      "Params": {
+        "dotRadius": "3"
+      }
+    },
+    {
+      "Id": "15572a4b-62e3-466e-b891-c8d9d5ae35a7",
+      "TypeId": "composite",
+      "X": 214.67857142857156,
+      "Y": 345.07142857142867,
+      "Params": {
+        "innerFlowPath": "genMask.flow.json",
+        "innerFlowJson": "",
+        "bindingsJson": "{}"
+      }
+    },
+    {
+      "Id": "6a20c99e-ee0b-4c12-82c1-ccfa91ebec0e",
+      "TypeId": "composite",
+      "X": 241.3928571428571,
+      "Y": 213.7857142857143,
+      "Params": {
+        "innerFlowPath": "grayPreprocess.flow.json",
+        "innerFlowJson": "",
+        "bindingsJson": "{}"
+      }
+    },
+    {
+      "Id": "a73161e3-931f-4b58-9090-fc0b26183c40",
+      "TypeId": "composite",
+      "X": 782.1785714285713,
+      "Y": 266.7857142857142,
+      "Params": {
+        "innerFlowPath": "binPreprocess.flow.json",
+        "innerFlowJson": "",
+        "bindingsJson": "{}"
+      }
+    },
+    {
+      "Id": "cccd0504-756c-4631-8844-faeebd1d8db6",
+      "TypeId": "composite",
+      "X": 1053.5182857142856,
+      "Y": 190.49982857142857,
+      "Params": {
+        "innerFlowPath": "contourPreprocess.flow.json",
+        "innerFlowJson": "",
+        "bindingsJson": "{}"
+      }
+    },
+    {
+      "Id": "a33020a5-000d-40cf-aed9-1813123d35f5",
+      "TypeId": "load_calibration_result",
+      "X": 1221,
+      "Y": 487,
+      "Params": {
+        "filePath": "D:\\work\\calibrate-api\\flows\\xingzu\\calibration_result.json"
+      }
+    },
+    {
+      "Id": "47c98eca-35e1-4eb4-b2a0-d84d66340a9a",
+      "TypeId": "img_to_world",
+      "X": 1502,
+      "Y": 358,
+      "Params": {}
+    },
+    {
+      "Id": "8360f5e2-4d3f-429f-bf29-29af3d89b704",
+      "TypeId": "display",
+      "X": 1742.4656,
+      "Y": 412.544,
+      "Params": {
+        "dotRadius": "3"
+      }
+    },
+    {
+      "Id": "9fb0d037-d3c7-40ab-901c-f9bea848db63",
+      "TypeId": "polyline_simplify_dp",
+      "X": 1275,
+      "Y": 288,
+      "Params": {
+        "epsilon": "2.0",
+        "closed": "true"
+      }
+    },
+    {
+      "Id": "17c9d354-24a1-4b0e-9f08-5b87f672475f",
+      "TypeId": "load_image_dir",
+      "X": 9,
+      "Y": 169,
+      "Params": {
+        "mode": "each",
+        "directory": "D:\\work\\calibrate-api\\test_images",
+        "extensions": ".bmp;.png;.jpg;.jpeg;.tif;.tiff",
+        "index": "0"
+      }
+    },
+    {
+      "Id": "392d6f20-d7f0-4a68-8007-095f2a7b3e2a",
+      "TypeId": "halcon_threshold_bin",
+      "X": 576,
+      "Y": 360,
+      "Params": {
+        "minGray": "2",
+        "maxGray": "30"
+      }
+    },
+    {
+      "Id": "7937bc05-7249-404c-be7d-ea22d21891da",
+      "TypeId": "halcon_gray_mask",
+      "X": 513.9642857142858,
+      "Y": 211.0000000000001,
+      "Params": {
+        "maskMin": "200",
+        "maskMax": "255"
+      }
+    },
+    {
+      "Id": "f8a7c3f4-5583-428e-af4d-54c064922ca3",
+      "TypeId": "halcon_binary_to_xld",
+      "X": 861,
+      "Y": 126,
+      "Params": {
+        "minGray": "1",
+        "maxGray": "255",
+        "genContourMode": "border",
+        "minContourPoints": "120"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "a33020a5-000d-40cf-aed9-1813123d35f5",
+      "FromPort": "Transform",
+      "ToNodeId": "47c98eca-35e1-4eb4-b2a0-d84d66340a9a",
+      "ToPort": "Transform"
+    },
+    {
+      "FromNodeId": "47c98eca-35e1-4eb4-b2a0-d84d66340a9a",
+      "FromPort": "World",
+      "ToNodeId": "8360f5e2-4d3f-429f-bf29-29af3d89b704",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "9fb0d037-d3c7-40ab-901c-f9bea848db63",
+      "FromPort": "Out",
+      "ToNodeId": "47c98eca-35e1-4eb4-b2a0-d84d66340a9a",
+      "ToPort": "Pixel"
+    },
+    {
+      "FromNodeId": "cccd0504-756c-4631-8844-faeebd1d8db6",
+      "FromPort": "Out",
+      "ToNodeId": "9fb0d037-d3c7-40ab-901c-f9bea848db63",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "17c9d354-24a1-4b0e-9f08-5b87f672475f",
+      "FromPort": "Image",
+      "ToNodeId": "6a20c99e-ee0b-4c12-82c1-ccfa91ebec0e",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "17c9d354-24a1-4b0e-9f08-5b87f672475f",
+      "FromPort": "Image",
+      "ToNodeId": "15572a4b-62e3-466e-b891-c8d9d5ae35a7",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "392d6f20-d7f0-4a68-8007-095f2a7b3e2a",
+      "FromPort": "Out",
+      "ToNodeId": "a73161e3-931f-4b58-9090-fc0b26183c40",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "6a20c99e-ee0b-4c12-82c1-ccfa91ebec0e",
+      "FromPort": "Out",
+      "ToNodeId": "7937bc05-7249-404c-be7d-ea22d21891da",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "15572a4b-62e3-466e-b891-c8d9d5ae35a7",
+      "FromPort": "Out",
+      "ToNodeId": "7937bc05-7249-404c-be7d-ea22d21891da",
+      "ToPort": "Mask"
+    },
+    {
+      "FromNodeId": "7937bc05-7249-404c-be7d-ea22d21891da",
+      "FromPort": "Out",
+      "ToNodeId": "392d6f20-d7f0-4a68-8007-095f2a7b3e2a",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "a73161e3-931f-4b58-9090-fc0b26183c40",
+      "FromPort": "Out",
+      "ToNodeId": "f8a7c3f4-5583-428e-af4d-54c064922ca3",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "f8a7c3f4-5583-428e-af4d-54c064922ca3",
+      "FromPort": "Xld",
+      "ToNodeId": "cccd0504-756c-4631-8844-faeebd1d8db6",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "cccd0504-756c-4631-8844-faeebd1d8db6",
+      "FromPort": "Out",
+      "ToNodeId": "1e52dbba-25b8-42c6-8b0c-2f39d07c92ae",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "a73161e3-931f-4b58-9090-fc0b26183c40",
+      "FromPort": "Out",
+      "ToNodeId": "1e52dbba-25b8-42c6-8b0c-2f39d07c92ae",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "a73161e3-931f-4b58-9090-fc0b26183c40",
+      "FromPort": "Out",
+      "ToNodeId": "8360f5e2-4d3f-429f-bf29-29af3d89b704",
+      "ToPort": "Image"
+    }
+  ]
+}

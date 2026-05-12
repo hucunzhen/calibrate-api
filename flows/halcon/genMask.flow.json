@@ -1,0 +1,50 @@
+{
+  "Nodes": [
+    {
+      "Id": "0b45620d-7cec-4073-81d4-7d8540428a24",
+      "TypeId": "composite_bind_in",
+      "X": 98,
+      "Y": 152,
+      "Params": {
+        "externalPort": "In"
+      }
+    },
+    {
+      "Id": "d7b4d053-df04-449d-bf7d-f701d4a24ce7",
+      "TypeId": "halcon_largest_contour_mask",
+      "X": 226.32142857142873,
+      "Y": 279.25000000000006,
+      "Params": {
+        "gaussSize": "9",
+        "minGray": "40",
+        "maxGray": "255",
+        "genContourMode": "border",
+        "rankBy": "perimeter",
+        "minContourPoints": "3"
+      }
+    },
+    {
+      "Id": "8b2ba91a-651f-4742-926b-cdfc575e6409",
+      "TypeId": "composite_bind_out",
+      "X": 424.5357142857141,
+      "Y": 571.6071428571427,
+      "Params": {
+        "externalPort": "Out"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "0b45620d-7cec-4073-81d4-7d8540428a24",
+      "FromPort": "Out",
+      "ToNodeId": "d7b4d053-df04-449d-bf7d-f701d4a24ce7",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "d7b4d053-df04-449d-bf7d-f701d4a24ce7",
+      "FromPort": "Out",
+      "ToNodeId": "8b2ba91a-651f-4742-926b-cdfc575e6409",
+      "ToPort": "In"
+    }
+  ]
+}
