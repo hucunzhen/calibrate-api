@@ -1237,6 +1237,9 @@ namespace CalibOperatorCLI_Example
                     }
                 }
 
+                if (fn.Def.TypeId == "composite")
+                    RefreshCompositeNodeCaption(fn);
+
                 mapOldIdToNode[nd.Id] = fn;
             }
 
@@ -1339,6 +1342,11 @@ namespace CalibOperatorCLI_Example
                             node.Params[kv.Key] = kv.Value;
                     }
                 }
+
+                // CreateNodeVisual 在合并 JSON 参数之前执行，组合算子副标题依赖 innerFlowPath/innerFlowJson，此处再刷新一次。
+                if (node.Def.TypeId == "composite")
+                    RefreshCompositeNodeCaption(node);
+
                 nodeLookup[nd.Id] = node;
             }
 
