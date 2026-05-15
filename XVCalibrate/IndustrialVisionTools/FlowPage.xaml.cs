@@ -33,6 +33,9 @@ namespace CalibOperatorCLI_Example
         /// <summary>若宿主支持多标签，返回 true 表示已在其它标签打开路径；否则走当前页加载。</summary>
         public Func<string, bool>? TryLoadFlowInNewTab { get; set; }
 
+        /// <summary>若宿主支持多标签，返回 true 表示已新建空白标签并切换；否则由当前页自行重置。</summary>
+        public Func<bool>? RequestNewEmptyFlowTab { get; set; }
+
         /// <summary>
         /// CLI <c>--flow</c> 自动执行时为 true：流程日志里标记为错误的行同时写入标准错误输出。
         /// </summary>
@@ -79,6 +82,7 @@ namespace CalibOperatorCLI_Example
         private const string LivePreviewSingletonSlotKey = "__flow_singleton_preview__";
 
         private readonly Dictionary<string, LivePreviewSlot> _livePreviewBySlot = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, Trajectory3DPreviewWindow> _livePreview3dBySlot = new(StringComparer.Ordinal);
         private System.Threading.CancellationTokenSource? _runCts;
         private bool _isRunInProgress;
         private bool _isPanningCanvas;
@@ -366,7 +370,61 @@ namespace CalibOperatorCLI_Example
             var menuRunTo = new MenuItem { Header = "执行到此节点（含上游）" };
             menuRunTo.Click += (_, _) => { _ = RunUpstreamToNodeAsync(node); };
 
-            border.ContextMenu = new ContextMenu { Items = { menuCopy, menuPaste, new Separator(), menuParams, menuRunTo, menuDelete } };
+            var menuPreviewPts = new MenuItem { Header = "预览点位轨迹" };
+
+            var ctx = new ContextMenu();
+            ctx.Items.Add(menuCopy);
+            ctx.Items.Add(menuPaste);
+            ctx.Items.Add(new Separator());
+            ctx.Items.Add(menuParams);
+            ctx.Items.Add(menuRunTo);
+            ctx.Items.Add(menuPreviewPts);
+            ctx.Items.Add(menuDelete);
+            ctx.Opened += (_, _) =>
+            {
+                menuPreviewPts.Items.Clear();
+                foreach (var kv in node.Outputs)
+                {
+                    if (kv.Value is Point2D[] pa)
+                    {
+                        string hdr = pa.Length == 0 ? $"{kv.Key} (0 点)" : $"{kv.Key} ({pa.Length} 点)";
+                        var mi = new MenuItem { Header = hdr, IsEnabled = pa.Length > 0 };
+                        if (pa.Length > 0)
+                        {
+                            Point2D[] snapshot = (Point2D[])pa.Clone();
+                            string port = kv.Key;
+                            var barFromNode = TryGetBarIdsForPointPort(node, port, pa.Length);
+                            var barSnap = barFromNode == null ? null : (int[])barFromNode.Clone();
+                            string? join = DefaultPointLineJoinModeForPreview(node.Def.TypeId, port);
+                            mi.Click += (_, _) =>
+                                ShowPointsPolylinePreview(snapshot, $"{node.Def.DisplayName} · {port}", barSnap, join);
+                        }
+                        menuPreviewPts.Items.Add(mi);
+                    }
+                    else if (kv.Value is CalibPoint3D[] p3)
+                    {
+                        string hdr = p3.Length == 0 ? $"{kv.Key} (0 点·3D)" : $"{kv.Key} ({p3.Length} 点·3D)";
+                        var mi = new MenuItem { Header = hdr, IsEnabled = p3.Length > 0 };
+                        if (p3.Length > 0)
+                        {
+                            CalibPoint3D[] snapshot = (CalibPoint3D[])p3.Clone();
+                            string port = kv.Key;
+                            var barFromNode = TryGetBarIdsForPointPort(node, port, p3.Length);
+                            var barSnap = barFromNode == null ? null : (int[])barFromNode.Clone();
+                            string? join = DefaultPointLineJoinModeForPreview(node.Def.TypeId, port);
+                            mi.Click += (_, _) =>
+                            {
+                                var xy = snapshot.Select(p => new Point2D(p.X, p.Y)).ToArray();
+                                ShowPointsPolylinePreview(xy, $"{node.Def.DisplayName} · {port} (XY投影)", barSnap, join);
+                            };
+                        }
+                        menuPreviewPts.Items.Add(mi);
+                    }
+                }
+                menuPreviewPts.Visibility = menuPreviewPts.Items.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            };
+
+            border.ContextMenu = ctx;
 
             var panel = new StackPanel();
 
@@ -749,6 +807,8 @@ namespace CalibOperatorCLI_Example
         {
             if (a == b) return true;
             if (a == typeof(object) || b == typeof(object)) return true;
+            // 基座 3D 点列可连入仍声明为 Point2D[] 的端口（显示叠加取 XY；PLC 写 float 时写 X,Y）
+            if (a == typeof(CalibPoint3D[]) && b == typeof(Point2D[])) return true;
             return false;
         }
 
@@ -981,21 +1041,41 @@ namespace CalibOperatorCLI_Example
                 return;
             }
 
-            // 点位类型：如果上游同节点有图像，叠加点位预览；否则显示摘要
+            // 点位类型：有同节点图像则叠加预览；否则纯轨迹图。auto 时仅多条条号才分段；「轮廓转焊道路径」的 Points 预览强制整条折线。
             if (data is Point2D[] pts)
             {
                 var baseImg = conn.FromPort.Owner.Outputs.Values.OfType<CalibImage>().FirstOrDefault();
+                var barIds = TryGetBarIdsForPointPort(conn.FromPort.Owner, conn.FromPort.Definition.Name, pts.Length);
+                var barSnap = barIds == null ? null : (int[])barIds.Clone();
+                string? joinMode = DefaultPointLineJoinModeForPreview(conn.FromPort.Owner.Def.TypeId, conn.FromPort.Definition.Name);
                 if (baseImg != null)
                 {
-                    ShowImagePreview(baseImg, pts, 3);
+                    ShowImagePreview(baseImg, pts, 3, null, null, null, barSnap, joinMode, null);
                 }
                 else
                 {
-                    MessageBox.Show(
-                        $"点位数量：{pts.Length}\n示例首点：{(pts.Length > 0 ? $"({pts[0].X:F2}, {pts[0].Y:F2})" : "N/A")}",
-                        "连线数据 - 点位",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Information);
+                    string title = $"点位轨迹 · {conn.FromPort.Owner.Def.DisplayName} · {conn.FromPort.Definition.Name}";
+                    ShowPointsPolylinePreview(pts, title, barSnap, joinMode);
+                }
+                e.Handled = true;
+                return;
+            }
+
+            if (data is CalibPoint3D[] pts3)
+            {
+                var baseImg = conn.FromPort.Owner.Outputs.Values.OfType<CalibImage>().FirstOrDefault();
+                var barIds = TryGetBarIdsForPointPort(conn.FromPort.Owner, conn.FromPort.Definition.Name, pts3.Length);
+                var barSnap = barIds == null ? null : (int[])barIds.Clone();
+                string? joinMode = DefaultPointLineJoinModeForPreview(conn.FromPort.Owner.Def.TypeId, conn.FromPort.Definition.Name);
+                var ptsXy = pts3.Select(p => new Point2D(p.X, p.Y)).ToArray();
+                if (baseImg != null)
+                {
+                    ShowImagePreview(baseImg, ptsXy, 3, null, null, null, barSnap, joinMode, null);
+                }
+                else
+                {
+                    string title = $"点位轨迹(基座3D·XY投影) · {conn.FromPort.Owner.Def.DisplayName} · {conn.FromPort.Definition.Name}";
+                    ShowPointsPolylinePreview(ptsXy, title, barSnap, joinMode);
                 }
                 e.Handled = true;
                 return;
@@ -1005,6 +1085,17 @@ namespace CalibOperatorCLI_Example
             {
                 var baseImg = conn.FromPort.Owner.Outputs.Values.OfType<CalibImage>().FirstOrDefault();
                 ShowContoursPreview(contours, baseImg);
+                e.Handled = true;
+                return;
+            }
+
+            if (data is ValueTuple<double[], double[], int[], int>)
+            {
+                MessageBox.Show(
+                    BuildConnectionDataText(conn, data),
+                    "连线数据 · 世界轮廓条带",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
                 e.Handled = true;
                 return;
             }
@@ -1047,6 +1138,48 @@ namespace CalibOperatorCLI_Example
                     sb.AppendLine($"Total Points: {contours.Item1?.Length ?? 0}");
                     if (contours.Item3 != null && contours.Item3.Length > 0)
                         sb.AppendLine($"First Contour Length: {contours.Item3[0]}");
+                    break;
+                case ValueTuple<double[], double[], int[], int> cw:
+                    sb.AppendLine($"ContoursWorld (条数): {cw.Item4}");
+                    sb.AppendLine($"Total Points: {cw.Item1?.Length ?? 0}");
+                    if (cw.Item3 != null && cw.Item3.Length > 0)
+                        sb.AppendLine($"First Contour Length: {cw.Item3[0]}");
+                    if (cw.Item1 != null && cw.Item1.Length > 0 && cw.Item2 != null)
+                    {
+                        sb.AppendLine($"首点: ({cw.Item1[0]:F4}, {cw.Item2[0]:F4})");
+                        if (cw.Item1.Length > 1)
+                            sb.AppendLine($"末点: ({cw.Item1[^1]:F4}, {cw.Item2[^1]:F4})");
+                    }
+                    break;
+                case ValueTuple<double[], double[], double[], int[], int> c3:
+                    sb.AppendLine($"ContoursBase3D (条数): {c3.Item5}");
+                    sb.AppendLine($"Total Points: {c3.Item1?.Length ?? 0}");
+                    if (c3.Item4 != null && c3.Item4.Length > 0)
+                        sb.AppendLine($"First Contour Length: {c3.Item4[0]}");
+                    if (c3.Item1 != null && c3.Item1.Length > 0 && c3.Item2 != null && c3.Item3 != null)
+                    {
+                        sb.AppendLine($"首点: ({c3.Item1[0]:F4}, {c3.Item2[0]:F4}, {c3.Item3[0]:F4})");
+                        if (c3.Item1.Length > 1)
+                            sb.AppendLine($"末点: ({c3.Item1[^1]:F4}, {c3.Item2[^1]:F4}, {c3.Item3[^1]:F4})");
+                    }
+                    break;
+                case Point2D[] pp:
+                    sb.AppendLine($"点数: {pp.Length}");
+                    if (pp.Length > 0)
+                    {
+                        sb.AppendLine($"首点: ({pp[0].X:F4}, {pp[0].Y:F4})");
+                        if (pp.Length > 1)
+                            sb.AppendLine($"末点: ({pp[^1].X:F4}, {pp[^1].Y:F4})");
+                    }
+                    break;
+                case CalibPoint3D[] p3:
+                    sb.AppendLine($"点数(基座3D): {p3.Length}");
+                    if (p3.Length > 0)
+                    {
+                        sb.AppendLine($"首点: ({p3[0].X:F4}, {p3[0].Y:F4}, {p3[0].Z:F4})");
+                        if (p3.Length > 1)
+                            sb.AppendLine($"末点: ({p3[^1].X:F4}, {p3[^1].Y:F4}, {p3[^1].Z:F4})");
+                    }
                     break;
                 default:
                     sb.AppendLine(data.ToString() ?? "(无可显示内容)");
@@ -1526,6 +1659,14 @@ namespace CalibOperatorCLI_Example
             if (TryLoadFlowInNewTab?.Invoke(dlg.FileName) == true)
                 return;
             LoadFlowFromFile(dlg.FileName, showErrorDialog: true);
+        }
+
+        private void NewFlowTab_Click(object sender, RoutedEventArgs e)
+        {
+            if (RequestNewEmptyFlowTab?.Invoke() == true)
+                return;
+            PushFlowUndoSnapshotBeforeChange();
+            ResetToEmptyDocument();
         }
 
         /// <summary>清空画布并重置路径（保留单标签时用于「关闭」语义）。</summary>
@@ -2039,6 +2180,531 @@ namespace CalibOperatorCLI_Example
                 regions.Add((points.Skip(start).Take(tailLen).ToArray(), barIds.Skip(start).Take(tailLen).ToArray()));
 
             return regions;
+        }
+
+        /// <summary>
+        /// 将 (flatX, flatY, contourLengths, contourCount) 拆成多条轮廓折线（像素坐标）。
+        /// </summary>
+        private static List<Point2D[]> ExplodeContourTupleToPolylines(
+            int[] flatX, int[] flatY, int[] contourLengths, int contourCount)
+        {
+            var list = new List<Point2D[]>();
+            if (flatX == null || flatY == null || contourLengths == null || contourCount <= 0)
+                return list;
+            int offset = 0;
+            for (int i = 0; i < contourCount && i < contourLengths.Length; i++)
+            {
+                int len = contourLengths[i];
+                if (len <= 0 || offset + len > flatX.Length || offset + len > flatY.Length)
+                {
+                    offset += Math.Max(0, len);
+                    continue;
+                }
+
+                var seg = new Point2D[len];
+                for (int j = 0; j < len; j++)
+                    seg[j] = new Point2D(flatX[offset + j], flatY[offset + j]);
+                offset += len;
+                list.Add(seg);
+            }
+
+            return list;
+        }
+
+        /// <summary>
+        /// 将 (flatX, flatY, contourLengths, contourCount) 拆成多条轮廓折线（双精度坐标，一般为世界 mm）。
+        /// </summary>
+        private static List<Point2D[]> ExplodeContourDoubleTupleToPolylines(
+            double[] flatX, double[] flatY, int[] contourLengths, int contourCount)
+        {
+            var list = new List<Point2D[]>();
+            if (flatX == null || flatY == null || contourLengths == null || contourCount <= 0)
+                return list;
+            int offset = 0;
+            for (int i = 0; i < contourCount && i < contourLengths.Length; i++)
+            {
+                int len = contourLengths[i];
+                if (len <= 0 || offset + len > flatX.Length || offset + len > flatY.Length)
+                {
+                    offset += Math.Max(0, len);
+                    continue;
+                }
+
+                var seg = new Point2D[len];
+                for (int j = 0; j < len; j++)
+                    seg[j] = new Point2D(flatX[offset + j], flatY[offset + j]);
+                offset += len;
+                list.Add(seg);
+            }
+
+            return list;
+        }
+
+        /// <summary>
+        /// 将「采样点 + 条号」还原为多条折线：一条轮廓应对应同一 BarId，仅在条号变化处分条。
+        /// BarIds 与 Points 不等长时退化为整条点列一条线。
+        /// </summary>
+        private static List<Point2D[]> SplitSampledPointsToContourPolylines(Point2D[] points, int[]? barIds)
+        {
+            SplitSampledPointsToContourPolylinesWithBarIds(points, barIds, out var segs, out _);
+            return segs;
+        }
+
+        /// <summary>与 <see cref="SplitSampledPointsToContourPolylines"/> 相同，并输出每条折线对应的条号（用于焊道分段合并时禁止跨条直连）。</summary>
+        private static void SplitSampledPointsToContourPolylinesWithBarIds(
+            Point2D[] points,
+            int[]? barIds,
+            out List<Point2D[]> segments,
+            out List<int> segmentBarIds)
+        {
+            segments = new List<Point2D[]>();
+            segmentBarIds = new List<int>();
+            if (points == null || points.Length == 0)
+                return;
+            if (barIds == null || barIds.Length != points.Length)
+            {
+                segments.Add(points);
+                segmentBarIds.Add(0);
+                return;
+            }
+
+            int start = 0;
+            for (int i = 1; i <= points.Length; i++)
+            {
+                if (i == points.Length || barIds[i] != barIds[i - 1])
+                {
+                    int len = i - start;
+                    if (len > 0)
+                    {
+                        var seg = new Point2D[len];
+                        Array.Copy(points, start, seg, 0, len);
+                        segments.Add(seg);
+                        segmentBarIds.Add(barIds[start]);
+                    }
+
+                    start = i;
+                }
+            }
+        }
+
+        private static (List<Point2D[]> Segments, List<int> BarIds) ZipRemoveEmptyContourSegments(
+            List<Point2D[]> segments,
+            List<int> segmentBarIds)
+        {
+            var s2 = new List<Point2D[]>();
+            var b2 = new List<int>();
+            for (int i = 0; i < segments.Count; i++)
+            {
+                var s = segments[i];
+                if (s == null || s.Length == 0)
+                    continue;
+                s2.Add(s);
+                int bid = i < segmentBarIds.Count ? segmentBarIds[i] : i;
+                b2.Add(bid);
+            }
+
+            return (s2, b2);
+        }
+
+        private static double WeldPolylineOpenLength(Point2D[] c)
+        {
+            if (c == null || c.Length < 2)
+                return 0;
+            double s = 0;
+            for (int i = 0; i < c.Length - 1; i++)
+                s += PointDistance(c[i], c[i + 1]);
+            return s;
+        }
+
+        private static bool ShouldAutoCloseContourWeld(Point2D[] c)
+        {
+            if (c == null || c.Length < 3)
+                return false;
+            double per = WeldPolylineOpenLength(c);
+            if (per < 1e-9)
+                return false;
+            double gap = PointDistance(c[0], c[^1]);
+            if (gap < 1e-9)
+                return false;
+            double medE = MedianEdgeLengthForContour(c);
+            return gap / per <= 0.38 || (medE > 1e-12 && gap <= medE * 8.0);
+        }
+
+        private static double MedianEdgeLengthForContour(Point2D[] c)
+        {
+            if (c == null || c.Length < 2)
+                return 0;
+            var e = new double[c.Length - 1];
+            for (int i = 0; i < c.Length - 1; i++)
+                e[i] = PointDistance(c[i], c[i + 1]);
+            Array.Sort(e);
+            return e[e.Length / 2];
+        }
+
+        private static void AppendWeldContourClosingIfNeeded(
+            List<Point2D> path,
+            Point2D[] c,
+            string closeContourMode,
+            double transitSpacingPx)
+        {
+            if (c == null || c.Length < 3 || path.Count == 0)
+                return;
+            var mode = (closeContourMode ?? "auto").Trim().ToLowerInvariant();
+            if (mode is "false" or "0" or "no" or "off")
+                return;
+            bool shouldClose = mode is "true" or "1" or "yes" or "on" || ShouldAutoCloseContourWeld(c);
+            if (!shouldClose)
+                return;
+            var last = path[path.Count - 1];
+            if (PointDistance(last, c[0]) < 1e-9)
+                return;
+            AppendLineTransit(path, last, c[0], transitSpacingPx);
+        }
+
+        private static bool BarSplitIsStrictByBar(string barSplitMode)
+        {
+            var m = (barSplitMode ?? "").Trim().ToLowerInvariant();
+            return m is "by_bar" or "bars" or "split";
+        }
+
+        /// <summary>
+        /// 同一条轮廓上相邻点步长应连续，条号应恒定（一条轮廓一个 BarId）。
+        /// 将「步长 ≤ 阈值且条号相对前一点突变」的点的条号改为与前一点相同，消除轮廓内的条号噪声。
+        /// </summary>
+        private static int[] SanitizeBarIdsUnifyAlongShortSteps(Point2D[] pts, int[] barIds, double transitSpacingHint)
+        {
+            if (pts == null || barIds == null || pts.Length < 2 || barIds.Length != pts.Length)
+                return barIds;
+
+            var steps = new double[pts.Length - 1];
+            for (int i = 0; i < pts.Length - 1; i++)
+            {
+                double dx = pts[i + 1].X - pts[i].X;
+                double dy = pts[i + 1].Y - pts[i].Y;
+                steps[i] = Math.Sqrt(dx * dx + dy * dy);
+            }
+
+            var sorted = (double[])steps.Clone();
+            Array.Sort(sorted);
+            double med = sorted[sorted.Length / 2];
+            double th = Math.Max(med * 4.0, 1e-9);
+            if (transitSpacingHint > 1e-12)
+                th = Math.Max(th, transitSpacingHint * 3.0);
+
+            var o = (int[])barIds.Clone();
+            for (int i = 1; i < pts.Length; i++)
+            {
+                if (steps[i - 1] <= th && o[i] != o[i - 1])
+                    o[i] = o[i - 1];
+            }
+
+            return o;
+        }
+
+        /// <summary>像素条带轮廓逐点变换为双精度条带（结构不变：条数、每条点数序列与输入一致）。</summary>
+        private static ValueTuple<double[], double[], int[], int> TransformPixelContourTupleToWorldDoubleTuple(
+            ValueTuple<int[], int[], int[], int> pixel,
+            Func<Point2D, Point2D> toWorld)
+        {
+            var (ix, iy, lens, cnt) = pixel;
+            if (cnt <= 0 || lens == null || ix == null || iy == null)
+                return (Array.Empty<double>(), Array.Empty<double>(), Array.Empty<int>(), 0);
+
+            int nCont = Math.Min(cnt, lens.Length);
+            var lensOut = new int[nCont];
+            var ptsX = new List<double>();
+            var ptsY = new List<double>();
+            int off = 0;
+            for (int ci = 0; ci < nCont; ci++)
+            {
+                int L = lens[ci];
+                if (L <= 0)
+                {
+                    lensOut[ci] = 0;
+                    continue;
+                }
+
+                if (off + L > ix.Length || off + L > iy.Length)
+                    throw new InvalidOperationException("轮廓像素→世界: Contours 数据长度与 contourLengths 不一致");
+
+                for (int j = 0; j < L; j++)
+                {
+                    var w = toWorld(new Point2D(ix[off + j], iy[off + j]));
+                    ptsX.Add(w.X);
+                    ptsY.Add(w.Y);
+                }
+
+                lensOut[ci] = L;
+                off += L;
+            }
+
+            return (ptsX.ToArray(), ptsY.ToArray(), lensOut, nCont);
+        }
+
+        /// <summary>从输入端口选择唯一一路像素→世界映射（Affine / H / Poly）。</summary>
+        private static Func<Point2D, Point2D> ResolvePixelToWorldMapperForContours(Dictionary<string, object?> inputs)
+        {
+            bool hasPoly = inputs.TryGetValue("Poly", out var pObj) && pObj is Poly2DTransform;
+            bool hasH = inputs.TryGetValue("H", out var hObj) && hObj is HomographyTransform;
+            bool hasA = inputs.TryGetValue("Transform", out var aObj) && aObj is AffineTransform;
+            int n = (hasPoly ? 1 : 0) + (hasH ? 1 : 0) + (hasA ? 1 : 0);
+            if (n != 1)
+                throw new InvalidOperationException(n == 0
+                    ? "轮廓像素→世界: 请连接 Transform、H、Poly 之一"
+                    : "轮廓像素→世界: 请只连接 Transform、H、Poly 中的一路");
+
+            if (hasPoly)
+            {
+                var poly = (Poly2DTransform)pObj!;
+                return pt => ApplyPoly2D(pt, poly);
+            }
+
+            if (hasH)
+            {
+                var hom = (HomographyTransform)hObj!;
+                return pt => ApplyHomography(pt, hom);
+            }
+
+            var aff = (AffineTransform)aObj!;
+            CalibAPI.SetTransform(aff);
+            return pt => CalibAPI.ImageToWorld(pt, aff);
+        }
+
+        /// <summary>直线移行插补：不包含起点 a，终点 b 总会写入（与 a 重合时仅写一次 b）。spacing≤0 时只追加 b。</summary>
+        private static void AppendLineTransit(List<Point2D> path, Point2D a, Point2D b, double spacingPx)
+        {
+            double dx = b.X - a.X, dy = b.Y - a.Y;
+            double len = Math.Sqrt(dx * dx + dy * dy);
+            if (len < 1e-12)
+            {
+                AppendDedupePoint(path, b);
+                return;
+            }
+
+            if (spacingPx <= 0)
+            {
+                AppendDedupePoint(path, b);
+                return;
+            }
+
+            int n = Math.Max(1, (int)Math.Ceiling(len / spacingPx));
+            for (int i = 1; i <= n; i++)
+            {
+                double t = (double)i / n;
+                AppendDedupePoint(path, new Point2D(a.X + t * dx, a.Y + t * dy));
+            }
+        }
+
+        private static void AppendDedupePoint(List<Point2D> path, Point2D p)
+        {
+            if (path.Count > 0)
+            {
+                var last = path[path.Count - 1];
+                if (Math.Abs(last.X - p.X) < 1e-9 && Math.Abs(last.Y - p.Y) < 1e-9)
+                    return;
+            }
+
+            path.Add(p);
+        }
+
+        /// <summary>
+        /// 轮廓顺序焊接：每条轮廓走完后先闭合（可选），再到 <paramref name="retreat"/>，再接近下一条轮廓。
+        /// </summary>
+        private static Point2D[] BuildWeldPathWithRetreatBetweenContours(
+            List<Point2D[]> contours,
+            Point2D retreat,
+            bool leadIn,
+            bool leadOut,
+            double transitSpacingPx,
+            string closeContourMode)
+        {
+            var path = new List<Point2D>();
+            for (int i = 0; i < contours.Count; i++)
+            {
+                var c = contours[i];
+                if (c == null || c.Length == 0) continue;
+
+                if (i == 0)
+                {
+                    if (leadIn)
+                        AppendLineTransit(path, retreat, c[0], transitSpacingPx);
+                    else
+                        AppendDedupePoint(path, c[0]);
+                    for (int k = 1; k < c.Length; k++)
+                        AppendDedupePoint(path, c[k]);
+                    AppendWeldContourClosingIfNeeded(path, c, closeContourMode, transitSpacingPx);
+                }
+                else
+                {
+                    var prev = path[path.Count - 1];
+                    AppendLineTransit(path, prev, retreat, transitSpacingPx);
+                    AppendLineTransit(path, retreat, c[0], transitSpacingPx);
+                    for (int k = 1; k < c.Length; k++)
+                        AppendDedupePoint(path, c[k]);
+                    AppendWeldContourClosingIfNeeded(path, c, closeContourMode, transitSpacingPx);
+                }
+            }
+
+            if (leadOut && path.Count > 0)
+            {
+                var last = path[path.Count - 1];
+                AppendLineTransit(path, last, retreat, transitSpacingPx);
+            }
+
+            return path.ToArray();
+        }
+
+        /// <summary>
+        /// 焊道 auto：仅当相邻分段为<strong>同一 BarId</strong>且端距小于阈值时才合并，避免不同轮廓被焊成直连线。
+        /// barSplit：auto / by_bar / single。
+        /// </summary>
+        private static (List<Point2D[]> Segments, List<int> BarIds, string? Note) NormalizeWeldContourSegmentsForRetreat(
+            List<Point2D[]> segments,
+            List<int> segmentBarIds,
+            string barSplitMode,
+            double transitSpacing,
+            double segmentJoinMaxDistOverride)
+        {
+            string? summaryNote = null;
+            if (segments == null || segments.Count == 0)
+                return (segments ?? new List<Point2D[]>(), segmentBarIds ?? new List<int>(), null);
+
+            var mode = (barSplitMode ?? "auto").Trim().ToLowerInvariant();
+            if (mode is "single" or "one" or "polyline")
+            {
+                var one = new List<Point2D>();
+                foreach (var s in segments)
+                {
+                    if (s == null || s.Length == 0) continue;
+                    foreach (var p in s)
+                        AppendDedupePoint(one, p);
+                }
+
+                summaryNote = " · 强制单条轨迹(无条间回退)";
+                return (new List<Point2D[]> { one.ToArray() }, new List<int> { 0 }, summaryNote);
+            }
+
+            if (mode is "by_bar" or "bars" or "split")
+                return (segments, segmentBarIds, null);
+
+            if (segments.Count <= 1)
+                return (segments, segmentBarIds, null);
+
+            int nonemptySegCount = segments.Count(s => s != null && s.Length > 0);
+            if (nonemptySegCount < 2)
+                return (segments, segmentBarIds, null);
+
+            while (segmentBarIds.Count < segments.Count)
+                segmentBarIds.Add(segmentBarIds.Count);
+            while (segmentBarIds.Count > segments.Count)
+                segmentBarIds.RemoveAt(segmentBarIds.Count - 1);
+
+            double jm = segmentJoinMaxDistOverride > 1e-15
+                ? segmentJoinMaxDistOverride
+                : InferWeldJoinMaxFromPointSteps(segments, transitSpacing);
+            if (jm <= 1e-15)
+                return (segments, segmentBarIds, null);
+
+            var merged = CoalesceWeldSegmentsByEndGapAndBarId(segments, segmentBarIds, jm);
+            for (int iter = 0; iter < 65536; iter++)
+            {
+                var again = CoalesceWeldSegmentsByEndGapAndBarId(merged.Segments, merged.BarIds, jm);
+                if (again.Segments.Count == merged.Segments.Count)
+                    break;
+                merged = again;
+            }
+
+            if (merged.Segments.Count < segments.Count)
+                summaryNote = $" · 同条号端距≤{jm.ToString("G6", System.Globalization.CultureInfo.InvariantCulture)}合并分段 {segments.Count}→{merged.Segments.Count}条";
+            return (merged.Segments, merged.BarIds, summaryNote);
+        }
+
+        /// <summary>
+        /// 用点列步长估计「同一条轮廓上相邻分段」的端距上限：略大于典型步长，远小于条与条之间的空移。
+        /// </summary>
+        private static double InferWeldJoinMaxFromPointSteps(List<Point2D[]> segments, double transitSpacing)
+        {
+            var flat = segments.Where(s => s != null && s.Length > 0).SelectMany(s => s!).ToArray();
+            if (flat.Length < 2)
+                return 0;
+
+            var d = new double[flat.Length - 1];
+            for (int i = 0; i < flat.Length - 1; i++)
+            {
+                double dx = flat[i + 1].X - flat[i].X;
+                double dy = flat[i + 1].Y - flat[i].Y;
+                d[i] = Math.Sqrt(dx * dx + dy * dy);
+            }
+
+            Array.Sort(d);
+            double med = d[d.Length / 2];
+            int p90i = Math.Min(d.Length - 1, (int)Math.Floor((d.Length - 1) * 0.9));
+            double p90 = d[p90i];
+            if (med < 1e-12 && p90 < 1e-12)
+                return 0;
+
+            double baseStep = Math.Max(med, p90 * 0.35);
+            double th = baseStep * 10.0;
+            if (transitSpacing > 1e-12)
+                th = Math.Max(th, transitSpacing * 5.0);
+            return th;
+        }
+
+        private static (List<Point2D[]> Segments, List<int> BarIds) CoalesceWeldSegmentsByEndGapAndBarId(
+            List<Point2D[]> segments,
+            IReadOnlyList<int> segmentBarId,
+            double joinMaxDist)
+        {
+            var res = new List<Point2D[]>();
+            var resBid = new List<int>();
+            var buf = new List<Point2D>();
+            var bufIds = new List<int>();
+            bool hasBuf = false;
+
+            for (int j = 0; j < segments.Count; j++)
+            {
+                var s = segments[j];
+                if (s == null || s.Length == 0)
+                    continue;
+                int bid = j < segmentBarId.Count ? segmentBarId[j] : j;
+                if (!hasBuf)
+                {
+                    foreach (var p in s)
+                        AppendDedupePoint(buf, p);
+                    bufIds.Add(bid);
+                    hasBuf = true;
+                    continue;
+                }
+
+                var last = buf[buf.Count - 1];
+                var head = s[0];
+                double dx = head.X - last.X, dy = head.Y - last.Y;
+                double dist = Math.Sqrt(dx * dx + dy * dy);
+                int bufId = bufIds[0];
+                if (dist <= joinMaxDist && bid == bufId)
+                {
+                    foreach (var p in s)
+                        AppendDedupePoint(buf, p);
+                }
+                else
+                {
+                    res.Add(buf.ToArray());
+                    resBid.Add(bufId);
+                    buf.Clear();
+                    bufIds.Clear();
+                    foreach (var p in s)
+                        AppendDedupePoint(buf, p);
+                    bufIds.Add(bid);
+                }
+            }
+
+            if (hasBuf && buf.Count > 0)
+            {
+                res.Add(buf.ToArray());
+                resBid.Add(bufIds[0]);
+            }
+
+            return (res, resBid);
         }
 
         private static (int[] flatX, int[] flatY, int[] lengths, int count) FilterContoursByGeometry(
@@ -5139,6 +5805,26 @@ namespace CalibOperatorCLI_Example
                         break;
                     }
 
+                    case "weld_trajectory_world":
+                    {
+                        string pattern = node.Params.GetValueOrDefault("pattern", "九宫格 (3×3)") ?? "九宫格 (3×3)";
+                        double cx = double.TryParse(node.Params.GetValueOrDefault("centerX"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var tcx) ? tcx : 0.0;
+                        double cy = double.TryParse(node.Params.GetValueOrDefault("centerY"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var tcy) ? tcy : 0.0;
+                        double step = double.TryParse(node.Params.GetValueOrDefault("stepMm"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ts) ? ts : 10.0;
+                        double arm = double.TryParse(node.Params.GetValueOrDefault("armMm"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ta) ? ta : 50.0;
+                        double legX = double.TryParse(node.Params.GetValueOrDefault("legXmm"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var lx) ? lx : 50.0;
+                        double legY = double.TryParse(node.Params.GetValueOrDefault("legYmm"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ly) ? ly : 50.0;
+                        double ang = double.TryParse(node.Params.GetValueOrDefault("angleDeg"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ad) ? ad : 0.0;
+                        int gcols = int.TryParse(node.Params.GetValueOrDefault("gridCols"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var gc) ? gc : 3;
+                        int grows = int.TryParse(node.Params.GetValueOrDefault("gridRows"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var gr) ? gr : 3;
+                        int samp = int.TryParse(node.Params.GetValueOrDefault("samplesPerSegment"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var sp) ? sp : 1;
+
+                        var coords = GenerateWeldTrajectoryWorld(pattern, cx, cy, step, arm, legX, legY, ang, gcols, grows, samp);
+                        node.Outputs["Points"] = coords;
+                        node.ResultSummary = $"{pattern.Trim()}: {coords.Length} pts (center {cx:G},{cy:G})";
+                        break;
+                    }
+
                     case "grayscale":
                     {
                         var srcImg = inputs["In"] as CalibImage;
@@ -5799,6 +6485,179 @@ namespace CalibOperatorCLI_Example
                             CalibAPI.ImageWidth, CalibAPI.ImageHeight, targetBars, (double)spacing);
                         node.Outputs["Points"] = pts;
                         node.Outputs["BarIds"] = barIds;
+                        break;
+                    }
+
+                    case "contours_pixel_to_world":
+                    {
+                        if (!inputs.TryGetValue("Contours", out var cObj) || cObj is not ValueTuple<int[], int[], int[], int> pix)
+                            throw new InvalidOperationException("轮廓像素→世界: 缺少像素 Contours");
+                        var (ix, iy, lens, cnt) = pix;
+                        if (cnt <= 0 || lens == null || ix == null || iy == null)
+                        {
+                            node.Outputs["ContoursWorld"] = (Array.Empty<double>(), Array.Empty<double>(), Array.Empty<int>(), 0);
+                            node.ResultSummary = "skip: empty Contours → empty ContoursWorld";
+                            break;
+                        }
+
+                        var map = ResolvePixelToWorldMapperForContours(inputs);
+                        var world = TransformPixelContourTupleToWorldDoubleTuple(pix, map);
+                        node.Outputs["ContoursWorld"] = world;
+                        node.ResultSummary = $"条数={world.Item4} 点数={world.Item1?.Length ?? 0}";
+                        break;
+                    }
+
+                    case "contours_to_weld_path":
+                    {
+                        double retreatX = double.TryParse(
+                            node.Params.GetValueOrDefault("retreatX")?.Trim(),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var rx)
+                            ? rx
+                            : 0;
+                        double retreatY = double.TryParse(
+                            node.Params.GetValueOrDefault("retreatY")?.Trim(),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var ry)
+                            ? ry
+                            : 0;
+                        double retreatZ = double.TryParse(
+                            node.Params.GetValueOrDefault("retreatZ", "0")?.Trim(),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var rz)
+                            ? rz
+                            : 0;
+                        double planarZ = double.TryParse(
+                            node.Params.GetValueOrDefault("planarZ", "0")?.Trim(),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var pz)
+                            ? pz
+                            : 0;
+                        bool leadIn = !string.Equals(
+                            (node.Params.GetValueOrDefault("leadIn", "true") ?? "true").Trim(),
+                            "false",
+                            StringComparison.OrdinalIgnoreCase);
+                        bool leadOut = !string.Equals(
+                            (node.Params.GetValueOrDefault("leadOut", "true") ?? "true").Trim(),
+                            "false",
+                            StringComparison.OrdinalIgnoreCase);
+                        double transitSpacing = double.TryParse(
+                            node.Params.GetValueOrDefault("transitSpacing")?.Trim(),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var tsp)
+                            ? tsp
+                            : 0;
+                        string barSplit = (node.Params.GetValueOrDefault("barSplit", "auto") ?? "auto").Trim();
+                        double segmentJoinMaxDistOverride = double.TryParse(
+                            node.Params.GetValueOrDefault("segmentJoinMaxDist")?.Trim(),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var sjm)
+                            ? sjm
+                            : 0;
+                        bool sanitizeBarIds = !string.Equals(
+                            (node.Params.GetValueOrDefault("sanitizeBarIds", "true") ?? "true").Trim(),
+                            "false",
+                            StringComparison.OrdinalIgnoreCase);
+
+                        List<CalibPoint3D[]> segments;
+                        List<int> segmentBarIds;
+                        string modeTag;
+                        if (inputs.TryGetValue("ContoursBase3D", out var b3o) &&
+                            b3o is ValueTuple<double[], double[], double[], int[], int> b3 &&
+                            b3.Item5 > 0 &&
+                            b3.Item1 != null &&
+                            b3.Item2 != null &&
+                            b3.Item3 != null &&
+                            b3.Item4 != null)
+                        {
+                            modeTag = "基座3D条带";
+                            segments = ExplodeContourTripleToPolylines3D(b3.Item1, b3.Item2, b3.Item3, b3.Item4, b3.Item5);
+                            segmentBarIds = Enumerable.Range(0, segments.Count).ToList();
+                        }
+                        else if (inputs.TryGetValue("ContoursWorld", out var wOb) &&
+                            wOb is ValueTuple<double[], double[], int[], int> wt &&
+                            wt.Item4 > 0 &&
+                            wt.Item1 != null &&
+                            wt.Item2 != null &&
+                            wt.Item3 != null)
+                        {
+                            modeTag = "平面条带→基座Z";
+                            var segs2 = ExplodeContourDoubleTupleToPolylines(wt.Item1, wt.Item2, wt.Item3, wt.Item4);
+                            segments = segs2.Select(s => LiftPoint2DToBase3D(s, planarZ)).ToList();
+                            segmentBarIds = Enumerable.Range(0, segments.Count).ToList();
+                        }
+                        else if (inputs.TryGetValue("Contours", out var cOb) &&
+                            cOb is ValueTuple<int[], int[], int[], int> it &&
+                            it.Item4 > 0 &&
+                            it.Item1 != null &&
+                            it.Item2 != null &&
+                            it.Item3 != null)
+                        {
+                            modeTag = "像素条带→Z=0";
+                            var segs2 = ExplodeContourTupleToPolylines(it.Item1, it.Item2, it.Item3, it.Item4);
+                            segments = segs2.Select(s => LiftPoint2DToBase3D(s, 0)).ToList();
+                            segmentBarIds = Enumerable.Range(0, segments.Count).ToList();
+                        }
+                        else if (inputs.TryGetValue("SamplePts", out var spOb) && spOb is CalibPoint3D[] sp && sp.Length > 0)
+                        {
+                            inputs.TryGetValue("BarIds", out var bidOb);
+                            var barIds = bidOb as int[];
+                            if (barIds != null && barIds.Length == sp.Length &&
+                                sanitizeBarIds && !BarSplitIsStrictByBar(barSplit))
+                                barIds = SanitizeBarIdsUnifyAlongShortSteps3D(sp, barIds, transitSpacing);
+                            SplitSampledPointsToContourPolylinesWithBarIds3D(sp, barIds, out segments, out segmentBarIds);
+                            modeTag = barIds != null && barIds.Length == sp.Length ? "采样点(基座3D)" : "采样点(基座3D·无BarIds)";
+                        }
+                        else
+                        {
+                            node.Outputs["Points"] = Array.Empty<CalibPoint3D>();
+                            node.ResultSummary = "skip: 未连接有效 ContoursBase3D / ContoursWorld / Contours / SamplePts(CalibPoint3D[])";
+                            break;
+                        }
+
+                        var retreat = new CalibPoint3D(retreatX, retreatY, retreatZ);
+                        var zippedEmpty = ZipRemoveEmptyContourSegments3D(segments, segmentBarIds);
+                        segments = zippedEmpty.Segments;
+                        segmentBarIds = zippedEmpty.BarIds;
+                        if (segments.Count == 0)
+                        {
+                            node.Outputs["Points"] = Array.Empty<CalibPoint3D>();
+                            node.ResultSummary = "skip: no non-empty contour polylines";
+                            break;
+                        }
+
+                        string closeContour = (node.Params.GetValueOrDefault("closeContour", "auto") ?? "auto").Trim();
+                        var norm = NormalizeWeldContourSegmentsForRetreat3D(
+                            segments,
+                            segmentBarIds,
+                            barSplit,
+                            transitSpacing,
+                            segmentJoinMaxDistOverride);
+                        segments = norm.Segments;
+                        segmentBarIds = norm.BarIds;
+                        var segNormNote = norm.Note;
+                        if (segments.Count == 0)
+                        {
+                            node.Outputs["Points"] = Array.Empty<CalibPoint3D>();
+                            node.ResultSummary = "skip: no segments after barSplit normalize";
+                            break;
+                        }
+
+                        var path = BuildWeldPathWithRetreatBetweenContours3D(
+                            segments,
+                            retreat,
+                            leadIn,
+                            leadOut,
+                            transitSpacing,
+                            closeContour);
+                        node.Outputs["Points"] = path;
+                        node.ResultSummary = $"{modeTag} · {path.Length} 点 · {segments.Count} 条轮廓{segNormNote ?? ""}";
                         break;
                     }
 
@@ -6571,6 +7430,58 @@ namespace CalibOperatorCLI_Example
                         break;
                     }
 
+                    case "plane_to_base_handeye":
+                    {
+                        if (!inputs.TryGetValue("Points", out var plObj) || plObj is not Point2D[] planePts)
+                            throw new InvalidOperationException("平面→基座(手眼): 缺少 Points（Point2D[]）。");
+                        if (planePts.Length == 0)
+                        {
+                            node.Outputs["Points3D"] = Array.Empty<CalibPoint3D>();
+                            node.ResultSummary = "skip: 0 pts → empty Points3D";
+                            break;
+                        }
+
+                        if (!double.TryParse(
+                                node.Params.GetValueOrDefault("planeZ", "0"),
+                                System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                out var planeZ))
+                            planeZ = 0.0;
+
+                        string jsonText;
+                        if (inputs.TryGetValue("HandEyeJson", out var hjObj) && hjObj is string hj && !string.IsNullOrWhiteSpace(hj))
+                            jsonText = hj.Trim();
+                        else
+                        {
+                            var pathParam = node.Params.GetValueOrDefault("filePath", "handeye_plane_to_base.json")?.Trim() ?? "handeye_plane_to_base.json";
+                            var resolved = ResolveCompositeFlowPath(pathParam, compositeInnerFlowBaseDir);
+                            if (!System.IO.File.Exists(resolved))
+                                throw new System.IO.FileNotFoundException($"平面→基座(手眼): JSON 文件不存在: {resolved}");
+                            jsonText = System.IO.File.ReadAllText(resolved, Encoding.UTF8);
+                        }
+
+                        double[] m16;
+                        try
+                        {
+                            m16 = HandEyePlaneToBaseTransform.ParseBaseFromPlaneMatrix16(jsonText);
+                        }
+                        catch (Exception ex) when (ex is JsonException || ex is InvalidOperationException || ex is ArgumentException)
+                        {
+                            throw new InvalidOperationException($"平面→基座(手眼): 解析手眼 JSON 失败 — {ex.Message}", ex);
+                        }
+
+                        var out3 = new CalibPoint3D[planePts.Length];
+                        for (int i = 0; i < planePts.Length; i++)
+                        {
+                            var p = planePts[i];
+                            out3[i] = HandEyePlaneToBaseTransform.TransformPoint(m16, p.X, p.Y, planeZ);
+                        }
+
+                        node.Outputs["Points3D"] = out3;
+                        node.ResultSummary = $"{planePts.Length} pts → base (planeZ={planeZ})";
+                        break;
+                    }
+
                     case "display_calibration":
                     {
                         string text;
@@ -6735,13 +7646,79 @@ namespace CalibOperatorCLI_Example
                         if (foregroundImg == null && backgroundImg == null)
                             throw new InvalidOperationException("显示: 缺少输入图像(Image 或 Img)");
                         inputs.TryGetValue("Points", out var ptsObj);
-                        Point2D[]? overlayPts = ptsObj as Point2D[];
+                        Point2D[]? overlayPts = ptsObj switch
+                        {
+                            Point2D[] p2 => p2,
+                            CalibPoint3D[] p3 => p3.Select(p => new Point2D(p.X, p.Y)).ToArray(),
+                            _ => null
+                        };
+                        inputs.TryGetValue("BarIds", out var barIdsObj);
+                        int[]? overlayBarIds = barIdsObj as int[];
+                        if (overlayBarIds != null && overlayPts != null && overlayBarIds.Length != overlayPts.Length)
+                            overlayBarIds = null;
                         inputs.TryGetValue("Xld", out var xldObj);
                         var xldBundle = xldObj as HalconXldContourBundle;
                         int dotRadius = int.TryParse(node.Params.GetValueOrDefault("dotRadius"), out int r) ? r : 3;
                         string dispSlot = node.Id.ToString("D");
                         string dispTitle = $"{node.Def.DisplayName} [{node.Id.ToString("N")[..8]}]";
-                        ShowImagePreview(foregroundImg, overlayPts, dotRadius, backgroundImg, dispSlot, dispTitle, xldBundle);
+                        string pointLineJoin = (node.Params.GetValueOrDefault("pointLineJoin", "auto") ?? "auto").Trim();
+                        ShowImagePreview(foregroundImg, overlayPts, dotRadius, backgroundImg, dispSlot, dispTitle, overlayBarIds, pointLineJoin, xldBundle);
+                        break;
+                    }
+
+                    case "display_3d_trajectory":
+                    {
+                        CalibPoint3D[]? path3 = null;
+                        if (inputs.TryGetValue("Points3D", out var p3o) && p3o is CalibPoint3D[] a3 && a3.Length > 0)
+                            path3 = a3;
+                        else if (inputs.TryGetValue("Points", out var p2o) && p2o is Point2D[] p2 && p2.Length > 0)
+                        {
+                            double zDef = double.TryParse(
+                                node.Params.GetValueOrDefault("zDefault", "0")?.Trim(),
+                                System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                out var zdefv)
+                                ? zdefv
+                                : 0;
+                            inputs.TryGetValue("Z", out var zObj);
+                            if (zObj is double[] zz && zz.Length == p2.Length)
+                                path3 = p2.Select((t, i) => new CalibPoint3D(t.X, t.Y, zz[i])).ToArray();
+                            else if (zObj is float[] zf && zf.Length == p2.Length)
+                                path3 = p2.Select((t, i) => new CalibPoint3D(t.X, t.Y, zf[i])).ToArray();
+                            else
+                                path3 = p2.Select(t => new CalibPoint3D(t.X, t.Y, zDef)).ToArray();
+                        }
+
+                        if (path3 == null || path3.Length == 0)
+                        {
+                            node.Outputs["Out"] = Array.Empty<CalibPoint3D>();
+                            node.ResultSummary = "skip: 无 Points3D 或 Points → 空 Out";
+                            break;
+                        }
+
+                        double tubeDiameter = double.TryParse(
+                            node.Params.GetValueOrDefault("tubeDiameter", "0.8")?.Trim(),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var td)
+                            ? td
+                            : 0.8;
+                        bool showGrid = !string.Equals(
+                            (node.Params.GetValueOrDefault("showGrid", "true") ?? "true").Trim(),
+                            "false",
+                            StringComparison.OrdinalIgnoreCase);
+                        double gridExtent = double.TryParse(
+                            node.Params.GetValueOrDefault("gridExtent", "200")?.Trim(),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var ge)
+                            ? ge
+                            : 200;
+                        string slot3d = node.Id.ToString("D");
+                        string title3d = $"{node.Def.DisplayName} [{node.Id.ToString("N")[..8]}]";
+                        ShowTrajectory3DPreview(path3, slot3d, title3d, tubeDiameter, showGrid, gridExtent);
+                        node.Outputs["Out"] = path3;
+                        node.ResultSummary = $"3D 预览 · {path3.Length} 点";
                         break;
                     }
 
@@ -6823,6 +7800,7 @@ namespace CalibOperatorCLI_Example
                         if (pts.Length == 0)
                         {
                             node.Outputs["Out"] = Array.Empty<Point2D>();
+                            node.Outputs["OutBarIds"] = Array.Empty<int>();
                             node.ResultSummary = "skip: 0 pts → empty Out";
                             break;
                         }
@@ -6838,35 +7816,137 @@ namespace CalibOperatorCLI_Example
                         bool closed = !string.Equals(closedRaw, "false", StringComparison.OrdinalIgnoreCase)
                                       && !string.Equals(closedRaw, "0", StringComparison.OrdinalIgnoreCase);
 
+                        inputs.TryGetValue("BarIds", out var barObj);
+                        var barIn = barObj as int[];
+
                         Point2D[] simplified;
-                        if (pts.Length <= 2)
-                            simplified = pts;
-                        else if (closed)
-                            simplified = SimplifyClosedPolyline(pts, epsilon);
+                        int[] outBarIds;
+                        if (barIn != null && barIn.Length == pts.Length)
+                        {
+                            var groups = SplitSampledPointsToContourPolylines(pts, barIn);
+                            var outPts = new List<Point2D>();
+                            var outIds = new List<int>();
+                            int bid = 0;
+                            foreach (var seg in groups)
+                            {
+                                if (seg == null || seg.Length == 0)
+                                {
+                                    bid++;
+                                    continue;
+                                }
+
+                                Point2D[] simpSeg;
+                                if (seg.Length <= 2)
+                                    simpSeg = seg;
+                                else if (closed)
+                                    simpSeg = SimplifyClosedPolyline(seg, epsilon);
+                                else
+                                    simpSeg = SimplifyOpenPolyline(seg.ToList(), epsilon).ToArray();
+                                foreach (var p in simpSeg)
+                                {
+                                    outPts.Add(p);
+                                    outIds.Add(bid);
+                                }
+
+                                bid++;
+                            }
+
+                            simplified = outPts.ToArray();
+                            outBarIds = outIds.ToArray();
+                        }
                         else
-                            simplified = SimplifyOpenPolyline(pts.ToList(), epsilon).ToArray();
+                        {
+                            if (pts.Length <= 2)
+                                simplified = pts;
+                            else if (closed)
+                                simplified = SimplifyClosedPolyline(pts, epsilon);
+                            else
+                                simplified = SimplifyOpenPolyline(pts.ToList(), epsilon).ToArray();
+                            outBarIds = new int[simplified.Length];
+                        }
 
                         node.Outputs["Out"] = simplified;
+                        node.Outputs["OutBarIds"] = outBarIds;
                         node.ResultSummary = $"{pts.Length} → {simplified.Length} pts, ε={epsilon:G}";
                         break;
                     }
 
                     case "send_plc":
                     {
-                        var pts = inputs["Points"] as Point2D[];
-                        if (pts == null || pts.Length == 0)
-                            throw new InvalidOperationException("发送PLC: 缺少有效的点位数据");
+                        CalibPoint3D[]? pts3 = inputs["Points"] as CalibPoint3D[];
+                        Point2D[]? pts2 = inputs["Points"] as Point2D[];
+                        int n = pts3?.Length ?? pts2?.Length ?? 0;
+                        if (n == 0)
+                            throw new InvalidOperationException("发送PLC: 缺少有效的点位数据（CalibPoint3D[] 或 Point2D[]）");
                         if (!_flowPlcConnected || _flowPlc == null)
                             throw new InvalidOperationException("发送PLC: PLC 未连接，请先执行 PLC连接 算子");
-                        // v1：先打通链路，写入点数到寄存器0；后续可扩展完整轨迹协议
-                        var wr = _flowPlc.Write("0", (short)pts.Length);
-                        if (!wr.IsSuccess)
-                            throw new InvalidOperationException($"发送PLC失败: {wr.Message}");
+
+                        string plcWriteMode = (node.Params.GetValueOrDefault("plcWriteMode", "count_only") ?? "count_only").Trim().ToLowerInvariant();
+                        int countRegister = int.TryParse(
+                            node.Params.GetValueOrDefault("countRegister"),
+                            System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var cr)
+                            ? cr
+                            : 0;
+                        int xyBaseRegister = int.TryParse(
+                            node.Params.GetValueOrDefault("xyBaseRegister"),
+                            System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var xyb)
+                            ? xyb
+                            : 10;
+
+                        bool writeXyFloats = plcWriteMode == "count_and_xy_floats"
+                            || plcWriteMode == "xy_floats"
+                            || plcWriteMode == "full";
+
+                        var wrCount = _flowPlc.Write(countRegister.ToString(), (short)n);
+                        if (!wrCount.IsSuccess)
+                            throw new InvalidOperationException($"发送PLC失败(计数@{countRegister}): {wrCount.Message}");
+
+                        if (writeXyFloats)
+                        {
+                            int addr = xyBaseRegister;
+                            if (pts3 != null)
+                            {
+                                foreach (var pt in pts3)
+                                {
+                                    var wrX = _flowPlc.Write(addr.ToString(), (float)pt.X);
+                                    if (!wrX.IsSuccess)
+                                        throw new InvalidOperationException($"发送PLC失败(X@{addr}): {wrX.Message}");
+                                    addr += 2;
+                                    var wrY = _flowPlc.Write(addr.ToString(), (float)pt.Y);
+                                    if (!wrY.IsSuccess)
+                                        throw new InvalidOperationException($"发送PLC失败(Y@{addr}): {wrY.Message}");
+                                    addr += 2;
+                                }
+                            }
+                            else if (pts2 != null)
+                            {
+                                foreach (var pt in pts2)
+                                {
+                                    var wrX = _flowPlc.Write(addr.ToString(), (float)pt.X);
+                                    if (!wrX.IsSuccess)
+                                        throw new InvalidOperationException($"发送PLC失败(X@{addr}): {wrX.Message}");
+                                    addr += 2;
+                                    var wrY = _flowPlc.Write(addr.ToString(), (float)pt.Y);
+                                    if (!wrY.IsSuccess)
+                                        throw new InvalidOperationException($"发送PLC失败(Y@{addr}): {wrY.Message}");
+                                    addr += 2;
+                                }
+                            }
+                        }
+
                         StatusText.Dispatcher.Invoke(() =>
                         {
-                            StatusText.Text = $"PLC发送成功: 点数={pts.Length}";
+                            StatusText.Text = writeXyFloats
+                                ? $"PLC发送成功: mode={plcWriteMode}, count={n} @{countRegister}, XY @{xyBaseRegister}"
+                                : $"PLC发送成功: 点数={n} @{countRegister}";
                         });
-                        node.ResultSummary = $"PLC sent {pts.Length} pts";
+                        node.ResultSummary = writeXyFloats
+                            ? $"PLC {plcWriteMode}: count={n} reg{countRegister}, {n} pts x,y floats from reg{xyBaseRegister}"
+                            : $"PLC count_only: count={n} reg{countRegister}";
                         break;
                     }
 
@@ -7393,9 +8473,14 @@ namespace CalibOperatorCLI_Example
                             throw new InvalidOperationException("HALCON XLD 采样点: 缺少 Xld");
                         double spacing = double.TryParse(node.Params.GetValueOrDefault("spacing"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var sp) ? sp : 4.0;
                         int maxBars = int.TryParse(node.Params.GetValueOrDefault("maxBars"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var mb) ? mb : 16;
-                        var pts = HalconFlowBridge.SamplePointsFromXldBundle(xb, spacing, maxBars);
+                        var orderRaw = (node.Params.GetValueOrDefault("contourOrder", "list") ?? "list").Trim();
+                        bool sortByLength = string.Equals(orderRaw, "length_desc", StringComparison.OrdinalIgnoreCase);
+                        var (pts, barIds) = HalconFlowBridge.SamplePointsFromXldBundle(xb, spacing, maxBars, sortByLength);
                         node.Outputs["Points"] = pts;
-                        node.ResultSummary = pts.Length == 0 ? "skip: empty XLD → empty Points" : $"HALCON xld_pts {pts.Length}";
+                        node.Outputs["BarIds"] = barIds;
+                        node.ResultSummary = pts.Length == 0
+                            ? "skip: empty XLD → empty Points"
+                            : $"HALCON xld_pts 输入轮廓={xb.ContourCount} 点={pts.Length}";
                         break;
                     }
 #endif
@@ -7805,6 +8890,214 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>
+        /// 与同节点点列端口配套的条号（Points+BarIds、Out+OutBarIds 等），用于预览时避免跨轮廓连线。
+        /// </summary>
+        private static int[]? TryGetBarIdsForPointPort(FlowNode node, string pointPortName, int pointCount)
+        {
+            if (pointCount <= 0)
+                return null;
+            if (string.Equals(pointPortName, "Points", StringComparison.Ordinal))
+            {
+                if (node.Outputs.TryGetValue("BarIds", out var b) && b is int[] ids && ids.Length == pointCount)
+                    return ids;
+                return null;
+            }
+
+            if (string.Equals(pointPortName, "Out", StringComparison.Ordinal))
+            {
+                if (node.Outputs.TryGetValue("OutBarIds", out var ob) && ob is int[] oids && oids.Length == pointCount)
+                    return oids;
+                if (node.Outputs.TryGetValue("BarIds", out var b2) && b2 is int[] id2 && id2.Length == pointCount)
+                    return id2;
+            }
+
+            return null;
+        }
+
+        /// <summary>BarIds 中是否出现至少两种条号（多段轮廓）。</summary>
+        private static bool BarIdsHaveMultipleRuns(int[]? barIds)
+        {
+            if (barIds == null || barIds.Length < 2) return false;
+            int v0 = barIds[0];
+            for (int i = 1; i < barIds.Length; i++)
+            {
+                if (barIds[i] != v0) return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>连线/右键预览：焊道输出强制整条折线，避免误用 BarIds 被分段。</summary>
+        private static string? DefaultPointLineJoinModeForPreview(string? nodeTypeId, string pointPortName)
+        {
+            if (string.Equals(nodeTypeId, "contours_to_weld_path", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(pointPortName, "Points", StringComparison.Ordinal))
+                return "single";
+            if (string.Equals(pointPortName, "World", StringComparison.Ordinal) &&
+                (string.Equals(nodeTypeId, "img_to_world", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(nodeTypeId, "img_to_world_homography", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(nodeTypeId, "img_to_world_poly2d", StringComparison.OrdinalIgnoreCase)))
+                return "single";
+            return null;
+        }
+
+        /// <summary>
+        /// 点列折线是否按 BarIds 分段绘制。
+        /// mode: auto=仅当 BarIds 等长且含多种条号时分段；single=强制整条折线；bars=BarIds 等长即分段。
+        /// </summary>
+        private static bool ShouldUseBarSplitForPointOverlay(int[]? barIds, int pointCount, string? mode)
+        {
+            if (pointCount < 2) return false;
+            bool idsOk = barIds != null && barIds.Length == pointCount;
+            var m = (mode ?? "auto").Trim().ToLowerInvariant();
+            if (m == "single" || m == "one" || m == "polyline")
+                return false;
+            if (m == "bars" || m == "per_bar" || m == "split")
+                return idsOk;
+            return idsOk && BarIdsHaveMultipleRuns(barIds);
+        }
+
+        /// <summary>
+        /// 将 Point2D[] 栅格化为 BMP 后走图像预览（缩放/平移与图像预览一致）。坐标 Y 轴向上为「数学正向」。
+        /// </summary>
+        private void ShowPointsPolylinePreview(Point2D[] pts, string? titlePrefix, int[]? barIds = null, string? pointLineJoinMode = null)
+        {
+            if (pts == null) return;
+            try
+            {
+                using var bmp = RenderPoint2DArrayToBitmap(pts, 920, 680, 28, barIds, pointLineJoinMode);
+                string tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"flow_pts_preview_{Guid.NewGuid():N}.bmp");
+                bmp.Save(tmp, System.Drawing.Imaging.ImageFormat.Bmp);
+                try
+                {
+                    var ci = CalibImage.Load(tmp);
+                    try
+                    {
+                        ShowImagePreview(ci, null, 0, null, LivePreviewSingletonSlotKey, titlePrefix ?? "点位轨迹");
+                    }
+                    finally
+                    {
+                        ci.Dispose();
+                    }
+                }
+                finally
+                {
+                    try { System.IO.File.Delete(tmp); } catch { /* ignored */ }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"无法生成点位预览: {ex.Message}", "点位预览", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        private static System.Drawing.Bitmap RenderPoint2DArrayToBitmap(
+            Point2D[] pts,
+            int targetW,
+            int targetH,
+            int padPx,
+            int[]? barIds = null,
+            string? pointLineJoinMode = null)
+        {
+            targetW = Math.Max(120, targetW);
+            targetH = Math.Max(120, targetH);
+            padPx = Math.Max(8, padPx);
+            if (pts == null || pts.Length == 0)
+            {
+                var empty = new System.Drawing.Bitmap(420, 140, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                using (var g0 = System.Drawing.Graphics.FromImage(empty))
+                {
+                    g0.Clear(System.Drawing.Color.FromArgb(32, 32, 36));
+                    using var f = new System.Drawing.Font("Segoe UI", 12f);
+                    g0.DrawString("0 个点（无轨迹可绘制）", f, System.Drawing.Brushes.Gray, padPx, 48f);
+                }
+                return empty;
+            }
+
+            double minX = pts.Min(p => p.X), maxX = pts.Max(p => p.X);
+            double minY = pts.Min(p => p.Y), maxY = pts.Max(p => p.Y);
+            double bw = Math.Max(maxX - minX, 1e-9);
+            double bh = Math.Max(maxY - minY, 1e-9);
+            double mx = Math.Max(bw, bh) * 0.06 + 1e-6;
+            minX -= mx;
+            maxX += mx;
+            minY -= mx;
+            maxY += mx;
+            bw = maxX - minX;
+            bh = maxY - minY;
+
+            double scale = Math.Min((targetW - 2.0 * padPx) / bw, (targetH - 2.0 * padPx) / bh);
+            int bmpW = (int)Math.Ceiling(bw * scale + 2 * padPx);
+            int bmpH = (int)Math.Ceiling(bh * scale + 2 * padPx);
+            bmpW = Math.Clamp(bmpW, 160, 1600);
+            bmpH = Math.Clamp(bmpH, 160, 1200);
+
+            var bmp = new System.Drawing.Bitmap(bmpW, bmpH, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+            using (var g = System.Drawing.Graphics.FromImage(bmp))
+            {
+                g.Clear(System.Drawing.Color.FromArgb(28, 28, 32));
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+
+                System.Drawing.PointF Map(Point2D p)
+                {
+                    float x = (float)(padPx + (p.X - minX) * scale);
+                    float y = (float)(padPx + (maxY - p.Y) * scale);
+                    return new System.Drawing.PointF(x, y);
+                }
+
+                if (pts.Length >= 2)
+                {
+                    using var linePen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(230, 0, 200, 255), 2f);
+                    linePen.StartCap = linePen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
+                    linePen.LineJoin = System.Drawing.Drawing2D.LineJoin.Round;
+                    bool useBarSplit = ShouldUseBarSplitForPointOverlay(barIds, pts.Length, pointLineJoinMode);
+                    if (useBarSplit)
+                    {
+                        int segStart = 0;
+                        for (int i = 1; i <= pts.Length; i++)
+                        {
+                            if (i == pts.Length || barIds![i] != barIds[i - 1])
+                            {
+                                int segLen = i - segStart;
+                                if (segLen >= 2)
+                                {
+                                    var arr = new System.Drawing.PointF[segLen];
+                                    for (int k = 0; k < segLen; k++)
+                                        arr[k] = Map(pts[segStart + k]);
+                                    g.DrawLines(linePen, arr);
+                                }
+
+                                segStart = i;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        var arr = pts.Select(Map).ToArray();
+                        g.DrawLines(linePen, arr);
+                    }
+                }
+
+                using var vtxPen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(220, 255, 220, 80), 1.2f);
+                float r = pts.Length > 200 ? 2f : 3.5f;
+                foreach (var p in pts)
+                {
+                    var c = Map(p);
+                    g.DrawEllipse(vtxPen, c.X - r, c.Y - r, r * 2f, r * 2f);
+                }
+
+                using var font = new System.Drawing.Font("Segoe UI", 9f);
+                string cap = $"N={pts.Length}  X[{minX + mx:F2},{maxX - mx:F2}]  Y[{minY + mx:F2},{maxY - mx:F2}]";
+                if (ShouldUseBarSplitForPointOverlay(barIds, pts.Length, pointLineJoinMode))
+                    cap += " · 分包";
+                g.DrawString(cap, font, System.Drawing.Brushes.Gainsboro, padPx, 4f);
+            }
+
+            return bmp;
+        }
+
+        /// <summary>
         /// 显示图像预览窗口，支持缩放和平移，可选叠加点位
         /// 滚轮缩放；右键按住拖拽平移（轻微移动仍可弹出菜单）；右键菜单「保存图像」或 F 适应窗口，1 重置100%
         /// </summary>
@@ -7817,6 +9110,8 @@ namespace CalibOperatorCLI_Example
             CalibImage? backgroundImg = null,
             string? previewSlotKey = null,
             string? titlePrefix = null,
+            int[]? overlayBarIds = null,
+            string? overlayPointLineJoinMode = null,
             HalconXldContourBundle? xldOverlay = null)
         {
             var baseSource = backgroundImg ?? img;
@@ -7868,6 +9163,43 @@ namespace CalibOperatorCLI_Example
                     g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
                     if (drawPts && overlayPoints != null)
                     {
+                        if (overlayPoints.Length >= 2)
+                        {
+                            using var linePen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(200, 0, 200, 255), 1.8f);
+                            linePen.StartCap = linePen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
+                            linePen.LineJoin = System.Drawing.Drawing2D.LineJoin.Round;
+                            bool useBarSplit = ShouldUseBarSplitForPointOverlay(overlayBarIds, overlayPoints.Length, overlayPointLineJoinMode);
+                            if (useBarSplit)
+                            {
+                                int segStart = 0;
+                                for (int i = 1; i <= overlayPoints.Length; i++)
+                                {
+                                    if (i == overlayPoints.Length || overlayBarIds![i] != overlayBarIds[i - 1])
+                                    {
+                                        int segLen = i - segStart;
+                                        if (segLen >= 2)
+                                        {
+                                            var gdiSeg = new System.Drawing.PointF[segLen];
+                                            for (int k = 0; k < segLen; k++)
+                                            {
+                                                var p = overlayPoints[segStart + k];
+                                                gdiSeg[k] = new System.Drawing.PointF((float)p.X, (float)p.Y);
+                                            }
+
+                                            g.DrawLines(linePen, gdiSeg);
+                                        }
+
+                                        segStart = i;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                var gdiPts = overlayPoints.Select(p => new System.Drawing.PointF((float)p.X, (float)p.Y)).ToArray();
+                                g.DrawLines(linePen, gdiPts);
+                            }
+                        }
+
                         using var pointPen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(140, 0, 255, 0), 1.2f);
                         for (int i = 0; i < overlayPoints.Length; i++)
                         {
@@ -7909,6 +9241,9 @@ namespace CalibOperatorCLI_Example
             string previewTitle = !string.IsNullOrEmpty(titlePrefix) ? titlePrefix : "图像预览";
             if (overlayPoints != null && overlayPoints.Length > 0)
                 previewTitle += $" ({overlayPoints.Length} 个点)";
+            if (overlayPoints != null && overlayPoints.Length > 0 &&
+                ShouldUseBarSplitForPointOverlay(overlayBarIds, overlayPoints.Length, overlayPointLineJoinMode))
+                previewTitle += " · 分包连线";
             if (xldOverlay != null && xldOverlay.ContourCount > 0)
                 previewTitle += $" | XLD {xldOverlay.ContourCount}";
             int imgW = baseSource.Width;
@@ -8174,6 +9509,60 @@ namespace CalibOperatorCLI_Example
                 OpenOrUpdateLivePreviewOnUiThread();
             else
                 Dispatcher.Invoke(OpenOrUpdateLivePreviewOnUiThread);
+        }
+
+        private void ShowTrajectory3DPreview(
+            CalibPoint3D[] path,
+            string slotKey,
+            string title,
+            double tubeDiameter,
+            bool showGrid,
+            double gridExtent)
+        {
+            void OpenOrUpdate()
+            {
+                if (_livePreview3dBySlot.TryGetValue(slotKey, out var existing) && existing.IsLoaded)
+                {
+                    existing.Title = title;
+                    existing.ApplyTrajectory(path, tubeDiameter, showGrid, gridExtent);
+                    existing.Show();
+                    try
+                    {
+                        existing.Activate();
+                    }
+                    catch
+                    {
+                        // ignored
+                    }
+
+                    return;
+                }
+
+                if (_livePreview3dBySlot.TryGetValue(slotKey, out var stale))
+                {
+                    _livePreview3dBySlot.Remove(slotKey);
+                    try
+                    {
+                        stale.Close();
+                    }
+                    catch
+                    {
+                        // ignored
+                    }
+                }
+
+                var win = new Trajectory3DPreviewWindow { Owner = Window.GetWindow(this) };
+                win.Title = title;
+                win.ApplyTrajectory(path, tubeDiameter, showGrid, gridExtent);
+                win.Closed += (_, _) => { _livePreview3dBySlot.Remove(slotKey); };
+                _livePreview3dBySlot[slotKey] = win;
+                win.Show();
+            }
+
+            if (Dispatcher.CheckAccess())
+                OpenOrUpdate();
+            else
+                Dispatcher.Invoke(OpenOrUpdate);
         }
 
         private void ShowContoursPreview(ValueTuple<int[], int[], int[], int> contourData, CalibImage? baseImg = null)

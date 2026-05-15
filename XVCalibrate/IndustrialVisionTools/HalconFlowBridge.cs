@@ -1460,36 +1460,48 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>
-        /// 沿 XLD 折线按弧长间距采样，合并为点列（供显示）；可选只取前 maxBars 条最长轮廓。
+        /// 沿 XLD 折线按弧长间距采样，合并为点列；可选只取前 maxBars 条轮廓。
+        /// <paramref name="BarIds"/> 与 <paramref name="Points"/> 等长，同一条轮廓上的点共享同一编号（0…），供「轮廓转焊道路径」等按条分包。
         /// </summary>
-        public static Point2D[] SamplePointsFromXldBundle(HalconXldContourBundle bundle, double spacing, int maxBars)
+        /// <param name="sortContoursByLengthDescending">false=按 <see cref="HalconXldContourBundle.Contours"/> 列表顺序输出；true=按周长从长到短排序后再输出（兼容旧行为）。</param>
+        public static (Point2D[] Points, int[] BarIds) SamplePointsFromXldBundle(
+            HalconXldContourBundle bundle,
+            double spacing,
+            int maxBars,
+            bool sortContoursByLengthDescending)
         {
             if (bundle?.Contours == null || bundle.Contours.Count == 0)
-                return Array.Empty<Point2D>();
+                return (Array.Empty<Point2D>(), Array.Empty<int>());
             spacing = Math.Max(1.0, spacing);
             maxBars = maxBars <= 0 ? int.MaxValue : maxBars;
 
-            var indexed = new List<(double Len, Point2D[] Pts)>();
+            var contours = new List<Point2D[]>();
             foreach (var c in bundle.Contours)
             {
                 if (c == null || c.Length < 2)
                     continue;
-                double len = PolylineLength(c);
-                indexed.Add((len, c));
+                contours.Add(c);
             }
 
-            indexed.Sort((a, b) => b.Len.CompareTo(a.Len));
+            if (sortContoursByLengthDescending)
+                contours.Sort((a, b) => PolylineLength(b).CompareTo(PolylineLength(a)));
+
             var outPts = new List<Point2D>();
+            var outIds = new List<int>();
             int taken = 0;
-            foreach (var (_, pts) in indexed)
+            foreach (var pts in contours)
             {
                 if (taken >= maxBars)
                     break;
+                int barId = taken;
+                int n0 = outPts.Count;
                 ResamplePolyline(pts, spacing, outPts);
+                for (int k = n0; k < outPts.Count; k++)
+                    outIds.Add(barId);
                 taken++;
             }
 
-            return outPts.ToArray();
+            return (outPts.ToArray(), outIds.ToArray());
         }
 
         private static double PolylineLength(Point2D[] pts)

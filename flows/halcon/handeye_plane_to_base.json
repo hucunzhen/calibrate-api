@@ -1,0 +1,39 @@
+{
+  "description": "手眼标定配置 - 平面到基座 (eye-to-hand)",
+  "calibrationMethod": "Tsai",
+  "targetType": "checkerboard",
+
+  "intrinsics": {
+    "fx": 2448.5,
+    "fy": 2448.5,
+    "cx": 1224.0,
+    "cy": 1024.0,
+    "k1": -0.0234,
+    "k2": 0.0125,
+    "p1": 0.0,
+    "p2": 0.0
+  },
+
+  "target": {
+    "rows": 11,
+    "cols": 11,
+    "squareSize": 10.0,
+    "units": "mm"
+  },
+
+  "baseFromPlaneRowMajor": [
+    1.0, 0.0, 0.0, 50.0,
+    0.0, 1.0, 0.0, -30.0,
+    0.0, 0.0, 1.0, 200.0,
+    0.0, 0.0, 0.0, 1.0
+  ],
+
+  "reprojectionError": {
+    "average": 0.52,
+    "max": 1.23,
+    "min": 0.15
+  },
+
+  "confidence": 0.95,
+  "calibratedAt": "2026-05-03"
+}

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * CalibOperatorExport.h - Native C API for CalibOperator
  * 
  * This header provides plain C exports for the CalibOperator library,

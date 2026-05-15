@@ -108,6 +108,23 @@ namespace CalibOperatorPInvoke
     }
 
     /// <summary>
+    /// 托管 3D 点（流程端口、3D 轨迹显示等）
+    /// </summary>
+    public struct CalibPoint3D
+    {
+        public double X { get; set; }
+        public double Y { get; set; }
+        public double Z { get; set; }
+
+        public CalibPoint3D(double x, double y, double z)
+        {
+            X = x;
+            Y = y;
+            Z = z;
+        }
+    }
+
+    /// <summary>
     /// 仿射变换
     /// </summary>
     public struct AffineTransform

@@ -80,6 +80,11 @@ namespace CalibOperatorCLI_Example
                 OpenFlowInNewTab(path);
                 return true;
             };
+            fp.RequestNewEmptyFlowTab = () =>
+            {
+                AddEmptyTab(switchToSelected: true);
+                return true;
+            };
             return fp;
         }
 

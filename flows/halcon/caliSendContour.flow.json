@@ -1,0 +1,89 @@
+{
+  "Nodes": [
+    {
+      "Id": "659df9da-773d-4eb2-b4a4-a3771f61dddd",
+      "TypeId": "weld_trajectory_world",
+      "X": 343,
+      "Y": 335,
+      "Params": {
+        "pattern": "\u4E5D\u5BAB\u683C (3\u00D73)",
+        "centerX": "0",
+        "centerY": "0",
+        "stepMm": "10",
+        "armMm": "50",
+        "legXmm": "50",
+        "legYmm": "50",
+        "angleDeg": "0",
+        "gridCols": "3",
+        "gridRows": "3",
+        "samplesPerSegment": "1"
+      }
+    },
+    {
+      "Id": "f97281da-9776-402f-a7f0-3b9012eaa556",
+      "TypeId": "send_plc",
+      "X": 1027,
+      "Y": 297,
+      "Params": {
+        "plcWriteMode": "count_only",
+        "countRegister": "0",
+        "xyBaseRegister": "10"
+      }
+    },
+    {
+      "Id": "190efde3-f5c0-46ba-b0ea-da6b49752bb8",
+      "TypeId": "plc_connect",
+      "X": 224,
+      "Y": 148,
+      "Params": {
+        "ip": "192.168.6.6",
+        "port": "502",
+        "station": "1"
+      }
+    },
+    {
+      "Id": "c89e74f7-8c8d-4cae-bfd9-a24b1c203aa4",
+      "TypeId": "if_gate",
+      "X": 449,
+      "Y": 160,
+      "Params": {
+        "op": "\u003E",
+        "threshold": "0",
+        "epsilon": "1e-6"
+      }
+    },
+    {
+      "Id": "5314bfb3-9dbb-4a46-b022-59ef0ea1f2ec",
+      "TypeId": "route_true",
+      "X": 669,
+      "Y": 276,
+      "Params": {}
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "190efde3-f5c0-46ba-b0ea-da6b49752bb8",
+      "FromPort": "Connected",
+      "ToNodeId": "c89e74f7-8c8d-4cae-bfd9-a24b1c203aa4",
+      "ToPort": "Value"
+    },
+    {
+      "FromNodeId": "c89e74f7-8c8d-4cae-bfd9-a24b1c203aa4",
+      "FromPort": "True",
+      "ToNodeId": "5314bfb3-9dbb-4a46-b022-59ef0ea1f2ec",
+      "ToPort": "Condition"
+    },
+    {
+      "FromNodeId": "659df9da-773d-4eb2-b4a4-a3771f61dddd",
+      "FromPort": "Points",
+      "ToNodeId": "5314bfb3-9dbb-4a46-b022-59ef0ea1f2ec",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "5314bfb3-9dbb-4a46-b022-59ef0ea1f2ec",
+      "FromPort": "Out",
+      "ToNodeId": "f97281da-9776-402f-a7f0-3b9012eaa556",
+      "ToPort": "Points"
+    }
+  ]
+}

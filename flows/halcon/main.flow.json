@@ -3,17 +3,18 @@
     {
       "Id": "1e52dbba-25b8-42c6-8b0c-2f39d07c92ae",
       "TypeId": "display",
-      "X": 1266.9285714285716,
-      "Y": 19.285714285714334,
+      "X": 893.9285714285716,
+      "Y": 341,
       "Params": {
-        "dotRadius": "3"
+        "dotRadius": "3",
+        "pointLineJoin": "auto"
       }
     },
     {
       "Id": "15572a4b-62e3-466e-b891-c8d9d5ae35a7",
       "TypeId": "composite",
-      "X": 214.67857142857156,
-      "Y": 345.07142857142867,
+      "X": 199.67857142857156,
+      "Y": 326.07142857142867,
       "Params": {
         "innerFlowPath": "genMask.flow.json",
         "innerFlowJson": "",
@@ -23,8 +24,8 @@
     {
       "Id": "6a20c99e-ee0b-4c12-82c1-ccfa91ebec0e",
       "TypeId": "composite",
-      "X": 241.3928571428571,
-      "Y": 213.7857142857143,
+      "X": 195.3928571428571,
+      "Y": 169.7857142857143,
       "Params": {
         "innerFlowPath": "grayPreprocess.flow.json",
         "innerFlowJson": "",
@@ -34,8 +35,8 @@
     {
       "Id": "a73161e3-931f-4b58-9090-fc0b26183c40",
       "TypeId": "composite",
-      "X": 782.1785714285713,
-      "Y": 266.7857142857142,
+      "X": 407.17857142857133,
+      "Y": 410.7857142857142,
       "Params": {
         "innerFlowPath": "binPreprocess.flow.json",
         "innerFlowJson": "",
@@ -45,8 +46,8 @@
     {
       "Id": "cccd0504-756c-4631-8844-faeebd1d8db6",
       "TypeId": "composite",
-      "X": 1053.5182857142856,
-      "Y": 190.49982857142857,
+      "X": 638.5182857142856,
+      "Y": 275.49982857142857,
       "Params": {
         "innerFlowPath": "contourPreprocess.flow.json",
         "innerFlowJson": "",
@@ -56,8 +57,8 @@
     {
       "Id": "a33020a5-000d-40cf-aed9-1813123d35f5",
       "TypeId": "load_calibration_result",
-      "X": 1221,
-      "Y": 487,
+      "X": 840,
+      "Y": 20,
       "Params": {
         "filePath": "D:\\work\\calibrate-api\\flows\\xingzu\\calibration_result.json"
       }
@@ -65,46 +66,35 @@
     {
       "Id": "47c98eca-35e1-4eb4-b2a0-d84d66340a9a",
       "TypeId": "img_to_world",
-      "X": 1502,
-      "Y": 358,
+      "X": 1091,
+      "Y": 204,
       "Params": {}
     },
     {
       "Id": "8360f5e2-4d3f-429f-bf29-29af3d89b704",
       "TypeId": "display",
-      "X": 1742.4656,
-      "Y": 412.544,
+      "X": 1082.4656,
+      "Y": 26.543999999999983,
       "Params": {
-        "dotRadius": "3"
+        "dotRadius": "3",
+        "pointLineJoin": "auto"
       }
     },
     {
       "Id": "9fb0d037-d3c7-40ab-901c-f9bea848db63",
       "TypeId": "polyline_simplify_dp",
-      "X": 1275,
-      "Y": 288,
+      "X": 879,
+      "Y": 218,
       "Params": {
         "epsilon": "2.0",
         "closed": "true"
       }
     },
     {
-      "Id": "17c9d354-24a1-4b0e-9f08-5b87f672475f",
-      "TypeId": "load_image_dir",
-      "X": 9,
-      "Y": 169,
-      "Params": {
-        "mode": "each",
-        "directory": "D:\\work\\calibrate-api\\test_images",
-        "extensions": ".bmp;.png;.jpg;.jpeg;.tif;.tiff",
-        "index": "0"
-      }
-    },
-    {
       "Id": "392d6f20-d7f0-4a68-8007-095f2a7b3e2a",
       "TypeId": "halcon_threshold_bin",
-      "X": 576,
-      "Y": 360,
+      "X": 425,
+      "Y": 292,
       "Params": {
         "minGray": "2",
         "maxGray": "30"
@@ -113,8 +103,8 @@
     {
       "Id": "7937bc05-7249-404c-be7d-ea22d21891da",
       "TypeId": "halcon_gray_mask",
-      "X": 513.9642857142858,
-      "Y": 211.0000000000001,
+      "X": 417.9642857142858,
+      "Y": 164.0000000000001,
       "Params": {
         "maskMin": "200",
         "maskMax": "255"
@@ -123,13 +113,63 @@
     {
       "Id": "f8a7c3f4-5583-428e-af4d-54c064922ca3",
       "TypeId": "halcon_binary_to_xld",
-      "X": 861,
-      "Y": 126,
+      "X": 627,
+      "Y": 162,
       "Params": {
         "minGray": "1",
         "maxGray": "255",
         "genContourMode": "border",
         "minContourPoints": "120"
+      }
+    },
+    {
+      "Id": "4363da26-6502-4e51-abe4-9263562fbd9e",
+      "TypeId": "contours_to_weld_path",
+      "X": 1106,
+      "Y": 458,
+      "Params": {
+        "retreatX": "500",
+        "retreatY": "100",
+        "retreatZ": "0",
+        "planarZ": "0",
+        "leadIn": "true",
+        "leadOut": "true",
+        "transitSpacing": "0",
+        "barSplit": "auto",
+        "segmentJoinMaxDist": "0",
+        "sanitizeBarIds": "true",
+        "closeContour": "auto"
+      }
+    },
+    {
+      "Id": "9e65aeb7-7491-435b-b86a-5cc7d8989307",
+      "TypeId": "load_image",
+      "X": 0,
+      "Y": 264,
+      "Params": {
+        "filePath": "D:\\work\\calibrate-api\\test_images\\Image_20260417090632792.bmp"
+      }
+    },
+    {
+      "Id": "7d7121da-5359-4028-b595-9c59b6695cd0",
+      "TypeId": "plane_to_base_handeye",
+      "X": 1094,
+      "Y": 332,
+      "Params": {
+        "filePath": "D:\\work\\calibrate-api\\flows\\halcon\\handeye_plane_to_base.json",
+        "planeZ": "0"
+      }
+    },
+    {
+      "Id": "9c5227c9-517c-4c13-bdc5-7910992f1edd",
+      "TypeId": "display_3d_trajectory",
+      "X": 1304,
+      "Y": 337,
+      "Params": {
+        "tubeDiameter": "0.8",
+        "showGrid": "true",
+        "gridExtent": "200",
+        "zDefault": "0"
       }
     }
   ],
@@ -141,12 +181,6 @@
       "ToPort": "Transform"
     },
     {
-      "FromNodeId": "47c98eca-35e1-4eb4-b2a0-d84d66340a9a",
-      "FromPort": "World",
-      "ToNodeId": "8360f5e2-4d3f-429f-bf29-29af3d89b704",
-      "ToPort": "Points"
-    },
-    {
       "FromNodeId": "9fb0d037-d3c7-40ab-901c-f9bea848db63",
       "FromPort": "Out",
       "ToNodeId": "47c98eca-35e1-4eb4-b2a0-d84d66340a9a",
@@ -156,18 +190,6 @@
       "FromNodeId": "cccd0504-756c-4631-8844-faeebd1d8db6",
       "FromPort": "Out",
       "ToNodeId": "9fb0d037-d3c7-40ab-901c-f9bea848db63",
-      "ToPort": "In"
-    },
-    {
-      "FromNodeId": "17c9d354-24a1-4b0e-9f08-5b87f672475f",
-      "FromPort": "Image",
-      "ToNodeId": "6a20c99e-ee0b-4c12-82c1-ccfa91ebec0e",
-      "ToPort": "In"
-    },
-    {
-      "FromNodeId": "17c9d354-24a1-4b0e-9f08-5b87f672475f",
-      "FromPort": "Image",
-      "ToNodeId": "15572a4b-62e3-466e-b891-c8d9d5ae35a7",
       "ToPort": "In"
     },
     {
@@ -223,6 +245,60 @@
       "FromPort": "Out",
       "ToNodeId": "8360f5e2-4d3f-429f-bf29-29af3d89b704",
       "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "cccd0504-756c-4631-8844-faeebd1d8db6",
+      "FromPort": "Out2",
+      "ToNodeId": "9fb0d037-d3c7-40ab-901c-f9bea848db63",
+      "ToPort": "BarIds"
+    },
+    {
+      "FromNodeId": "cccd0504-756c-4631-8844-faeebd1d8db6",
+      "FromPort": "Out2",
+      "ToNodeId": "1e52dbba-25b8-42c6-8b0c-2f39d07c92ae",
+      "ToPort": "BarIds"
+    },
+    {
+      "FromNodeId": "9fb0d037-d3c7-40ab-901c-f9bea848db63",
+      "FromPort": "OutBarIds",
+      "ToNodeId": "4363da26-6502-4e51-abe4-9263562fbd9e",
+      "ToPort": "BarIds"
+    },
+    {
+      "FromNodeId": "9fb0d037-d3c7-40ab-901c-f9bea848db63",
+      "FromPort": "OutBarIds",
+      "ToNodeId": "8360f5e2-4d3f-429f-bf29-29af3d89b704",
+      "ToPort": "BarIds"
+    },
+    {
+      "FromNodeId": "9e65aeb7-7491-435b-b86a-5cc7d8989307",
+      "FromPort": "Image",
+      "ToNodeId": "6a20c99e-ee0b-4c12-82c1-ccfa91ebec0e",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "9e65aeb7-7491-435b-b86a-5cc7d8989307",
+      "FromPort": "Image",
+      "ToNodeId": "15572a4b-62e3-466e-b891-c8d9d5ae35a7",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "47c98eca-35e1-4eb4-b2a0-d84d66340a9a",
+      "FromPort": "World",
+      "ToNodeId": "7d7121da-5359-4028-b595-9c59b6695cd0",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "7d7121da-5359-4028-b595-9c59b6695cd0",
+      "FromPort": "Points3D",
+      "ToNodeId": "4363da26-6502-4e51-abe4-9263562fbd9e",
+      "ToPort": "SamplePts"
+    },
+    {
+      "FromNodeId": "4363da26-6502-4e51-abe4-9263562fbd9e",
+      "FromPort": "Points",
+      "ToNodeId": "9c5227c9-517c-4c13-bdc5-7910992f1edd",
+      "ToPort": "Points3D"
     }
   ]
 }

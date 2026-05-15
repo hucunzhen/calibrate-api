@@ -1,4 +1,4 @@
-﻿/**
+/**
  * CalibOperatorExport.cpp - Native C API Implementation
  */
 

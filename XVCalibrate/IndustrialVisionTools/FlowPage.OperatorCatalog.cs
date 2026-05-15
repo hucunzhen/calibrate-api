@@ -1099,18 +1099,48 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "display",
                 DisplayName = "显示图像",
-                Description = "每个画布上的「显示图像」节点独占一个预览窗口（标题含短 Guid）；同一节点多次运行会刷新该窗口。可选端口 Xld：叠加 HALCON XLD 折线（橘色）。右键连线看图仍共用单个快捷预览窗口。",
+                Description = "每个画布上的「显示图像」节点独占一个预览窗口（标题含短 Guid）；同一节点多次运行会刷新该窗口。可选 Xld：叠加 HALCON XLD 折线（橘色）。可选 BarIds 与参数「点列折线」控制青色折线：默认 auto 仅在条号不全相同时分段（转换前多轮廓）；焊头/整段轨迹选 single。右键连线看图仍共用快捷预览窗口。",
                 Category = "可视化",
                 Params =
                 {
-                    new OperatorParam { Name = "dotRadius", DisplayName = "点位半径", DefaultValue = "3", Description = "叠加点位的圆点半径 (像素)" }
+                    new OperatorParam { Name = "dotRadius", DisplayName = "点位半径", DefaultValue = "3", Description = "叠加点位的圆点半径 (像素)" },
+                    new OperatorParam
+                    {
+                        Name = "pointLineJoin",
+                        DisplayName = "点列折线",
+                        DefaultValue = "auto",
+                        Description = "auto=仅当 BarIds 与 Points 等长且条号不全相同时分段（转换前多轮廓）；single=强制整条折线（焊头轨迹、转换后整路径）；bars=只要 BarIds 等长就分段",
+                        Options = new List<string> { "auto", "single", "bars" }
+                    }
                 },
                 Ports =
                 {
                     new PortDef { Name = "Img", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107" },
                     new PortDef { Name = "Xld", Direction = PortDirection.Input, DataType = typeof(HalconXldContourBundle), ColorHex = "#E65100" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "display_3d_trajectory",
+                DisplayName = "显示3D轨迹",
+                Description = "在独立窗口中用 3D 视图显示轨迹（HelixToolkit 管状体）。优先连接 Points3D(CalibPoint3D[])；或连接 Point2D[] 的 Points，可选同长度 Z(double[]) 或仅用参数 zDefault 作为统一高度。同一节点多次运行刷新该节点对应窗口。鼠标旋转视角（Turntable）。",
+                Category = "可视化",
+                Params =
+                {
+                    new OperatorParam { Name = "tubeDiameter", DisplayName = "管径", DefaultValue = "0.8", Description = "轨迹管状体直径（与坐标同单位）" },
+                    new OperatorParam { Name = "showGrid", DisplayName = "地面网格", DefaultValue = "true", Description = "是否显示参考网格" },
+                    new OperatorParam { Name = "gridExtent", DisplayName = "网格边长", DefaultValue = "200", Description = "地面网格正方形边长（与坐标同单位）" },
+                    new OperatorParam { Name = "zDefault", DisplayName = "默认Z", DefaultValue = "0", Description = "仅接 Points 且未接 Z 时，各点的 Z 坐标" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Points3D", Direction = PortDirection.Input, DataType = typeof(CalibPoint3D[]), ColorHex = "#00BCD4" },
+                    new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Z", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#9E9E9E" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibPoint3D[]), ColorHex = "#00BCD4" }
                 }
             },
             new OperatorDef
@@ -1177,17 +1207,19 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "polyline_simplify_dp",
                 DisplayName = "轮廓点简化",
-                Description = "对有序采样点列做 Douglas–Peucker 多边形近似：在最大偏差 ε（像素）内用更少顶点保持形状。closed=true 时视为闭合轮廓（如沿边界等弧长采样）；false 时为开折线。若 In 为 0 个点则跳过（Out 输出空点列，不报错）。",
+                Description = "对有序点列做 Douglas–Peucker：输入可为轮廓/轨迹/等弧长采样点等任意 Point2D[]。若连接 BarIds（与 In 等长），则按条号分段简化后再合并，并输出 OutBarIds 供下游（如「轮廓转焊道路径」的 SamplePts+BarIds）。未接 BarIds 时整条 In 视为一条折线；OutBarIds 为全 0（与 Out 等长）。",
                 Category = "预处理",
                 Params =
                 {
-                    new OperatorParam { Name = "epsilon", DisplayName = "偏差阈值 ε", DefaultValue = "2.0", Description = "像素；越大顶点越少、形状越粗糙" },
-                    new OperatorParam { Name = "closed", DisplayName = "闭合轮廓", DefaultValue = "true", Description = "true=首尾闭合；false=开折线" }
+                    new OperatorParam { Name = "epsilon", DisplayName = "偏差阈值 ε", DefaultValue = "2.0", Description = "与坐标同单位（一般为像素）；越大顶点越少" },
+                    new OperatorParam { Name = "closed", DisplayName = "闭合轮廓", DefaultValue = "true", Description = "true=首尾闭合；false=开折线。接 BarIds 时每段轮廓单独应用该选项" }
                 },
                 Ports =
                 {
                     new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
-                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "OutBarIds", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#FFC107" }
                 }
             },
             new OperatorDef
@@ -1205,6 +1237,47 @@ namespace CalibOperatorCLI_Example
                         DefaultValue = "100,100;400,100;700,100;100,300;400,300;700,300;100,500;400,500;700,500",
                         Description = "格式: x,y;x,y;...（建议9点）"
                     }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Points", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "weld_trajectory_world",
+                DisplayName = "焊接轨迹(世界mm)",
+                Description = "在工件世界坐标系(mm)生成规则点列：轨迹类型用下拉选择；兼容旧流程英文键。接「发送PLC」或后续标定。",
+                Category = "标定",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "pattern",
+                        DisplayName = "轨迹类型",
+                        DefaultValue = "九宫格 (3×3)",
+                        Description = "下拉选择；保存为中文项。兼容旧流程中的英文：nine_3x3 / cross_lines 等。",
+                        Options = new List<string>
+                        {
+                            "九宫格 (3×3)",
+                            "十字交叉折线",
+                            "五点十字",
+                            "L形轨迹",
+                            "直线段",
+                            "矩形周长",
+                            "网格蛇形"
+                        }
+                    },
+                    new OperatorParam { Name = "centerX", DisplayName = "中心X(mm)", DefaultValue = "0", Description = "世界坐标中心 X" },
+                    new OperatorParam { Name = "centerY", DisplayName = "中心Y(mm)", DefaultValue = "0", Description = "世界坐标中心 Y" },
+                    new OperatorParam { Name = "stepMm", DisplayName = "步距(mm)", DefaultValue = "10", Description = "九宫/蛇形/矩形边插补、L 形沿边步长" },
+                    new OperatorParam { Name = "armMm", DisplayName = "臂长/半长(mm)", DefaultValue = "50", Description = "十字/直线：半边长；矩形：半边宽=armMm、半边高=armMm（与 line 总长=2×armMm）" },
+                    new OperatorParam { Name = "legXmm", DisplayName = "L水平腿长(mm)", DefaultValue = "50", Description = "l_shape 水平段总长" },
+                    new OperatorParam { Name = "legYmm", DisplayName = "L垂直腿长(mm)", DefaultValue = "50", Description = "l_shape 垂直段总长" },
+                    new OperatorParam { Name = "angleDeg", DisplayName = "直线角度(°)", DefaultValue = "0", Description = "line：与 +X 夹角，0=水平" },
+                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "3", Description = "grid_snake 列数" },
+                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "3", Description = "grid_snake 行数" },
+                    new OperatorParam { Name = "samplesPerSegment", DisplayName = "段内插值点数", DefaultValue = "1", Description = "cross_lines/line：每段≥1 时仅端点；>1 时沿线插值细分" }
                 },
                 Ports =
                 {
@@ -1287,6 +1360,90 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "Pixel", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "Poly", Direction = PortDirection.Input, DataType = typeof(Poly2DTransform), ColorHex = "#E91E63" },
                     new PortDef { Name = "World", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "plane_to_base_handeye",
+                DisplayName = "平面→基座(手眼)",
+                Description =
+                    "固定相机：将平面坐标系下的点列 (Point2D，即 Xp,Yp) 经手眼标定得到的 4×4 刚体变换到机器人基座系，输出 CalibPoint3D[]。平面内第三维用参数 planeZ（默认 0，与轨迹共面时通常保持 0）。手眼 JSON：baseFromPlaneRowMajor 为长度 16 的行主序数组，或 baseFromPlane 为 4×4 二维数组；乘法约定为 [xb,yb,zb,wb]^T = M * [xp,yp,zp,1]^T。可连接 HandEyeJson 字符串覆盖文件；未连接时从 filePath 读取（相对路径相对当前流程 .flow.json 所在目录，组合子流程内相对子流程文件目录）。",
+                Category = "标定",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "filePath",
+                        DisplayName = "手眼 JSON 路径",
+                        DefaultValue = "handeye_plane_to_base.json",
+                        Description = "含 baseFromPlaneRowMajor 或 baseFromPlane；未连接 HandEyeJson 时读取此文件"
+                    },
+                    new OperatorParam
+                    {
+                        Name = "planeZ",
+                        DisplayName = "平面坐标 Z",
+                        DefaultValue = "0",
+                        Description = "点在平面坐标系中的 Z（mm 等，与标定单位一致）；共面轨迹一般为 0"
+                    }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "HandEyeJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Points3D", Direction = PortDirection.Output, DataType = typeof(CalibPoint3D[]), ColorHex = "#00BCD4" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "contours_pixel_to_world",
+                DisplayName = "轮廓像素→世界",
+                Description = "将像素条带轮廓 (int) 逐点变换为世界坐标条带 (double)。请只连接 Affine 的 Transform、或 H、或 Poly 之一。输出 ContoursWorld 可接「轮廓转焊道路径」：焊道算子会用参数 planarZ 将 XY 抬成基座 3D（或改用 ContoursBase3D / 平面→基座后再 SamplePts）。",
+                Category = "标定",
+                Ports =
+                {
+                    new PortDef { Name = "Contours", Direction = PortDirection.Input, DataType = typeof(ValueTuple<int[], int[], int[], int>), ColorHex = "#9C27B0" },
+                    new PortDef { Name = "Transform", Direction = PortDirection.Input, DataType = typeof(AffineTransform), ColorHex = "#E91E63" },
+                    new PortDef { Name = "H", Direction = PortDirection.Input, DataType = typeof(HomographyTransform), ColorHex = "#E91E63" },
+                    new PortDef { Name = "Poly", Direction = PortDirection.Input, DataType = typeof(Poly2DTransform), ColorHex = "#E91E63" },
+                    new PortDef { Name = "ContoursWorld", Direction = PortDirection.Output, DataType = typeof(ValueTuple<double[], double[], int[], int>), ColorHex = "#7B1FA2" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "contours_to_weld_path",
+                DisplayName = "轮廓转焊道路径",
+                Description =
+                    "按轮廓顺序生成焊头点列（机器人基座坐标系 CalibPoint3D[]）：每条轮廓走完后先尽量沿轮廓闭合到起点（见 closeContour），再到「回退/待机」三维点，再接近下一条轮廓。输入优先级：ContoursBase3D（平面 X、Y、Z 条带）> ContoursWorld（双精度 XY 条带，Z 由参数 planarZ 抬升）> Contours（像素条带，Z=0）> SamplePts（基座 3D 采样点 + 可选 BarIds）。barSplit=auto 时仅「同条号且端距小」才合并分段。未接 BarIds 时整条 SamplePts 视为单条轮廓。",
+                Category = "标定",
+                Ports =
+                {
+                    new PortDef { Name = "Contours", Direction = PortDirection.Input, DataType = typeof(ValueTuple<int[], int[], int[], int>), ColorHex = "#9C27B0", IsOptional = true },
+                    new PortDef { Name = "ContoursWorld", Direction = PortDirection.Input, DataType = typeof(ValueTuple<double[], double[], int[], int>), ColorHex = "#7B1FA2", IsOptional = true },
+                    new PortDef
+                    {
+                        Name = "ContoursBase3D",
+                        Direction = PortDirection.Input,
+                        DataType = typeof(ValueTuple<double[], double[], double[], int[], int>),
+                        ColorHex = "#00ACC1",
+                        IsOptional = true
+                    },
+                    new PortDef { Name = "SamplePts", Direction = PortDirection.Input, DataType = typeof(CalibPoint3D[]), ColorHex = "#00BCD4", IsOptional = true },
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "Points", Direction = PortDirection.Output, DataType = typeof(CalibPoint3D[]), ColorHex = "#00BCD4" }
+                },
+                Params =
+                {
+                    new OperatorParam { Name = "retreatX", DisplayName = "回退点X", DefaultValue = "0", Description = "待机点 X（基座 mm 等，与点列同单位）" },
+                    new OperatorParam { Name = "retreatY", DisplayName = "回退点Y", DefaultValue = "0", Description = "待机点 Y（基座）" },
+                    new OperatorParam { Name = "retreatZ", DisplayName = "回退点Z", DefaultValue = "0", Description = "待机点 Z（基座）" },
+                    new OperatorParam { Name = "planarZ", DisplayName = "平面条带Z", DefaultValue = "0", Description = "仅 ContoursWorld：各点抬升到基座 Z（ContoursBase3D 不需要）" },
+                    new OperatorParam { Name = "leadIn", DisplayName = "首条从回退点接近", DefaultValue = "true", Description = "true=第一条轮廓前先插入 回退点→轮廓起点 的移行；false=假定焊头已在首轮廓起点" },
+                    new OperatorParam { Name = "leadOut", DisplayName = "末条后回退", DefaultValue = "true", Description = "true=最后一条轮廓结束后再插入到回退点" },
+                    new OperatorParam { Name = "transitSpacing", DisplayName = "移行插补间距", DefaultValue = "0", Description = "移行直线插补步长（与坐标同单位）；0=仅写移行终点" },
+                    new OperatorParam { Name = "barSplit", DisplayName = "轮廓分段", DefaultValue = "auto", Description = "auto=仅当相邻分段为同一 BarId 且端距小于阈值时才合并（避免不同轮廓焊成直连）；by_bar=严格按条带/条号分段不合并；single=整条点列一条轨迹(无条间回退)" },
+                    new OperatorParam { Name = "segmentJoinMaxDist", DisplayName = "合并端距上限", DefaultValue = "0", Description = "仅 barSplit=auto：>0 时用该值作为段间合并阈值；0=按点列步长自动推断（3D 欧氏距离）" },
+                    new OperatorParam { Name = "sanitizeBarIds", DisplayName = "条号轮廓内对齐", DefaultValue = "true", Description = "仅 SamplePts+BarIds：在轮廓内窄步长上若条号突变则改为与前点相同（一条轮廓一个 BarId）。barSplit=by_bar 时不生效。设为 false 可保留原始条号" },
+                    new OperatorParam { Name = "closeContour", DisplayName = "轮廓闭合", DefaultValue = "auto", Description = "每条轮廓点走完后是否插到起点闭合：auto=首尾间距相对周长或边长中位数较小时沿直线闭合；true=始终尝试闭合；false=不闭合。闭合后再回待机点，避免未闭环就回退" }
                 }
             },
             new OperatorDef
@@ -1375,8 +1532,14 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "send_plc",
                 DisplayName = "发送PLC",
-                Description = "将轨迹发送到PLC",
+                Description = "将点列发到 PLC(Modbus)。Points 可为 Point2D[] 或 CalibPoint3D[]（后者写 float 时仍按 X、Y 写入）。plcWriteMode=count_only：仅写点数(ushort)到 countRegister。plcWriteMode=count_and_xy_floats：先写点数，再从 xyBaseRegister 起按 X0,Y0,X1,Y1… 各写 float32（各占 2 个保持寄存器）。",
                 Category = "输出",
+                Params =
+                {
+                    new OperatorParam { Name = "plcWriteMode", DisplayName = "写入模式", DefaultValue = "count_only", Description = "count_only | count_and_xy_floats" },
+                    new OperatorParam { Name = "countRegister", DisplayName = "点数寄存器地址", DefaultValue = "0", Description = "ushort 点数；Modbus 保持寄存器字地址（与 Hsl ModbusTcpNet 一致）" },
+                    new OperatorParam { Name = "xyBaseRegister", DisplayName = "XY起始寄存器地址", DefaultValue = "10", Description = "count_and_xy_floats：第一个 X 的起始字地址；每个 float 占 2 字" }
+                },
                 Ports =
                 {
                     new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
@@ -2007,7 +2170,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "halcon_binary_to_xld",
                 DisplayName = "HALCON 二值→XLD",
-                Description = "Threshold → Connection → GenContourRegionXld；输出独立数据结构 HalconXldContourBundle（不接原生 find_contours）",
+                Description = "Threshold → Connection → GenContourRegionXld；每个连通域一条闭合轮廓（HalconXldContourBundle.Contours 条数≈连通域个数）。与 find_contours(RETR_EXTERNAL) 类似：二值破碎则条数增多，可上游用 Closing/填洞或下游 maxBars+周长排序控制条数。",
                 Category = "HALCON",
                 Params =
                 {
@@ -2026,7 +2189,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "halcon_segment_xld",
                 DisplayName = "HALCON XLD 分格",
-                Description = "GenContourPolygonXld + SegmentContoursXld，将轮廓拆成直线/圆弧段（输出仍为 HalconXldContourBundle）",
+                Description = "GenContourPolygonXld + SegmentContoursXld：将每条轮廓拆成多段直线/圆弧，输出 Xld 中 Contours 条数会显著增加（例如 16 条整周界 → 数十段）。若下游按「每条轮廓一个 BarId」焊道/采样，请勿在本算子后再采样；应对「二值→Xld」的原始包直接接 halcon_xld_sample_points。仅在做几何分段、折线化分析时使用。",
                 Category = "HALCON",
                 Params =
                 {
@@ -2141,17 +2304,26 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "halcon_xld_sample_points",
                 DisplayName = "HALCON XLD 采样点",
-                Description = "沿 XLD 折线按间距采样为 Point2D[]（对应 sample 思路，独立数据结构）",
+                Description = "沿 Xld.Contours 中每条折线按弧长间距采样为 Point2D[]，BarIds 与轮廓一一对应。轮廓条数等于输入包中折线条数：若前级接 halcon_segment_xld，条数会按分段暴涨；需要「每条暗条一条轮廓」时请对 GenContour 的原始 Xld 直接采样。maxBars：只保留前 N 条（配合 contourOrder=length_desc 时常取周长最长的 N 条）；0 表示不限制。",
                 Category = "HALCON",
                 Params =
                 {
                     new OperatorParam { Name = "spacing", DisplayName = "间距", DefaultValue = "4", Description = "沿轮廓弧长采样步长（像素）" },
-                    new OperatorParam { Name = "maxBars", DisplayName = "最多条数", DefaultValue = "16", Description = "按轮廓长度降序只取前 N 条；0 表示不限制" }
+                    new OperatorParam { Name = "maxBars", DisplayName = "最多条数", DefaultValue = "16", Description = "只处理前 N 条轮廓（在「轮廓顺序」下的前 N 条）；0 表示不限制" },
+                    new OperatorParam
+                    {
+                        Name = "contourOrder",
+                        DisplayName = "轮廓顺序",
+                        DefaultValue = "list",
+                        Description = "list=与 Xld.Contours 列表顺序一致（推荐）；length_desc=按周长从长到短（旧版行为）",
+                        Options = new List<string> { "list", "length_desc" }
+                    }
                 },
                 Ports =
                 {
                     new PortDef { Name = "Xld", Direction = PortDirection.Input, DataType = typeof(HalconXldContourBundle), ColorHex = "#E65100" },
-                    new PortDef { Name = "Points", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
+                    new PortDef { Name = "Points", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#FFC107" }
                 }
             },
             new OperatorDef
