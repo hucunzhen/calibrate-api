@@ -25,9 +25,8 @@
       "X": 1027,
       "Y": 297,
       "Params": {
-        "plcWriteMode": "count_only",
-        "countRegister": "0",
-        "xyBaseRegister": "10"
+        "baseRegister": "30000",
+        "gvarType": "0"
       }
     },
     {

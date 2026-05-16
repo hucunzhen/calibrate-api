@@ -3,8 +3,8 @@
     {
       "Id": "1e52dbba-25b8-42c6-8b0c-2f39d07c92ae",
       "TypeId": "display",
-      "X": 893.9285714285716,
-      "Y": 341,
+      "X": 868.9285714285716,
+      "Y": 494,
       "Params": {
         "dotRadius": "3",
         "pointLineJoin": "auto"
@@ -83,8 +83,8 @@
     {
       "Id": "9fb0d037-d3c7-40ab-901c-f9bea848db63",
       "TypeId": "polyline_simplify_dp",
-      "X": 879,
-      "Y": 218,
+      "X": 874,
+      "Y": 339,
       "Params": {
         "epsilon": "2.0",
         "closed": "true"
@@ -165,6 +165,42 @@
       "TypeId": "display_3d_trajectory",
       "X": 1304,
       "Y": 337,
+      "Params": {
+        "tubeDiameter": "0.8",
+        "showGrid": "true",
+        "gridExtent": "200",
+        "zDefault": "0"
+      }
+    },
+    {
+      "Id": "e59de9ad-aee3-400e-b15f-54276bee5ec2",
+      "TypeId": "simplify_contours_to_corners",
+      "X": 865,
+      "Y": 199,
+      "Params": {}
+    },
+    {
+      "Id": "704c47ce-549c-4103-83d4-3d13ff6179ba",
+      "TypeId": "contour_perpendicular_entry",
+      "X": 1085,
+      "Y": 617,
+      "Params": {
+        "retreatX": "0",
+        "retreatY": "0",
+        "retreatZ": "0",
+        "planarZ": "0",
+        "verticalDist": "30",
+        "leadIn": "true",
+        "leadOut": "true",
+        "transitSpacing": "0",
+        "closeContour": "false"
+      }
+    },
+    {
+      "Id": "d04c0e90-5019-4615-9f61-b6fe5d2a4fdd",
+      "TypeId": "display_3d_trajectory",
+      "X": 1305,
+      "Y": 488,
       "Params": {
         "tubeDiameter": "0.8",
         "showGrid": "true",
@@ -265,12 +301,6 @@
       "ToPort": "BarIds"
     },
     {
-      "FromNodeId": "9fb0d037-d3c7-40ab-901c-f9bea848db63",
-      "FromPort": "OutBarIds",
-      "ToNodeId": "8360f5e2-4d3f-429f-bf29-29af3d89b704",
-      "ToPort": "BarIds"
-    },
-    {
       "FromNodeId": "9e65aeb7-7491-435b-b86a-5cc7d8989307",
       "FromPort": "Image",
       "ToNodeId": "6a20c99e-ee0b-4c12-82c1-ccfa91ebec0e",
@@ -298,6 +328,48 @@
       "FromNodeId": "4363da26-6502-4e51-abe4-9263562fbd9e",
       "FromPort": "Points",
       "ToNodeId": "9c5227c9-517c-4c13-bdc5-7910992f1edd",
+      "ToPort": "Points3D"
+    },
+    {
+      "FromNodeId": "cccd0504-756c-4631-8844-faeebd1d8db6",
+      "FromPort": "Out",
+      "ToNodeId": "e59de9ad-aee3-400e-b15f-54276bee5ec2",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "cccd0504-756c-4631-8844-faeebd1d8db6",
+      "FromPort": "Out2",
+      "ToNodeId": "e59de9ad-aee3-400e-b15f-54276bee5ec2",
+      "ToPort": "BarIds"
+    },
+    {
+      "FromNodeId": "e59de9ad-aee3-400e-b15f-54276bee5ec2",
+      "FromPort": "Out",
+      "ToNodeId": "8360f5e2-4d3f-429f-bf29-29af3d89b704",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "e59de9ad-aee3-400e-b15f-54276bee5ec2",
+      "FromPort": "OutBarIds",
+      "ToNodeId": "8360f5e2-4d3f-429f-bf29-29af3d89b704",
+      "ToPort": "BarIds"
+    },
+    {
+      "FromNodeId": "7d7121da-5359-4028-b595-9c59b6695cd0",
+      "FromPort": "Points3D",
+      "ToNodeId": "704c47ce-549c-4103-83d4-3d13ff6179ba",
+      "ToPort": "SamplePts"
+    },
+    {
+      "FromNodeId": "9fb0d037-d3c7-40ab-901c-f9bea848db63",
+      "FromPort": "OutBarIds",
+      "ToNodeId": "704c47ce-549c-4103-83d4-3d13ff6179ba",
+      "ToPort": "BarIds"
+    },
+    {
+      "FromNodeId": "704c47ce-549c-4103-83d4-3d13ff6179ba",
+      "FromPort": "Points",
+      "ToNodeId": "d04c0e90-5019-4615-9f61-b6fe5d2a4fdd",
       "ToPort": "Points3D"
     }
   ]

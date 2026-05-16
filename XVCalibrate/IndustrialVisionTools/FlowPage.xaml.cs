@@ -6507,6 +6507,352 @@ namespace CalibOperatorCLI_Example
                         break;
                     }
 
+                    case "simplify_contours_to_corners":
+                    {
+                        var pts = inputs["In"] as Point2D[];
+                        if (pts == null)
+                            throw new InvalidOperationException("轮廓四角点: 缺少输入点列 In（未连接或非 Point2D[]）");
+                        inputs.TryGetValue("BarIds", out var barObj);
+                        var barIds = barObj as int[];
+
+                        if (pts.Length == 0)
+                        {
+                            node.Outputs["Out"] = Array.Empty<Point2D>();
+                            node.Outputs["OutBarIds"] = Array.Empty<int>();
+                            node.ResultSummary = "skip: 0 pts → empty Out";
+                            break;
+                        }
+
+                        // 按 BarIds 分段
+                        var segments = new List<(int Start, int Len, int BarId)>();
+                        if (barIds != null && barIds.Length == pts.Length)
+                        {
+                            int segStart = 0;
+                            for (int i = 1; i < pts.Length; i++)
+                            {
+                                if (barIds[i] != barIds[i - 1])
+                                {
+                                    if (i - segStart > 0)
+                                        segments.Add((segStart, i - segStart, barIds[segStart]));
+                                    segStart = i;
+                                }
+                            }
+                            if (pts.Length - segStart > 0)
+                                segments.Add((segStart, pts.Length - segStart, barIds[segStart]));
+                        }
+                        else
+                        {
+                            segments.Add((0, pts.Length, 0));
+                        }
+
+                        var outPts = new List<Point2D>();
+                        var outBarIds = new List<int>();
+
+                        foreach (var seg in segments)
+                        {
+                            if (seg.Len < 4) continue;
+
+                            // 1. 计算质心
+                            double cx = 0, cy = 0;
+                            for (int k = 0; k < seg.Len; k++)
+                            {
+                                cx += pts[seg.Start + k].X;
+                                cy += pts[seg.Start + k].Y;
+                            }
+                            cx /= seg.Len;
+                            cy /= seg.Len;
+
+                            // 2. PCA 主方向
+                            double mxx = 0, myy = 0, mxy = 0;
+                            for (int k = 0; k < seg.Len; k++)
+                            {
+                                double dx = pts[seg.Start + k].X - cx;
+                                double dy = pts[seg.Start + k].Y - cy;
+                                mxx += dx * dx;
+                                myy += dy * dy;
+                                mxy += dx * dy;
+                            }
+                            double trace = mxx + myy;
+                            double disc = Math.Sqrt(Math.Max(0, (mxx - myy) * (mxx - myy) / 4 + mxy * mxy));
+                            double lambda1 = (trace / 2) + disc;
+                            double vx, vy;
+                            if (disc < 1e-10)
+                            {
+                                vx = 1; vy = 0;
+                            }
+                            else
+                            {
+                                double ratio = lambda1 - mxx;
+                                if (Math.Abs(mxy) > Math.Abs(ratio))
+                                {
+                                    vy = ratio / mxy;
+                                    double lenV = Math.Sqrt(1 + vy * vy);
+                                    vx = 1 / lenV; vy /= lenV;
+                                }
+                                else
+                                {
+                                    vx = mxy / ratio;
+                                    double lenV = Math.Sqrt(vx * vx + 1);
+                                    vy = 1 / lenV; vx /= lenV;
+                                }
+                            }
+                            if (vx < 0) { vx = -vx; vy = -vy; }
+                            double nx = -vy, ny = vx; // 法线方向（垂直于主方向）
+
+                            // 3. 计算射线与轮廓边界的交点
+                            Point2D pLeft = new Point2D(cx, cy), pRight = new Point2D(cx, cy);
+                            Point2D pTop = new Point2D(cx, cy), pBottom = new Point2D(cx, cy);
+                            double maxDistRight = 0, maxDistLeft = 0, maxDistTop = 0, maxDistBottom = 0;
+
+                            // 遍历轮廓边（相邻点之间的线段）
+                            for (int i = 0; i < seg.Len; i++)
+                            {
+                                int j = (i + 1) % seg.Len;
+                                var a = pts[seg.Start + i];
+                                var b = pts[seg.Start + j];
+
+                                // 线段方向
+                                double segDx = b.X - a.X;
+                                double segDy = b.Y - a.Y;
+
+                                // 交点计算：射线 p = center + t * dir 与线段 ab 的交点
+                                // 行列式: dir.x * segDy - dir.y * segDx
+                                // t = (a - center) cross seg / (dir cross seg)
+                                // 其中 cross(u,v) = u.x*v.y - u.y*v.x
+
+                                // 主方向交点（左右）
+                                double denom = vx * segDy - vy * segDx;
+                                if (Math.Abs(denom) > 1e-10)
+                                {
+                                    double ax_cx = a.X - cx, ay_cy = a.Y - cy;
+                                    // t: 射线参数，s: 线段参数
+                                    double t = (ax_cx * segDy - ay_cy * segDx) / denom;
+                                    double s = (ax_cx * vy - ay_cy * vx) / denom;
+
+                                    if (s >= 0 && s <= 1)
+                                    {
+                                        if (t > maxDistRight)
+                                        {
+                                            maxDistRight = t;
+                                            pRight = new Point2D(cx + t * vx, cy + t * vy);
+                                        }
+                                        if (-t > maxDistLeft)
+                                        {
+                                            maxDistLeft = -t;
+                                            pLeft = new Point2D(cx + t * vx, cy + t * vy);
+                                        }
+                                    }
+                                }
+
+                                // 法线方向交点（上下）
+                                denom = nx * segDy - ny * segDx;
+                                if (Math.Abs(denom) > 1e-10)
+                                {
+                                    double ax_cx = a.X - cx, ay_cy = a.Y - cy;
+                                    double t = (ax_cx * segDy - ay_cy * segDx) / denom;
+                                    double s = (ax_cx * ny - ay_cy * nx) / denom;
+
+                                    if (s >= 0 && s <= 1)
+                                    {
+                                        if (t > maxDistBottom)
+                                        {
+                                            maxDistBottom = t;
+                                            pBottom = new Point2D(cx + t * nx, cy + t * ny);
+                                        }
+                                        if (-t > maxDistTop)
+                                        {
+                                            maxDistTop = -t;
+                                            pTop = new Point2D(cx + t * nx, cy + t * ny);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 4. 顺时针输出：左→上→右→下
+                            outPts.Add(pLeft); outBarIds.Add(seg.BarId);
+                            outPts.Add(pTop); outBarIds.Add(seg.BarId);
+                            outPts.Add(pRight); outBarIds.Add(seg.BarId);
+                            outPts.Add(pBottom); outBarIds.Add(seg.BarId);
+                        }
+
+                        node.Outputs["Out"] = outPts.ToArray();
+                        node.Outputs["OutBarIds"] = outBarIds.ToArray();
+                        node.ResultSummary = $"段数={segments.Count} 每段4点";
+                        break;
+                    }
+
+                    case "contour_perpendicular_entry":
+                    {
+                        double retreatX = double.TryParse(
+                            node.Params.GetValueOrDefault("retreatX")?.Trim(),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var rx)
+                            ? rx : 0;
+                        double retreatY = double.TryParse(
+                            node.Params.GetValueOrDefault("retreatY")?.Trim(),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var ry)
+                            ? ry : 0;
+                        double retreatZ = double.TryParse(
+                            node.Params.GetValueOrDefault("retreatZ", "0")?.Trim(),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var rz)
+                            ? rz : 0;
+                        double planarZ = double.TryParse(
+                            node.Params.GetValueOrDefault("planarZ", "0")?.Trim(),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var pz)
+                            ? pz : 0;
+                        double verticalDist = double.TryParse(
+                            node.Params.GetValueOrDefault("verticalDist", "30")?.Trim(),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var vd)
+                            ? vd : 30;
+                        bool leadIn = !string.Equals(
+                            (node.Params.GetValueOrDefault("leadIn", "true") ?? "true").Trim(),
+                            "false", StringComparison.OrdinalIgnoreCase);
+                        bool leadOut = !string.Equals(
+                            (node.Params.GetValueOrDefault("leadOut", "true") ?? "true").Trim(),
+                            "false", StringComparison.OrdinalIgnoreCase);
+                        double transitSpacing = double.TryParse(
+                            node.Params.GetValueOrDefault("transitSpacing")?.Trim(),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var tsp)
+                            ? tsp : 0;
+                        string closeContour = (node.Params.GetValueOrDefault("closeContour", "false") ?? "false").Trim().ToLowerInvariant();
+
+                        var retreat = new CalibPoint3D(retreatX, retreatY, retreatZ);
+
+                        // 输入格式解析（优先级同 contours_to_weld_path）
+                        List<CalibPoint3D[]> contourSegs3D;
+                        List<int> contourBarIds;
+                        string modeTag;
+                        if (inputs.TryGetValue("ContoursBase3D", out var b3o) &&
+                            b3o is ValueTuple<double[], double[], double[], int[], int> b3 &&
+                            b3.Item5 > 0 && b3.Item1 != null && b3.Item2 != null && b3.Item3 != null && b3.Item4 != null)
+                        {
+                            modeTag = "基座3D条带";
+                            contourSegs3D = ExplodeContourTripleToPolylines3D(b3.Item1, b3.Item2, b3.Item3, b3.Item4, b3.Item5);
+                            contourBarIds = Enumerable.Range(0, contourSegs3D.Count).ToList();
+                        }
+                        else if (inputs.TryGetValue("ContoursWorld", out var wOb) &&
+                            wOb is ValueTuple<double[], double[], int[], int> wt &&
+                            wt.Item4 > 0 && wt.Item1 != null && wt.Item2 != null && wt.Item3 != null)
+                        {
+                            modeTag = "平面条带→基座Z";
+                            var segs2 = ExplodeContourDoubleTupleToPolylines(wt.Item1, wt.Item2, wt.Item3, wt.Item4);
+                            contourSegs3D = segs2.Select(s => LiftPoint2DToBase3D(s, planarZ)).ToList();
+                            contourBarIds = Enumerable.Range(0, contourSegs3D.Count).ToList();
+                        }
+                        else if (inputs.TryGetValue("Contours", out var cOb) &&
+                            cOb is ValueTuple<int[], int[], int[], int> it &&
+                            it.Item4 > 0 && it.Item1 != null && it.Item2 != null && it.Item3 != null)
+                        {
+                            modeTag = "像素条带→Z=0";
+                            var segs2 = ExplodeContourTupleToPolylines(it.Item1, it.Item2, it.Item3, it.Item4);
+                            contourSegs3D = segs2.Select(s => LiftPoint2DToBase3D(s, 0)).ToList();
+                            contourBarIds = Enumerable.Range(0, contourSegs3D.Count).ToList();
+                        }
+                        else if (inputs.TryGetValue("SamplePts", out var spOb) && spOb is CalibPoint3D[] sp && sp.Length > 0)
+                        {
+                            inputs.TryGetValue("BarIds", out var bidOb);
+                            var barIds = bidOb as int[];
+                            SplitSampledPointsToContourPolylinesWithBarIds3D(sp, barIds, out contourSegs3D, out contourBarIds);
+                            modeTag = barIds != null && barIds.Length == sp.Length ? "采样点(基座3D)" : "采样点(基座3D·无BarIds)";
+                        }
+                        else
+                        {
+                            node.Outputs["Points"] = Array.Empty<CalibPoint3D>();
+                            node.Outputs["BarIds"] = Array.Empty<int>();
+                            node.ResultSummary = "skip: 未连接有效 ContoursBase3D / ContoursWorld / Contours / SamplePts";
+                            break;
+                        }
+
+                        var zipped = ZipRemoveEmptyContourSegments3D(contourSegs3D, contourBarIds);
+                        contourSegs3D = zipped.Segments;
+                        contourBarIds = zipped.BarIds;
+                        if (contourSegs3D.Count == 0)
+                        {
+                            node.Outputs["Points"] = Array.Empty<CalibPoint3D>();
+                            node.Outputs["BarIds"] = Array.Empty<int>();
+                            node.ResultSummary = "skip: no non-empty contour polylines";
+                            break;
+                        }
+
+                        var path = new List<CalibPoint3D>();
+
+                        // 垂直方向由回退点Z和首轮廓点Z的关系决定
+                        // 回退点在工件上方（Z >= 进入点Z）：垂直方向向上（+Z）
+                        // 回退点在工件下方（Z < 进入点Z）：垂直方向向下（-Z）
+                        double zSign = (retreatZ - contourSegs3D[0][0].Z) >= 0 ? 1 : -1;
+
+                        CalibPoint3D retreatAbove = default; // 循环外声明，供 leadOut 使用
+
+                        for (int i = 0; i < contourSegs3D.Count; i++)
+                        {
+                            var seg = contourSegs3D[i];
+                            if (seg == null || seg.Length < 2) continue;
+
+                            var pStart = seg[0];
+                            var pEnd = seg[seg.Length - 1];
+
+                            // 进入点正上方/正下方：沿Z轴偏移
+                            var entryAbove = new CalibPoint3D(pStart.X, pStart.Y, pStart.Z + zSign * verticalDist);
+                            // 回退点正上方/正下方：沿Z轴偏移
+                            retreatAbove = new CalibPoint3D(retreat.X, retreat.Y, retreat.Z + zSign * verticalDist);
+
+                            if (i == 0)
+                            {
+                                // 第一条轮廓
+                                if (leadIn)
+                                {
+                                    // 进入段：回退点 → 进入点正上方/正下方 → 进入点（只保留轮廓点附近的垂直段）
+                                    AppendLineTransit3D(path, retreat, entryAbove, transitSpacing);
+                                    AppendLineTransit3D(path, entryAbove, pStart, transitSpacing);
+                                }
+                                else
+                                {
+                                    AppendDedupePoint3D(path, pStart);
+                                }
+                            }
+                            else
+                            {
+                                // 从上一条轮廓的退出点直接回退
+                                AppendLineTransit3D(path, path[path.Count - 1], retreat, transitSpacing);
+                                // 进入段：回退点 → 进入点正上方/正下方 → 进入点
+                                AppendLineTransit3D(path, retreat, entryAbove, transitSpacing);
+                                AppendLineTransit3D(path, entryAbove, pStart, transitSpacing);
+                            }
+
+                            // 添加轮廓所有点
+                            foreach (var p in seg)
+                                AppendDedupePoint3D(path, p);
+
+                            // 退出延伸：轮廓终点 → 进入点（闭合）→ 进入点正上方/正下方
+                            // 进出都连到同一个轮廓起点，形成闭合轨迹
+                            if (PointDistance3D(pEnd, pStart) > 1e-9)
+                                AppendLineTransit3D(path, path[path.Count - 1], pStart, transitSpacing);
+                            AppendLineTransit3D(path, path[path.Count - 1], entryAbove, transitSpacing);
+                        }
+
+                        if (leadOut && path.Count > 0)
+                        {
+                            // 最后退出点正上方/正下方 → 回退点（只保留轮廓点附近的垂直段）
+                            AppendLineTransit3D(path, path[path.Count - 1], retreat, transitSpacing);
+                        }
+
+                        node.Outputs["Points"] = path.ToArray();
+                        node.Outputs["BarIds"] = contourBarIds.ToArray();
+                        node.ResultSummary = $"{modeTag} · {path.Count} 点 · {contourSegs3D.Count} 条轮廓";
+                        break;
+                    }
+
                     case "contours_to_weld_path":
                     {
                         double retreatX = double.TryParse(
@@ -7881,72 +8227,79 @@ namespace CalibOperatorCLI_Example
                         if (!_flowPlcConnected || _flowPlc == null)
                             throw new InvalidOperationException("发送PLC: PLC 未连接，请先执行 PLC连接 算子");
 
-                        string plcWriteMode = (node.Params.GetValueOrDefault("plcWriteMode", "count_only") ?? "count_only").Trim().ToLowerInvariant();
-                        int countRegister = int.TryParse(
-                            node.Params.GetValueOrDefault("countRegister"),
+                        // ===== 参数解析 =====
+                        int baseRegister = int.TryParse(
+                            node.Params.GetValueOrDefault("baseRegister"),
                             System.Globalization.NumberStyles.Integer,
                             System.Globalization.CultureInfo.InvariantCulture,
-                            out var cr)
-                            ? cr
-                            : 0;
-                        int xyBaseRegister = int.TryParse(
-                            node.Params.GetValueOrDefault("xyBaseRegister"),
+                            out var br)
+                            ? br : 0;
+                        short gvarType = short.TryParse(
+                            node.Params.GetValueOrDefault("gvarType"),
                             System.Globalization.NumberStyles.Integer,
                             System.Globalization.CultureInfo.InvariantCulture,
-                            out var xyb)
-                            ? xyb
-                            : 10;
+                            out var gt)
+                            ? gt : (short)2;  // 默认直线类型
 
-                        bool writeXyFloats = plcWriteMode == "count_and_xy_floats"
-                            || plcWriteMode == "xy_floats"
-                            || plcWriteMode == "full";
-
-                        var wrCount = _flowPlc.Write(countRegister.ToString(), (short)n);
+                        // ===== 完整GVAR格式 (每条28寄存器) =====
+                        // 寄存器布局: [type1][pad][p0.x,p0.y,p0.z][p1.x,p1.y,p1.z][cx,cy,r][start_deg,end_deg][z0,z1]
+                        // 与 PlcPage.WriteGvarList() 保持一致
+                        var wrCount = _flowPlc.Write(baseRegister.ToString(), (short)n);
                         if (!wrCount.IsSuccess)
-                            throw new InvalidOperationException($"发送PLC失败(计数@{countRegister}): {wrCount.Message}");
+                            throw new InvalidOperationException($"发送PLC失败(计数@{baseRegister}): {wrCount.Message}");
 
-                        if (writeXyFloats)
+                        int written = 0;
+                        for (int i = 0; i < n; i++)
                         {
-                            int addr = xyBaseRegister;
+                            float x0, y0, z0, x1, y1, z1;
+
                             if (pts3 != null)
                             {
-                                foreach (var pt in pts3)
-                                {
-                                    var wrX = _flowPlc.Write(addr.ToString(), (float)pt.X);
-                                    if (!wrX.IsSuccess)
-                                        throw new InvalidOperationException($"发送PLC失败(X@{addr}): {wrX.Message}");
-                                    addr += 2;
-                                    var wrY = _flowPlc.Write(addr.ToString(), (float)pt.Y);
-                                    if (!wrY.IsSuccess)
-                                        throw new InvalidOperationException($"发送PLC失败(Y@{addr}): {wrY.Message}");
-                                    addr += 2;
-                                }
+                                x0 = (float)pts3[i].X; y0 = (float)pts3[i].Y; z0 = (float)pts3[i].Z;
+                                x1 = (i + 1 < n) ? (float)pts3[i + 1].X : x0;
+                                y1 = (i + 1 < n) ? (float)pts3[i + 1].Y : y0;
+                                z1 = (i + 1 < n) ? (float)pts3[i + 1].Z : z0;
                             }
-                            else if (pts2 != null)
+                            else
                             {
-                                foreach (var pt in pts2)
-                                {
-                                    var wrX = _flowPlc.Write(addr.ToString(), (float)pt.X);
-                                    if (!wrX.IsSuccess)
-                                        throw new InvalidOperationException($"发送PLC失败(X@{addr}): {wrX.Message}");
-                                    addr += 2;
-                                    var wrY = _flowPlc.Write(addr.ToString(), (float)pt.Y);
-                                    if (!wrY.IsSuccess)
-                                        throw new InvalidOperationException($"发送PLC失败(Y@{addr}): {wrY.Message}");
-                                    addr += 2;
-                                }
+                                x0 = (float)pts2[i].X; y0 = (float)pts2[i].Y; z0 = 0;
+                                x1 = (i + 1 < n) ? (float)pts2[i + 1].X : x0;
+                                y1 = (i + 1 < n) ? (float)pts2[i + 1].Y : y0;
+                                z1 = 0;
+                            }
+
+                            // 与 PlcPage 一致: itemBase = baseRegister + i * 28
+                            int itemBase = baseRegister + i * 28;
+
+                            // 写 type1 (short) 到寄存器 0
+                            var wrType = _flowPlc.Write(itemBase.ToString(), gvarType);
+                            if (!wrType.IsSuccess)
+                                throw new InvalidOperationException($"发送PLC失败(type1 @{itemBase}): {wrType.Message}");
+
+                            // 写 13 个连续 float: 从寄存器 2 开始（跳过 pad 寄存器 1）
+                            // 寄存器 2..27 = p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, cx, cy, r, start_deg, end_deg, z0, z1
+                            float[] floats = new float[]
+                            {
+                                x0, y0, z0,
+                                x1, y1, z1,
+                                x0, y0, 0,  // cx, cy, r
+                                0, 0,       // start_deg, end_deg
+                                z0, z1      // z0, z1
+                            };
+                            var wrFloats = _flowPlc.Write((itemBase + 2).ToString(), floats);
+                            if (!wrFloats.IsSuccess)
+                                throw new InvalidOperationException($"发送PLC失败(GVAR数据@{itemBase + 2}): {wrFloats.Message}");
+
+                            written++;
+                            if (n > 50 && written % 50 == 0)
+                            {
+                                StatusText.Dispatcher.Invoke(() => StatusText.Text = $"PLC发送中: {written}/{n}");
                             }
                         }
 
-                        StatusText.Dispatcher.Invoke(() =>
-                        {
-                            StatusText.Text = writeXyFloats
-                                ? $"PLC发送成功: mode={plcWriteMode}, count={n} @{countRegister}, XY @{xyBaseRegister}"
-                                : $"PLC发送成功: 点数={n} @{countRegister}";
-                        });
-                        node.ResultSummary = writeXyFloats
-                            ? $"PLC {plcWriteMode}: count={n} reg{countRegister}, {n} pts x,y floats from reg{xyBaseRegister}"
-                            : $"PLC count_only: count={n} reg{countRegister}";
+                        string resultMsg = $"GVAR: count={n} @{baseRegister}, type={gvarType}";
+                        StatusText.Dispatcher.Invoke(() => StatusText.Text = $"发送成功: {resultMsg}");
+                        node.ResultSummary = resultMsg;
                         break;
                     }
 

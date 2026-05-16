@@ -1410,6 +1410,49 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "simplify_contours_to_corners",
+                DisplayName = "轮廓四角点",
+                Description = "使用PCA确定每个轮廓的主方向，提取四个对称极点（左、右、上、下）。按BarIds分段处理，每条轮廓输出4个角点。",
+                Category = "预处理",
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "OutBarIds", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#FFC107" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "contour_perpendicular_entry",
+                DisplayName = "轮廓垂直进入",
+                Description = "生成带垂直进入/退出的焊头点列（基座3D）：从回退点接近轮廓时，在接近轨迹前有一段垂直于轮廓平面的距离；退出轨迹后也有一段垂直距离后再回退到待机点。输入优先级同「轮廓转焊道路径」。",
+                Category = "标定",
+                Ports =
+                {
+                    new PortDef { Name = "Contours", Direction = PortDirection.Input, DataType = typeof(ValueTuple<int[], int[], int[], int>), ColorHex = "#9C27B0", IsOptional = true },
+                    new PortDef { Name = "ContoursWorld", Direction = PortDirection.Input, DataType = typeof(ValueTuple<double[], double[], int[], int>), ColorHex = "#7B1FA2", IsOptional = true },
+                    new PortDef { Name = "ContoursBase3D", Direction = PortDirection.Input, DataType = typeof(ValueTuple<double[], double[], double[], int[], int>), ColorHex = "#00ACC1", IsOptional = true },
+                    new PortDef { Name = "SamplePts", Direction = PortDirection.Input, DataType = typeof(CalibPoint3D[]), ColorHex = "#00BCD4", IsOptional = true },
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "Points", Direction = PortDirection.Output, DataType = typeof(CalibPoint3D[]), ColorHex = "#00BCD4" },
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#FFC107" }
+                },
+                Params =
+                {
+                    new OperatorParam { Name = "retreatX", DisplayName = "回退点X", DefaultValue = "0", Description = "待机点 X（基座 mm）" },
+                    new OperatorParam { Name = "retreatY", DisplayName = "回退点Y", DefaultValue = "0", Description = "待机点 Y（基座 mm）" },
+                    new OperatorParam { Name = "retreatZ", DisplayName = "回退点Z", DefaultValue = "0", Description = "待机点 Z（基座 mm）" },
+                    new OperatorParam { Name = "planarZ", DisplayName = "平面条带Z", DefaultValue = "0", Description = "仅 ContoursWorld：各点抬升到基座 Z" },
+                    new OperatorParam { Name = "verticalDist", DisplayName = "垂直距离", DefaultValue = "30", Description = "进入轮廓前和退出轮廓后的垂直段距离（mm），沿进入点/退出点的法线方向" },
+                    new OperatorParam { Name = "leadIn", DisplayName = "首条从回退点接近", DefaultValue = "true", Description = "true=第一条轮廓前从回退点接近；false=直接从首点开始" },
+                    new OperatorParam { Name = "leadOut", DisplayName = "末条后回退", DefaultValue = "true", Description = "true=最后一条轮廓结束后回退到待机点；false=不返回" },
+                    new OperatorParam { Name = "transitSpacing", DisplayName = "移行插补间距", DefaultValue = "0", Description = "移行直线插补步长（mm）；0=仅写移行终点" },
+                    new OperatorParam { Name = "closeContour", DisplayName = "轮廓闭合", DefaultValue = "false", Description = "每条轮廓点走完后是否闭合到起点" }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "contours_to_weld_path",
                 DisplayName = "轮廓转焊道路径",
                 Description =
@@ -1532,13 +1575,12 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "send_plc",
                 DisplayName = "发送PLC",
-                Description = "将点列发到 PLC(Modbus)。Points 可为 Point2D[] 或 CalibPoint3D[]（后者写 float 时仍按 X、Y 写入）。plcWriteMode=count_only：仅写点数(ushort)到 countRegister。plcWriteMode=count_and_xy_floats：先写点数，再从 xyBaseRegister 起按 X0,Y0,X1,Y1… 各写 float32（各占 2 个保持寄存器）。",
+                Description = "将点列表以GVAR格式写入PLC(Modbus)。每条GVAR占28寄存器：[type1][pad][p0.x,p0.y,p0.z][p1.x,p1.y,p1.z][cx,cy,r][start_deg,end_deg][z0,z1]。与PlcPage的GVAR列表写入格式一致。",
                 Category = "输出",
                 Params =
                 {
-                    new OperatorParam { Name = "plcWriteMode", DisplayName = "写入模式", DefaultValue = "count_only", Description = "count_only | count_and_xy_floats" },
-                    new OperatorParam { Name = "countRegister", DisplayName = "点数寄存器地址", DefaultValue = "0", Description = "ushort 点数；Modbus 保持寄存器字地址（与 Hsl ModbusTcpNet 一致）" },
-                    new OperatorParam { Name = "xyBaseRegister", DisplayName = "XY起始寄存器地址", DefaultValue = "10", Description = "count_and_xy_floats：第一个 X 的起始字地址；每个 float 占 2 字" }
+                    new OperatorParam { Name = "baseRegister", DisplayName = "起始寄存器地址", DefaultValue = "5000", Description = "count写入地址；第i条GVAR从 baseRegister + i*28 开始" },
+                    new OperatorParam { Name = "gvarType", DisplayName = "GVAR类型", DefaultValue = "2", Description = "类型值（默认2=直线）" }
                 },
                 Ports =
                 {
