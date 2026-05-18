@@ -83,6 +83,32 @@
                     <TextBlock Text="Running:" VerticalAlignment="Center" Foreground="#666"/>
                     <TextBlock x:Name="TxtRunStatus" Text="---" VerticalAlignment="Center" Margin="4,0,0,0" Foreground="Gray" FontFamily="Consolas" FontWeight="Bold"/>
                 </StackPanel>
+                <!-- 轴使能控制 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="Axis Enable:" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="Bold"/>
+                    <TextBlock x:Name="LblXEnable" Text="X:" VerticalAlignment="Center" Foreground="#D32F2F" FontWeight="Bold" Margin="0,0,4,0"/>
+                    <ToggleButton x:Name="TogXEnable" Content="Enable" Width="80" Height="26" Click="TogXEnable_Click" ToolTip="X轴使能控制"/>
+                    <TextBlock x:Name="TxtXEnableStatus" Text="OFF" VerticalAlignment="Center" Margin="6,0,12,0" Foreground="Gray" FontFamily="Consolas" FontWeight="Bold"/>
+                    <TextBlock x:Name="LblYEnable" Text="Y:" VerticalAlignment="Center" Foreground="#1976D2" FontWeight="Bold" Margin="0,0,4,0"/>
+                    <ToggleButton x:Name="TogYEnable" Content="Enable" Width="80" Height="26" Click="TogYEnable_Click" ToolTip="Y轴使能控制"/>
+                    <TextBlock x:Name="TxtYEnableStatus" Text="OFF" VerticalAlignment="Center" Margin="6,0,12,0" Foreground="Gray" FontFamily="Consolas" FontWeight="Bold"/>
+                    <TextBlock x:Name="LblZEnable" Text="Z:" VerticalAlignment="Center" Foreground="#388E3C" FontWeight="Bold" Margin="0,0,4,0"/>
+                    <ToggleButton x:Name="TogZEnable" Content="Enable" Width="80" Height="26" Click="TogZEnable_Click" ToolTip="Z轴使能控制"/>
+                    <TextBlock x:Name="TxtZEnableStatus" Text="OFF" VerticalAlignment="Center" Margin="6,0,0,0" Foreground="Gray" FontFamily="Consolas" FontWeight="Bold"/>
+                </StackPanel>
+                <!-- 报警清除控制 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="Alarm Clear:" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="Bold"/>
+                    <TextBlock x:Name="LblXAlarm" Text="X:" VerticalAlignment="Center" Foreground="#D32F2F" FontWeight="Bold" Margin="0,0,4,0"/>
+                    <Button x:Name="BtnXAlarmClear" Content="Clear" Width="80" Height="26" Margin="0,0,4,0" Click="BtnXAlarmClear_Click" Foreground="#D32F2F" FontWeight="Bold" ToolTip="X轴报警清除（清位置写0）"/>
+                    <TextBox x:Name="TxtXAlarmPos" Text="0" Width="50" Height="24" VerticalContentAlignment="Center" Margin="0,0,12,0" ToolTip="报警清除时写入的位置值"/>
+                    <TextBlock x:Name="LblYAlarm" Text="Y:" VerticalAlignment="Center" Foreground="#1976D2" FontWeight="Bold" Margin="0,0,4,0"/>
+                    <Button x:Name="BtnYAlarmClear" Content="Clear" Width="80" Height="26" Margin="0,0,4,0" Click="BtnYAlarmClear_Click" Foreground="#D32F2F" FontWeight="Bold" ToolTip="Y轴报警清除（清位置写0）"/>
+                    <TextBox x:Name="TxtYAlarmPos" Text="0" Width="50" Height="24" VerticalContentAlignment="Center" Margin="0,0,12,0" ToolTip="报警清除时写入的位置值"/>
+                    <TextBlock x:Name="LblZAlarm" Text="Z:" VerticalAlignment="Center" Foreground="#388E3C" FontWeight="Bold" Margin="0,0,4,0"/>
+                    <Button x:Name="BtnZAlarmClear" Content="Clear" Width="80" Height="26" Margin="0,0,4,0" Click="BtnZAlarmClear_Click" Foreground="#D32F2F" FontWeight="Bold" ToolTip="Z轴报警清除（清位置写0）"/>
+                    <TextBox x:Name="TxtZAlarmPos" Text="0" Width="50" Height="24" VerticalContentAlignment="Center" ToolTip="报警清除时写入的位置值"/>
+                </StackPanel>
                 <!-- X轴参数读写 -->
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                     <TextBlock Text="X Params:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold"/>

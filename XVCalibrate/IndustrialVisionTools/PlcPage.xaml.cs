@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -109,6 +110,21 @@ namespace CalibOperatorCLI_Example
 
             // GVAR 列表地址
             TxtGvarAddr.Text = _config?.GvarList?.StartAddress ?? "D5000";
+
+            // 使能/报警清除按钮提示
+            ApplyEnableButton(TogXEnable, "XEnableL");
+            ApplyEnableButton(TogYEnable, "YEnableL");
+            ApplyEnableButton(TogZEnable, "ZEnableL");
+        }
+
+        private void ApplyEnableButton(ToggleButton btn, string regKey)
+        {
+            try
+            {
+                string addr = Reg(regKey);
+                btn.ToolTip = $"使能控制: {addr}.bit0=ON";
+            }
+            catch { }
         }
 
         private string TryReg(string key, string fallback)
@@ -163,19 +179,30 @@ namespace CalibOperatorCLI_Example
             });
         }
 
+
         /// <summary>
-        /// 将信捷地址字符串转为 Modbus 寄存器地址
-        /// HD2100 → 41088 + 2100 = 43188
-        /// D2000  → 2000
+        /// 将信捷地址字符串转为 (Modbus寄存器地址, 位偏移)
+        /// HD2100 → (43188, 0)
+        /// D2000  → (2000, 0)
+        /// D2043L → (2043, 0)  // L = 低字节 bit 0
+        /// D2043H → (2043, 8)  // H = 高字节 bit 8
         /// </summary>
-        private int XinjeAddressToModbus(string addr)
+        private (int addr, int extraBitOffset) XinjeAddressToModbus(string addr)
         {
             addr = addr.Trim().ToUpper();
-            if (addr.StartsWith("HD") && int.TryParse(addr[2..], out int hdIdx))
-                return HdModbusOffset + hdIdx;
-            if (addr.StartsWith("D") && int.TryParse(addr[1..], out int dIdx))
-                return dIdx;
-            return -1;
+            int extraBitOffset = 0;
+            if (addr.EndsWith("L"))
+                extraBitOffset = 0;
+            else if (addr.EndsWith("H"))
+                extraBitOffset = 8;
+            string baseAddr = addr;
+            if (addr.EndsWith("L") || addr.EndsWith("H"))
+                baseAddr = addr[..^1];
+            if (baseAddr.StartsWith("HD") && int.TryParse(baseAddr[2..], out int hdIdx))
+                return (HdModbusOffset + hdIdx, extraBitOffset);
+            if (baseAddr.StartsWith("D") && int.TryParse(baseAddr[1..], out int dIdx))
+                return (dIdx, extraBitOffset);
+            return (-1, 0);
         }
 
         private void ReadAxisPositions()
@@ -209,7 +236,7 @@ namespace CalibOperatorCLI_Example
         {
             if (_plc == null || !_plcConnected) return double.NaN;
 
-            int addr = XinjeAddressToModbus(xinjeAddr);
+            var (addr, _) = XinjeAddressToModbus(xinjeAddr);
             if (addr < 0)
             {
                 Log($"[PLC] 无效地址: {xinjeAddr}");
@@ -246,7 +273,7 @@ namespace CalibOperatorCLI_Example
             }
             if (!CheckPlcConnected()) return false;
 
-            int addr = XinjeAddressToModbus(xinjeAddr);
+            var (addr, _) = XinjeAddressToModbus(xinjeAddr);
             if (addr < 0)
             {
                 Log($"[PLC] 无效地址: {xinjeAddr}");
@@ -319,7 +346,7 @@ namespace CalibOperatorCLI_Example
                 return false;
             }
 
-            int startAddr = XinjeAddressToModbus(gvarCfg.StartAddress);
+            var (startAddr, _) = XinjeAddressToModbus(gvarCfg.StartAddress);
             if (startAddr < 0)
             {
                 Log($"[PLC] GVAR 起始地址无效: {gvarCfg.StartAddress}");
@@ -367,7 +394,7 @@ namespace CalibOperatorCLI_Example
 
             int count = _gvarList.Length;
             int totalRegisters = count * GVAR.WORD_COUNT;
-            int startAddr = XinjeAddressToModbus(gvarCfg.StartAddress);
+            var (startAddr, _) = XinjeAddressToModbus(gvarCfg.StartAddress);
             if (startAddr < 0)
             {
                 Log($"[PLC] GVAR 起始地址无效: {gvarCfg.StartAddress}");
@@ -565,12 +592,15 @@ namespace CalibOperatorCLI_Example
 
         /// <summary>
         /// 操作 D 寄存器的单个 bit：读取当前值 → 置位/复位 → 写回
+        /// L后缀 → bit 0, H后缀 → bit 8
         /// </summary>
         private void WriteBit(string xinjeAddr, int bitIndex, bool set)
         {
             if (_plc == null || !_plcConnected) return;
-            int addr = XinjeAddressToModbus(xinjeAddr);
+            var (addr, extraBitOffset) = XinjeAddressToModbus(xinjeAddr);
             if (addr < 0) return;
+
+            int finalBit = bitIndex + extraBitOffset;
 
             var readResult = _plc.ReadUInt16(addr.ToString());
             if (!readResult.IsSuccess)
@@ -580,9 +610,9 @@ namespace CalibOperatorCLI_Example
             }
             ushort val = readResult.Content;
             if (set)
-                val |= (ushort)(1 << bitIndex);
+                val |= (ushort)(1 << finalBit);
             else
-                val &= (ushort)~(1 << bitIndex);
+                val &= (ushort)~(1 << finalBit);
 
             var writeResult = _plc.Write(addr.ToString(), val);
             if (!writeResult.IsSuccess)
@@ -761,6 +791,122 @@ namespace CalibOperatorCLI_Example
             return false;
         }
 
+        // ===== 轴使能控制 =====
+        private void TogXEnable_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) { TogXEnable.IsChecked = false; return; }
+            bool enable = TogXEnable.IsChecked == true;
+            WriteBit(Reg("XEnableL"), 0, enable);
+            TxtXEnableStatus.Text = enable ? "ON" : "OFF";
+            TxtXEnableStatus.Foreground = enable ? new SolidColorBrush(Colors.Green) : new SolidColorBrush(Colors.Gray);
+            Log($"[PLC] X使能 = {(enable ? "ON" : "OFF")}");
+        }
+
+        private void TogYEnable_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) { TogYEnable.IsChecked = false; return; }
+            bool enable = TogYEnable.IsChecked == true;
+            WriteBit(Reg("YEnableL"), 0, enable);
+            TxtYEnableStatus.Text = enable ? "ON" : "OFF";
+            TxtYEnableStatus.Foreground = enable ? new SolidColorBrush(Colors.Green) : new SolidColorBrush(Colors.Gray);
+            Log($"[PLC] Y使能 = {(enable ? "ON" : "OFF")}");
+        }
+
+        private void TogZEnable_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) { TogZEnable.IsChecked = false; return; }
+            bool enable = TogZEnable.IsChecked == true;
+            WriteBit(Reg("ZEnableL"), 0, enable);
+            TxtZEnableStatus.Text = enable ? "ON" : "OFF";
+            TxtZEnableStatus.Foreground = enable ? new SolidColorBrush(Colors.Green) : new SolidColorBrush(Colors.Gray);
+            Log($"[PLC] Z使能 = {(enable ? "ON" : "OFF")}");
+        }
+
+        // ===== 报警清除控制 =====
+        private void BtnXAlarmClear_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            if (!float.TryParse(TxtXAlarmPos.Text.Trim(), out float pos))
+                pos = 0;
+            WriteBit(Reg("XAlarmClearL"), 0, true);
+            WritePlcFloat(Reg("PositionX"), "TxtXAlarmPos", "X报警清除位置");
+            Log($"[PLC] X报警清除，位置={pos}");
+            // 释放信号
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+            timer.Tick += (_, _) => { WriteBit(Reg("XAlarmClearL"), 0, false); timer.Stop(); };
+            timer.Start();
+        }
+
+        private void BtnYAlarmClear_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            if (!float.TryParse(TxtYAlarmPos.Text.Trim(), out float pos))
+                pos = 0;
+            WriteBit(Reg("YAlarmClearL"), 0, true);
+            WritePlcFloat(Reg("PositionY"), "TxtYAlarmPos", "Y报警清除位置");
+            Log($"[PLC] Y报警清除，位置={pos}");
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+            timer.Tick += (_, _) => { WriteBit(Reg("YAlarmClearL"), 0, false); timer.Stop(); };
+            timer.Start();
+        }
+
+        private void BtnZAlarmClear_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            if (!float.TryParse(TxtZAlarmPos.Text.Trim(), out float pos))
+                pos = 0;
+            WriteBit(Reg("ZAlarmClearL"), 0, true);
+            WritePlcFloat(Reg("PositionZ"), "TxtZAlarmPos", "Z报警清除位置");
+            Log($"[PLC] Z报警清除，位置={pos}");
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+            timer.Tick += (_, _) => { WriteBit(Reg("ZAlarmClearL"), 0, false); timer.Stop(); };
+            timer.Start();
+        }
+
+        /// <summary>
+        /// 读取单个使能状态（bit 0）
+        /// </summary>
+        private bool ReadEnableBit(string xinjeAddr)
+        {
+            if (_plc == null || !_plcConnected) return false;
+            var (addr, _) = XinjeAddressToModbus(xinjeAddr);
+            if (addr < 0) return false;
+            var result = _plc.ReadUInt16(addr.ToString());
+            if (!result.IsSuccess) return false;
+            return (result.Content & 1) != 0;
+        }
+
+        private void ReadEnableStatus()
+        {
+            try
+            {
+                bool xEn = ReadEnableBit(Reg("XEnableL"));
+                Dispatcher.Invoke(() =>
+                {
+                    TogXEnable.IsChecked = xEn;
+                    TxtXEnableStatus.Text = xEn ? "ON" : "OFF";
+                    TxtXEnableStatus.Foreground = xEn ? new SolidColorBrush(Colors.Green) : new SolidColorBrush(Colors.Gray);
+                });
+
+                bool yEn = ReadEnableBit(Reg("YEnableL"));
+                Dispatcher.Invoke(() =>
+                {
+                    TogYEnable.IsChecked = yEn;
+                    TxtYEnableStatus.Text = yEn ? "ON" : "OFF";
+                    TxtYEnableStatus.Foreground = yEn ? new SolidColorBrush(Colors.Green) : new SolidColorBrush(Colors.Gray);
+                });
+
+                bool zEn = ReadEnableBit(Reg("ZEnableL"));
+                Dispatcher.Invoke(() =>
+                {
+                    TogZEnable.IsChecked = zEn;
+                    TxtZEnableStatus.Text = zEn ? "ON" : "OFF";
+                    TxtZEnableStatus.Foreground = zEn ? new SolidColorBrush(Colors.Green) : new SolidColorBrush(Colors.Gray);
+                });
+            }
+            catch { }
+        }
+
         private void ChkAutoRead_Checked(object sender, RoutedEventArgs e)
         {
             if (!_plcConnected)
@@ -773,7 +919,7 @@ namespace CalibOperatorCLI_Example
                 ms = 500;
 
             _readTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ms) };
-            _readTimer.Tick += (s, args) => { ReadAxisPositions(); UpdateRunStatus(); };
+            _readTimer.Tick += (s, args) => { ReadAxisPositions(); UpdateRunStatus(); ReadEnableStatus(); };
             _readTimer.Start();
             Log($"[PLC] 自动读取已启动，间隔 {ms}ms");
         }
