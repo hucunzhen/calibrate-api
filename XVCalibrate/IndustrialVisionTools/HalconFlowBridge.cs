@@ -1,6 +1,7 @@
 #if HALCON_ENABLED
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -969,7 +970,7 @@ namespace CalibOperatorCLI_Example
                                 HOperatorSet.GenContourRegionXld(regPart, out HObject contour, genContourMode);
                                 try
                                 {
-                                    Point2D[] pts = ContourXldToPointArray(contour);
+                                    Point2D[] pts = EnsureClosedContourPoints(ContourXldToPointArray(contour));
                                     if (pts.Length >= minContourPoints)
                                         list.Add(pts);
                                 }
@@ -1004,6 +1005,312 @@ namespace CalibOperatorCLI_Example
             finally
             {
                 ho.Dispose();
+            }
+        }
+
+        /// <summary>根据 ROI 内直方图，在 [0,t] / [t,255] 中选更可能对应“目标”的灰度区间（避免整块 ROI 落入同一类）。</summary>
+        public static (double MinGray, double MaxGray) SuggestGrayRangeInRegion(
+            byte[] grayPixels,
+            int width,
+            int height,
+            int otsuThreshold,
+            Func<int, int, bool> isInsideRoi)
+        {
+            int low = 0;
+            int high = 0;
+            int total = 0;
+            int t = Math.Clamp(otsuThreshold, 1, 254);
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    if (!isInsideRoi(x, y))
+                        continue;
+                    int g = grayPixels[y * width + x];
+                    total++;
+                    if (g <= t) low++;
+                    else high++;
+                }
+            }
+
+            if (total <= 0)
+                return (0, t);
+
+            double fracLow = (double)low / total;
+            double fracHigh = (double)high / total;
+
+            // 某一侧占满 ROI：目标一般在另一侧
+            if (fracLow > 0.88)
+                return (t + 1, 255);
+            if (fracHigh > 0.88)
+                return (0, t);
+
+            // 两侧都有：取像素较少的一侧作为目标
+            return low <= high ? (0, t) : (t + 1, 255);
+        }
+
+        /// <summary>
+        /// ROI 内提轮廓：用户阈值 → 互补阈值 → BinaryThreshold，并剔除“整块 ROI”连通域。
+        /// </summary>
+        public static HalconXldContourBundle XldContoursFromBinaryGrayInRegion(
+            CalibImage inImg,
+            HObject domainRegion,
+            double minGray,
+            double maxGray,
+            string genContourMode,
+            int minContourPoints,
+            double maxRegionAreaRatio = 0.92)
+        {
+            if (inImg == null) throw new ArgumentNullException(nameof(inImg));
+            if (domainRegion == null || !domainRegion.IsInitialized())
+                throw new ArgumentException("domain 无效", nameof(domainRegion));
+
+            int mid = (int)Math.Clamp(Math.Round((minGray + maxGray) / 2.0), 1, 254);
+            var attempts = new List<(double Min, double Max, string Tag)>
+            {
+                (minGray, maxGray, "manual"),
+                (0, mid, "low"),
+                (mid + 1, 255, "high")
+            };
+
+            // 若用户区间已覆盖一侧，去重
+            HalconXldContourBundle? best = null;
+            string bestTag = "";
+            foreach (var (min, max, tag) in attempts.DistinctBy(a => $"{a.Min:F0}_{a.Max:F0}"))
+            {
+                if (max <= min) continue;
+                var bundle = XldContoursFromGrayRangeInRegionCore(
+                    inImg, domainRegion, min, max, genContourMode, minContourPoints, maxRegionAreaRatio);
+                if (bundle.Contours != null && bundle.Contours.Count > 0)
+                {
+                    best = bundle;
+                    bestTag = tag;
+                    break;
+                }
+            }
+
+            if (best != null && best.Contours!.Count > 0)
+            {
+                System.Diagnostics.Debug.WriteLine($"[XldInRegion] used {bestTag}, contours={best.Contours.Count}");
+                return best;
+            }
+
+            var auto = XldContoursFromBinaryThresholdInRegion(
+                inImg, domainRegion, genContourMode, minContourPoints, maxRegionAreaRatio);
+            if (auto.Contours != null && auto.Contours.Count > 0)
+                return auto;
+
+            return new HalconXldContourBundle
+            {
+                Width = inImg.Width,
+                Height = inImg.Height,
+                Contours = new List<Point2D[]>()
+            };
+        }
+
+        private static HalconXldContourBundle XldContoursFromGrayRangeInRegionCore(
+            CalibImage inImg,
+            HObject domainRegion,
+            double minGray,
+            double maxGray,
+            string genContourMode,
+            int minContourPoints,
+            double maxRegionAreaRatio)
+        {
+            if (string.IsNullOrWhiteSpace(genContourMode)) genContourMode = "border";
+            minContourPoints = Math.Max(2, minContourPoints);
+
+            HOperatorSet.AreaCenter(domainRegion, out HTuple domainAreaT, out HTuple _, out HTuple _);
+            double domainArea = domainAreaT.Length > 0 ? domainAreaT[0].D : 0;
+
+            HObject ho = CalibToHObject(inImg);
+            try
+            {
+                ho = EnsureGray(ho);
+                HOperatorSet.Threshold(ho, out HObject threshReg, minGray, maxGray);
+                try
+                {
+                    HOperatorSet.Intersection(threshReg, domainRegion, out HObject clipped);
+                    try
+                    {
+                        return ContoursFromClippedRegion(
+                            clipped, domainArea, inImg.Width, inImg.Height,
+                            genContourMode, minContourPoints, maxRegionAreaRatio);
+                    }
+                    finally
+                    {
+                        clipped.Dispose();
+                    }
+                }
+                finally
+                {
+                    threshReg.Dispose();
+                }
+            }
+            finally
+            {
+                ho.Dispose();
+            }
+        }
+
+        private static HalconXldContourBundle XldContoursFromBinaryThresholdInRegion(
+            CalibImage inImg,
+            HObject domainRegion,
+            string genContourMode,
+            int minContourPoints,
+            double maxRegionAreaRatio)
+        {
+            HOperatorSet.AreaCenter(domainRegion, out HTuple domainAreaT, out HTuple _, out HTuple _);
+            double domainArea = domainAreaT.Length > 0 ? domainAreaT[0].D : 0;
+
+            HObject ho = CalibToHObject(inImg);
+            try
+            {
+                ho = EnsureGray(ho);
+                HOperatorSet.ReduceDomain(ho, domainRegion, out HObject reduced);
+                ho.Dispose();
+                ho = reduced;
+
+                foreach (string lightDark in new[] { "dark", "light" })
+                {
+                    try
+                    {
+                        HOperatorSet.BinaryThreshold(ho, out HObject region, "max_separability", lightDark, out HTuple _);
+                        try
+                        {
+                            HOperatorSet.Intersection(region, domainRegion, out HObject clipped);
+                            try
+                            {
+                                var bundle = ContoursFromClippedRegion(
+                                    clipped, domainArea, inImg.Width, inImg.Height,
+                                    genContourMode, minContourPoints, maxRegionAreaRatio);
+                                if (bundle.Contours != null && bundle.Contours.Count > 0)
+                                    return bundle;
+                            }
+                            finally
+                            {
+                                clipped.Dispose();
+                            }
+                        }
+                        finally
+                        {
+                            region.Dispose();
+                        }
+                    }
+                    catch
+                    {
+                        // 尝试下一极性
+                    }
+                }
+
+                return new HalconXldContourBundle
+                {
+                    Width = inImg.Width,
+                    Height = inImg.Height,
+                    Contours = new List<Point2D[]>()
+                };
+            }
+            finally
+            {
+                ho.Dispose();
+            }
+        }
+
+        private static HalconXldContourBundle ContoursFromClippedRegion(
+            HObject clipped,
+            double domainArea,
+            int iw,
+            int ih,
+            string genContourMode,
+            int minContourPoints,
+            double maxRegionAreaRatio)
+        {
+            HOperatorSet.Connection(clipped, out HObject connected);
+            try
+            {
+                HOperatorSet.CountObj(connected, out HTuple numObj);
+                int n = TupleFirstInt(numObj);
+                var list = new List<Point2D[]>(Math.Max(0, n));
+                Point2D[]? largestRejected = null;
+                int largestRejectedLen = 0;
+
+                for (int idx = 1; idx <= n; idx++)
+                {
+                    HOperatorSet.SelectObj(connected, out HObject regPart, idx);
+                    try
+                    {
+                        double partArea = 0;
+                        if (domainArea > 0)
+                        {
+                            HOperatorSet.AreaCenter(regPart, out HTuple partAreaT, out HTuple _, out HTuple _);
+                            partArea = partAreaT.Length > 0 ? partAreaT[0].D : 0;
+                            if (partArea >= domainArea * maxRegionAreaRatio)
+                            {
+                                foreach (var ptsTry in ContourXldToPointArraysFromRegion(regPart, genContourMode))
+                                {
+                                    if (ptsTry.Length > largestRejectedLen)
+                                    {
+                                        largestRejectedLen = ptsTry.Length;
+                                        largestRejected = ptsTry;
+                                    }
+                                }
+                                continue;
+                            }
+                        }
+
+                        foreach (Point2D[] pts in ContourXldToPointArraysFromRegion(regPart, genContourMode))
+                        {
+                            Point2D[] closed = EnsureClosedContourPoints(pts);
+                            if (closed.Length >= minContourPoints)
+                                list.Add(closed);
+                        }
+                    }
+                    finally
+                    {
+                        regPart.Dispose();
+                    }
+                }
+
+                // 若全部被当成“整块 ROI”剔除，对掩膜轻微腐蚀后再试一次
+                if (list.Count == 0 && domainArea > 0)
+                {
+                    HOperatorSet.ErosionRectangle1(clipped, out HObject eroded, 3, 3);
+                    try
+                    {
+                        var retry = ContoursFromClippedRegion(
+                            eroded, domainArea, iw, ih, genContourMode, minContourPoints, 0.98);
+                        if (retry.Contours != null && retry.Contours.Count > 0)
+                            return retry;
+                    }
+                    finally
+                    {
+                        eroded.Dispose();
+                    }
+                }
+
+                if (list.Count == 0 && largestRejected != null && largestRejected.Length >= minContourPoints)
+                    list.Add(EnsureClosedContourPoints(largestRejected));
+
+                return new HalconXldContourBundle { Width = iw, Height = ih, Contours = list };
+            }
+            finally
+            {
+                connected.Dispose();
+            }
+        }
+
+        private static IEnumerable<Point2D[]> ContourXldToPointArraysFromRegion(HObject regPart, string genContourMode)
+        {
+            HOperatorSet.GenContourRegionXld(regPart, out HObject contour, genContourMode);
+            try
+            {
+                foreach (Point2D[] pts in ContourXldToPointArrays(contour))
+                    yield return EnsureClosedContourPoints(pts);
+            }
+            finally
+            {
+                contour.Dispose();
             }
         }
 
@@ -1069,9 +1376,73 @@ namespace CalibOperatorCLI_Example
             };
         }
 
-        private static Point2D[] ContourXldToPointArray(HObject contourXld)
+        /// <summary>逐条 XLD 提取点列（GenContourRegionXld 等可能返回多对象，不可对整包直接 GetContourXld）。</summary>
+        public static List<Point2D[]> ContourXldToPointArrays(HObject contourXld)
         {
-            using var xld = new HXLDCont(contourXld);
+            var list = new List<Point2D[]>();
+            if (contourXld == null || !contourXld.IsInitialized())
+                return list;
+
+            int n = 1;
+            try
+            {
+                HOperatorSet.CountObj(contourXld, out HTuple num);
+                n = Math.Max(1, TupleFirstInt(num));
+            }
+            catch
+            {
+                n = 1;
+            }
+
+            for (int i = 1; i <= n; i++)
+            {
+                HObject one = n == 1 ? contourXld : contourXld.SelectObj(i);
+                try
+                {
+                    Point2D[] pts = ContourXldSingleToPointArray(one);
+                    if (pts.Length >= 2)
+                        list.Add(pts);
+                }
+                finally
+                {
+                    if (n > 1)
+                        one.Dispose();
+                }
+            }
+
+            return list;
+        }
+
+        public static Point2D[] ContourXldToPointArray(HObject contourXld)
+        {
+            List<Point2D[]> parts = ContourXldToPointArrays(contourXld);
+            if (parts.Count == 0)
+                return Array.Empty<Point2D>();
+            return parts.OrderByDescending(p => p.Length).First();
+        }
+
+        /// <summary>
+        /// HALCON 闭合轮廓的 XLD 点列通常不包含重复的起点；补终点使折线/轨迹含最后一条闭合边。
+        /// </summary>
+        public static Point2D[] EnsureClosedContourPoints(Point2D[]? pts, double tolerancePx = 0.5)
+        {
+            if (pts == null || pts.Length < 3)
+                return pts ?? Array.Empty<Point2D>();
+
+            double dx = pts[0].X - pts[^1].X;
+            double dy = pts[0].Y - pts[^1].Y;
+            if (dx * dx + dy * dy <= tolerancePx * tolerancePx)
+                return pts;
+
+            var closed = new Point2D[pts.Length + 1];
+            Array.Copy(pts, closed, pts.Length);
+            closed[^1] = pts[0];
+            return closed;
+        }
+
+        private static Point2D[] ContourXldSingleToPointArray(HObject singleContourXld)
+        {
+            using var xld = new HXLDCont(singleContourXld);
             xld.GetContourXld(out HTuple row, out HTuple col);
             int len = row.TupleLength();
             if (len <= 0)
@@ -1551,6 +1922,757 @@ namespace CalibOperatorCLI_Example
                     nextAt += spacing;
                 }
             }
+        }
+
+        // ================================================================
+        // HALCON 形状模板匹配
+        // ================================================================
+
+        /// <summary>新版 HalconDotNet 句柄不可再当 long 用；用 id 持有 <see cref="HShapeModel"/> 生命周期。</summary>
+        private static class HalconShapeModelRegistry
+        {
+            private static readonly object Lock = new();
+            private static readonly Dictionary<long, HShapeModel> Models = new();
+            private static long _nextId = 1;
+
+            public static long Register(HShapeModel model)
+            {
+                lock (Lock)
+                {
+                    long id = _nextId++;
+                    Models[id] = model;
+                    return id;
+                }
+            }
+
+            public static HShapeModel Get(long id)
+            {
+                lock (Lock)
+                {
+                    if (!Models.TryGetValue(id, out HShapeModel? model))
+                        throw new InvalidOperationException($"形状模型 ModelId={id} 不存在或已释放");
+                    return model;
+                }
+            }
+
+            public static void Release(long id)
+            {
+                lock (Lock)
+                {
+                    if (!Models.Remove(id, out HShapeModel? model))
+                        return;
+                    model.Dispose();
+                }
+            }
+        }
+
+        /// <summary>按选项过滤 XLD 包（最小点数、仅保留最长轮廓）。</summary>
+        public static HalconXldContourBundle FilterXldBundle(HalconXldContourBundle bundle, int minContourPoints, bool largestOnly)
+        {
+            if (bundle.Contours == null || bundle.Contours.Count == 0)
+                return bundle;
+
+            var list = bundle.Contours
+                .Where(c => c != null && c.Length >= Math.Max(2, minContourPoints))
+                .ToList();
+
+            if (largestOnly && list.Count > 1)
+            {
+                Point2D[] best = list.OrderByDescending(c => c.Length).First();
+                list = new List<Point2D[]> { best };
+            }
+
+            return new HalconXldContourBundle
+            {
+                Width = bundle.Width,
+                Height = bundle.Height,
+                Contours = list
+            };
+        }
+
+        /// <summary>EdgesSubPix (canny) 提取 XLD，可选 domain 区域裁剪。</summary>
+        public static HalconXldContourBundle XldContoursFromEdgesSubPix(
+            CalibImage inImg,
+            HObject? domainRegion,
+            double alpha,
+            double low,
+            double high,
+            int minContourPoints)
+        {
+            if (inImg == null) throw new ArgumentNullException(nameof(inImg));
+
+            HObject ho = CalibToHObject(inImg);
+            try
+            {
+                ho = EnsureGray(ho);
+                if (domainRegion != null && domainRegion.IsInitialized())
+                {
+                    HOperatorSet.ReduceDomain(ho, domainRegion, out HObject reduced);
+                    ho.Dispose();
+                    ho = reduced;
+                }
+
+                HOperatorSet.EdgesSubPix(ho, out HObject edges, "canny", alpha, low, high);
+                ho.Dispose();
+                ho = edges;
+
+                int n = ho.CountObj();
+                var outList = new List<Point2D[]>();
+                for (int i = 1; i <= n; i++)
+                {
+                    HObject one = ho.SelectObj(i);
+                    try
+                    {
+                        Point2D[] pts = ContourXldToPointArray(one);
+                        if (pts.Length >= Math.Max(2, minContourPoints))
+                            outList.Add(pts);
+                    }
+                    finally
+                    {
+                        one.Dispose();
+                    }
+                }
+
+                return new HalconXldContourBundle
+                {
+                    Width = inImg.Width,
+                    Height = inImg.Height,
+                    Contours = outList
+                };
+            }
+            finally
+            {
+                ho.Dispose();
+            }
+        }
+
+        public static HObject GenRegionRectangle(double row1, double col1, double row2, double col2)
+        {
+            HOperatorSet.GenRectangle1(out HObject reg, row1, col1, row2, col2);
+            return reg;
+        }
+
+        public static HObject GenRegionPolygonFilled(IReadOnlyList<Point2D> polygon)
+        {
+            if (polygon == null || polygon.Count < 3)
+                throw new ArgumentException("多边形至少需要 3 个点", nameof(polygon));
+
+            var rows = polygon.Select(p => p.Y).ToArray();
+            var cols = polygon.Select(p => p.X).ToArray();
+            HOperatorSet.GenRegionPolygonFilled(out HObject reg, new HTuple(rows), new HTuple(cols));
+            return reg;
+        }
+
+        /// <summary>环形区域：外多边形减内多边形（点坐标 X=列, Y=行）。</summary>
+        public static HObject GenRegionRingFromPolygons(IReadOnlyList<Point2D> outer, IReadOnlyList<Point2D> inner)
+        {
+            if (outer == null || outer.Count < 3)
+                throw new ArgumentException("外圈多边形至少需要 3 个点", nameof(outer));
+            if (inner == null || inner.Count < 3)
+                throw new ArgumentException("内圈多边形至少需要 3 个点", nameof(inner));
+
+            HObject outerReg = GenRegionPolygonFilled(outer);
+            try
+            {
+                HObject innerReg = GenRegionPolygonFilled(inner);
+                try
+                {
+                    HOperatorSet.Difference(outerReg, innerReg, out HObject ring);
+                    outerReg.Dispose();
+                    return ring;
+                }
+                finally
+                {
+                    innerReg.Dispose();
+                }
+            }
+            catch
+            {
+                outerReg.Dispose();
+                throw;
+            }
+        }
+
+        /// <summary>圆环区域：外圆减内圆（row/col 为 HALCON 图像坐标）。</summary>
+        public static HObject GenRegionAnnulus(double row, double col, double innerRadius, double outerRadius)
+        {
+            if (outerRadius <= 0)
+                throw new ArgumentException("外半径必须大于 0", nameof(outerRadius));
+            if (innerRadius < 0)
+                innerRadius = 0;
+            if (innerRadius >= outerRadius)
+                throw new ArgumentException("内半径必须小于外半径");
+
+            HOperatorSet.GenCircle(out HObject outer, row, col, outerRadius);
+            try
+            {
+                if (innerRadius <= 1e-6)
+                    return outer;
+
+                HOperatorSet.GenCircle(out HObject inner, row, col, innerRadius);
+                try
+                {
+                    HOperatorSet.Difference(outer, inner, out HObject ring);
+                    outer.Dispose();
+                    return ring;
+                }
+                finally
+                {
+                    inner.Dispose();
+                }
+            }
+            catch
+            {
+                outer.Dispose();
+                throw;
+            }
+        }
+
+        /// <summary>区域边界折线（图像坐标）。带孔区域请用 <paramref name="genContourMode"/> = border_holes。</summary>
+        public static List<Point2D[]> RegionToBoundaryContours(HObject region, string genContourMode = "border")
+        {
+            string mode = string.IsNullOrWhiteSpace(genContourMode) ? "border" : genContourMode.Trim();
+            HOperatorSet.GenContourRegionXld(region, out HObject contour, mode);
+            try
+            {
+                return ContourXldToPointArrays(contour)
+                    .Where(p => p != null && p.Length >= 2)
+                    .Select(p => EnsureClosedContourPoints(p))
+                    .ToList();
+            }
+            finally
+            {
+                contour.Dispose();
+            }
+        }
+
+        /// <summary>环形/带孔区域：外边界 + 内孔边界。</summary>
+        public static List<Point2D[]> RegionRingBoundaryContours(HObject ringRegion)
+        {
+            var list = RegionToBoundaryContours(ringRegion, "border_holes");
+            if (list.Count > 0)
+                return list;
+            return RegionToBoundaryContours(ringRegion, "border");
+        }
+
+        /// <summary>将多条闭合多边形转为 XLD 轮廓列表（用于环形 ROI 的 PolygonXld）。</summary>
+        public static List<Point2D[]> PolygonsToClosedContourList(params IReadOnlyList<Point2D>[] polygons)
+        {
+            var list = new List<Point2D[]>();
+            if (polygons == null)
+                return list;
+            foreach (IReadOnlyList<Point2D>? poly in polygons)
+            {
+                if (poly == null || poly.Count < 3)
+                    continue;
+                list.Add(EnsureClosedContourPoints(poly.ToArray()));
+            }
+
+            return list;
+        }
+
+        /// <summary>区域外边界中最长的一条折线。</summary>
+        public static Point2D[] RegionToBoundaryPoints(HObject region)
+        {
+            List<Point2D[]> parts = RegionToBoundaryContours(region);
+            if (parts.Count == 0)
+                return Array.Empty<Point2D>();
+            return parts.OrderByDescending(p => p.Length).First();
+        }
+
+        private static HTuple ToNumLevelsTuple(int numLevels) =>
+            numLevels > 0 ? new HTuple(numLevels) : new HTuple("auto");
+
+        private static HTuple ToAngleStepTuple(double angleStepDeg) =>
+            angleStepDeg > 0
+                ? new HTuple(angleStepDeg * Math.PI / 180.0)
+                : new HTuple("auto");
+
+        private static HTuple ToScaleStepTuple(double scaleStep) =>
+            scaleStep > 0 ? new HTuple(scaleStep) : new HTuple("auto");
+
+        private static HTuple ToContrastTuple(string? contrast, int contrastFallback)
+        {
+            if (string.IsNullOrWhiteSpace(contrast) ||
+                contrast.Equals("auto", StringComparison.OrdinalIgnoreCase))
+                return new HTuple("auto");
+            if (int.TryParse(contrast, NumberStyles.Integer, CultureInfo.InvariantCulture, out int c) && c > 0)
+                return new HTuple(c);
+            if (contrastFallback > 0)
+                return new HTuple(contrastFallback);
+            return new HTuple("auto");
+        }
+
+        private static int ResolveMinContrast(HalconShapeModelCreateOptions opt) =>
+            opt.MinContrast > 0 ? opt.MinContrast : 5;
+
+        /// <summary>统一创建入口：XLD 或 ROI 灰度图。</summary>
+        public static long CreateShapeModel(
+            CalibImage? image,
+            HalconXldContourBundle? xldBundle,
+            HObject? region,
+            HalconShapeModelCreateOptions opt)
+        {
+            if (opt == null) throw new ArgumentNullException(nameof(opt));
+
+            bool fromImage = opt.SourceKind is HalconShapeModelSourceKind.ImageRectangle
+                or HalconShapeModelSourceKind.ImagePolygon;
+
+            if (fromImage)
+            {
+                if (image == null) throw new ArgumentNullException(nameof(image));
+                if (region == null || !region.IsInitialized())
+                    throw new InvalidOperationException("图像模板模式需要有效的 ROI 区域");
+                return CreateShapeModelFromImageRegion(image, region, opt);
+            }
+
+            if (xldBundle == null || xldBundle.Contours == null || xldBundle.Contours.Count == 0)
+                throw new InvalidOperationException("XLD 轮廓为空");
+
+            return CreateShapeModelFromXld(xldBundle, opt);
+        }
+
+        /// <summary>CreateShapeModel：基于 XLD 轮廓（兼容旧参数）。</summary>
+        public static long CreateShapeModelFromXld(
+            HalconXldContourBundle? xldBundle,
+            int numLevels,
+            double angleStartDeg,
+            double angleExtentDeg,
+            double angleStepDeg,
+            string optimization,
+            string metric,
+            int contrast,
+            int minContrast)
+        {
+            return CreateShapeModelFromXld(xldBundle, new HalconShapeModelCreateOptions
+            {
+                ModelKind = HalconShapeModelKind.Shape,
+                SourceKind = HalconShapeModelSourceKind.ThresholdXld,
+                NumLevels = numLevels,
+                AngleStartDeg = angleStartDeg,
+                AngleExtentDeg = angleExtentDeg,
+                AngleStepDeg = angleStepDeg,
+                Optimization = optimization,
+                Metric = metric,
+                Contrast = contrast > 0 ? contrast.ToString(CultureInfo.InvariantCulture) : "auto",
+                MinContrast = minContrast
+            });
+        }
+
+        /// <summary>CreateShapeModel / CreateScaledShapeModel：基于 XLD。</summary>
+        public static long CreateShapeModelFromXld(HalconXldContourBundle? xldBundle, HalconShapeModelCreateOptions opt)
+        {
+            HObject conts = new HObject();
+            try
+            {
+                if (xldBundle?.Contours == null || xldBundle.Contours.Count == 0)
+                    throw new InvalidOperationException("XLD轮廓为空");
+
+                List<Point2D[]> contours = xldBundle.Contours
+                    .Where(c => c != null && c.Length >= 2)
+                    .ToList();
+                if (contours.Count == 0)
+                    throw new InvalidOperationException($"没有有效轮廓（共 {xldBundle.Contours.Count} 条）");
+
+                conts = XldBundleToHObject(contours);
+                if (!conts.IsInitialized() || conts.CountObj() == 0)
+                    throw new InvalidOperationException("轮廓对象无效/为空");
+
+                string metricResolved = ResolveShapeModelXldMetric(conts, opt.Metric);
+                double angleStartRad = opt.AngleStartDeg * Math.PI / 180.0;
+                double angleExtentRad = opt.AngleExtentDeg * Math.PI / 180.0;
+                HTuple numLevels = ToNumLevelsTuple(opt.NumLevels);
+                HTuple angleStep = ToAngleStepTuple(opt.AngleStepDeg);
+                HTuple optimization = new HTuple(string.IsNullOrWhiteSpace(opt.Optimization) ? "auto" : opt.Optimization);
+                int minContrastVal = ResolveMinContrast(opt);
+
+                var xld = new HXLDCont(conts);
+                var shapeModel = new HShapeModel();
+                try
+                {
+                    if (opt.ModelKind == HalconShapeModelKind.ScaledShape)
+                    {
+                        shapeModel.CreateScaledShapeModelXld(
+                            xld,
+                            numLevels,
+                            angleStartRad,
+                            angleExtentRad,
+                            angleStep,
+                            opt.ScaleMin,
+                            opt.ScaleMax,
+                            ToScaleStepTuple(opt.ScaleStep),
+                            optimization,
+                            metricResolved,
+                            minContrastVal);
+                    }
+                    else
+                    {
+                        shapeModel.CreateShapeModelXld(
+                            xld,
+                            numLevels,
+                            angleStartRad,
+                            angleExtentRad,
+                            angleStep,
+                            optimization,
+                            metricResolved,
+                            minContrastVal);
+                    }
+                }
+                catch
+                {
+                    shapeModel.Dispose();
+                    throw;
+                }
+
+                return HalconShapeModelRegistry.Register(shapeModel);
+            }
+            finally
+            {
+                conts.Dispose();
+            }
+        }
+
+        /// <summary>CreateShapeModel / CreateScaledShapeModel：ROI 内灰度图。</summary>
+        public static long CreateShapeModelFromImageRegion(
+            CalibImage image,
+            HObject region,
+            HalconShapeModelCreateOptions opt)
+        {
+            if (image == null) throw new ArgumentNullException(nameof(image));
+            if (region == null || !region.IsInitialized())
+                throw new ArgumentException("区域无效", nameof(region));
+
+            HObject ho = CalibToHObject(image);
+            try
+            {
+                ho = EnsureGray(ho);
+                HOperatorSet.ReduceDomain(ho, region, out HObject reduced);
+                ho.Dispose();
+                ho = reduced;
+
+                using var hImg = new HImage(ho);
+                double angleStartRad = opt.AngleStartDeg * Math.PI / 180.0;
+                double angleExtentRad = opt.AngleExtentDeg * Math.PI / 180.0;
+                HTuple numLevels = ToNumLevelsTuple(opt.NumLevels);
+                HTuple angleStep = ToAngleStepTuple(opt.AngleStepDeg);
+                HTuple optimization = new HTuple(string.IsNullOrWhiteSpace(opt.Optimization) ? "auto" : opt.Optimization);
+                string metric = string.IsNullOrWhiteSpace(opt.Metric) ? "use_polarity" : opt.Metric;
+                HTuple contrast = ToContrastTuple(opt.Contrast, 0);
+                HTuple minContrast = new HTuple(ResolveMinContrast(opt));
+
+                var shapeModel = new HShapeModel();
+                try
+                {
+                    if (opt.ModelKind == HalconShapeModelKind.ScaledShape)
+                    {
+                        shapeModel.CreateScaledShapeModel(
+                            hImg,
+                            numLevels,
+                            angleStartRad,
+                            angleExtentRad,
+                            angleStep,
+                            opt.ScaleMin,
+                            opt.ScaleMax,
+                            ToScaleStepTuple(opt.ScaleStep),
+                            optimization,
+                            metric,
+                            contrast,
+                            minContrast);
+                    }
+                    else
+                    {
+                        shapeModel.CreateShapeModel(
+                            hImg,
+                            numLevels,
+                            angleStartRad,
+                            angleExtentRad,
+                            angleStep,
+                            optimization,
+                            metric,
+                            contrast,
+                            minContrast);
+                    }
+                }
+                catch
+                {
+                    shapeModel.Dispose();
+                    throw;
+                }
+
+                return HalconShapeModelRegistry.Register(shapeModel);
+            }
+            finally
+            {
+                ho.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// FindShapeModel：在图像中查找形状模板
+        /// </summary>
+        public static (double[] rows, double[] cols, double[] angles, double[] scores) FindShapeModel(
+            CalibImage inImg,
+            long modelId,
+            double angleStartDeg,
+            double angleExtentDeg,
+            double minScore,
+            int numMatches,
+            double maxOverlap,
+            string subPixel,
+            int numLevels,
+            double greediness)
+        {
+            HShapeModel shapeModel = HalconShapeModelRegistry.Get(modelId);
+            HObject hoImage = CalibToHObject(inImg);
+            HImage hImg = new HImage(hoImage);
+            try
+            {
+                string subPix = string.IsNullOrWhiteSpace(subPixel) || subPixel.Equals("true", StringComparison.OrdinalIgnoreCase)
+                    ? "least_squares"
+                    : subPixel;
+
+                HTuple hv_Row, hv_Column, hv_Angle, hv_Score;
+                shapeModel.FindShapeModel(
+                    hImg,
+                    angleStartDeg * Math.PI / 180.0,
+                    angleExtentDeg * Math.PI / 180.0,
+                    minScore,
+                    numMatches,
+                    maxOverlap,
+                    subPix,
+                    numLevels,
+                    greediness,
+                    out hv_Row,
+                    out hv_Column,
+                    out hv_Angle,
+                    out hv_Score);
+
+                double[] rows = new double[hv_Row.Length];
+                double[] cols = new double[hv_Column.Length];
+                double[] angles = new double[hv_Angle.Length];
+                double[] scores = new double[hv_Score.Length];
+                for (int i = 0; i < hv_Row.Length; i++)
+                {
+                    rows[i] = hv_Row[i].D;
+                    cols[i] = hv_Column[i].D;
+                    angles[i] = hv_Angle[i].D * 180.0 / Math.PI;
+                    scores[i] = hv_Score[i].D;
+                }
+                return (rows, cols, angles, scores);
+            }
+            finally
+            {
+                hImg.Dispose();
+                hoImage.Dispose();
+            }
+        }
+
+        /// <summary>查找形状模板；若无结果则用更低 MinScore / Greediness 再试一次。</summary>
+        public static (double[] rows, double[] cols, double[] angles, double[] scores) FindShapeModelWithFallback(
+            CalibImage inImg,
+            long modelId,
+            double angleStartDeg,
+            double angleExtentDeg,
+            double minScore,
+            int numMatches,
+            double maxOverlap,
+            string subPixel,
+            int numLevels,
+            double greediness)
+        {
+            var first = FindShapeModel(inImg, modelId, angleStartDeg, angleExtentDeg, minScore, numMatches, maxOverlap, subPixel, numLevels, greediness);
+            if (first.rows.Length > 0)
+                return first;
+
+            double retryScore = Math.Max(0.2, minScore * 0.65);
+            double retryGreed = Math.Max(0.5, greediness * 0.85);
+            if (Math.Abs(retryScore - minScore) < 1e-6 && Math.Abs(retryGreed - greediness) < 1e-6)
+                return first;
+
+            return FindShapeModel(inImg, modelId, angleStartDeg, angleExtentDeg, retryScore, numMatches, maxOverlap, subPixel, numLevels, retryGreed);
+        }
+
+        /// <summary>将已创建的模型写入 .shm 文件。</summary>
+        public static void WriteShapeModelToFile(long modelId, string filePath)
+        {
+            if (modelId < 0)
+                throw new ArgumentOutOfRangeException(nameof(modelId));
+            if (string.IsNullOrWhiteSpace(filePath))
+                throw new ArgumentException("路径不能为空", nameof(filePath));
+            HalconShapeModelRegistry.Get(modelId).WriteShapeModel(filePath);
+        }
+
+        /// <summary>从 .shm 文件加载形状模型并注册，返回 ModelId。</summary>
+        public static long LoadShapeModelFromFile(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                throw new ArgumentException("路径不能为空", nameof(filePath));
+            if (!File.Exists(filePath))
+                throw new FileNotFoundException("形状模型文件不存在", filePath);
+
+            var model = new HShapeModel();
+            model.ReadShapeModel(filePath);
+            return HalconShapeModelRegistry.Register(model);
+        }
+
+        /// <summary>读取已加载模型的参数摘要（用于界面显示）。</summary>
+        public static string GetShapeModelParamsSummary(long modelId)
+        {
+            HShapeModel shapeModel = HalconShapeModelRegistry.Get(modelId);
+            int numLevels = shapeModel.GetShapeModelParams(
+                out double angleStart,
+                out double angleExtent,
+                out double angleStep,
+                out double scaleMin,
+                out double scaleMax,
+                out double scaleStep,
+                out string metric,
+                out int minContrast);
+
+            double angleStartDeg = angleStart * 180.0 / Math.PI;
+            double angleExtentDeg = angleExtent * 180.0 / Math.PI;
+            string metricStr = metric ?? "";
+            bool scaled = Math.Abs(scaleMax - scaleMin) > 1e-6 && (Math.Abs(scaleMax - 1) > 1e-6 || Math.Abs(scaleMin - 1) > 1e-6);
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"ModelID: {modelId}");
+            sb.AppendLine($"类型: {(scaled ? "Scaled" : "Standard")}");
+            sb.AppendLine($"角度: [{angleStartDeg:F1}°, 范围 {angleExtentDeg:F1}°], 步长 {angleStep * 180.0 / Math.PI:F2}°");
+            if (scaled)
+                sb.AppendLine($"缩放: [{scaleMin:F3}, {scaleMax:F3}], 步长 {scaleStep:F3}");
+            sb.AppendLine($"NumLevels: {numLevels}, MinContrast: {minContrast}");
+            if (!string.IsNullOrEmpty(metricStr))
+                sb.AppendLine($"Metric: {metricStr}");
+            return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>释放 HALCON 形状模型句柄。</summary>
+        public static void ClearShapeModel(long modelId)
+        {
+            if (modelId < 0) return;
+            HalconShapeModelRegistry.Release(modelId);
+        }
+
+        /// <summary>获取形状模型轮廓点（模型坐标系：X=列, Y=行），用于叠加显示。</summary>
+        public static Point2D[][] GetShapeModelContourPoints(long modelId, int level = 1)
+        {
+            HShapeModel shapeModel = HalconShapeModelRegistry.Get(modelId);
+            using HXLDCont xld = shapeModel.GetShapeModelContours(level);
+            int n = xld.CountObj();
+            if (n <= 0)
+                return Array.Empty<Point2D[]>();
+
+            var list = new List<Point2D[]>(n);
+            for (int i = 1; i <= n; i++)
+            {
+                HObject one = xld.SelectObj(i);
+                try
+                {
+                    Point2D[] pts = ContourXldToPointArray(one);
+                    if (pts.Length >= 2)
+                        list.Add(pts);
+                }
+                finally
+                {
+                    one.Dispose();
+                }
+            }
+
+            return list.ToArray();
+        }
+
+        /// <summary>
+        /// use_polarity / ignore_global_polarity 需要轮廓带 edge_direction；阈值/多边形轮廓应使用 ignore_local_polarity。
+        /// </summary>
+        private static string ResolveShapeModelXldMetric(HObject conts, string metric)
+        {
+            string m = (metric ?? "").Trim();
+            if (string.IsNullOrEmpty(m))
+                return "ignore_local_polarity";
+
+            if (!m.Equals("use_polarity", StringComparison.OrdinalIgnoreCase) &&
+                !m.Equals("ignore_global_polarity", StringComparison.OrdinalIgnoreCase))
+                return m;
+
+            try
+            {
+                HOperatorSet.GetContourAttribXld(conts, "edge_direction", out HTuple attrib);
+                if (attrib != null && attrib.Length > 0)
+                    return m;
+            }
+            catch
+            {
+                // 无 edge_direction 属性
+            }
+
+            return "ignore_local_polarity";
+        }
+
+        /// <summary>
+        /// 将 Point2D[] 列表转换为 HObject XLD（每条轮廓单独 GenContourPolygonXld 后 ConcatObj）
+        /// </summary>
+        private static HObject XldBundleToHObject(List<Point2D[]> contours)
+        {
+            if (contours == null || contours.Count == 0)
+            {
+                HOperatorSet.GenEmptyObj(out HObject empty);
+                return empty;
+            }
+
+            HObject acc = new HObject();
+            HOperatorSet.GenEmptyObj(out acc);
+            int added = 0;
+
+            for (int i = 0; i < contours.Count; i++)
+            {
+                var contour = contours[i];
+                if (contour == null || contour.Length < 2)
+                    continue;
+
+                var rowsList = new List<double>();
+                var colsList = new List<double>();
+                foreach (var pt in contour)
+                {
+                    double row = pt.Y;
+                    double col = pt.X;
+                    if (double.IsNaN(row) || double.IsNaN(col) ||
+                        double.IsInfinity(row) || double.IsInfinity(col))
+                        continue;
+                    rowsList.Add(row);
+                    colsList.Add(col);
+                }
+
+                if (rowsList.Count < 2)
+                    continue;
+
+                HOperatorSet.GenContourPolygonXld(
+                    out HObject one,
+                    new HTuple(rowsList.ToArray()),
+                    new HTuple(colsList.ToArray()));
+
+                if (added == 0)
+                {
+                    acc.Dispose();
+                    acc = one;
+                }
+                else
+                {
+                    HOperatorSet.ConcatObj(acc, one, out HObject merged);
+                    acc.Dispose();
+                    one.Dispose();
+                    acc = merged;
+                }
+
+                added++;
+            }
+
+            if (added == 0)
+            {
+                acc.Dispose();
+                HOperatorSet.GenEmptyObj(out HObject empty);
+                return empty;
+            }
+
+            return acc;
         }
     }
 }

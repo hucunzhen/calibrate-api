@@ -2368,6 +2368,143 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "BarIds", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#FFC107" }
                 }
             },
+            // ================================================================
+            // HALCON 形状模板匹配
+            // ================================================================
+            new OperatorDef
+            {
+                TypeId = "halcon_create_shape_model",
+                DisplayName = "HALCON 创建形状模板",
+                Description = "CreateShapeModel(XLD/ROI 灰度)：基于 XLD 或 ROI 图像创建形状/缩放模板，返回 ModelId。流程中可接 halcon_binary_to_xld；形状模板页支持阈值/Canny/多边形 XLD 与矩形/多边形灰度 ROI。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "numLevels", DisplayName = "NumLevels", DefaultValue = "4", Description = "金字塔层数，0=自动" },
+                    new OperatorParam { Name = "angleStart", DisplayName = "AngleStart(°)", DefaultValue = "-30", Description = "起始角度(度)" },
+                    new OperatorParam { Name = "angleExtent", DisplayName = "AngleExtent(°)", DefaultValue = "60", Description = "角度范围(度)" },
+                    new OperatorParam { Name = "angleStep", DisplayName = "AngleStep(°)", DefaultValue = "0.5", Description = "角度步长(度)" },
+                    new OperatorParam { Name = "optimization", DisplayName = "Optimization", DefaultValue = "auto", Description = "优化方式：auto / no_pregeneration / no_recurse" },
+                    new OperatorParam { Name = "metric", DisplayName = "Metric", DefaultValue = "ignore_local_polarity", Description = "XLD 匹配度量；阈值轮廓请用 ignore_local_polarity（use_polarity 需 edge_direction）" },
+                    new OperatorParam { Name = "contrast", DisplayName = "Contrast", DefaultValue = "30", Description = "已弃用(XLD 无 Contrast)，未设 MinContrast 时作回退" },
+                    new OperatorParam { Name = "minContrast", DisplayName = "MinContrast", DefaultValue = "5", Description = "搜索图最小边缘对比度(create_shape_model_xld)" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Xld", Direction = PortDirection.Input, DataType = typeof(HalconXldContourBundle), ColorHex = "#E65100", IsOptional = true },
+                    new PortDef { Name = "ModelId", Direction = PortDirection.Output, DataType = typeof(long), ColorHex = "#9C27B0" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_find_shape_model",
+                DisplayName = "HALCON 查找形状模板",
+                Description = "FindShapeModel：在图像中查找已创建的形状模板，返回匹配位置。需先有 halcon_create_shape_model。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "angleStart", DisplayName = "AngleStart(°)", DefaultValue = "-30", Description = "起始角度(度)" },
+                    new OperatorParam { Name = "angleExtent", DisplayName = "AngleExtent(°)", DefaultValue = "60", Description = "角度范围(度)" },
+                    new OperatorParam { Name = "minScore", DisplayName = "MinScore", DefaultValue = "0.4", Description = "最小匹配得分；漏检降低、误检提高" },
+                    new OperatorParam { Name = "numMatches", DisplayName = "NumMatches", DefaultValue = "0", Description = "返回最多匹配数，0=全部" },
+                    new OperatorParam { Name = "maxOverlap", DisplayName = "MaxOverlap", DefaultValue = "0.5", Description = "最大重叠度" },
+                    new OperatorParam { Name = "subPixel", DisplayName = "SubPixel", DefaultValue = "interpolation", Description = "亚像素：none / interpolation / least_squares / least_squares_high" },
+                    new OperatorParam { Name = "numLevels", DisplayName = "NumLevels", DefaultValue = "0", Description = "金字塔层数，0=创建模型时使用" },
+                    new OperatorParam { Name = "greediness", DisplayName = "Greediness", DefaultValue = "0.75", Description = "贪心系数 0-1；漏检时降到 0.65~0.7" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "ModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#9C27B0" },
+                    new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF5722" },
+                    new PortDef { Name = "Score", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FFC107" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_load_shape_model",
+                DisplayName = "HALCON 加载形状模板",
+                Description = "从 .shm 文件加载形状模型（形状模板页导出），返回 ModelId。filePath 相对当前流程 .flow.json 所在目录。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "filePath", DisplayName = "模型文件", DefaultValue = "shape_model.shm", Description = ".shm 路径，相对流程文件目录或绝对路径" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "ModelId", Direction = PortDirection.Output, DataType = typeof(long), ColorHex = "#9C27B0" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_shape_match_centers",
+                DisplayName = "HALCON 匹配中心→点列",
+                Description = "将 FindShapeModel 的 Row/Column 转为 Point2D[]（X=列,Y=行），供「显示图像」叠加匹配位置。",
+                Category = "HALCON",
+                Ports =
+                {
+                    new PortDef { Name = "Row", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Points", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_filter_shape_match_grid",
+                DisplayName = "HALCON 阵列过滤匹配",
+                Description = "行/列聚类后拟合等间距格点(每行N个、共M行)；每格选最贴近理论格点的匹配，分数次之。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "3", Description = "阵列行数（沿副轴 v）" },
+                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "3", Description = "阵列列数（沿主轴 u）" },
+                    new OperatorParam { Name = "pitchRow", DisplayName = "行间距(px)", DefaultValue = "0", Description = "0=自动估计（沿 v / 图像行方向间距）" },
+                    new OperatorParam { Name = "pitchCol", DisplayName = "列间距(px)", DefaultValue = "0", Description = "0=自动估计（沿 u / 图像列方向间距）" },
+                    new OperatorParam { Name = "gridAngleDeg", DisplayName = "阵列角度(°)", DefaultValue = "auto", Description = "auto=匹配角+PCA，并自动消歧 ±90°/行列对调；也可填固定角度(仍会自动试行列对调)" },
+                    new OperatorParam { Name = "snapTolerancePx", DisplayName = "格点容差(px)", DefaultValue = "0", Description = "0=自动(约 0.35×min间距)" },
+                    new OperatorParam { Name = "pitchToleranceRatio", DisplayName = "间距容差比", DefaultValue = "0.2", Description = "邻格一致性检查时的间距相对容差" },
+                    new OperatorParam { Name = "minNeighborVotes", DisplayName = "最少邻格票", DefaultValue = "0", Description = "0=关闭；≥1 抑制孤立误检(可能增加漏检)" },
+                    new OperatorParam { Name = "minScoreKeep", DisplayName = "最低得分", DefaultValue = "0", Description = "过滤后保留的最低 Score；误检多时可设 0.45~0.55" },
+                    new OperatorParam { Name = "maxAngleDeviationDeg", DisplayName = "最大角度偏差°", DefaultValue = "0", Description = "0=关闭；相对模板匹配角的偏差上限。整板旋转时各点角相近可设 10~15°；对称模板或角度乱跳时请设 0" },
+                    new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto", Description = "auto=后台跑flow或设环境变量XV_GRID_FILTER_LOG时写日志；true=强制；false=关闭。日志见 flow同目录/*.grid-filter.log" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Row", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
+                    new PortDef { Name = "Score", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF5722" },
+                    new PortDef { Name = "Score", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FFC107" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_display_shape_match",
+                DisplayName = "HALCON 显示形状匹配结果",
+                Description = "在预览窗口叠加 FindShapeModel 结果：按位姿变换的模板轮廓（多色）、匹配中心十字与得分。需连接 In、ModelId 及查找输出的 Row/Column/Angle/Score。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "contourLevel", DisplayName = "ContourLevel", DefaultValue = "1", Description = "GetShapeModelContours 金字塔层" },
+                    new OperatorParam { Name = "crossHalf", DisplayName = "十字半长(px)", DefaultValue = "14", Description = "匹配中心十字线半长" },
+                    new OperatorParam { Name = "strokeWidth", DisplayName = "线宽", DefaultValue = "2.5", Description = "轮廓与十字笔画宽度" },
+                    new OperatorParam { Name = "drawScores", DisplayName = "显示得分", DefaultValue = "true", Description = "true/false" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "ModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#9C27B0" },
+                    new PortDef { Name = "Row", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
+                    new PortDef { Name = "Score", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
             new OperatorDef
             {
                 TypeId = "composite",

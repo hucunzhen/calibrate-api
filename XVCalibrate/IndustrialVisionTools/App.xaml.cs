@@ -33,11 +33,14 @@ namespace CalibOperatorCLI_Example
             var mainWindow = new MainWindow();
             mainWindow.Show();
 
-            string? flowPath = TryParseFlowPathArg(e.Args, out bool preferNativeEngine);
+            string? flowPath = TryParseFlowPathArg(e.Args, out bool preferNativeEngine, out bool gridFilterLog);
             if (!string.IsNullOrWhiteSpace(flowPath))
             {
                 // 从终端启动时可挂上父控制台，便于看到简要结果（WinExe 默认无控制台）
                 try { AttachConsole(AttachParentProcess); } catch { /* ignore */ }
+
+                if (gridFilterLog)
+                    HalconShapeMatchGridDiagnostics.EnableForFlowFile(flowPath, mirrorConsole: true);
 
                 // 后台自动执行模式：隐藏窗口，执行完成后以退出码返回结果
                 mainWindow.WindowState = WindowState.Minimized;
@@ -82,24 +85,30 @@ namespace CalibOperatorCLI_Example
             string.Equals(arg, "--prefer-native-engine", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(arg, "-prefer-native-engine", StringComparison.OrdinalIgnoreCase);
 
+        private static bool IsGridFilterLogSwitch(string arg) =>
+            string.Equals(arg, "--grid-filter-log", StringComparison.OrdinalIgnoreCase);
+
         /// <summary>
         /// 解析 CLI：flow 路径 + 是否优先使用 C++ NativeFlowEngine（可与路径任意顺序混写）。
         /// </summary>
-        private static string? TryParseFlowPathArg(string[] args, out bool preferNativeEngine)
+        private static string? TryParseFlowPathArg(string[] args, out bool preferNativeEngine, out bool gridFilterLog)
         {
             preferNativeEngine = false;
+            gridFilterLog = false;
             if (args == null || args.Length == 0) return null;
 
             foreach (string a in args)
             {
                 if (IsPreferNativeEngineSwitch(a))
                     preferNativeEngine = true;
+                if (IsGridFilterLogSwitch(a))
+                    gridFilterLog = true;
             }
 
             for (int i = 0; i < args.Length; i++)
             {
                 string arg = args[i];
-                if (IsPreferNativeEngineSwitch(arg)) continue;
+                if (IsPreferNativeEngineSwitch(arg) || IsGridFilterLogSwitch(arg)) continue;
                 if (string.Equals(arg, "--flow", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(arg, "-flow", StringComparison.OrdinalIgnoreCase))
                 {
@@ -111,7 +120,7 @@ namespace CalibOperatorCLI_Example
             // 兼容直接传文件路径（可与开关混用，例如： app.exe my.flow.json --prefer-native-engine）
             foreach (string arg in args)
             {
-                if (IsPreferNativeEngineSwitch(arg)) continue;
+                if (IsPreferNativeEngineSwitch(arg) || IsGridFilterLogSwitch(arg)) continue;
                 if (arg.Length > 0 && arg[0] == '-') continue;
                 if (arg.EndsWith(".flow.json", StringComparison.OrdinalIgnoreCase))
                     return Path.GetFullPath(arg);

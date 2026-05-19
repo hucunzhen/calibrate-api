@@ -17,6 +17,7 @@ namespace CalibOperatorCLI_Example
         private YoloSegTrainPage _yoloSegTrainPage;
         private HalconDlSegPage _halconDlSegPage;
         private SamTrainPage _samTrainPage;
+        private HalconShapeModelPage _halconShapeModelPage;
 
         public MainWindow()
         {
@@ -39,6 +40,7 @@ namespace CalibOperatorCLI_Example
             _yoloSegTrainPage = new YoloSegTrainPage();
             _halconDlSegPage = new HalconDlSegPage();
             _samTrainPage = new SamTrainPage();
+            _halconShapeModelPage = new HalconShapeModelPage();
 
             NavigateTo(_flowHostPage);
             HighlightTab("Flow");
@@ -76,6 +78,7 @@ namespace CalibOperatorCLI_Example
                 case "YoloSeg":
                 case "HalconDlSeg":
                 case "SamOnnx":
+                case "HalconShapeModel":
                     NavAdvanced.Background = accent;
                     break;
             }
@@ -129,6 +132,12 @@ namespace CalibOperatorCLI_Example
             HighlightTab("SamOnnx");
         }
 
+        private void NavHalconShapeModel_Click(object sender, RoutedEventArgs e)
+        {
+            NavigateTo(_halconShapeModelPage);
+            HighlightTab("HalconShapeModel");
+        }
+
         public async Task<bool> RunFlowConfigInBackgroundAsync(string flowFilePath, bool preferNativeEngine = false)
         {
             if (string.IsNullOrWhiteSpace(flowFilePath))
@@ -148,14 +157,17 @@ namespace CalibOperatorCLI_Example
             SaveLastFlowPath(flowFilePath);
             fp.MirrorErrorsToStderr = true;
             fp.TraceEnginePathToConsole = true;
+            HalconShapeMatchGridDiagnostics.EnableForFlowFile(flowFilePath, mirrorConsole: true);
             try
             {
+                try { Console.WriteLine($"[GridFilter] 诊断日志: {HalconShapeMatchGridDiagnostics.LogFilePath}"); } catch { /* ignore */ }
                 return await fp.RunAllAsync(clearLog: true, preferNativeEngine: preferNativeEngine);
             }
             finally
             {
                 fp.MirrorErrorsToStderr = false;
                 fp.TraceEnginePathToConsole = false;
+                HalconShapeMatchGridDiagnostics.Disable();
             }
         }
 

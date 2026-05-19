@@ -8836,7 +8836,163 @@ namespace CalibOperatorCLI_Example
                             : $"HALCON xld_pts 输入轮廓={xb.ContourCount} 点={pts.Length}";
                         break;
                     }
+
+                    case "halcon_create_shape_model":
+                    {
+                        HalconXldContourBundle? xldBundle = null;
+                        inputs.TryGetValue("Xld", out var xldObj);
+                        xldBundle = xldObj as HalconXldContourBundle;
+                        int numLevels = int.TryParse(node.Params.GetValueOrDefault("numLevels"), out var nl) ? nl : 4;
+                        double angleStart = double.TryParse(node.Params.GetValueOrDefault("angleStart"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var asv) ? asv : -30.0;
+                        double angleExtent = double.TryParse(node.Params.GetValueOrDefault("angleExtent"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var aev) ? aev : 60.0;
+                        double angleStep = double.TryParse(node.Params.GetValueOrDefault("angleStep"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var apv) ? apv : 0.5;
+                        string optimization = node.Params.GetValueOrDefault("optimization") ?? "auto";
+                        string metric = node.Params.GetValueOrDefault("metric") ?? "use_polarity";
+                        int contrast = int.TryParse(node.Params.GetValueOrDefault("contrast"), out var c) ? c : 30;
+                        int minContrast = int.TryParse(node.Params.GetValueOrDefault("minContrast"), out var mc) ? mc : 5;
+                        long modelId = HalconFlowBridge.CreateShapeModelFromXld(xldBundle, numLevels, angleStart, angleExtent, angleStep, optimization, metric, contrast, minContrast);
+                        node.Outputs["ModelId"] = modelId;
+                        node.ResultSummary = $"HALCON CreateShapeModel ModelId={modelId}";
+                        break;
+                    }
+
+                    case "halcon_find_shape_model":
+                    {
+                        var findImg = inputs["In"] as CalibImage;
+                        if (findImg == null) throw new InvalidOperationException("HALCON FindShapeModel: 缺少 In");
+                        long modelId = Convert.ToInt64(inputs["ModelId"]);
+                        double angleStart = double.TryParse(node.Params.GetValueOrDefault("angleStart"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var asv) ? asv : -30.0;
+                        double angleExtent = double.TryParse(node.Params.GetValueOrDefault("angleExtent"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var aev) ? aev : 60.0;
+                        double minScore = double.TryParse(node.Params.GetValueOrDefault("minScore"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ms) ? ms : 0.5;
+                        int numMatches = int.TryParse(node.Params.GetValueOrDefault("numMatches"), out var nm) ? nm : 0;
+                        double maxOverlap = double.TryParse(node.Params.GetValueOrDefault("maxOverlap"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mo) ? mo : 0.5;
+                        string subPixel = node.Params.GetValueOrDefault("subPixel") ?? "interpolation";
+                        int numLevels = int.TryParse(node.Params.GetValueOrDefault("numLevels"), out var nl) ? nl : 0;
+                        double greediness = double.TryParse(node.Params.GetValueOrDefault("greediness"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var g) ? g : 0.9;
+                        var (rows, cols, angles, scores) = HalconFlowBridge.FindShapeModelWithFallback(
+                            findImg, modelId, angleStart, angleExtent, minScore, numMatches, maxOverlap, subPixel, numLevels, greediness);
+                        node.Outputs["Row"] = rows;
+                        node.Outputs["Column"] = cols;
+                        node.Outputs["Angle"] = angles;
+                        node.Outputs["Score"] = scores;
+                        node.ResultSummary = $"HALCON FindShapeModel 找到 {rows.Length} 个匹配";
+                        break;
+                    }
+
+                    case "halcon_load_shape_model":
+                    {
+                        string configuredPath = node.Params.GetValueOrDefault("filePath", "")?.Trim() ?? "";
+                        if (string.IsNullOrWhiteSpace(configuredPath))
+                            throw new InvalidOperationException("HALCON 加载形状模型: filePath 为空");
+                        string resolvedPath = ResolveCompositeFlowPath(configuredPath);
+                        long modelId = HalconFlowBridge.LoadShapeModelFromFile(resolvedPath);
+                        node.Outputs["ModelId"] = modelId;
+                        node.ResultSummary = $"HALCON 已加载 .shm ModelId={modelId}";
+                        break;
+                    }
 #endif
+
+                    case "halcon_shape_match_centers":
+                    {
+                        double[] rows = inputs.TryGetValue("Row", out var rObj) && rObj is double[] ra ? ra : Array.Empty<double>();
+                        double[] cols = inputs.TryGetValue("Column", out var cObj) && cObj is double[] ca ? ca : Array.Empty<double>();
+                        int n = Math.Min(rows.Length, cols.Length);
+                        var pts = new Point2D[n];
+                        for (int i = 0; i < n; i++)
+                            pts[i] = new Point2D(cols[i], rows[i]);
+                        node.Outputs["Points"] = pts;
+                        node.ResultSummary = n == 0 ? "无匹配中心" : $"匹配中心 {n} 个点";
+                        break;
+                    }
+
+                    case "halcon_filter_shape_match_grid":
+                    {
+                        double[] rows = inputs.TryGetValue("Row", out var rIn) && rIn is double[] ra ? ra : Array.Empty<double>();
+                        double[] cols = inputs.TryGetValue("Column", out var cIn) && cIn is double[] ca ? ca : Array.Empty<double>();
+                        inputs.TryGetValue("Angle", out var aIn);
+                        double[]? anglesIn = aIn as double[];
+                        inputs.TryGetValue("Score", out var sIn);
+                        double[]? scoresIn = sIn as double[];
+
+                        int gridRows = int.TryParse(node.Params.GetValueOrDefault("gridRows"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int gr) ? gr : 3;
+                        int gridCols = int.TryParse(node.Params.GetValueOrDefault("gridCols"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int gc) ? gc : 3;
+                        double pitchRow = double.TryParse(node.Params.GetValueOrDefault("pitchRow"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double pr) ? pr : 0;
+                        double pitchCol = double.TryParse(node.Params.GetValueOrDefault("pitchCol"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double pc) ? pc : 0;
+                        string angleRaw = (node.Params.GetValueOrDefault("gridAngleDeg", "auto") ?? "auto").Trim();
+                        double? gridAngle = string.Equals(angleRaw, "auto", StringComparison.OrdinalIgnoreCase)
+                            ? null
+                            : double.TryParse(angleRaw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double gad)
+                                ? gad
+                                : null;
+                        double snapTol = double.TryParse(node.Params.GetValueOrDefault("snapTolerancePx"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double st) ? st : 0;
+                        double pitchTol = double.TryParse(node.Params.GetValueOrDefault("pitchToleranceRatio"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double pt) ? pt : 0.2;
+                        int minVotes = int.TryParse(node.Params.GetValueOrDefault("minNeighborVotes"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int mv) ? mv : 0;
+                        double minScoreKeep = double.TryParse(node.Params.GetValueOrDefault("minScoreKeep"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double msk) ? msk : 0;
+                        double maxAngleDev = double.TryParse(node.Params.GetValueOrDefault("maxAngleDeviationDeg"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double mad) ? mad : 0;
+
+                        string diagTag = $"{node.Def.DisplayName}#{node.Id.ToString()[..8]}";
+                        bool wantGridLog = HalconShapeMatchGridDiagnostics.ShouldLogForParam(
+                            node.Params.GetValueOrDefault("debugLog", "auto"), MirrorErrorsToStderr);
+                        if (wantGridLog && !HalconShapeMatchGridDiagnostics.IsEnabled)
+                            HalconShapeMatchGridDiagnostics.Enable(mirrorConsole: MirrorErrorsToStderr, sessionName: diagTag);
+
+                        if (wantGridLog)
+                        {
+                            HalconShapeMatchGridDiagnostics.LogFindInput(diagTag, rows.Length, scoresIn);
+                            string? logPath = HalconShapeMatchGridDiagnostics.LogFilePath;
+                            if (!string.IsNullOrEmpty(logPath))
+                                AppendLog($"[GridFilter] 诊断日志 → {logPath}");
+                        }
+
+                        var filtered = HalconShapeMatchGridFilter.Filter(
+                            rows, cols, anglesIn, scoresIn,
+                            gridRows, gridCols,
+                            pitchRow, pitchCol,
+                            gridAngle,
+                            snapTol,
+                            pitchTol,
+                            minVotes,
+                            minScoreKeep,
+                            maxAngleDev,
+                            wantGridLog ? diagTag : null);
+
+                        node.Outputs["Row"] = filtered.Rows;
+                        node.Outputs["Column"] = filtered.Cols;
+                        node.Outputs["Angle"] = filtered.Angles;
+                        node.Outputs["Score"] = filtered.Scores;
+                        string swapNote = filtered.AxesSwapped ? ", 行列轴已对调" : "";
+                        node.ResultSummary =
+                            $"阵列过滤 {filtered.InputCount}→{filtered.Rows.Length} " +
+                            $"(阵列 {gridRows}×{gridCols}, 间距≈{filtered.EstimatedPitchRow:F1}×{filtered.EstimatedPitchCol:F1}px, θ≈{filtered.EstimatedAngleDeg:F1}°{swapNote})";
+                        break;
+                    }
+
+                    case "halcon_display_shape_match":
+                    {
+                        var matchImg = inputs["In"] as CalibImage;
+                        if (matchImg == null)
+                            throw new InvalidOperationException("HALCON 显示形状匹配: 缺少 In");
+                        if (!inputs.TryGetValue("ModelId", out var midObj))
+                            throw new InvalidOperationException("HALCON 显示形状匹配: 缺少 ModelId");
+                        long modelId = Convert.ToInt64(midObj);
+                        double[] rows = inputs.TryGetValue("Row", out var rowObj) && rowObj is double[] ra ? ra : Array.Empty<double>();
+                        double[] cols = inputs.TryGetValue("Column", out var colObj) && colObj is double[] ca ? ca : Array.Empty<double>();
+                        inputs.TryGetValue("Angle", out var angObj);
+                        double[] angles = angObj as double[] ?? Array.Empty<double>();
+                        inputs.TryGetValue("Score", out var scObj);
+                        double[] scores = scObj as double[] ?? Array.Empty<double>();
+                        int contourLevel = int.TryParse(node.Params.GetValueOrDefault("contourLevel"), out int cl) && cl > 0 ? cl : 1;
+                        float crossHalf = float.TryParse(node.Params.GetValueOrDefault("crossHalf"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float ch) ? ch : 14f;
+                        float strokeWidth = float.TryParse(node.Params.GetValueOrDefault("strokeWidth"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float sw) ? sw : 2.5f;
+                        bool drawScores = !string.Equals(node.Params.GetValueOrDefault("drawScores", "true")?.Trim(), "false", StringComparison.OrdinalIgnoreCase);
+                        string dispSlot = node.Id.ToString("D");
+                        string dispTitle = $"{node.Def.DisplayName} [{node.Id.ToString("N")[..8]}]";
+                        ShowShapeMatchPreview(matchImg, modelId, rows, cols, angles, scores, dispSlot, dispTitle, contourLevel, crossHalf, strokeWidth, drawScores);
+                        node.Outputs["Out"] = matchImg;
+                        int n = Math.Min(rows.Length, cols.Length);
+                        node.ResultSummary = n == 0 ? "无匹配可显示" : $"已显示 {n} 个匹配";
+                        break;
+                    }
 
                     case "composite_bind_in":
                     {
@@ -9450,6 +9606,49 @@ namespace CalibOperatorCLI_Example
             return bmp;
         }
 
+        /// <summary>HALCON FindShapeModel 专用预览：模板轮廓按位姿叠加、十字、得分。</summary>
+        private void ShowShapeMatchPreview(
+            CalibImage img,
+            long modelId,
+            double[] rows,
+            double[] cols,
+            double[] angles,
+            double[] scores,
+            string previewSlotKey,
+            string titlePrefix,
+            int contourLevel,
+            float crossHalf,
+            float strokeWidth,
+            bool drawScores)
+        {
+            int n = Math.Min(rows.Length, cols.Length);
+            string title = titlePrefix + (n > 0 ? $" · {n} 匹配" : " · 无匹配");
+#if HALCON_ENABLED
+            ShowImagePreview(
+                img,
+                null,
+                0,
+                null,
+                previewSlotKey,
+                title,
+                null,
+                null,
+                null,
+                (drawBmp) => HalconShapeMatchVisualizer.DrawOnBitmap(
+                    drawBmp, modelId, rows, cols, angles, scores, contourLevel, crossHalf, strokeWidth, drawScores));
+#else
+            if (n > 0)
+            {
+                var pts = new Point2D[n];
+                for (int i = 0; i < n; i++)
+                    pts[i] = new Point2D(cols[i], rows[i]);
+                ShowImagePreview(img, pts, 6, null, previewSlotKey, title + " (无HALCON，仅中心点)");
+            }
+            else
+                ShowImagePreview(img, null, 0, null, previewSlotKey, title);
+#endif
+        }
+
         /// <summary>
         /// 显示图像预览窗口，支持缩放和平移，可选叠加点位
         /// 滚轮缩放；右键按住拖拽平移（轻微移动仍可弹出菜单）；右键菜单「保存图像」或 F 适应窗口，1 重置100%
@@ -9465,7 +9664,8 @@ namespace CalibOperatorCLI_Example
             string? titlePrefix = null,
             int[]? overlayBarIds = null,
             string? overlayPointLineJoinMode = null,
-            HalconXldContourBundle? xldOverlay = null)
+            HalconXldContourBundle? xldOverlay = null,
+            Action<System.Drawing.Bitmap>? customBitmapDraw = null)
         {
             var baseSource = backgroundImg ?? img;
             if (baseSource == null) return;
@@ -9500,7 +9700,8 @@ namespace CalibOperatorCLI_Example
 
             bool drawPts = overlayPoints != null && overlayPoints.Length > 0;
             bool drawXld = xldOverlay != null && xldOverlay.ContourCount > 0;
-            if (drawPts || drawXld)
+            bool drawCustom = customBitmapDraw != null;
+            if (drawPts || drawXld || drawCustom)
             {
                 // Graphics.FromImage 不支持索引像素格式，先转为 24bppRgb
                 var drawBmp = new System.Drawing.Bitmap(bmp.Width, bmp.Height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
@@ -9580,6 +9781,8 @@ namespace CalibOperatorCLI_Example
                             }
                         }
                     }
+
+                    customBitmapDraw?.Invoke(bmp);
                 }
             }
 
