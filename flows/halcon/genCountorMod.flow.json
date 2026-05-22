@@ -107,11 +107,22 @@
     {
       "Id": "c81e0011-bbbb-4011-8011-000000000011",
       "TypeId": "polyline_simplify_dp",
-      "X": 1749,
-      "Y": 377,
+      "X": 1699,
+      "Y": 349,
       "Params": {
         "epsilon": "1.5",
         "closed": "true"
+      }
+    },
+    {
+      "Id": "c81e0012-cccc-4012-8012-000000000012",
+      "TypeId": "polyline_uniform_offset",
+      "X": 1960,
+      "Y": 429,
+      "Params": {
+        "offsetDistance": "-10",
+        "closed": "true",
+        "halconMode": "regression_normal"
       }
     },
     {
@@ -133,8 +144,8 @@
     {
       "Id": "45dc7abb-52d0-4c81-b17c-a4c1c81c03e8",
       "TypeId": "plane_to_base_handeye",
-      "X": 2048,
-      "Y": 348,
+      "X": 2150,
+      "Y": 217,
       "Params": {
         "filePath": "D:\\work\\calibrate-api\\flows\\halcon\\handeye_plane_to_base.json",
         "planeZ": "0"
@@ -143,8 +154,8 @@
     {
       "Id": "04a2ad9d-8fb2-4ff0-bf15-694abb9d21cc",
       "TypeId": "composite_bind_out",
-      "X": 2300,
-      "Y": 322,
+      "X": 2384,
+      "Y": 353,
       "Params": {
         "externalPort": "Out"
       }
@@ -152,8 +163,8 @@
     {
       "Id": "a6b3c467-61a4-4c1e-bbf1-4ef1f1262703",
       "TypeId": "composite_bind_out",
-      "X": 2263,
-      "Y": 471,
+      "X": 2291,
+      "Y": 496,
       "Params": {
         "externalPort": "Out2"
       }
@@ -165,6 +176,16 @@
       "Y": 0,
       "Params": {
         "externalPort": "In"
+      }
+    },
+    {
+      "Id": "a64092c9-67fa-44d9-ac3f-420d64d579b7",
+      "TypeId": "display",
+      "X": 1614,
+      "Y": 0,
+      "Params": {
+        "dotRadius": "3",
+        "pointLineJoin": "auto"
       }
     }
   ],
@@ -328,8 +349,32 @@
     {
       "FromNodeId": "c81e0011-bbbb-4011-8011-000000000011",
       "FromPort": "Out",
+      "ToNodeId": "c81e0012-cccc-4012-8012-000000000012",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "c81e0011-bbbb-4011-8011-000000000011",
+      "FromPort": "OutBarIds",
+      "ToNodeId": "c81e0012-cccc-4012-8012-000000000012",
+      "ToPort": "BarIds"
+    },
+    {
+      "FromNodeId": "c81e0010-aaaa-4010-8010-000000000010",
+      "FromPort": "GroupBarIds",
+      "ToNodeId": "c81e0012-cccc-4012-8012-000000000012",
+      "ToPort": "GroupBarIds"
+    },
+    {
+      "FromNodeId": "c81e0012-cccc-4012-8012-000000000012",
+      "FromPort": "Out",
       "ToNodeId": "34ff0eb4-92c9-4a5c-b83a-a15e3b47e5e8",
       "ToPort": "Pixel"
+    },
+    {
+      "FromNodeId": "c81e0012-cccc-4012-8012-000000000012",
+      "FromPort": "OutBarIds",
+      "ToNodeId": "45dc7abb-52d0-4c81-b17c-a4c1c81c03e8",
+      "ToPort": "BarIds"
     },
     {
       "FromNodeId": "34ff0eb4-92c9-4a5c-b83a-a15e3b47e5e8",
@@ -362,12 +407,6 @@
       "ToPort": "Image"
     },
     {
-      "FromNodeId": "c81e0011-bbbb-4011-8011-000000000011",
-      "FromPort": "OutBarIds",
-      "ToNodeId": "45dc7abb-52d0-4c81-b17c-a4c1c81c03e8",
-      "ToPort": "BarIds"
-    },
-    {
       "FromNodeId": "c81e0010-aaaa-4010-8010-000000000010",
       "FromPort": "BarIds",
       "ToNodeId": "c81e0011-bbbb-4011-8011-000000000011",
@@ -378,6 +417,24 @@
       "FromPort": "GroupBarIds",
       "ToNodeId": "c81e0011-bbbb-4011-8011-000000000011",
       "ToPort": "GroupBarIds"
+    },
+    {
+      "FromNodeId": "c81e0012-cccc-4012-8012-000000000012",
+      "FromPort": "Out",
+      "ToNodeId": "a64092c9-67fa-44d9-ac3f-420d64d579b7",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "c81e0012-cccc-4012-8012-000000000012",
+      "FromPort": "OutBarIds",
+      "ToNodeId": "a64092c9-67fa-44d9-ac3f-420d64d579b7",
+      "ToPort": "BarIds"
+    },
+    {
+      "FromNodeId": "e81e0008-8888-4008-8008-000000000008",
+      "FromPort": "Out",
+      "ToNodeId": "a64092c9-67fa-44d9-ac3f-420d64d579b7",
+      "ToPort": "Image"
     }
   ]
 }

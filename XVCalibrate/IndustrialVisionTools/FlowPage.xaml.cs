@@ -2342,6 +2342,44 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>与 <see cref="SplitSampledPointsToContourPolylines"/> 相同，并输出每条折线对应的条号（用于焊道分段合并时禁止跨条直连）。</summary>
+        private static void OffsetPolylinesWithBarIds(
+            Point2D[] pts,
+            int[]? barIds,
+            double distance,
+            bool closed,
+            out Point2D[] outPts,
+            out int[] outBarIds)
+        {
+            if (barIds == null || barIds.Length != pts.Length)
+            {
+                outPts = PolylineUniformOffset.Offset(pts, distance, closed);
+                outBarIds = new int[outPts.Length];
+                return;
+            }
+
+            SplitSampledPointsToContourPolylinesWithBarIds(pts, barIds, out var groups, out var segBarIds);
+            var outList = new List<Point2D>();
+            var idList = new List<int>();
+            for (int gi = 0; gi < groups.Count; gi++)
+            {
+                var seg = groups[gi];
+                if (seg == null || seg.Length < 2)
+                    continue;
+
+                int barId = gi < segBarIds.Count ? segBarIds[gi] : gi;
+                bool segClosed = closed && seg.Length >= 3;
+                var off = PolylineUniformOffset.Offset(seg, distance, segClosed);
+                foreach (var p in off)
+                {
+                    outList.Add(p);
+                    idList.Add(barId);
+                }
+            }
+
+            outPts = outList.ToArray();
+            outBarIds = idList.ToArray();
+        }
+
         private static void SplitSampledPointsToContourPolylinesWithBarIds(
             Point2D[] points,
             int[]? barIds,
@@ -8433,6 +8471,85 @@ namespace CalibOperatorCLI_Example
                         node.Outputs["Out"] = simplified;
                         node.Outputs["OutBarIds"] = outBarIds;
                         node.ResultSummary = $"{pts.Length} → {simplified.Length} pts, ε={epsilon:G}";
+                        break;
+                    }
+
+                    case "polyline_uniform_offset":
+                    {
+                        double offsetDist = 5.0;
+                        if (node.Params.TryGetValue("offsetDistance", out var offText) &&
+                            !string.IsNullOrWhiteSpace(offText) &&
+                            double.TryParse(offText.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var od))
+                            offsetDist = od;
+
+                        var closedRaw = (node.Params.GetValueOrDefault("closed", "true") ?? "true").Trim();
+                        bool closed = !string.Equals(closedRaw, "false", StringComparison.OrdinalIgnoreCase)
+                                      && !string.Equals(closedRaw, "0", StringComparison.OrdinalIgnoreCase);
+                        string halconMode = node.Params.GetValueOrDefault("halconMode", "regression_normal") ?? "regression_normal";
+
+#if HALCON_ENABLED
+                        if (inputs.TryGetValue("Xld", out var xldIn) && xldIn is HalconXldContourBundle xb)
+                        {
+                            if (xb.ContourCount == 0)
+                            {
+                                node.Outputs["XldOut"] = new HalconXldContourBundle { Width = xb.Width, Height = xb.Height, Contours = new List<Point2D[]>() };
+                                node.ResultSummary = "skip: empty Xld → empty XldOut";
+                                break;
+                            }
+
+                            var xldOut = HalconFlowBridge.OffsetXldBundle(xb, offsetDist, halconMode);
+                            node.Outputs["XldOut"] = xldOut;
+                            node.ResultSummary = $"HALCON 外扩 d={offsetDist:G} → {xldOut.ContourCount} 条 XLD";
+                            break;
+                        }
+#endif
+                        int[]? barIn = null;
+                        if (inputs.TryGetValue("Points3D", out var p3Obj) && p3Obj is CalibPoint3D[] p3 && p3.Length > 0)
+                        {
+                            var xy = new Point2D[p3.Length];
+                            for (int i = 0; i < p3.Length; i++)
+                                xy[i] = new Point2D(p3[i].X, p3[i].Y);
+                            if (inputs.TryGetValue("GroupBarIds", out var gb3) && gb3 is int[] gbArr && gbArr.Length == p3.Length)
+                                barIn = gbArr;
+                            else if (inputs.TryGetValue("BarIds", out var b3) && b3 is int[] bArr && bArr.Length == p3.Length)
+                                barIn = bArr;
+
+                            OffsetPolylinesWithBarIds(xy, barIn, offsetDist, closed, out var off2d, out var offIds);
+                            var off3d = new CalibPoint3D[off2d.Length];
+                            for (int i = 0; i < off2d.Length; i++)
+                            {
+                                int j = Math.Min(i, p3.Length - 1);
+                                off3d[i] = new CalibPoint3D(off2d[i].X, off2d[i].Y, p3[j].Z);
+                            }
+
+                            node.Outputs["Out3D"] = off3d;
+                            node.Outputs["Out"] = off2d;
+                            node.Outputs["OutBarIds"] = offIds;
+                            node.ResultSummary = $"3D 外扩 d={offsetDist:G} · {p3.Length}→{off3d.Length} 点";
+                            break;
+                        }
+
+                        var pts = inputs.GetValueOrDefault("In") as Point2D[];
+                        if (pts == null)
+                            throw new InvalidOperationException("轮廓/轨迹均匀外扩: 请连接 In(Point2D[])、Points3D 或 Xld");
+
+                        if (pts.Length == 0)
+                        {
+                            node.Outputs["Out"] = Array.Empty<Point2D>();
+                            node.Outputs["OutBarIds"] = Array.Empty<int>();
+                            node.ResultSummary = "skip: 0 pts → empty Out";
+                            break;
+                        }
+
+                        if (inputs.TryGetValue("GroupBarIds", out var gbObj) && gbObj is int[] gb && gb.Length == pts.Length)
+                            barIn = gb;
+                        else if (inputs.TryGetValue("BarIds", out var barObj) && barObj is int[] bi && bi.Length == pts.Length)
+                            barIn = bi;
+
+                        OffsetPolylinesWithBarIds(pts, barIn, offsetDist, closed, out var outPts, out var outBarIds);
+                        node.Outputs["Out"] = outPts;
+                        node.Outputs["OutBarIds"] = outBarIds;
+                        node.ResultSummary = $"外扩 d={offsetDist:G} · {pts.Length}→{outPts.Length} 点";
                         break;
                     }
 

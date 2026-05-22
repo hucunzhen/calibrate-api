@@ -85,6 +85,30 @@ namespace CalibOperatorCLI_Example
             return OperateResult.CreateSuccessResult(g);
         }
 
+        /// <summary>读取线段数量寄存器（默认 D800，16 位有符号）。</summary>
+        public static OperateResult<short> ReadSegmentCount(XinJETcpNet plc, string segmentCountRegister)
+        {
+            string addr = PlcXinjeHelper.NormalizeWordAddress(
+                (segmentCountRegister ?? "").Trim(),
+                out _);
+            var r = plc.ReadInt16(addr);
+            if (!r.IsSuccess)
+                return OperateResult.CreateFailedResult<short>(r);
+            return OperateResult.CreateSuccessResult(r.Content);
+        }
+
+        /// <summary>写入线段数量寄存器（默认 D800）。</summary>
+        public static OperateResult WriteSegmentCount(XinJETcpNet plc, string segmentCountRegister, short count)
+        {
+            string addr = PlcXinjeHelper.NormalizeWordAddress(
+                (segmentCountRegister ?? "").Trim(),
+                out _);
+            var wr = plc.Write(addr, count);
+            if (!wr.IsSuccess)
+                return CopyOperateFailure(wr);
+            return OperateResult.CreateSuccessResult();
+        }
+
         public static OperateResult<GVAR[]> ReadGvarListFromPlc(XinJETcpNet plc, string startXinje, int itemCount)
         {
             if (itemCount <= 0)
@@ -153,9 +177,36 @@ namespace CalibOperatorCLI_Example
             return OperateResult.CreateSuccessResult();
         }
 
-        public static OperateResult SendGvarList(XinJETcpNet plc, string startXinje, GVAR[] items, out int totalWords)
+        /// <summary>仅写 GVAR（不写 D800；流程 send_plc 已单独写线段数时用）。</summary>
+        public static OperateResult SendGvarList(
+            XinJETcpNet plc,
+            string startXinje,
+            GVAR[] items,
+            out int totalWords)
         {
             totalWords = (items?.Length ?? 0) * GVAR.WORD_COUNT;
+            return WriteGvarList(plc, startXinje, items);
+        }
+
+        /// <summary>先写 D800 线段数，再写 GVAR 列表（PLC 页 Write All）。</summary>
+        public static OperateResult SendGvarListWithSegmentCount(
+            XinJETcpNet plc,
+            string segmentCountRegister,
+            string startXinje,
+            GVAR[] items,
+            out int totalWords)
+        {
+            totalWords = (items?.Length ?? 0) * GVAR.WORD_COUNT;
+            if (items == null || items.Length == 0)
+                return new OperateResult { IsSuccess = false, Message = "GVAR 列表为空" };
+
+            if (items.Length > short.MaxValue)
+                return new OperateResult { IsSuccess = false, Message = $"线段数 {items.Length} 超过 Int16 上限" };
+
+            var wrCount = WriteSegmentCount(plc, segmentCountRegister, (short)items.Length);
+            if (!wrCount.IsSuccess)
+                return wrCount;
+
             return WriteGvarList(plc, startXinje, items);
         }
     }

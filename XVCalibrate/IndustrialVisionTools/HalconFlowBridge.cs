@@ -1376,6 +1376,64 @@ namespace CalibOperatorCLI_Example
             };
         }
 
+        /// <summary>HALCON 法向等距偏移 XLD（<c>gen_parallel_contour_xld</c>）。</summary>
+        public static HalconXldContourBundle OffsetXldBundle(HalconXldContourBundle src, double offset, string mode)
+        {
+            if (src == null) throw new ArgumentNullException(nameof(src));
+            if (src.Contours == null || src.Contours.Count == 0)
+                return new HalconXldContourBundle { Width = src.Width, Height = src.Height, Contours = new List<Point2D[]>() };
+
+            var polys = src.Contours.Where(c => c != null && c.Length >= 2).ToList();
+            if (polys.Count == 0)
+                return new HalconXldContourBundle { Width = src.Width, Height = src.Height, Contours = new List<Point2D[]>() };
+
+            string parallelMode = ResolveGenParallelContourMode(mode);
+            var outList = new List<Point2D[]>();
+
+            foreach (var poly in polys)
+            {
+                HObject ho = XldBundleToHObject(new List<Point2D[]> { poly });
+                try
+                {
+                    HOperatorSet.GenParallelContourXld(ho, out HObject hoOut, parallelMode, offset);
+                    try
+                    {
+                        outList.AddRange(ContourXldToPointArrays(hoOut));
+                    }
+                    finally
+                    {
+                        hoOut.Dispose();
+                    }
+                }
+                finally
+                {
+                    ho.Dispose();
+                }
+            }
+
+            return new HalconXldContourBundle
+            {
+                Width = src.Width,
+                Height = src.Height,
+                Contours = outList
+            };
+        }
+
+        /// <summary>gen_parallel_contour_xld 的 Mode：gradient / contour_normal / regression_normal。</summary>
+        static string ResolveGenParallelContourMode(string? mode)
+        {
+            string m = (mode ?? "regression_normal").Trim().ToLowerInvariant();
+            return m switch
+            {
+                "gradient" => "gradient",
+                "contour_normal" => "contour_normal",
+                "regression_normal" => "regression_normal",
+                // 旧 UI（OffsetContoursXld）兼容 → 折线轮廓用回归法向最稳
+                "round" or "original" or "rectangular" => "regression_normal",
+                _ => "regression_normal"
+            };
+        }
+
         /// <summary>逐条 XLD 提取点列（GenContourRegionXld 等可能返回多对象，不可对整包直接 GetContourXld）。</summary>
         public static List<Point2D[]> ContourXldToPointArrays(HObject contourXld)
         {

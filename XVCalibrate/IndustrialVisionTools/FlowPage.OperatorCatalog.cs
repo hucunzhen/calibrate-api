@@ -1225,6 +1225,31 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "polyline_uniform_offset",
+                DisplayName = "轮廓/轨迹均匀外扩",
+                Description = "沿法向等距偏移（平行曲线）：正距离=闭合轮廓外扩一圈、开折线向左侧偏置。支持 Point2D[] / CalibPoint3D[]（仅 XY 偏移、保留 Z）/ HalconXld（HALCON gen_parallel_contour_xld）。按 BarIds 或 GroupBarIds 分段；负距离=内缩。",
+                Category = "预处理",
+                Params =
+                {
+                    new OperatorParam { Name = "offsetDistance", DisplayName = "偏移距离", DefaultValue = "5", Description = "与坐标同单位（像素或 mm）；正=外扩，负=内缩" },
+                    new OperatorParam { Name = "closed", DisplayName = "闭合轮廓", DefaultValue = "true", Description = "true=首尾闭合；false=开折线" },
+                    new OperatorParam { Name = "halconMode", DisplayName = "HALCON法向模式", DefaultValue = "regression_normal", Description = "仅 Xld：gen_parallel_contour_xld 的 Mode；折线轮廓推荐 regression_normal", Options = new List<string> { "regression_normal", "contour_normal", "gradient" } }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3", IsOptional = true },
+                    new PortDef { Name = "Points3D", Direction = PortDirection.Input, DataType = typeof(CalibPoint3D[]), ColorHex = "#00ACC1", IsOptional = true },
+                    new PortDef { Name = "Xld", Direction = PortDirection.Input, DataType = typeof(HalconXldContourBundle), ColorHex = "#E65100", IsOptional = true },
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "GroupBarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFEB3B", IsOptional = true },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3", IsOptional = true },
+                    new PortDef { Name = "Out3D", Direction = PortDirection.Output, DataType = typeof(CalibPoint3D[]), ColorHex = "#00ACC1", IsOptional = true },
+                    new PortDef { Name = "XldOut", Direction = PortDirection.Output, DataType = typeof(HalconXldContourBundle), ColorHex = "#E65100", IsOptional = true },
+                    new PortDef { Name = "OutBarIds", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "world_coords",
                 DisplayName = "世界坐标",
                 Description = "通过参数配置九点标定的世界坐标",

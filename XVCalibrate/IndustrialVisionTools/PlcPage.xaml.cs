@@ -20,6 +20,10 @@ namespace CalibOperatorCLI_Example
         private ModbusTcpNet? _plcHd;
         private bool _plcConnected = false;
         private DispatcherTimer? _readTimer;
+        private PlcGvar3DPreviewControl? _gvar3D;
+        private double _lastAxisX = double.NaN;
+        private double _lastAxisY = double.NaN;
+        private double _lastAxisZ = double.NaN;
 
         // ===== PLC 配置 =====
         private PlcConfig? _config;
@@ -29,6 +33,8 @@ namespace CalibOperatorCLI_Example
         public PlcPage()
         {
             InitializeComponent();
+            _gvar3D = new PlcGvar3DPreviewControl();
+            Gvar3DHost.Content = _gvar3D;
             LoadConfig();
             ApplyConfigToUI();
             Log("PLC Communication Page Loaded (D=XinJETcpNet, HD=ModbusTcp)");
@@ -57,19 +63,45 @@ namespace CalibOperatorCLI_Example
         }
 
 
-        /// <summary>
-        /// 将配置中的地址动态显示到 UI 上，保持一致性
-        /// </summary>
+        /// <summary>寄存器地址仅来自 plc_config，写入控件 ToolTip（界面不展示地址）。</summary>
+        private void ApplyRegToolTip(FrameworkElement? el, string regKey, string description)
+        {
+            if (el == null) return;
+            try
+            {
+                string addr = Reg(regKey);
+                el.ToolTip = string.IsNullOrWhiteSpace(description)
+                    ? $"寄存器: {addr}"
+                    : $"{description}\n寄存器: {addr}";
+            }
+            catch
+            {
+                el.ToolTip = description;
+            }
+        }
+
+        private string ResolveGvarStartAddress()
+        {
+            var gvarCfg = _config?.GvarList;
+            return PlcXinjeHelper.ResolveGvarStartAddress("", gvarCfg?.StartAddress ?? "D30000");
+        }
+
+        /// <summary>将 plc_config 中的寄存器地址写入 ToolTip，界面仅显示功能文案。</summary>
         private void ApplyConfigToUI()
         {
             if (_config == null) return;
 
-            // 位置寄存器 TextBox 默认值
-            TxtRegX.Text = TryReg("PositionX", "HD2100");
-            TxtRegY.Text = TryReg("PositionY", "HD2200");
-            TxtRegZ.Text = TryReg("PositionZ", "HD2000");
+            string posX = TryReg("PositionX", "HD2100");
+            string posY = TryReg("PositionY", "HD2200");
+            string posZ = TryReg("PositionZ", "HD2000");
+            string posHint = $"位置读取（plc_config）\nX: {posX}\nY: {posY}\nZ: {posZ}\nXY速度: {TryReg("SpeedXY", "---")}";
+            ChkAutoRead.ToolTip = posHint + "\n自动刷新时同步读 GVAR 3D";
+            BtnReadOnce.ToolTip = posHint;
+            TxtPosX.ToolTip = $"X 位置\n寄存器: {posX}";
+            TxtPosY.ToolTip = $"Y 位置\n寄存器: {posY}";
+            TxtPosZ.ToolTip = $"Z 位置\n寄存器: {posZ}";
+            TxtSpeedXY.ToolTip = $"XY 合成速度\n寄存器: {TryReg("SpeedXY", "---")}";
 
-            // 位操作按钮
             ApplyBitButton(BtnXForward, "XForward");
             ApplyBitButton(BtnXReverse, "XReverse");
             ApplyBitButton(BtnXZero, "XZero");
@@ -80,70 +112,74 @@ namespace CalibOperatorCLI_Example
             ApplyBitButton(BtnZReverse, "ZReverse");
             ApplyBitButton(BtnZZero, "ZZero");
 
-            // 模式/启停按钮
-            BtnManual.Content = $"Manual ({TryReg("ManualMode", "M509")}=ON)";
-            BtnManual.ToolTip = $"手动模式：写 {TryReg("ManualMode", "M509")} = ON";
-            BtnAuto.Content = $"Auto ({TryReg("ManualMode", "M509")}=OFF)";
-            BtnAuto.ToolTip = $"自动模式：写 {TryReg("ManualMode", "M509")} = OFF";
+            BtnManual.Content = "手动模式";
+            ApplyRegToolTip(BtnManual, "ManualMode", "写 ON → 手动");
+            BtnAuto.Content = "自动模式";
+            ApplyRegToolTip(BtnAuto, "ManualMode", "写 OFF → 自动");
+            BtnStart.Content = "启动";
+            ApplyRegToolTip(BtnStart, "RunStartStop", "写 ON");
+            BtnStop.Content = "停止";
+            ApplyRegToolTip(BtnStop, "RunStartStop", "写 OFF");
 
-            string runAddr = TryReg("RunStartStop", "M500");
-            BtnStart.Content = $"Start ({runAddr}=ON)";
-            BtnStart.ToolTip = $"启动：写 {runAddr} = ON";
-            BtnStop.Content = $"Stop ({runAddr}=OFF)";
-            BtnStop.ToolTip = $"停止：写 {runAddr} = OFF";
+            ApplyRegToolTip(TxtXHomeSpd, "XHomeSpeed", "X 复位速度");
+            ApplyRegToolTip(TxtXManualSpd, "XManualSpeed", "X 手动速度");
+            ApplyRegToolTip(TxtXPosLimit, "XPosLimit", "X 正限位");
+            ApplyRegToolTip(TxtXNegLimit, "XNegLimit", "X 负限位");
+            ApplyRegToolTip(BtnReadXHomeSpd, "XHomeSpeed", "读取");
+            ApplyRegToolTip(BtnWriteXHomeSpd, "XHomeSpeed", "写入");
 
-            // 参数标签
-            LblXHomeSpd.Text = $"HomeSpd {TryReg("XHomeSpeed", "---")}:";
-            LblXManualSpd.Text = $"ManualSpd {TryReg("XManualSpeed", "---")}:";
-            LblXPosLimit.Text = $"+Limit {TryReg("XPosLimit", "---")}:";
-            LblXNegLimit.Text = $"-Limit {TryReg("XNegLimit", "---")}:";
+            ApplyRegToolTip(TxtYHomeSpd, "YHomeSpeed", "Y 复位速度");
+            ApplyRegToolTip(TxtYManualSpd, "YManualSpeed", "Y 手动速度");
+            ApplyRegToolTip(TxtYPosLimit, "YPosLimit", "Y 正限位");
+            ApplyRegToolTip(TxtYNegLimit, "YNegLimit", "Y 负限位");
 
-            LblYHomeSpd.Text = $"HomeSpd {TryReg("YHomeSpeed", "---")}:";
-            LblYManualSpd.Text = $"ManualSpd {TryReg("YManualSpeed", "---")}:";
-            LblYPosLimit.Text = $"+Limit {TryReg("YPosLimit", "---")}:";
-            LblYNegLimit.Text = $"-Limit {TryReg("YNegLimit", "---")}:";
+            ApplyRegToolTip(TxtZHomeSpd, "ZHomeSpeed", "Z 复位速度");
+            ApplyRegToolTip(TxtZManualSpd, "ZManualSpeed", "Z 手动速度");
+            ApplyRegToolTip(TxtZPosLimit, "ZPosLimit", "Z 正限位");
+            ApplyRegToolTip(TxtZNegLimit, "ZNegLimit", "Z 负限位");
 
-            LblZHomeSpd.Text = $"HomeSpd {TryReg("ZHomeSpeed", "---")}:";
-            LblZManualSpd.Text = $"ManualSpd {TryReg("ZManualSpeed", "---")}:";
-            LblZPosLimit.Text = $"+Limit {TryReg("ZPosLimit", "---")}:";
-            LblZNegLimit.Text = $"-Limit {TryReg("ZNegLimit", "---")}:";
+            ApplyRegToolTip(TxtLaserPower, "LaserPower", "激光功率");
+            ApplyRegToolTip(TxtStopSafeX, "StopSafePosX", "停机安全位 X");
+            ApplyRegToolTip(TxtStopSafeY, "StopSafePosY", "停机安全位 Y");
+            ApplyRegToolTip(TxtStopSafeZ, "StopSafePosZ", "停机安全位 Z");
+            ApplyRegToolTip(BtnReadStopSafePos, "StopSafePosX", "读取停机安全位 XYZ");
+            ApplyRegToolTip(TxtPhotoPosX, "PhotoPosX", "拍照位 X");
+            ApplyRegToolTip(TxtPhotoPosY, "PhotoPosY", "拍照位 Y");
+            ApplyRegToolTip(TxtPhotoPosZ, "PhotoPosZ", "拍照位 Z");
+            ApplyRegToolTip(TxtLaserRelX, "LaserRelPosX", "激光相对 X");
+            ApplyRegToolTip(TxtLaserRelY, "LaserRelPosY", "激光相对 Y");
+            ApplyRegToolTip(TxtLaserRelZ, "LaserRelPosZ", "激光相对 Z");
+            ApplyRegToolTip(TxtWeldSpeed, "WeldSpeed", "焊接速度");
+            ApplyRegToolTip(TxtReturnSafeSpeed, "ReturnSafeSpeed", "返回安全点速度");
+            ApplyRegToolTip(TxtPhotoApproachSpeed, "PhotoApproachSpeed", "到拍照点速度");
+            ApplyRegToolTip(TxtFastOffsetSpeed, "FastOffsetSpeed", "快速偏移速度");
 
-            LblLaserPower.Text = $"功率 {TryReg("LaserPower", "HD1900")}:";
+            string gvarStart = ResolveGvarStartAddress();
+            string segReg = TryReg("SegmentCount", "D800");
+            string gvarHint = $"GVAR 起始: {gvarStart}\n线段数: {segReg}";
+            BtnReadGvar.ToolTip = $"先读 {segReg} 线段数，再读 GVAR\n{gvarHint}";
+            BtnWriteGvar.ToolTip = $"先写 {segReg}=表格条数，再写 GVAR\n{gvarHint}";
+            BtnClearGvar.ToolTip = gvarHint;
+            TxtGvarCount.ToolTip = $"当前线段数（读自 {segReg}）";
 
-            LblStopSafeX.Text = $"X {TryReg("StopSafePosX", "HD1700")}:";
-            LblStopSafeY.Text = $"Y {TryReg("StopSafePosY", "HD1702")}:";
-            LblStopSafeZ.Text = $"Z {TryReg("StopSafePosZ", "HD1704")}:";
-            LblPhotoPosX.Text = $"X {TryReg("PhotoPosX", "HD1710")}:";
-            LblPhotoPosY.Text = $"Y {TryReg("PhotoPosY", "HD1712")}:";
-            LblPhotoPosZ.Text = $"Z {TryReg("PhotoPosZ", "HD1714")}:";
-            LblLaserRelX.Text = $"X {TryReg("LaserRelPosX", "HD1720")}:";
-            LblLaserRelY.Text = $"Y {TryReg("LaserRelPosY", "HD1722")}:";
-            LblLaserRelZ.Text = $"Z {TryReg("LaserRelPosZ", "HD1724")}:";
-            LblWeldSpeed.Text = $"焊接 {TryReg("WeldSpeed", "HD5000")}:";
-            LblReturnSafeSpeed.Text = $"返安全 {TryReg("ReturnSafeSpeed", "HD5002")}:";
-            LblPhotoApproachSpeed.Text = $"到拍照 {TryReg("PhotoApproachSpeed", "HD5004")}:";
-            LblFastOffsetSpeed.Text = $"快偏 {TryReg("FastOffsetSpeed", "HD5006")}:";
-
-            // GVAR 列表地址
-            TxtGvarAddr.Text = _config?.GvarList?.StartAddress ?? "D5000";
-
-            // 使能/报警清除按钮提示
             ApplyEnableButton(BtnXEnable, "XEnableL");
+            ApplyDisableButton(BtnXDisable, "XEnableH", "XEnableL");
             ApplyEnableButton(BtnYEnable, "YEnableL");
+            ApplyDisableButton(BtnYDisable, "YEnableH", "YEnableL");
             ApplyEnableButton(BtnZEnable, "ZEnableL");
+            ApplyDisableButton(BtnZDisable, "ZEnableH", "ZEnableL");
             ApplyEnableButton(BtnLaserEnable, "LaserEnable");
-            BtnLaserDisable.ToolTip = $"激光关闭: {TryReg("LaserEnable", "D1900L")}.bit0=OFF";
+            ApplyRegToolTip(BtnLaserDisable, "LaserEnable", "激光使能 OFF");
             ApplyEnableButton(BtnRedLightEnable, "RedLightEnable");
-            BtnRedLightDisable.ToolTip = $"红光关闭: {TryReg("RedLightEnable", "D1901L")}.bit0=OFF";
+            ApplyRegToolTip(BtnRedLightDisable, "RedLightEnable", "红光使能 OFF");
             ApplyEnableButton(BtnBlowEnable, "BlowEnable");
-            BtnBlowDisable.ToolTip = $"吹气关闭: {TryReg("BlowEnable", "D1902L")}.bit0=OFF";
-            BtnCameraCaptureStart.ToolTip = $"相机开始拍照: {TryReg("CameraCaptureStart", "D1800L")}.bit0 脉冲触发";
-            TxtWeldDoneFlagAddr.Text = TryReg("WeldDoneFlag", "D803L");
-            BtnReadWeldDone.ToolTip = $"读取焊接完成标志 {TryReg("WeldDoneFlag", "D803L")} (PLC→上位机)";
-            BtnClearWeldDone.ToolTip = $"清零 {TryReg("WeldDoneFlag", "D803L")}，下一轮开始前须清 0";
-            TxtWeldDoneHostFlagAddr.Text = TryReg("WeldDoneHostFlag", "D804L");
-            BtnSetWeldDoneHost.ToolTip = $"轨迹下发完成通知 {TryReg("WeldDoneHostFlag", "D804L")}=1 (上位机→PLC)";
-            BtnClearWeldDoneHost.ToolTip = $"清零 {TryReg("WeldDoneHostFlag", "D804L")}";
+            ApplyRegToolTip(BtnBlowDisable, "BlowEnable", "吹气使能 OFF");
+            ApplyRegToolTip(BtnCameraCaptureStart, "CameraCaptureStart", "相机拍照脉冲");
+
+            ApplyRegToolTip(BtnReadWeldDone, "WeldDoneFlag", "读取焊接完成 (PLC→上位机)");
+            ApplyRegToolTip(BtnClearWeldDone, "WeldDoneFlag", "清零，下一轮前须执行");
+            ApplyRegToolTip(BtnSetWeldDoneHost, "WeldDoneHostFlag", "轨迹下发完成置 1");
+            ApplyRegToolTip(BtnClearWeldDoneHost, "WeldDoneHostFlag", "清零");
         }
 
         private void ApplyEnableButton(Button btn, string regKey)
@@ -151,7 +187,18 @@ namespace CalibOperatorCLI_Example
             try
             {
                 string addr = Reg(regKey);
-                btn.ToolTip = $"使能控制: {addr}.bit0=ON";
+                btn.ToolTip = $"使能: {addr}.bit0=ON";
+            }
+            catch { }
+        }
+
+        private void ApplyDisableButton(Button btn, string disableRegKey, string enableRegKey)
+        {
+            try
+            {
+                string disableAddr = Reg(disableRegKey);
+                string enableAddr = Reg(enableRegKey);
+                btn.ToolTip = $"禁用: {disableAddr}.bit0 脉冲，并清 {enableAddr}.bit0";
             }
             catch { }
         }
@@ -218,21 +265,40 @@ namespace CalibOperatorCLI_Example
 
             try
             {
-                string regX = TxtRegX.Text.Trim();
-                string regY = TxtRegY.Text.Trim();
-                string regZ = TxtRegZ.Text.Trim();
+                string regX = TryReg("PositionX", "HD2100");
+                string regY = TryReg("PositionY", "HD2200");
+                string regZ = TryReg("PositionZ", "HD2000");
 
                 double x = ReadPlcFloat(regX, "X");
                 double y = ReadPlcFloat(regY, "Y");
                 double z = ReadPlcFloat(regZ, "Z");
                 double speedXY = ReadPlcFloat(Reg("SpeedXY"), "XY速度");
 
+                _lastAxisX = x;
+                _lastAxisY = y;
+                _lastAxisZ = z;
                 UpdatePositionDisplay(x, y, z, speedXY);
+                RefreshGvar3DPreview();
             }
             catch (Exception ex)
             {
                 Log($"[PLC] Read error: {ex.Message}");
             }
+        }
+
+        private void RefreshGvar3DPreview()
+        {
+            if (_gvar3D == null) return;
+            bool hasAxis = !double.IsNaN(_lastAxisX) && !double.IsNaN(_lastAxisY) && !double.IsNaN(_lastAxisZ);
+            _gvar3D.SetScene(_gvarList, _lastAxisX, _lastAxisY, _lastAxisZ, hasAxis);
+        }
+
+        /// <summary>Auto Read 周期：读轴位置后读 D800+GVAR 并刷新 3D（不刷新表格）。</summary>
+        private void AutoRefreshPlcCycle()
+        {
+            ReadAxisPositions();
+            UpdateRunStatus();
+            ReadGvarListFor3D(silent: true);
         }
 
         /// <summary>读取 PLC 浮点：HD→Modbus；D→XinJETcpNet 信捷地址。</summary>
@@ -346,44 +412,110 @@ namespace CalibOperatorCLI_Example
         /// </summary>
         public GVAR[] GvarList => _gvarList ?? Array.Empty<GVAR>();
 
-        /// <summary>
-        /// 读取 GVAR 列表（起始地址见 plc_config GvarList.StartAddress，默认 D30000）
-        /// </summary>
-        private bool ReadGvarList(int count)
+        private string SegmentCountRegister => Reg("SegmentCount");
+
+        private int GvarMaxCount()
+            => _config?.GvarList?.MaxCount > 0 ? _config.GvarList.MaxCount : 1024;
+
+        /// <summary>从 D800 读取线段数量。</summary>
+        private bool TryReadSegmentCount(out int count, bool silent = false)
+        {
+            count = 0;
+            if (_plcD == null || !_plcConnected) return false;
+
+            string countReg = SegmentCountRegister;
+            var r = PlcGvarModbus.ReadSegmentCount(_plcD, countReg);
+            if (!r.IsSuccess)
+            {
+                if (!silent)
+                    Log($"[PLC] 读取线段数失败({countReg}): {PlcGvarModbus.FormatOperateFailure(r)}");
+                return false;
+            }
+
+            count = r.Content;
+            int maxCount = GvarMaxCount();
+            if (count <= 0 || count > maxCount)
+            {
+                if (!silent)
+                    Log($"[PLC] {countReg}={count} 无效（允许 1-{maxCount}）");
+                return false;
+            }
+
+            int displayCount = count;
+            Dispatcher.Invoke(() => TxtGvarCount.Text = displayCount.ToString());
+            if (!silent)
+                Log($"[PLC] 读取线段数 {countReg}={count}");
+            return true;
+        }
+
+        private bool TryWriteSegmentCount(int count)
+        {
+            if (_plcD == null || !_plcConnected) return false;
+
+            string countReg = SegmentCountRegister;
+            int maxCount = GvarMaxCount();
+            if (count <= 0 || count > maxCount)
+            {
+                Log($"[PLC] 线段数 {count} 无效（允许 1-{maxCount}）");
+                return false;
+            }
+
+            var wr = PlcGvarModbus.WriteSegmentCount(_plcD, countReg, (short)count);
+            if (!wr.IsSuccess)
+            {
+                Log($"[PLC] 写入线段数失败({countReg}={count}): {PlcGvarModbus.FormatOperateFailure(wr)}");
+                return false;
+            }
+
+            int displayCount = count;
+            Dispatcher.Invoke(() => TxtGvarCount.Text = displayCount.ToString());
+            Log($"[PLC] 写入线段数 {countReg}={count}");
+            return true;
+        }
+
+        /// <summary>先读 D800，再按段数读 GVAR（起始地址见 GvarList.StartAddress）。</summary>
+        private bool ReadGvarList(bool silent = false)
         {
             if (_plcD == null || !_plcConnected) return false;
             var gvarCfg = _config?.GvarList;
             if (gvarCfg == null)
             {
-                Log("[PLC] GvarList 未在配置中定义");
+                if (!silent)
+                    Log("[PLC] GvarList 未在配置中定义");
                 return false;
             }
 
-            int maxCount = gvarCfg.MaxCount > 0 ? gvarCfg.MaxCount : 1024;
-            if (count <= 0 || count > maxCount)
-            {
-                Log($"[PLC] GVAR count={count} 无效（允许 1-{maxCount}）");
+            if (!TryReadSegmentCount(out int count, silent))
                 return false;
-            }
 
-            string startD = PlcXinjeHelper.ResolveGvarStartAddress(TxtGvarAddr.Text, gvarCfg.StartAddress);
+            string startD = ResolveGvarStartAddress();
             var result = PlcGvarModbus.ReadGvarListFromPlc(_plcD, startD, count);
             if (!result.IsSuccess)
             {
-                Log($"[PLC] 读取 GVAR 列表失败({startD}): {PlcGvarModbus.FormatOperateFailure(result)}");
+                if (!silent)
+                    Log($"[PLC] 读取 GVAR 列表失败({startD}): {PlcGvarModbus.FormatOperateFailure(result)}");
                 return false;
             }
 
             _gvarList = result.Content;
             int totalRegisters = count * GVAR.WORD_COUNT;
-            Log($"[PLC] 读取 GVAR 成功：{count} 项 @{startD}，{totalRegisters} 寄存器（ReadFloat/{PlcXinjeHelper.ResolveFloatDataFormatString(_config)}）");
-            PlcGvarDraft.Set(_gvarList, "ReadGvar");
+            if (!silent)
+                Log($"[PLC] 读取 GVAR 成功：{count} 项 @{startD}，{totalRegisters} 寄存器（ReadFloat/{PlcXinjeHelper.ResolveFloatDataFormatString(_config)}）");
+            PlcGvarDraft.Set(_gvarList, silent ? "AutoReadGvar" : "ReadGvar");
             return true;
         }
 
-        /// <summary>
-        /// 写入 GVAR 列表（将缓存中的数据批量写入 PLC）
-        /// </summary>
+        /// <summary>自动刷新专用：读 GVAR 并更新 3D，失败时保留上一帧数据。</summary>
+        private void ReadGvarListFor3D(bool silent)
+        {
+            var prev = _gvarList;
+            if (ReadGvarList(silent))
+                RefreshGvar3DPreview();
+            else
+                _gvarList = prev;
+        }
+
+        /// <summary>先写 D800=条数，再写 GVAR 列表。</summary>
         private bool WriteGvarList()
         {
             if (_plcD == null || !_plcConnected) return false;
@@ -401,15 +533,16 @@ namespace CalibOperatorCLI_Example
             }
 
             int count = _gvarList.Length;
-            string startD = PlcXinjeHelper.ResolveGvarStartAddress(TxtGvarAddr.Text, gvarCfg.StartAddress);
-            var wr = PlcGvarModbus.SendGvarList(_plcD, startD, _gvarList, out int totalRegisters);
+            string startD = ResolveGvarStartAddress();
+            string countReg = SegmentCountRegister;
+            var wr = PlcGvarModbus.SendGvarListWithSegmentCount(_plcD, countReg, startD, _gvarList, out int totalRegisters);
             if (!wr.IsSuccess)
             {
-                Log($"[PLC] 写入 GVAR 失败({startD}): {PlcGvarModbus.FormatOperateFailure(wr)}");
+                Log($"[PLC] 写入失败({countReg}/{startD}): {PlcGvarModbus.FormatOperateFailure(wr)}");
                 return false;
             }
 
-            Log($"[PLC] 写入 GVAR 成功：{count} 项 @{startD}，{totalRegisters} 寄存器（线段数 D800 请用流程算子）");
+            Log($"[PLC] 写入成功：{countReg}={count}，GVAR {count} 项 @{startD}，{totalRegisters} 寄存器");
             return true;
         }
 
@@ -425,16 +558,11 @@ namespace CalibOperatorCLI_Example
         private void BtnReadGvar_Click(object sender, RoutedEventArgs e)
         {
             if (!CheckPlcConnected()) return;
-            int maxRead = _config?.GvarList?.MaxCount ?? 1024;
-            if (!int.TryParse(TxtGvarCount.Text.Trim(), out int count) || count <= 0 || count > maxRead)
-            {
-                MessageBox.Show($"条数应为 1-{maxRead} 的整数", "输入错误", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-            if (ReadGvarList(count))
+            if (ReadGvarList())
             {
                 RefreshGvarGrid();
-                Log($"[PLC] GVAR 列表已刷新：{count} 项");
+                RefreshGvar3DPreview();
+                Log($"[PLC] GVAR 列表已刷新：{_gvarList?.Length ?? 0} 项");
             }
         }
 
@@ -456,13 +584,17 @@ namespace CalibOperatorCLI_Example
 
             PlcGvarDraft.Set(_gvarList, "WriteAllGrid");
             if (WriteGvarList())
+            {
+                RefreshGvar3DPreview();
                 Log($"[PLC] 已将 {items.Count} 条 GVAR 写入 PLC");
+            }
         }
 
         private void BtnClearGvar_Click(object sender, RoutedEventArgs e)
         {
             _gvarList = Array.Empty<GVAR>();
             DgGvarList.ItemsSource = new List<GvarItemViewModel>();
+            _gvar3D?.ClearScene();
             Log("[PLC] GVAR 列表已清空");
         }
 
@@ -1008,6 +1140,36 @@ namespace CalibOperatorCLI_Example
             Log("[PLC] Z使能 = ON");
         }
 
+        private void BtnXDisable_Click(object sender, RoutedEventArgs e)
+            => PulseAxisDisable("X", Reg("XEnableH"), Reg("XEnableL"), TxtXEnableStatus);
+
+        private void BtnYDisable_Click(object sender, RoutedEventArgs e)
+            => PulseAxisDisable("Y", Reg("YEnableH"), Reg("YEnableL"), TxtYEnableStatus);
+
+        private void BtnZDisable_Click(object sender, RoutedEventArgs e)
+            => PulseAxisDisable("Z", Reg("ZEnableH"), Reg("ZEnableL"), TxtZEnableStatus);
+
+        /// <summary>轴禁用：清使能位 + 高字节禁用位脉冲（与 plc_config 中 *EnableH 对应）。</summary>
+        private void PulseAxisDisable(string axisLabel, string disableAddr, string enableAddr, TextBlock statusText)
+        {
+            if (!CheckPlcConnected()) return;
+            WriteBit(enableAddr, 0, false);
+            WriteBit(disableAddr, 0, true);
+            statusText.Text = "OFF";
+            statusText.Foreground = new SolidColorBrush(Colors.Gray);
+            Log($"[PLC] {axisLabel}轴禁用 {disableAddr}.bit0 脉冲，{enableAddr}.bit0=OFF");
+            var timer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(500)
+            };
+            timer.Tick += (_, _) =>
+            {
+                WriteBit(disableAddr, 0, false);
+                timer.Stop();
+            };
+            timer.Start();
+        }
+
         // ===== 报警清除控制 =====
         private void BtnXAlarmClear_Click(object sender, RoutedEventArgs e)
         {
@@ -1051,9 +1213,9 @@ namespace CalibOperatorCLI_Example
                 ms = 500;
 
             _readTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ms) };
-            _readTimer.Tick += (s, args) => { ReadAxisPositions(); UpdateRunStatus(); };
+            _readTimer.Tick += (_, _) => AutoRefreshPlcCycle();
             _readTimer.Start();
-            Log($"[PLC] 自动读取已启动，间隔 {ms}ms");
+            Log($"[PLC] 自动读取已启动（XYZ + GVAR 3D），间隔 {ms}ms");
         }
 
         private void ChkAutoRead_Unchecked(object sender, RoutedEventArgs e)
@@ -1117,7 +1279,9 @@ namespace CalibOperatorCLI_Example
                     TxtPlcPort.IsEnabled = false;
                     TxtPlcStatus.Text = "[已连接]";
                     TxtPlcStatus.Foreground = new SolidColorBrush(Colors.Green);
+                    _lastAxisX = _lastAxisY = _lastAxisZ = double.NaN;
                     UpdatePositionDisplay(double.NaN, double.NaN, double.NaN, double.NaN);
+                    _gvar3D?.ClearScene();
                 }
                 else
                 {
@@ -1169,7 +1333,9 @@ namespace CalibOperatorCLI_Example
                 TxtPlcPort.IsEnabled = true;
                 TxtPlcStatus.Text = "[未连接]";
                 TxtPlcStatus.Foreground = new SolidColorBrush(Colors.Gray);
+                _lastAxisX = _lastAxisY = _lastAxisZ = double.NaN;
                 UpdatePositionDisplay(double.NaN, double.NaN, double.NaN, double.NaN);
+                _gvar3D?.ClearScene();
                 Log("[PLC] Disconnected");
             }
             catch (Exception ex)
