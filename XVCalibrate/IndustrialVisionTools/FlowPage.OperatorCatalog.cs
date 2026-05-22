@@ -1389,8 +1389,10 @@ namespace CalibOperatorCLI_Example
                 Ports =
                 {
                     new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true },
                     new PortDef { Name = "HandEyeJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
-                    new PortDef { Name = "Points3D", Direction = PortDirection.Output, DataType = typeof(CalibPoint3D[]), ColorHex = "#00BCD4" }
+                    new PortDef { Name = "Points3D", Direction = PortDirection.Output, DataType = typeof(CalibPoint3D[]), ColorHex = "#00BCD4" },
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true }
                 }
             },
             new OperatorDef
@@ -1426,7 +1428,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "contour_perpendicular_entry",
                 DisplayName = "轮廓垂直进入",
-                Description = "生成带垂直进入/退出的焊头点列（基座3D）：从回退点接近轮廓时，在接近轨迹前有一段垂直于轮廓平面的距离；退出轨迹后也有一段垂直距离后再回退到待机点。输入优先级同「轮廓转焊道路径」。",
+                Description = "生成带垂直进入/退出的焊头点列（基座3D）：从回退点接近轮廓时，在接近轨迹前有一段垂直于轮廓平面的距离；退出轨迹后也有一段垂直距离后再回退到待机点。输出 BarIds 与 Points 等长（逐点条号），供 send_plc 按条分批写 D800。输入优先级同「轮廓转焊道路径」。",
                 Category = "标定",
                 Ports =
                 {
@@ -1553,7 +1555,7 @@ namespace CalibOperatorCLI_Example
                 {
                     new OperatorParam { Name = "ip", DisplayName = "IP", DefaultValue = "192.168.6.6", Description = "PLC IP 地址" },
                     new OperatorParam { Name = "port", DisplayName = "端口", DefaultValue = "502", Description = "Modbus TCP 端口" },
-                    new OperatorParam { Name = "station", DisplayName = "站号", DefaultValue = "1", Description = "站号 (1~247)" }
+                    new OperatorParam { Name = "station", DisplayName = "站号", DefaultValue = "", Description = "留空则用 plc_config.json 的 ModbusStation（默认 0）；填 1~247 覆盖" }
                 },
                 Ports =
                 {
@@ -1573,18 +1575,243 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
-                TypeId = "send_plc",
-                DisplayName = "发送PLC",
-                Description = "将点列表以GVAR格式写入PLC(Modbus)。每条GVAR占28寄存器：[type1][pad][p0.x,p0.y,p0.z][p1.x,p1.y,p1.z][cx,cy,r][start_deg,end_deg][z0,z1]。与PlcPage的GVAR列表写入格式一致。",
+                TypeId = "plc_read_camera_capture",
+                DisplayName = "PLC 读相机拍照信号",
+                Description = "读取相机开始拍照位（默认 plc_config Registers.CameraCaptureStart = D1800L.bit0，1=PLC 请求拍照）。须先 PLC连接。",
                 Category = "输出",
                 Params =
                 {
-                    new OperatorParam { Name = "baseRegister", DisplayName = "起始寄存器地址", DefaultValue = "5000", Description = "count写入地址；第i条GVAR从 baseRegister + i*28 开始" },
-                    new OperatorParam { Name = "gvarType", DisplayName = "GVAR类型", DefaultValue = "2", Description = "类型值（默认2=直线）" }
+                    new OperatorParam { Name = "signalRegister", DisplayName = "信号地址", DefaultValue = "", Description = "留空则用 plc_config CameraCaptureStart（D1800L）" },
+                    new OperatorParam { Name = "bit", DisplayName = "位号", DefaultValue = "0", Description = "相对 L/H 后缀后的位偏移，D1800L 一般为 bit0" }
                 },
                 Ports =
                 {
-                    new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
+                    new PortDef { Name = "Triggered", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#5E35B1" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "plc_wait_camera_capture",
+                DisplayName = "PLC 监听相机拍照",
+                Description = "阻塞轮询直到 D1800L（或 signalRegister）拍照位为 1，再执行下游（如「相机取一帧」）。须先 PLC连接。",
+                Category = "输出",
+                Params =
+                {
+                    new OperatorParam { Name = "signalRegister", DisplayName = "信号地址", DefaultValue = "", Description = "留空则用 plc_config CameraCaptureStart（D1800L）" },
+                    new OperatorParam { Name = "bit", DisplayName = "位号", DefaultValue = "0", Description = "D1800L = D1800 低字节 bit0" },
+                    new OperatorParam { Name = "timeoutMs", DisplayName = "超时(ms)", DefaultValue = "60000", Description = "超时未收到信号则流程失败" },
+                    new OperatorParam { Name = "pollIntervalMs", DisplayName = "轮询间隔(ms)", DefaultValue = "20", Description = "读 PLC 间隔，5~5000" },
+                    new OperatorParam
+                    {
+                        Name = "clearAfter",
+                        DisplayName = "收到后清 0",
+                        DefaultValue = "false",
+                        Description = "true=触发后复位该位，便于 PLC 下次再发脉冲",
+                        Options = new List<string> { "false", "true" }
+                    }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Triggered", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#5E35B1" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "plc_read_weld_done",
+                DisplayName = "PLC 读焊接完成",
+                Description = "读取 D803L（PLC→上位机，1=PLC 侧焊接完成）。须先 PLC连接。",
+                Category = "输出",
+                Params =
+                {
+                    new OperatorParam { Name = "flagRegister", DisplayName = "标志地址", DefaultValue = "", Description = "留空则用 plc_config WeldDoneFlag（D803L）" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Done", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#9C27B0" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "plc_wait_weld_done",
+                DisplayName = "PLC 监听焊接完成",
+                Description = "阻塞轮询直到 D803L=1（PLC→上位机焊接完成）。建议接在「发送PLC」及「PLC 通知轨迹已下发」之后。须先 PLC连接。",
+                Category = "输出",
+                Params =
+                {
+                    new OperatorParam { Name = "flagRegister", DisplayName = "标志地址", DefaultValue = "", Description = "留空则用 plc_config WeldDoneFlag（D803L）" },
+                    new OperatorParam { Name = "bit", DisplayName = "位号", DefaultValue = "0", Description = "D803L = D803 低字节 bit0" },
+                    new OperatorParam { Name = "timeoutMs", DisplayName = "超时(ms)", DefaultValue = "600000", Description = "焊接超时则流程失败" },
+                    new OperatorParam { Name = "pollIntervalMs", DisplayName = "轮询间隔(ms)", DefaultValue = "50", Description = "读 PLC 间隔" },
+                    new OperatorParam
+                    {
+                        Name = "clearAfter",
+                        DisplayName = "收到后清 0",
+                        DefaultValue = "true",
+                        Description = "true=收到完成后清 D803，便于下一轮",
+                        Options = new List<string> { "true", "false" }
+                    }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "After", Direction = PortDirection.Input, DataType = typeof(bool), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Done", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#9C27B0" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "plc_clear_weld_done",
+                DisplayName = "PLC 清焊接完成",
+                Description = "将焊接完成标志清 0（默认 D803L，PLC→上位机）。下一轮流程开始前应执行。须先 PLC连接。",
+                Category = "输出",
+                Params =
+                {
+                    new OperatorParam { Name = "flagRegister", DisplayName = "标志地址", DefaultValue = "D803L", Description = "PLC→上位机 完成标志" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Cleared", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#9C27B0" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "plc_set_weld_done_to_plc",
+                DisplayName = "PLC 通知轨迹已下发",
+                Description = "上位机→PLC：GVAR 下发后置 D804L=1（默认）。建议接在「发送PLC」与「PLC 监听焊接完成」之间。",
+                Category = "输出",
+                Params =
+                {
+                    new OperatorParam { Name = "flagRegister", DisplayName = "标志地址", DefaultValue = "", Description = "留空则用 plc_config WeldDoneHostFlag（D804L）" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "After", Direction = PortDirection.Input, DataType = typeof(bool), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Signaled", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#673AB7" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "plc_pou_enable",
+                DisplayName = "PLC POU使能",
+                Description = "写 POU 使能位到 PLC（默认 D801L.bit0=ON）。须先执行「PLC连接」。",
+                Category = "输出",
+                Params =
+                {
+                    new OperatorParam { Name = "enableRegister", DisplayName = "使能地址", DefaultValue = "D801L", Description = "信捷 D801L = D801 低字节 bit0" },
+                    new OperatorParam
+                    {
+                        Name = "enable",
+                        DisplayName = "使能",
+                        DefaultValue = "ON",
+                        Description = "ON=置位，OFF=复位；未接 Enable 输入时生效",
+                        Options = new List<string> { "ON", "OFF" }
+                    }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Enable", Direction = PortDirection.Input, DataType = typeof(bool), ColorHex = "#4CAF50", IsOptional = true },
+                    new PortDef { Name = "Enabled", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#4CAF50" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "plc_set_segment_count",
+                DisplayName = "PLC 设置线段数量",
+                Description = "将待下发的线段条数写入 PLC（默认 D800，16 位整数）。须先执行「PLC连接」。可接数组长度或手动 segmentCount 参数。",
+                Category = "输出",
+                Params =
+                {
+                    new OperatorParam { Name = "countRegister", DisplayName = "数量寄存器", DefaultValue = "800", Description = "信捷 D800 → Modbus 寄存器 800；也可填 D800" },
+                    new OperatorParam { Name = "segmentCount", DisplayName = "线段数量", DefaultValue = "", Description = "未接 Count 输入时使用；留空则必须接 Count" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Count", Direction = PortDirection.Input, DataType = typeof(int), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Count", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#607D8B" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "send_plc",
+                DisplayName = "发送PLC",
+                Description = "与 PLC 页 Write All 相同：优先 GvarList；否则 Points3D/Points 生成 GVAR。separate_batch=按条分批写 D800+GVAR，每批可触发 GvarSent 连线下游子节点，全部批次完成后置 D804L。",
+                Category = "输出",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "splitByBar",
+                        DisplayName = "按条号下发",
+                        DefaultValue = "none",
+                        Description = "none=整列连续线段；break_segment=同条号内才成段；separate_batch=每个 BarId 一批 GVAR，每批写 D800=当批段数（须接 BarIds）",
+                        Options = new List<string> { "none", "break_segment", "separate_batch" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "barGvarLayout",
+                        DisplayName = "分批地址布局",
+                        DefaultValue = "overwrite",
+                        Description = "仅 separate_batch：overwrite=每批都从 gvarStart 写；stack=按批依次 D30000、D30000+28×n…",
+                        Options = new List<string> { "overwrite", "stack" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "usePlcPageGvar",
+                        DisplayName = "使用PLC页GVAR表",
+                        DefaultValue = "false",
+                        Description = "true=下发 PLC 页表格中与 Write All 相同的数据（须先在 PLC 页填好/读取 GVAR）",
+                        Options = new List<string> { "true", "false" }
+                    },
+                    new OperatorParam { Name = "gvarStartRegister", DisplayName = "GVAR起始地址", DefaultValue = "D30000", Description = "第 i 条从 gvarStart + i×28 起；与 GvarList.StartAddress 一致" },
+                    new OperatorParam { Name = "baseRegister", DisplayName = "起始地址(兼容)", DefaultValue = "", Description = "已废弃：仅当未填 gvarStartRegister 时作为 GVAR 起始地址" },
+                    new OperatorParam { Name = "gvarType", DisplayName = "GVAR类型", DefaultValue = "1", Description = "类型值（1=线段，与 PLC 程序约定一致）" },
+                    new OperatorParam { Name = "maxSegmentCount", DisplayName = "最大线段数", DefaultValue = "1024", Description = "超过则中止，防止越界写 PLC" },
+                    new OperatorParam
+                    {
+                        Name = "skipCountWrite",
+                        DisplayName = "跳过写线段数",
+                        DefaultValue = "true",
+                        Description = "默认 true：单次下发不写 D800（可用「PLC设置线段数量」）；separate_batch 时仍每批写 D800=当批段数",
+                        Options = new List<string> { "true", "false" }
+                    },
+                    new OperatorParam { Name = "countRegister", DisplayName = "线段数量寄存器", DefaultValue = "D800", Description = "单次下发且 skipCountWrite=false 时写入；separate_batch 时每批写入当批段数" },
+                    new OperatorParam { Name = "weldDoneHostRegister", DisplayName = "下发完成标志", DefaultValue = "D804L", Description = "发完 GVAR 后自动置 1；留空则不置位" },
+                    new OperatorParam
+                    {
+                        Name = "setWeldDoneHostOnSend",
+                        DisplayName = "发完自动置位",
+                        DefaultValue = "false",
+                        Description = "true=单次下发结束后置 weldDoneHostRegister=1",
+                        Options = new List<string> { "true", "false" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "setWeldDoneHostAfterAllBatches",
+                        DisplayName = "分批全部完成后置位",
+                        DefaultValue = "true",
+                        Description = "仅 separate_batch：全部批次 D800+GVAR 写完后才置 D804L（默认 true）；置位前会先清 0，避免 PLC 误判首批完成",
+                        Options = new List<string> { "true", "false" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "runDownstreamPerBatch",
+                        DisplayName = "每批执行下游",
+                        DefaultValue = "true",
+                        Description = "仅 separate_batch：每批写完 GVAR 后按拓扑序执行 GvarSent 连线的下游子节点（如 POU 使能、等待焊接完成）；主流程中这些节点不再重复执行",
+                        Options = new List<string> { "true", "false" }
+                    }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "GvarList", Direction = PortDirection.Input, DataType = typeof(GVAR[]), ColorHex = "#FF9800", IsOptional = true },
+                    new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3", IsOptional = true },
+                    new PortDef { Name = "Points3D", Direction = PortDirection.Input, DataType = typeof(CalibPoint3D[]), ColorHex = "#2196F3", IsOptional = true },
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "GvarSent", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#FF9800", IsOptional = true },
+                    new PortDef { Name = "HostWeldDoneSignaled", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#673AB7", IsOptional = true },
+                    new PortDef { Name = "BatchIndex", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "BatchCount", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "BatchBarId", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "BatchSegmentCount", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FFC107", IsOptional = true }
                 }
             },
             new OperatorDef
@@ -2451,9 +2678,337 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "halcon_shape_match_grid_to_trajectory",
+                DisplayName = "HALCON 落格匹配轮廓→轨迹",
+                Description =
+                    "按落格顺序将每个匹配的 GetShapeModelContours 轮廓变换到图像坐标并拼接为点列（非匹配中心）。需 ModelId 与落格相同的 .shm；Angle 用于旋转变换。输出 Points+BarIds 可接「轮廓点简化」；SamplePts 可接「轮廓转焊道路径」。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "contourLevel", DisplayName = "轮廓层", DefaultValue = "1", Description = "GetShapeModelContours 金字塔层" },
+                    new OperatorParam
+                    {
+                        Name = "contourMode",
+                        DisplayName = "轮廓选取",
+                        DefaultValue = "outer",
+                        Description = "outer=每格取面积最大外形；all=模板全部子轮廓",
+                        Options = new List<string> { "outer", "all" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "connectOrder",
+                        DisplayName = "匹配顺序",
+                        DefaultValue = "col_major",
+                        Description = "落格实例的拼接顺序",
+                        Options = new List<string> { "row_major", "col_major", "snake_row", "snake_col" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "barIdSource",
+                        DisplayName = "分组条号",
+                        DefaultValue = "per_match",
+                        Description = "写入 GroupBarIds（焊道分组）；BarIds 恒为每段闭合轮廓独立段号，避免显示/简化跨轮廓连线",
+                        Options = new List<string> { "per_match", "grid_col", "grid_row", "single" }
+                    },
+                    new OperatorParam { Name = "closeTolPx", DisplayName = "闭合容差(px)", DefaultValue = "0.5", Description = "仅当首尾几乎重合(≤容差)时不补点；否则强制在末尾补起点闭合" },
+                    new OperatorParam { Name = "defaultZ", DisplayName = "SamplePts Z", DefaultValue = "0", Description = "SamplePts 的 Z" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "ModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#9C27B0" },
+                    new PortDef { Name = "Row", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
+                    new PortDef { Name = "GridRow", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#8BC34A", IsOptional = true },
+                    new PortDef { Name = "GridCol", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#CDDC39", IsOptional = true },
+                    new PortDef { Name = "Points", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#FFC107" },
+                    new PortDef { Name = "GroupBarIds", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#FFEB3B" },
+                    new PortDef { Name = "SamplePts", Direction = PortDirection.Output, DataType = typeof(CalibPoint3D[]), ColorHex = "#00BCD4" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_ransac_pick_shape_match_lattice",
+                DisplayName = "HALCON RANSAC 阵列落格",
+                Description = "鲁棒拟合/RANSAC：输入 FindShapeModel 的 Row/Column/Angle/Score，估计 u/v 格网并每格取最高分，直接输出 16 点及 GridRow/GridCol，可接「显示形状匹配」。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8", Description = "阵列行数" },
+                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2", Description = "阵列列数" },
+                    new OperatorParam { Name = "minScoreKeep", DisplayName = "最低得分", DefaultValue = "0", Description = "0=关闭；每格保留匹配的最低 Score" },
+                    new OperatorParam { Name = "snapTolerancePx", DisplayName = "吸附容差(px)", DefaultValue = "0", Description = "0=自动；u/v 落格吸附半径" },
+                    new OperatorParam { Name = "ransacIterations", DisplayName = "RANSAC 迭代", DefaultValue = "500", Description = "假设采样次数（含 θ 扰动与三点最小集）" },
+                    new OperatorParam { Name = "inlierSnapFactor", DisplayName = "内点吸附系数", DefaultValue = "0.45", Description = "评分阶段 snap 相对自动容差的比例" },
+                    new OperatorParam { Name = "uvProjectionSvg", DisplayName = "u/v 投影图", DefaultValue = "", Description = "相对流程目录的 SVG 路径，如 uv-projection.svg" },
+                    new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto", Description = "写入 *.grid-filter.log" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Row", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
+                    new PortDef { Name = "Score", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF5722" },
+                    new PortDef { Name = "Score", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FFC107" },
+                    new PortDef { Name = "GridRow", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "GridCol", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#CDDC39" },
+                    new PortDef { Name = "LatticeAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#C5E1A5" },
+                    new PortDef { Name = "ChainDirectionAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF9800" },
+                    new PortDef { Name = "ConsensusMatchAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF5722" },
+                    new PortDef { Name = "ConsensusPickIndices", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "LatticeRows", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "LatticeCols", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#CDDC39" },
+                    new PortDef { Name = "AxesSwapped", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#9E9E9E" },
+                    new PortDef { Name = "TwoColumnDeltaU", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#9E9E9E", IsOptional = true },
+                    new PortDef { Name = "TwoColumnDeltaV", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#9E9E9E", IsOptional = true },
+                    new PortDef { Name = "TwoColumnDeltaSummary", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#9E9E9E", IsOptional = true }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_pick_shape_match_lattice",
+                DisplayName = "HALCON 阵列格点筛选",
+                Description = "链向定向 + u/v 落格聚类：2 列×8 行每格取最高分，直接输出 rows×cols 个模板（如 16 个）及 GridRow/GridCol。链向角由输出点集估计。可接阵列聚类拟合/显示。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8", Description = "阵列行数（2 列×8 行 → 行=8、列=2；内部可自动 swap）" },
+                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2", Description = "阵列列数" },
+                    new OperatorParam { Name = "minScoreKeep", DisplayName = "最低得分", DefaultValue = "0", Description = "0=关闭；每格保留匹配的最低 Score" },
+                    new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto", Description = "写入 *.grid-filter.log" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Row", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
+                    new PortDef { Name = "Score", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF5722" },
+                    new PortDef { Name = "Score", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FFC107" },
+                    new PortDef { Name = "GridRow", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "GridCol", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#CDDC39" },
+                    new PortDef { Name = "LatticeAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#C5E1A5" },
+                    new PortDef { Name = "ChainDirectionAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF9800" },
+                    new PortDef { Name = "ConsensusMatchAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF5722" },
+                    new PortDef { Name = "ConsensusPickIndices", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "LatticeRows", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "LatticeCols", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#CDDC39" },
+                    new PortDef { Name = "AxesSwapped", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#9E9E9E" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_chain_strip_bootstrap",
+                DisplayName = "HALCON 链向·引导",
+                Description = "条带第 1 步：Score 最高 K 点（2×8 为 K=8）估链向连线，θ_u=链向−90° 作格网 u 轴；另输出 PCA/HALCON 角对照。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8", Description = "阵列行数" },
+                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2", Description = "阵列列数" },
+                    new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto", Description = "写入 *.grid-filter.log" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Row", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
+                    new PortDef { Name = "Score", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "BootstrapPickIndices", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "ChainBootstrapAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#C5E1A5" },
+                    new PortDef { Name = "LatticeAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#C5E1A5" },
+                    new PortDef { Name = "PcaChainAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF9800" },
+                    new PortDef { Name = "VAxisImageAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF9800" },
+                    new PortDef { Name = "ConsensusMatchAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF5722" },
+                    new PortDef { Name = "MatchConcentration", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#9E9E9E" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_chain_strip_pick_uv_grid",
+                DisplayName = "HALCON 链向·u/v 落格16",
+                Description = "接「链向·引导」：沿用 ChainBootstrapAngle（格网 θ）投影 u/v，左右池聚类行心，26 点落 16 格。不按 Score 筛选（请在前级 FindShapeModel 卡分）；每格在 snap 候选内分数优先、其次距格心。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8" },
+                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2" },
+                    new OperatorParam { Name = "minScoreKeep", DisplayName = "最低得分(已忽略)", DefaultValue = "0", Description = "保留参数兼容；落格不再按分过滤，请在前级匹配设 minScore" },
+                    new OperatorParam { Name = "snapTolerancePx", DisplayName = "格点容差(px)", DefaultValue = "0", Description = "0=自动" },
+                    new OperatorParam { Name = "uvProjectionSvg", DisplayName = "u/v投影SVG", DefaultValue = "", Description = "相对 exe 或绝对路径；留空不写 SVG" },
+                    new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Row", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
+                    new PortDef { Name = "Score", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "ChainBootstrapAngle", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#C5E1A5", IsOptional = true },
+                    new PortDef { Name = "PcaChainAngle", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#FF9800", IsOptional = true },
+                    new PortDef { Name = "BootstrapPickIndices", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#8BC34A", IsOptional = true },
+                    new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF5722" },
+                    new PortDef { Name = "Score", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FFC107" },
+                    new PortDef { Name = "GridRow", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "GridCol", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#CDDC39" },
+                    new PortDef { Name = "LatticeAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#C5E1A5" },
+                    new PortDef { Name = "ChainDirectionAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF9800" },
+                    new PortDef { Name = "ConsensusMatchAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF5722" },
+                    new PortDef { Name = "ConsensusPickIndices", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "LatticeRows", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "LatticeCols", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#CDDC39" },
+                    new PortDef { Name = "AxesSwapped", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#9E9E9E" },
+                    new PortDef { Name = "TwoColumnDeltaU", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF9800" },
+                    new PortDef { Name = "TwoColumnDeltaV", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF9800" },
+                    new PortDef { Name = "TwoColumnDeltaSummary", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#FFE082" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_chain_strip_orient",
+                DisplayName = "HALCON 链向·定向落格",
+                Description = "条带第 2 步：沿用引导格网 θ 建 u/v 与列/行中心线（StripContext）；无引导时几何分列估角。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8" },
+                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2" },
+                    new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Row", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
+                    new PortDef { Name = "Score", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "BootstrapPickIndices", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#8BC34A", IsOptional = true },
+                    new PortDef { Name = "ChainBootstrapAngle", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#C5E1A5", IsOptional = true },
+                    new PortDef { Name = "StripContext", Direction = PortDirection.Output, DataType = typeof(HalconLatticeStripContext), ColorHex = "#795548" },
+                    new PortDef { Name = "LatticeAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#C5E1A5" },
+                    new PortDef { Name = "PcaAxisAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF9800" },
+                    new PortDef { Name = "PitchRow", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "PitchCol", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#CDDC39" },
+                    new PortDef { Name = "LatticeRows", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "LatticeCols", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#CDDC39" },
+                    new PortDef { Name = "AxesSwapped", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#9E9E9E" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_chain_strip_pick_fill",
+                DisplayName = "HALCON 链向·列0+条带输出",
+                Description = "条带第3–4步合并：列0 N 连链选 + 列1落格/同行对齐/共线筛选。须接上游 StripContext。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Row", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
+                    new PortDef { Name = "Score", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "StripContext", Direction = PortDirection.Input, DataType = typeof(HalconLatticeStripContext), ColorHex = "#795548" },
+                    new PortDef { Name = "StripContext", Direction = PortDirection.Output, DataType = typeof(HalconLatticeStripContext), ColorHex = "#795548" },
+                    new PortDef { Name = "Column0PickIndices", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "ChainDirectionAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF9800" },
+                    new PortDef { Name = "ConsensusMatchAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF5722" },
+                    new PortDef { Name = "MatchConcentration", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#9E9E9E" },
+                    new PortDef { Name = "ConsensusPickIndices", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "GridRow", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "GridCol", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#CDDC39" },
+                    new PortDef { Name = "CollinearRow", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "CollinearColumn", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_estimate_shape_match_chain",
+                DisplayName = "HALCON 链向角估计",
+                Description = "一步完成条带筛选（=引导+定向+列0+条带输出）。CollinearRow/Column 与 Find 同坐标。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8", Description = "阵列行数（2 列×8 行 → 行=8、列=2）" },
+                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2", Description = "阵列列数" },
+                    new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto", Description = "写入 *.grid-filter.log" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Row", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
+                    new PortDef { Name = "Score", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "ChainDirectionAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF9800" },
+                    new PortDef { Name = "ConsensusMatchAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF5722" },
+                    new PortDef { Name = "MatchConcentration", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#9E9E9E" },
+                    new PortDef { Name = "ConsensusPickIndices", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "GridRow", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "GridCol", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#CDDC39" },
+                    new PortDef { Name = "CollinearRow", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "CollinearColumn", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_fit_shape_match_lattice",
+                DisplayName = "HALCON 阵列聚类拟合",
+                Description = "对匹配点做 u/v 投影与列/行中心线聚类（共识高分点贴合行/列中心）。可接上游「链向角估计」的 ChainDirectionAngle；未连接时在内部估计链向。输出列/行中心与理论格心，可接「阵列过滤匹配」。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "3", Description = "阵列行数（沿副轴 v）" },
+                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "3", Description = "阵列列数（沿主轴 u）" },
+                    new OperatorParam { Name = "pitchRow", DisplayName = "行间距(px)", DefaultValue = "0", Description = "0=自动估计" },
+                    new OperatorParam { Name = "pitchCol", DisplayName = "列间距(px)", DefaultValue = "0", Description = "0=自动估计" },
+                    new OperatorParam { Name = "gridAngleDeg", DisplayName = "阵列角度(°)", DefaultValue = "auto", Description = "auto=模板角聚类+PCA 消歧；或固定角度" },
+                    new OperatorParam { Name = "snapTolerancePx", DisplayName = "格点容差(px)", DefaultValue = "0", Description = "0=自动(约 0.35×min间距)，供下游过滤落格" },
+                    new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto", Description = "同阵列过滤算子；写入 *.grid-filter.log" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Row", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
+                    new PortDef { Name = "Score", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "LatticeAngle", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#C5E1A5", IsOptional = true },
+                    new PortDef { Name = "ChainDirectionAngle", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#FF9800", IsOptional = true },
+                    new PortDef { Name = "ConsensusMatchAngle", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#FF5722", IsOptional = true },
+                    new PortDef { Name = "ConsensusPickIndices", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#8BC34A", IsOptional = true },
+                    new PortDef { Name = "ColCenterU", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "RowCenterV", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "LatticeAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#C5E1A5" },
+                    new PortDef { Name = "ConsensusMatchAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF5722" },
+                    new PortDef { Name = "ChainDirectionAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF9800" },
+                    new PortDef { Name = "PitchRow", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#AED581" },
+                    new PortDef { Name = "PitchCol", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#DCE775" },
+                    new PortDef { Name = "AxesSwapped", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#9E9E9E" },
+                    new PortDef { Name = "SnapU", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#B0BEC5" },
+                    new PortDef { Name = "SnapV", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#B0BEC5" },
+                    new PortDef { Name = "LatticeRows", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "LatticeCols", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#CDDC39" },
+                    new PortDef { Name = "CellRow", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#AED581" },
+                    new PortDef { Name = "CellCol", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#DCE775" },
+                    new PortDef { Name = "CellFound", Direction = PortDirection.Output, DataType = typeof(bool[]), ColorHex = "#C5E1A5" },
+                    new PortDef { Name = "CellAngle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#C5E1A5" },
+                    new PortDef { Name = "PointGridRow", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "PointGridCol", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#CDDC39" }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "halcon_filter_shape_match_grid",
                 DisplayName = "HALCON 阵列过滤匹配",
-                Description = "行/列聚类后拟合等间距格点(每行N个、共M行)；每格选最贴近理论格点的匹配，分数次之。",
+                Description = "在阵列聚类结果上落格、每格选最优匹配并过滤。可连接「阵列聚类拟合」输出，或本算子内嵌聚类（与旧流程兼容）。",
                 Category = "HALCON",
                 Params =
                 {
@@ -2475,17 +3030,96 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "Angle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
                     new PortDef { Name = "Score", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "ColCenterU", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3", IsOptional = true },
+                    new PortDef { Name = "RowCenterV", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#4CAF50", IsOptional = true },
+                    new PortDef { Name = "LatticeAngle", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#C5E1A5", IsOptional = true },
+                    new PortDef { Name = "ChainDirectionAngle", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#FF9800", IsOptional = true },
+                    new PortDef { Name = "ConsensusMatchAngle", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#FF5722", IsOptional = true },
+                    new PortDef { Name = "PitchRow", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#AED581", IsOptional = true },
+                    new PortDef { Name = "PitchCol", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#DCE775", IsOptional = true },
+                    new PortDef { Name = "AxesSwapped", Direction = PortDirection.Input, DataType = typeof(int), ColorHex = "#9E9E9E", IsOptional = true },
+                    new PortDef { Name = "SnapU", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#B0BEC5", IsOptional = true },
+                    new PortDef { Name = "SnapV", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#B0BEC5", IsOptional = true },
                     new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF5722" },
-                    new PortDef { Name = "Score", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FFC107" }
+                    new PortDef { Name = "Score", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FFC107" },
+                    new PortDef { Name = "GridRow", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "GridCol", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#CDDC39" },
+                    new PortDef { Name = "LatticeRows", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "LatticeCols", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#CDDC39" },
+                    new PortDef { Name = "CellRow", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#AED581" },
+                    new PortDef { Name = "CellCol", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#DCE775" },
+                    new PortDef { Name = "CellFound", Direction = PortDirection.Output, DataType = typeof(bool[]), ColorHex = "#C5E1A5" },
+                    new PortDef { Name = "PitchRow", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#AED581" },
+                    new PortDef { Name = "PitchCol", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#DCE775" },
+                    new PortDef { Name = "LatticeAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#C5E1A5" },
+                    new PortDef { Name = "ChainDirectionAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF9800" },
+                    new PortDef { Name = "ColCenterU", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "RowCenterV", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "CellAngle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#C5E1A5" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_mask_image_by_shape_match",
+                DisplayName = "HALCON 形状匹配区域 Mask",
+                Description = "输入原图 + FindShapeModel 结果 + ModelId：由模板轮廓变换得到填充区域，生成 Mask 并对原图做掩膜（区域外置 0）。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "contourLevel", DisplayName = "轮廓层", DefaultValue = "1", Description = "GetShapeModelContours 金字塔层" },
+                    new OperatorParam { Name = "insetPx", DisplayName = "区域内缩(px)", DefaultValue = "0", Description = "生成区域前腐蚀半径，缩小有效区" },
+                    new OperatorParam { Name = "maskMin", DisplayName = "Mask有效下界", DefaultValue = "1", Description = "Mask 灰度在此区间内保留原图" },
+                    new OperatorParam { Name = "maskMax", DisplayName = "Mask有效上界", DefaultValue = "255", Description = "Mask 灰度在此区间内保留原图" },
+                    new OperatorParam { Name = "preserveColor", DisplayName = "保留彩色", DefaultValue = "true", Description = "true=原图为 BGR 时输出彩色；false=转灰度后掩膜" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Row", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
+                    new PortDef { Name = "ModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#9C27B0" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Mask", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FFB74D", IsOptional = true }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_filter_shape_match_inside_region",
+                DisplayName = "HALCON 区域内匹配过滤",
+                Description = "两路 FindShapeModel：用「区域匹配」的模板轮廓（变换到图像）作区域，过滤「待选匹配」中中心落在区域内、与区域边界及彼此不相碰的实例。须接两路 ModelId 与对应 Row/Column/Angle。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "contourLevel", DisplayName = "轮廓层", DefaultValue = "1", Description = "GetShapeModelContours 金字塔层" },
+                    new OperatorParam { Name = "insetPx", DisplayName = "区域内缩(px)", DefaultValue = "2", Description = "匹配中心须距区域轮廓边界≥该值，避免贴边" },
+                    new OperatorParam { Name = "minSeparationPx", DisplayName = "最小间距(px)", DefaultValue = "0", Description = "0=仅区域内过滤，不做互斥；>0 时在同一区域实例内按得分贪心保留，中心间距≥该值" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "RegionRow", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "RegionColumn", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "RegionAngle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
+                    new PortDef { Name = "RegionModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#9C27B0" },
+                    new PortDef { Name = "Row", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
+                    new PortDef { Name = "Score", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "ModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#9C27B0" },
+                    new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF5722" },
+                    new PortDef { Name = "Score", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FFC107" },
+                    new PortDef { Name = "KeptIndices", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#8BC34A", IsOptional = true }
                 }
             },
             new OperatorDef
             {
                 TypeId = "halcon_display_shape_match",
                 DisplayName = "HALCON 显示形状匹配结果",
-                Description = "在预览窗口叠加 FindShapeModel 结果：按位姿变换的模板轮廓（多色）、匹配中心十字与得分。需连接 In、ModelId 及查找输出的 Row/Column/Angle/Score。",
+                Description = "叠加 FindShapeModel 模板轮廓、十字与得分。可选接 ConsensusPickIndices（与 Row/Column 同源，一般为 Find 输出）仅显示格点筛选保留的匹配。",
                 Category = "HALCON",
                 Params =
                 {
@@ -2502,6 +3136,10 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "Angle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
                     new PortDef { Name = "Score", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "ConsensusPickIndices", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#8BC34A", IsOptional = true },
+                    new PortDef { Name = "GridCol", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#CDDC39", IsOptional = true },
+                    new PortDef { Name = "CollinearRow", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#4CAF50", IsOptional = true },
+                    new PortDef { Name = "CollinearColumn", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3", IsOptional = true },
                     new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
                 }
             },

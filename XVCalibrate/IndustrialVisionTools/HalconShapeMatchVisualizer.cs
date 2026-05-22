@@ -1,5 +1,6 @@
 #if HALCON_ENABLED
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using CalibOperatorPInvoke;
@@ -32,6 +33,11 @@ namespace CalibOperatorCLI_Example
             bool drawScores)
         {
             if (bmp == null) throw new ArgumentNullException(nameof(bmp));
+
+            using var g = Graphics.FromImage(bmp);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.Half;
+
             int n = Math.Min(rows?.Length ?? 0, cols?.Length ?? 0);
             if (n == 0) return;
 
@@ -47,10 +53,6 @@ namespace CalibOperatorCLI_Example
                     modelContours = Array.Empty<Point2D[]>();
                 }
             }
-
-            using var g = Graphics.FromImage(bmp);
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.PixelOffsetMode = PixelOffsetMode.Half;
 
             using var scoreFont = new Font(FontFamily.GenericSansSerif, 11f, FontStyle.Bold);
             using var scoreBrush = new SolidBrush(Color.White);

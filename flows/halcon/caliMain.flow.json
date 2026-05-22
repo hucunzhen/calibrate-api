@@ -1,0 +1,147 @@
+{
+  "Nodes": [
+    {
+      "Id": "2354daa9-14ff-4e4f-9cd1-70c24fec7cc1",
+      "TypeId": "camera_snap",
+      "X": 128,
+      "Y": 136,
+      "Params": {
+        "deviceIndex": "0",
+        "targetWidth": "0",
+        "targetHeight": "0"
+      }
+    },
+    {
+      "Id": "264a0aeb-e489-4f5a-8e45-2ff983063128",
+      "TypeId": "calibrate",
+      "X": 703,
+      "Y": 169,
+      "Params": {}
+    },
+    {
+      "Id": "48161343-7aaf-474b-bbdb-7612471391c9",
+      "TypeId": "detect_circles",
+      "X": 369,
+      "Y": 136,
+      "Params": {}
+    },
+    {
+      "Id": "e57a1683-ed06-41bc-b013-8a5dd1b8aec4",
+      "TypeId": "world_coords",
+      "X": 214,
+      "Y": 346,
+      "Params": {
+        "points": "100,100;400,100;700,100;100,300;400,300;700,300;100,500;400,500;700,500"
+      }
+    },
+    {
+      "Id": "b8fbcce7-dbae-48ad-b570-01c3898b41dc",
+      "TypeId": "save_calibration_result",
+      "X": 1015,
+      "Y": 223,
+      "Params": {
+        "filePath": "calibration_result.json"
+      }
+    },
+    {
+      "Id": "28f8f86f-5565-40f5-b949-74913d30ece6",
+      "TypeId": "calibrate_homography",
+      "X": 700,
+      "Y": 328,
+      "Params": {}
+    },
+    {
+      "Id": "2a9c8284-902c-449f-a807-fe986d6a2799",
+      "TypeId": "chessboard_calibrate_intrinsics",
+      "X": 687,
+      "Y": 23,
+      "Params": {
+        "imagePaths": "",
+        "cols": "9",
+        "rows": "6",
+        "squareSizeMm": "25"
+      }
+    },
+    {
+      "Id": "7dd7d8de-b1d9-4bd2-a7f6-5ba2a00fb965",
+      "TypeId": "calibrate_poly2d",
+      "X": 729,
+      "Y": 474,
+      "Params": {}
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "2354daa9-14ff-4e4f-9cd1-70c24fec7cc1",
+      "FromPort": "Image",
+      "ToNodeId": "48161343-7aaf-474b-bbdb-7612471391c9",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "48161343-7aaf-474b-bbdb-7612471391c9",
+      "FromPort": "Points",
+      "ToNodeId": "264a0aeb-e489-4f5a-8e45-2ff983063128",
+      "ToPort": "ImagePts"
+    },
+    {
+      "FromNodeId": "e57a1683-ed06-41bc-b013-8a5dd1b8aec4",
+      "FromPort": "Points",
+      "ToNodeId": "264a0aeb-e489-4f5a-8e45-2ff983063128",
+      "ToPort": "WorldPts"
+    },
+    {
+      "FromNodeId": "264a0aeb-e489-4f5a-8e45-2ff983063128",
+      "FromPort": "Transform",
+      "ToNodeId": "b8fbcce7-dbae-48ad-b570-01c3898b41dc",
+      "ToPort": "Transform"
+    },
+    {
+      "FromNodeId": "e57a1683-ed06-41bc-b013-8a5dd1b8aec4",
+      "FromPort": "Points",
+      "ToNodeId": "28f8f86f-5565-40f5-b949-74913d30ece6",
+      "ToPort": "WorldPts"
+    },
+    {
+      "FromNodeId": "48161343-7aaf-474b-bbdb-7612471391c9",
+      "FromPort": "Points",
+      "ToNodeId": "28f8f86f-5565-40f5-b949-74913d30ece6",
+      "ToPort": "ImagePts"
+    },
+    {
+      "FromNodeId": "28f8f86f-5565-40f5-b949-74913d30ece6",
+      "FromPort": "H",
+      "ToNodeId": "b8fbcce7-dbae-48ad-b570-01c3898b41dc",
+      "ToPort": "H"
+    },
+    {
+      "FromNodeId": "2a9c8284-902c-449f-a807-fe986d6a2799",
+      "FromPort": "Intrinsics",
+      "ToNodeId": "b8fbcce7-dbae-48ad-b570-01c3898b41dc",
+      "ToPort": "Intrinsics"
+    },
+    {
+      "FromNodeId": "2a9c8284-902c-449f-a807-fe986d6a2799",
+      "FromPort": "CalibrationJson",
+      "ToNodeId": "b8fbcce7-dbae-48ad-b570-01c3898b41dc",
+      "ToPort": "CalibrationJson"
+    },
+    {
+      "FromNodeId": "48161343-7aaf-474b-bbdb-7612471391c9",
+      "FromPort": "Points",
+      "ToNodeId": "7dd7d8de-b1d9-4bd2-a7f6-5ba2a00fb965",
+      "ToPort": "ImagePts"
+    },
+    {
+      "FromNodeId": "e57a1683-ed06-41bc-b013-8a5dd1b8aec4",
+      "FromPort": "Points",
+      "ToNodeId": "7dd7d8de-b1d9-4bd2-a7f6-5ba2a00fb965",
+      "ToPort": "WorldPts"
+    },
+    {
+      "FromNodeId": "7dd7d8de-b1d9-4bd2-a7f6-5ba2a00fb965",
+      "FromPort": "Poly",
+      "ToNodeId": "b8fbcce7-dbae-48ad-b570-01c3898b41dc",
+      "ToPort": "Poly"
+    }
+  ]
+}

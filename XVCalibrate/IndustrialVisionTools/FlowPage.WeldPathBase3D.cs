@@ -154,6 +154,23 @@ namespace CalibOperatorCLI_Example
             path.Add(p);
         }
 
+        private static void AppendDedupePoint3DWithBarId(
+            List<CalibPoint3D> path,
+            List<int> pathBarIds,
+            CalibPoint3D p,
+            int barId)
+        {
+            if (path.Count > 0)
+            {
+                var last = path[path.Count - 1];
+                if (Math.Abs(last.X - p.X) < 1e-9 && Math.Abs(last.Y - p.Y) < 1e-9 && Math.Abs(last.Z - p.Z) < 1e-9)
+                    return;
+            }
+
+            path.Add(p);
+            pathBarIds.Add(barId);
+        }
+
         private static void AppendLineTransit3D(List<CalibPoint3D> path, CalibPoint3D a, CalibPoint3D b, double spacing)
         {
             double dx = b.X - a.X, dy = b.Y - a.Y, dz = b.Z - a.Z;
@@ -175,6 +192,40 @@ namespace CalibOperatorCLI_Example
             {
                 double t = (double)i / n;
                 AppendDedupePoint3D(path, new CalibPoint3D(a.X + t * dx, a.Y + t * dy, a.Z + t * dz));
+            }
+        }
+
+        private static void AppendLineTransit3DWithBarId(
+            List<CalibPoint3D> path,
+            List<int> pathBarIds,
+            CalibPoint3D a,
+            CalibPoint3D b,
+            double spacing,
+            int barId)
+        {
+            double dx = b.X - a.X, dy = b.Y - a.Y, dz = b.Z - a.Z;
+            double len = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+            if (len < 1e-12)
+            {
+                AppendDedupePoint3DWithBarId(path, pathBarIds, b, barId);
+                return;
+            }
+
+            if (spacing <= 0)
+            {
+                AppendDedupePoint3DWithBarId(path, pathBarIds, b, barId);
+                return;
+            }
+
+            int n = Math.Max(1, (int)Math.Ceiling(len / spacing));
+            for (int i = 1; i <= n; i++)
+            {
+                double t = (double)i / n;
+                AppendDedupePoint3DWithBarId(
+                    path,
+                    pathBarIds,
+                    new CalibPoint3D(a.X + t * dx, a.Y + t * dy, a.Z + t * dz),
+                    barId);
             }
         }
 

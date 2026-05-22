@@ -23,11 +23,21 @@
 
 ## 规则阵列过滤（剔除误检）
 
-若目标呈 **M 行 × N 列** 等距排布，在 `halcon_find_shape_model` 与显示之间插入 **`halcon_filter_shape_match_grid`（HALCON 阵列过滤匹配）**：
+若目标呈 **M 行 × N 列** 等距排布，推荐拆成两步（`main2.flow.json` 已按此连线）：
 
 ```
-FindShapeModel → 阵列过滤 → 显示形状匹配结果
+FindShapeModel → halcon_pick_shape_match_lattice（阵列格点筛选，输出 16 模板）→ halcon_fit_shape_match_lattice（阵列聚类拟合）
+              → halcon_filter_shape_match_grid（阵列过滤匹配）
+              → halcon_display_shape_match
 ```
+
+- **`halcon_pick_shape_match_lattice`**：链向定向 + 2 列×8 行落格，每格最高分 → 直接输出 **16** 个 `Row/Column/Angle/Score` 及 `GridRow/GridCol`、链向角。
+- **`halcon_chain_strip_*`（见 `main2.flow.json`）**：
+  - **快速路径**：**`halcon_chain_strip_bootstrap`**（输出格网 u 轴 θ≈0° 与 `BootstrapPickIndices`）→ **`halcon_chain_strip_pick_uv_grid`**（沿用 θ 投影 u/v，每格最高分 → 16 点）
+  - **条带路径**：引导 → 定向落格 → 列0+条带输出（`halcon_chain_strip_pick_fill`）
+- **`halcon_estimate_shape_match_chain`**：一步完成引导+定向+列0+条带（兼容旧流程）。
+- **`halcon_fit_shape_match_lattice`**：可接上游链向；u/v 聚类得列/行中心线与理论格心（`ColCenterU` / `RowCenterV` 等）。
+- **`halcon_filter_shape_match_grid`**：在聚类结果上落格、每格选优、邻格/得分过滤；可连接上游聚类端口，也可单独使用（内嵌聚类，兼容旧流程）。
 
 | 参数 | 含义 |
 |------|------|

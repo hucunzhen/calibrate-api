@@ -13,8 +13,8 @@
     {
       "Id": "15572a4b-62e3-466e-b891-c8d9d5ae35a7",
       "TypeId": "composite",
-      "X": 199.67857142857156,
-      "Y": 326.07142857142867,
+      "X": 163.67857142857156,
+      "Y": 356.07142857142867,
       "Params": {
         "innerFlowPath": "genMask.flow.json",
         "innerFlowJson": "",
@@ -24,8 +24,8 @@
     {
       "Id": "6a20c99e-ee0b-4c12-82c1-ccfa91ebec0e",
       "TypeId": "composite",
-      "X": 195.3928571428571,
-      "Y": 169.7857142857143,
+      "X": 201.3928571428571,
+      "Y": 83.7857142857143,
       "Params": {
         "innerFlowPath": "grayPreprocess.flow.json",
         "innerFlowJson": "",
@@ -60,14 +60,14 @@
       "X": 840,
       "Y": 20,
       "Params": {
-        "filePath": "D:\\work\\calibrate-api\\flows\\xingzu\\calibration_result.json"
+        "filePath": "calibration_result.json"
       }
     },
     {
       "Id": "47c98eca-35e1-4eb4-b2a0-d84d66340a9a",
       "TypeId": "img_to_world",
-      "X": 1091,
-      "Y": 204,
+      "X": 1171,
+      "Y": 207,
       "Params": {}
     },
     {
@@ -125,8 +125,8 @@
     {
       "Id": "4363da26-6502-4e51-abe4-9263562fbd9e",
       "TypeId": "contours_to_weld_path",
-      "X": 1106,
-      "Y": 458,
+      "X": 1130,
+      "Y": 351,
       "Params": {
         "retreatX": "500",
         "retreatY": "100",
@@ -142,34 +142,13 @@
       }
     },
     {
-      "Id": "9e65aeb7-7491-435b-b86a-5cc7d8989307",
-      "TypeId": "load_image",
-      "X": 0,
-      "Y": 264,
-      "Params": {
-        "filePath": "D:\\work\\calibrate-api\\test_images\\Image_20260417090632792.bmp"
-      }
-    },
-    {
       "Id": "7d7121da-5359-4028-b595-9c59b6695cd0",
       "TypeId": "plane_to_base_handeye",
-      "X": 1094,
-      "Y": 332,
+      "X": 1383,
+      "Y": 275,
       "Params": {
         "filePath": "D:\\work\\calibrate-api\\flows\\halcon\\handeye_plane_to_base.json",
         "planeZ": "0"
-      }
-    },
-    {
-      "Id": "9c5227c9-517c-4c13-bdc5-7910992f1edd",
-      "TypeId": "display_3d_trajectory",
-      "X": 1304,
-      "Y": 337,
-      "Params": {
-        "tubeDiameter": "0.8",
-        "showGrid": "true",
-        "gridExtent": "200",
-        "zDefault": "0"
       }
     },
     {
@@ -182,8 +161,8 @@
     {
       "Id": "704c47ce-549c-4103-83d4-3d13ff6179ba",
       "TypeId": "contour_perpendicular_entry",
-      "X": 1085,
-      "Y": 617,
+      "X": 1123,
+      "Y": 563,
       "Params": {
         "retreatX": "0",
         "retreatY": "0",
@@ -197,86 +176,31 @@
       }
     },
     {
-      "Id": "d04c0e90-5019-4615-9f61-b6fe5d2a4fdd",
-      "TypeId": "display_3d_trajectory",
-      "X": 1305,
-      "Y": 488,
+      "Id": "631d5e84-54cf-42ff-bb6b-77da87b3d2e9",
+      "TypeId": "composite_bind_in",
+      "X": 0,
+      "Y": 180,
       "Params": {
-        "tubeDiameter": "0.8",
-        "showGrid": "true",
-        "gridExtent": "200",
-        "zDefault": "0"
+        "externalPort": "In"
       }
     },
     {
-      "Id": "0dd8ca3b-ac04-44c0-b65f-56520357be9b",
-      "TypeId": "plc_connect",
-      "X": 1307,
-      "Y": 26,
+      "Id": "e602fcf3-4736-437a-a3a3-7cac43fa5420",
+      "TypeId": "composite_bind_out",
+      "X": 1352,
+      "Y": 563,
       "Params": {
-        "ip": "192.168.6.6",
-        "port": "502",
-        "station": "0"
+        "externalPort": "Out"
       }
     },
     {
-      "Id": "1506adfe-0c58-4dd5-bd3e-bcd0d3be5c74",
-      "TypeId": "send_plc",
-      "X": 1807,
-      "Y": 385,
+      "Id": "456a77bb-0e76-465d-acdd-03322e7c6f37",
+      "TypeId": "composite_bind_out",
+      "X": 1294,
+      "Y": 676,
       "Params": {
-        "splitByBar": "separate_batch",
-        "barGvarLayout": "overwrite",
-        "countRegister": "D800",
-        "gvarStartRegister": "D30000",
-        "gvarType": "1",
-        "skipCountWrite": "false",
-        "usePlcPageGvar": "false",
-        "weldDoneHostRegister": "D804L",
-        "setWeldDoneHostOnSend": "false",
-        "setWeldDoneHostAfterAllBatches": "true",
-        "runDownstreamPerBatch": "true"
+        "externalPort": "Out2"
       }
-    },
-    {
-      "Id": "f3a8c2e1-9b4d-4f6a-8c1e-2d5e7a9b0c3d",
-      "TypeId": "plc_set_weld_done_to_plc",
-      "X": 2020,
-      "Y": 385,
-      "Params": {
-        "flagRegister": ""
-      }
-    },
-    {
-      "Id": "e2b7d1f0-8a3c-4e5f-9d0a-1c4e6f8a2b4c",
-      "TypeId": "plc_wait_weld_done",
-      "X": 2240,
-      "Y": 385,
-      "Params": {
-        "flagRegister": "",
-        "bit": "0",
-        "timeoutMs": "600000",
-        "pollIntervalMs": "50",
-        "clearAfter": "true"
-      }
-    },
-    {
-      "Id": "852e6ec6-e40b-4416-a9fd-66c7e6789189",
-      "TypeId": "if_gate",
-      "X": 1603,
-      "Y": 62,
-      "Params": {
-        "op": "\u003E",
-        "threshold": "0",
-        "epsilon": "1e-6"
-      }
-    },
-    {
-      "Id": "68b145b3-fa01-4d68-808d-7077fa0ab4d1",
-      "TypeId": "route_true",
-      "X": 1737,
-      "Y": 226,
-      "Params": {}
     }
   ],
   "Connections": [
@@ -371,18 +295,6 @@
       "ToPort": "BarIds"
     },
     {
-      "FromNodeId": "9e65aeb7-7491-435b-b86a-5cc7d8989307",
-      "FromPort": "Image",
-      "ToNodeId": "6a20c99e-ee0b-4c12-82c1-ccfa91ebec0e",
-      "ToPort": "In"
-    },
-    {
-      "FromNodeId": "9e65aeb7-7491-435b-b86a-5cc7d8989307",
-      "FromPort": "Image",
-      "ToNodeId": "15572a4b-62e3-466e-b891-c8d9d5ae35a7",
-      "ToPort": "In"
-    },
-    {
       "FromNodeId": "47c98eca-35e1-4eb4-b2a0-d84d66340a9a",
       "FromPort": "World",
       "ToNodeId": "7d7121da-5359-4028-b595-9c59b6695cd0",
@@ -393,12 +305,6 @@
       "FromPort": "Points3D",
       "ToNodeId": "4363da26-6502-4e51-abe4-9263562fbd9e",
       "ToPort": "SamplePts"
-    },
-    {
-      "FromNodeId": "4363da26-6502-4e51-abe4-9263562fbd9e",
-      "FromPort": "Points",
-      "ToNodeId": "9c5227c9-517c-4c13-bdc5-7910992f1edd",
-      "ToPort": "Points3D"
     },
     {
       "FromNodeId": "cccd0504-756c-4631-8844-faeebd1d8db6",
@@ -437,52 +343,28 @@
       "ToPort": "BarIds"
     },
     {
-      "FromNodeId": "704c47ce-549c-4103-83d4-3d13ff6179ba",
-      "FromPort": "Points",
-      "ToNodeId": "d04c0e90-5019-4615-9f61-b6fe5d2a4fdd",
-      "ToPort": "Points3D"
-    },
-    {
-      "FromNodeId": "0dd8ca3b-ac04-44c0-b65f-56520357be9b",
-      "FromPort": "Connected",
-      "ToNodeId": "852e6ec6-e40b-4416-a9fd-66c7e6789189",
-      "ToPort": "Value"
-    },
-    {
-      "FromNodeId": "852e6ec6-e40b-4416-a9fd-66c7e6789189",
-      "FromPort": "True",
-      "ToNodeId": "68b145b3-fa01-4d68-808d-7077fa0ab4d1",
-      "ToPort": "Condition"
-    },
-    {
-      "FromNodeId": "704c47ce-549c-4103-83d4-3d13ff6179ba",
-      "FromPort": "Points",
-      "ToNodeId": "68b145b3-fa01-4d68-808d-7077fa0ab4d1",
+      "FromNodeId": "631d5e84-54cf-42ff-bb6b-77da87b3d2e9",
+      "FromPort": "Out",
+      "ToNodeId": "6a20c99e-ee0b-4c12-82c1-ccfa91ebec0e",
       "ToPort": "In"
     },
     {
-      "FromNodeId": "68b145b3-fa01-4d68-808d-7077fa0ab4d1",
+      "FromNodeId": "631d5e84-54cf-42ff-bb6b-77da87b3d2e9",
       "FromPort": "Out",
-      "ToNodeId": "1506adfe-0c58-4dd5-bd3e-bcd0d3be5c74",
-      "ToPort": "Points3D"
+      "ToNodeId": "15572a4b-62e3-466e-b891-c8d9d5ae35a7",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "704c47ce-549c-4103-83d4-3d13ff6179ba",
+      "FromPort": "Points",
+      "ToNodeId": "e602fcf3-4736-437a-a3a3-7cac43fa5420",
+      "ToPort": "In"
     },
     {
       "FromNodeId": "704c47ce-549c-4103-83d4-3d13ff6179ba",
       "FromPort": "BarIds",
-      "ToNodeId": "1506adfe-0c58-4dd5-bd3e-bcd0d3be5c74",
-      "ToPort": "BarIds"
-    },
-    {
-      "FromNodeId": "1506adfe-0c58-4dd5-bd3e-bcd0d3be5c74",
-      "FromPort": "GvarSent",
-      "ToNodeId": "f3a8c2e1-9b4d-4f6a-8c1e-2d5e7a9b0c3d",
-      "ToPort": "After"
-    },
-    {
-      "FromNodeId": "f3a8c2e1-9b4d-4f6a-8c1e-2d5e7a9b0c3d",
-      "FromPort": "Signaled",
-      "ToNodeId": "e2b7d1f0-8a3c-4e5f-9d0a-1c4e6f8a2b4c",
-      "ToPort": "After"
+      "ToNodeId": "456a77bb-0e76-465d-acdd-03322e7c6f37",
+      "ToPort": "In"
     }
   ]
 }

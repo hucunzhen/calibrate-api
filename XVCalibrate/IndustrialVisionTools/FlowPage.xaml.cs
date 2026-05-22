@@ -15,7 +15,10 @@ using System.Runtime.InteropServices;
 using System.Numerics;
 using Microsoft.Win32;
 using CalibOperatorPInvoke;
+using HslCommunication;
+using HslCommunication;
 using HslCommunication.ModBus;
+using HslCommunication.Profinet.XINJE;
 #if HALCON_ENABLED
 using HalconDotNet;
 #endif
@@ -97,8 +100,141 @@ namespace CalibOperatorCLI_Example
         private readonly TranslateTransform _canvasTranslate = new TranslateTransform(0, 0);
         private readonly ScaleTransform _canvasScale = new ScaleTransform(1, 1);
         private readonly TransformGroup _canvasTransform = new TransformGroup();
-        private ModbusTcpNet? _flowPlc;
+        private XinJETcpNet? _flowPlc;
         private bool _flowPlcConnected;
+        private static PlcConfig? _flowPlcConfig;
+        /// <summary>组合算子执行子流程时，子图内已连线的 (节点Id, 输出端口名)。</summary>
+        private HashSet<(Guid NodeId, string Port)>? _compositeInnerWiredOutputs;
+        /// <summary>send_plc 分批下发时已在批内执行过的下游节点，主流程调度跳过避免重复。</summary>
+        private HashSet<Guid>? _skipFlowRunNodeIds;
+        private Guid _sendPlcDownstreamChainSourceId;
+        private List<FlowNode>? _sendPlcDownstreamChainCache;
+
+        private static PlcConfig LoadFlowPlcConfig()
+        {
+            if (_flowPlcConfig != null)
+                return _flowPlcConfig;
+            try
+            {
+                string configPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plc_config.json");
+                if (System.IO.File.Exists(configPath))
+                {
+                    string json = System.IO.File.ReadAllText(configPath);
+                    _flowPlcConfig = JsonSerializer.Deserialize<PlcConfig>(json) ?? new PlcConfig();
+                }
+                else
+                    _flowPlcConfig = new PlcConfig();
+            }
+            catch
+            {
+                _flowPlcConfig = new PlcConfig();
+            }
+
+            return _flowPlcConfig;
+        }
+
+        private static string NormalizeFlowDAddress(string raw)
+        {
+            string s = (raw ?? "").Trim();
+            if (string.IsNullOrEmpty(s))
+                throw new InvalidOperationException("无效的 PLC 寄存器地址");
+            if (int.TryParse(s, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out int n))
+                s = "D" + n;
+            if (XinjePlcAddress.IsHdAddress(s))
+                throw new InvalidOperationException($"流程 PLC 仅支持 D 区信捷地址，不支持 HD: {raw}");
+            return PlcXinjeHelper.NormalizeWordAddress(s, out _);
+        }
+
+        private static string FormatFlowPlcOperateFailure(OperateResult result)
+        {
+            if (result == null)
+                return "无响应";
+            string msg = string.IsNullOrWhiteSpace(result.Message)
+                ? "无详细消息（常见：Modbus 超时、寄存器越界、连接已断开）"
+                : result.Message.Trim();
+            if (result.ErrorCode != 0)
+                msg += $" (ErrorCode={result.ErrorCode})";
+            return msg;
+        }
+
+        private bool FlowReadPlcBit(string xinjeAddr, int bitIndex)
+        {
+            XinJETcpNet plc = RequireFlowPlcD();
+            string word = PlcXinjeHelper.NormalizeWordAddress(xinjeAddr, out int wordBitOffset);
+            int finalBit = bitIndex + wordBitOffset;
+
+            var readResult = plc.ReadUInt16(word);
+            if (!readResult.IsSuccess)
+                throw new InvalidOperationException($"PLC 读位失败({xinjeAddr}): {readResult.Message}");
+
+            return (readResult.Content & (1 << finalBit)) != 0;
+        }
+
+        private void FlowWritePlcBit(string xinjeAddr, int bitIndex, bool set)
+        {
+            XinJETcpNet plc = RequireFlowPlcD();
+            string word = PlcXinjeHelper.NormalizeWordAddress(xinjeAddr, out int wordBitOffset);
+            int finalBit = bitIndex + wordBitOffset;
+
+            var readResult = plc.ReadUInt16(word);
+            if (!readResult.IsSuccess)
+                throw new InvalidOperationException($"PLC 读位失败({xinjeAddr}): {readResult.Message}");
+
+            ushort val = readResult.Content;
+            if (set)
+                val |= (ushort)(1 << finalBit);
+            else
+                val &= (ushort)~(1 << finalBit);
+
+            var writeResult = plc.Write(word, val);
+            if (!writeResult.IsSuccess)
+                throw new InvalidOperationException($"PLC 写位失败({xinjeAddr}): {writeResult.Message}");
+        }
+
+        private static string ResolveFlowPlcRegister(string? paramValue, string configKey, string fallback)
+        {
+            if (!string.IsNullOrWhiteSpace(paramValue))
+                return paramValue.Trim();
+            var cfg = LoadFlowPlcConfig();
+            if (cfg.Registers != null &&
+                cfg.Registers.TryGetValue(configKey, out var reg) &&
+                !string.IsNullOrWhiteSpace(reg))
+                return reg.Trim();
+            return fallback;
+        }
+
+        /// <summary>轮询直到指定位为 1；超时或取消则失败。</summary>
+        private bool FlowWaitPlcBit(string xinjeAddr, int bitIndex, int timeoutMs, int pollIntervalMs)
+        {
+            timeoutMs = Math.Max(0, timeoutMs);
+            pollIntervalMs = Math.Clamp(pollIntervalMs, 5, 5000);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var token = _runCts?.Token ?? System.Threading.CancellationToken.None;
+
+            while (sw.ElapsedMilliseconds <= timeoutMs)
+            {
+                token.ThrowIfCancellationRequested();
+                if (FlowReadPlcBit(xinjeAddr, bitIndex))
+                    return true;
+                if (sw.ElapsedMilliseconds >= timeoutMs)
+                    break;
+                System.Threading.Thread.Sleep(pollIntervalMs);
+            }
+
+            return false;
+        }
+
+        /// <summary>流程专用连接优先；否则复用 PLC 页已连接的信捷 D 客户端（与 PlcPage GVAR 写入同通道）。</summary>
+        private XinJETcpNet RequireFlowPlcD()
+        {
+            if (_flowPlc != null && _flowPlcConnected)
+                return _flowPlc;
+            if (PlcXinjeSession.Active != null)
+                return PlcXinjeSession.Active;
+            throw new InvalidOperationException(
+                "PLC 未连接：请先执行「PLC连接」算子，或在 PLC 页点击连接后再运行 send_plc。");
+        }
 
         private const int MaxFlowUndoSteps = 80;
         private static readonly JsonSerializerOptions FlowSnapshotJsonOptions = new JsonSerializerOptions { WriteIndented = false };
@@ -2020,7 +2156,22 @@ namespace CalibOperatorCLI_Example
             var simplified = SimplifyOpenPolyline(open, epsilon);
             if (simplified.Count > 1)
                 simplified.RemoveAt(simplified.Count - 1);
-            return simplified.ToArray();
+            return EnsureClosedPolylineEndpoints(simplified.ToArray());
+        }
+
+        /// <summary>简化后的闭合轮廓补回终点，供显示 DrawPolygon / 焊道闭合段使用。</summary>
+        private static Point2D[] EnsureClosedPolylineEndpoints(Point2D[]? pts)
+        {
+            if (pts == null || pts.Length < 2)
+                return pts ?? Array.Empty<Point2D>();
+            double dx = pts[0].X - pts[^1].X;
+            double dy = pts[0].Y - pts[^1].Y;
+            if (dx * dx + dy * dy <= 1e-12)
+                return pts;
+            var closed = new Point2D[pts.Length + 1];
+            Array.Copy(pts, closed, pts.Length);
+            closed[^1] = pts[0];
+            return closed;
         }
 
         private static List<Point2D> SimplifyOpenPolyline(List<Point2D> points, double epsilon)
@@ -5247,17 +5398,29 @@ namespace CalibOperatorCLI_Example
             var innerList = idMap.Values.ToList();
             var sorted = TopologicalSortInner(innerList, edges, idMap);
 
-            foreach (var inner in sorted)
+            var innerWiredOutputs = new HashSet<(Guid NodeId, string Port)>();
+            foreach (var e in edges)
+                innerWiredOutputs.Add((e.FromId, e.FromPort));
+
+            _compositeInnerWiredOutputs = innerWiredOutputs;
+            try
             {
-                var innerInputs = BuildInnerInputsFromEdges(inner.Id, edges, idMap);
-                MergeCompositeExternalInputs(inner, innerInputs, compositeInputs, spec);
-                bool innerIsSource = !edges.Any(e => e.ToId == inner.Id);
-                if (!strictCompositeInputBinding)
-                    AutoFillUnboundCompositeInnerInputs(inner, innerInputs, compositeInputs, innerIsSource);
-                var swInner = Stopwatch.StartNew();
-                ExecuteNode(inner, innerInputs, compositeInputs, baseDirForNestedComposites);
-                swInner.Stop();
-                LogOperatorTiming(inner, swInner.Elapsed.TotalMilliseconds, "composite");
+                foreach (var inner in sorted)
+                {
+                    var innerInputs = BuildInnerInputsFromEdges(inner.Id, edges, idMap);
+                    MergeCompositeExternalInputs(inner, innerInputs, compositeInputs, spec);
+                    bool innerIsSource = !edges.Any(e => e.ToId == inner.Id);
+                    if (!strictCompositeInputBinding)
+                        AutoFillUnboundCompositeInnerInputs(inner, innerInputs, compositeInputs, innerIsSource);
+                    var swInner = Stopwatch.StartNew();
+                    ExecuteNode(inner, innerInputs, compositeInputs, baseDirForNestedComposites);
+                    swInner.Stop();
+                    LogOperatorTiming(inner, swInner.Elapsed.TotalMilliseconds, "composite");
+                }
+            }
+            finally
+            {
+                _compositeInnerWiredOutputs = null;
             }
 
             var effectiveOutputs = BuildEffectiveCompositeOutputBinds(
@@ -5558,6 +5721,59 @@ namespace CalibOperatorCLI_Example
             return result;
         }
 
+        /// <summary>send_plc 下游子节点，按主流程拓扑序排列（不含 send_plc 自身）。</summary>
+        private List<FlowNode> GetOrderedDownstreamOfNode(FlowNode source)
+        {
+            var downstream = GetDownstreamNodes(source);
+            downstream.Remove(source);
+            var sorted = TopologicalSort();
+            return sorted.Where(downstream.Contains).ToList();
+        }
+
+        private List<FlowNode> ResolveSendPlcDownstreamChain(FlowNode sendPlc)
+        {
+            if (_sendPlcDownstreamChainCache != null && _sendPlcDownstreamChainSourceId == sendPlc.Id)
+                return _sendPlcDownstreamChainCache;
+            _sendPlcDownstreamChainSourceId = sendPlc.Id;
+            _sendPlcDownstreamChainCache = GetOrderedDownstreamOfNode(sendPlc);
+            return _sendPlcDownstreamChainCache;
+        }
+
+        /// <summary>每批 GVAR 写完后执行 GvarSent 等连线下游（如 POU 使能、等待焊接完成）。</summary>
+        private void ExecuteSendPlcDownstreamChain(
+            FlowNode sendPlc,
+            int batchIndex,
+            int batchCount,
+            int barId,
+            int segmentCount)
+        {
+            var chain = ResolveSendPlcDownstreamChain(sendPlc);
+            if (chain.Count == 0)
+                return;
+
+            _skipFlowRunNodeIds ??= new HashSet<Guid>();
+            foreach (var dn in chain)
+                _skipFlowRunNodeIds.Add(dn.Id);
+
+            sendPlc.Outputs["GvarSent"] = true;
+            sendPlc.Outputs["BatchIndex"] = batchIndex;
+            sendPlc.Outputs["BatchCount"] = batchCount;
+            sendPlc.Outputs["BatchBarId"] = barId;
+            sendPlc.Outputs["BatchSegmentCount"] = segmentCount;
+            sendPlc.Outputs["HostWeldDoneSignaled"] = false;
+
+            AppendLog(
+                $"[send_plc] 批次 {batchIndex + 1}/{batchCount} BarId={barId} 段={segmentCount} → 下游 {chain.Count} 节点");
+            foreach (var dn in chain)
+            {
+                AppendLog($"  [send_plc↓] {dn.Def.DisplayName}");
+                ExecuteNode(dn);
+                if (!string.IsNullOrEmpty(dn.ErrorMessage))
+                    throw new InvalidOperationException(
+                        $"发送PLC 下游「{dn.Def.DisplayName}」失败(批次 {batchIndex + 1}/{batchCount}): {dn.ErrorMessage}");
+            }
+        }
+
         private bool IsFlowOutputPortWired(FlowNode node, string outputPortName)
         {
             foreach (var c in _connections)
@@ -5568,6 +5784,30 @@ namespace CalibOperatorCLI_Example
                     return true;
             }
             return false;
+        }
+
+        /// <summary>主画布或组合子图内该输出端口是否有下游连线。</summary>
+        private bool ShouldEmitCalibrationOutput(FlowNode node, string outputPortName, string? compositeInnerFlowBaseDir)
+        {
+            if (_compositeInnerWiredOutputs != null)
+                return _compositeInnerWiredOutputs.Contains((node.Id, outputPortName));
+            return IsFlowOutputPortWired(node, outputPortName);
+        }
+
+        private static AffineTransform? CoerceAffineTransform(object? value)
+        {
+            if (value == null)
+                return null;
+            if (value is AffineTransform a)
+                return a;
+            try
+            {
+                return (AffineTransform)value;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         /// <summary>枚举目录内匹配扩展名的图像路径，去重后按文件名排序（OrdinalIgnoreCase）。</summary>
@@ -6786,6 +7026,7 @@ namespace CalibOperatorCLI_Example
                         }
 
                         var path = new List<CalibPoint3D>();
+                        var pathBarIds = new List<int>();
 
                         // 垂直方向由回退点Z和首轮廓点Z的关系决定
                         // 回退点在工件上方（Z >= 进入点Z）：垂直方向向上（+Z）
@@ -6793,11 +7034,15 @@ namespace CalibOperatorCLI_Example
                         double zSign = (retreatZ - contourSegs3D[0][0].Z) >= 0 ? 1 : -1;
 
                         CalibPoint3D retreatAbove = default; // 循环外声明，供 leadOut 使用
+                        int lastBarId = contourBarIds.Count > 0 ? contourBarIds[0] : 0;
 
                         for (int i = 0; i < contourSegs3D.Count; i++)
                         {
                             var seg = contourSegs3D[i];
                             if (seg == null || seg.Length < 2) continue;
+
+                            int barId = i < contourBarIds.Count ? contourBarIds[i] : i;
+                            lastBarId = barId;
 
                             var pStart = seg[0];
                             var pEnd = seg[seg.Length - 1];
@@ -6813,43 +7058,47 @@ namespace CalibOperatorCLI_Example
                                 if (leadIn)
                                 {
                                     // 进入段：回退点 → 进入点正上方/正下方 → 进入点（只保留轮廓点附近的垂直段）
-                                    AppendLineTransit3D(path, retreat, entryAbove, transitSpacing);
-                                    AppendLineTransit3D(path, entryAbove, pStart, transitSpacing);
+                                    AppendLineTransit3DWithBarId(path, pathBarIds, retreat, entryAbove, transitSpacing, barId);
+                                    AppendLineTransit3DWithBarId(path, pathBarIds, entryAbove, pStart, transitSpacing, barId);
                                 }
                                 else
                                 {
-                                    AppendDedupePoint3D(path, pStart);
+                                    AppendDedupePoint3DWithBarId(path, pathBarIds, pStart, barId);
                                 }
                             }
                             else
                             {
                                 // 从上一条轮廓的退出点直接回退
-                                AppendLineTransit3D(path, path[path.Count - 1], retreat, transitSpacing);
+                                AppendLineTransit3DWithBarId(path, pathBarIds, path[path.Count - 1], retreat, transitSpacing, barId);
                                 // 进入段：回退点 → 进入点正上方/正下方 → 进入点
-                                AppendLineTransit3D(path, retreat, entryAbove, transitSpacing);
-                                AppendLineTransit3D(path, entryAbove, pStart, transitSpacing);
+                                AppendLineTransit3DWithBarId(path, pathBarIds, retreat, entryAbove, transitSpacing, barId);
+                                AppendLineTransit3DWithBarId(path, pathBarIds, entryAbove, pStart, transitSpacing, barId);
                             }
 
                             // 添加轮廓所有点
                             foreach (var p in seg)
-                                AppendDedupePoint3D(path, p);
+                                AppendDedupePoint3DWithBarId(path, pathBarIds, p, barId);
 
                             // 退出延伸：轮廓终点 → 进入点（闭合）→ 进入点正上方/正下方
                             // 进出都连到同一个轮廓起点，形成闭合轨迹
                             if (PointDistance3D(pEnd, pStart) > 1e-9)
-                                AppendLineTransit3D(path, path[path.Count - 1], pStart, transitSpacing);
-                            AppendLineTransit3D(path, path[path.Count - 1], entryAbove, transitSpacing);
+                                AppendLineTransit3DWithBarId(path, pathBarIds, path[path.Count - 1], pStart, transitSpacing, barId);
+                            AppendLineTransit3DWithBarId(path, pathBarIds, path[path.Count - 1], entryAbove, transitSpacing, barId);
                         }
 
                         if (leadOut && path.Count > 0)
                         {
                             // 最后退出点正上方/正下方 → 回退点（只保留轮廓点附近的垂直段）
-                            AppendLineTransit3D(path, path[path.Count - 1], retreat, transitSpacing);
+                            AppendLineTransit3DWithBarId(path, pathBarIds, path[path.Count - 1], retreat, transitSpacing, lastBarId);
                         }
 
+                        if (pathBarIds.Count != path.Count)
+                            throw new InvalidOperationException(
+                                $"垂直入刀: 内部 BarIds 与点数不一致 ({pathBarIds.Count} vs {path.Count})");
+
                         node.Outputs["Points"] = path.ToArray();
-                        node.Outputs["BarIds"] = contourBarIds.ToArray();
-                        node.ResultSummary = $"{modeTag} · {path.Count} 点 · {contourSegs3D.Count} 条轮廓";
+                        node.Outputs["BarIds"] = pathBarIds.ToArray();
+                        node.ResultSummary = $"{modeTag} · {path.Count} 点 · {contourSegs3D.Count} 条轮廓 · BarIds逐点";
                         break;
                     }
 
@@ -7693,10 +7942,13 @@ namespace CalibOperatorCLI_Example
 
                     case "img_to_world":
                     {
-                        var pixelPts = inputs["Pixel"] as Point2D[];
-                        var transform = inputs["Transform"] as AffineTransform?;
+                        var pixelPts = inputs.TryGetValue("Pixel", out var pxObj) ? pxObj as Point2D[] : null;
+                        var transform = inputs.TryGetValue("Transform", out var trObj)
+                            ? CoerceAffineTransform(trObj)
+                            : null;
                         if (pixelPts == null || transform == null)
-                            throw new InvalidOperationException("坐标转换: 缺少输入点或变换矩阵");
+                            throw new InvalidOperationException(
+                                "坐标转换: 缺少输入点或变换矩阵（请检查「读取标定结果」是否在子流程内输出 Transform，且 calibration_result.json 含 affine）");
                         if (pixelPts.Length == 0)
                         {
                             node.Outputs["World"] = Array.Empty<Point2D>();
@@ -7824,7 +8076,16 @@ namespace CalibOperatorCLI_Example
                         }
 
                         node.Outputs["Points3D"] = out3;
-                        node.ResultSummary = $"{planePts.Length} pts → base (planeZ={planeZ})";
+                        if (inputs.TryGetValue("BarIds", out var barIn) && barIn is int[] barIds)
+                        {
+                            if (barIds.Length != planePts.Length)
+                                throw new InvalidOperationException(
+                                    $"平面→基座(手眼): BarIds 长度 {barIds.Length} 与 Points {planePts.Length} 不一致。");
+                            node.Outputs["BarIds"] = (int[])barIds.Clone();
+                        }
+
+                        string barNote = node.Outputs.ContainsKey("BarIds") ? ", BarIds 已透传" : "";
+                        node.ResultSummary = $"{planePts.Length} pts → base (planeZ={planeZ}){barNote}";
                         break;
                     }
 
@@ -7899,9 +8160,7 @@ namespace CalibOperatorCLI_Example
                         var pathParam = node.Params.GetValueOrDefault("filePath", "calibration_result.json");
                         if (string.IsNullOrWhiteSpace(pathParam))
                             pathParam = "calibration_result.json";
-                        var resolvedPath = System.IO.Path.IsPathRooted(pathParam)
-                            ? System.IO.Path.GetFullPath(pathParam)
-                            : System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, pathParam));
+                        var resolvedPath = ResolveCompositeFlowPath(pathParam, compositeInnerFlowBaseDir);
                         var dir = System.IO.Path.GetDirectoryName(resolvedPath);
                         if (!string.IsNullOrWhiteSpace(dir))
                             System.IO.Directory.CreateDirectory(dir);
@@ -7915,9 +8174,9 @@ namespace CalibOperatorCLI_Example
                     case "load_calibration_result":
                     {
                         string configuredPath = node.Params.GetValueOrDefault("filePath", "")?.Trim() ?? "";
-                        string resolvedPath = configuredPath;
-                        if (!string.IsNullOrWhiteSpace(configuredPath) && !System.IO.Path.IsPathRooted(configuredPath))
-                            resolvedPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, configuredPath));
+                        string? resolvedPath = null;
+                        if (!string.IsNullOrWhiteSpace(configuredPath))
+                            resolvedPath = ResolveCompositeFlowPath(configuredPath, compositeInnerFlowBaseDir);
 
                         if (string.IsNullOrWhiteSpace(resolvedPath))
                         {
@@ -7934,7 +8193,11 @@ namespace CalibOperatorCLI_Example
                             resolvedPath = dlg.FileName;
                         }
                         else if (!System.IO.File.Exists(resolvedPath))
-                            throw new System.IO.FileNotFoundException($"读取标定结果: 文件不存在: {resolvedPath}");
+                            throw new System.IO.FileNotFoundException(
+                                $"读取标定结果: 文件不存在: {resolvedPath}" +
+                                (string.IsNullOrWhiteSpace(compositeInnerFlowBaseDir)
+                                    ? ""
+                                    : $"（相对路径基准: {compositeInnerFlowBaseDir}）"));
 
                         string raw = System.IO.File.ReadAllText(resolvedPath, Encoding.UTF8);
                         CalibrationResultFileV1? dto;
@@ -7949,31 +8212,31 @@ namespace CalibOperatorCLI_Example
                         if (dto == null || dto.SchemaVersion < 1)
                             throw new InvalidOperationException("读取标定结果: 无效的 schemaVersion（需要 >= 1）");
 
-                        if (IsFlowOutputPortWired(node, "CalibrationJson"))
+                        if (ShouldEmitCalibrationOutput(node, "CalibrationJson", compositeInnerFlowBaseDir))
                         {
                             if (string.IsNullOrWhiteSpace(dto.CalibrationJson))
                                 throw new InvalidOperationException("读取标定结果: 文件不含 calibrationJson，请去掉该输出的连线或更换文件");
                             node.Outputs["CalibrationJson"] = dto.CalibrationJson;
                         }
-                        if (IsFlowOutputPortWired(node, "Transform"))
+                        if (ShouldEmitCalibrationOutput(node, "Transform", compositeInnerFlowBaseDir))
                         {
                             if (dto.Affine == null)
                                 throw new InvalidOperationException("读取标定结果: 文件不含 affine，请去掉 Transform 输出连线或更换文件");
                             node.Outputs["Transform"] = dto.Affine.ToAffine();
                         }
-                        if (IsFlowOutputPortWired(node, "H"))
+                        if (ShouldEmitCalibrationOutput(node, "H", compositeInnerFlowBaseDir))
                         {
                             if (dto.Homography == null)
                                 throw new InvalidOperationException("读取标定结果: 文件不含 homography，请去掉 H 输出连线或更换文件");
                             node.Outputs["H"] = dto.Homography.ToHomography();
                         }
-                        if (IsFlowOutputPortWired(node, "Poly"))
+                        if (ShouldEmitCalibrationOutput(node, "Poly", compositeInnerFlowBaseDir))
                         {
                             if (dto.Poly2d == null)
                                 throw new InvalidOperationException("读取标定结果: 文件不含 poly2d，请去掉 Poly 输出连线或更换文件");
                             node.Outputs["Poly"] = dto.Poly2d.ToPoly();
                         }
-                        if (IsFlowOutputPortWired(node, "Intrinsics"))
+                        if (ShouldEmitCalibrationOutput(node, "Intrinsics", compositeInnerFlowBaseDir))
                         {
                             if (dto.Intrinsics == null)
                                 throw new InvalidOperationException("读取标定结果: 文件不含 intrinsics，请去掉 Intrinsics 输出连线或更换文件");
@@ -8217,87 +8480,389 @@ namespace CalibOperatorCLI_Example
                         break;
                     }
 
+                    case "plc_read_weld_done":
+                    {
+                        _ = RequireFlowPlcD();
+                        string flagReg = ResolveFlowPlcRegister(
+                            node.Params.GetValueOrDefault("flagRegister"),
+                            "WeldDoneFlag",
+                            "D803L");
+                        int bit = int.TryParse(node.Params.GetValueOrDefault("bit"), out var rb) ? rb : 0;
+                        bool done = FlowReadPlcBit(flagReg, bit);
+                        node.Outputs["Done"] = done;
+                        node.ResultSummary = $"焊接完成 {flagReg}.bit{bit} = {(done ? "1(完成)" : "0")}";
+                        break;
+                    }
+
+                    case "plc_wait_weld_done":
+                    {
+                        _ = RequireFlowPlcD();
+                        string flagReg = ResolveFlowPlcRegister(
+                            node.Params.GetValueOrDefault("flagRegister"),
+                            "WeldDoneFlag",
+                            "D803L");
+                        int bit = int.TryParse(node.Params.GetValueOrDefault("bit"), out var wb) ? wb : 0;
+                        int timeoutMs = int.TryParse(node.Params.GetValueOrDefault("timeoutMs"), out var tm) ? tm : 600_000;
+                        int pollMs = int.TryParse(node.Params.GetValueOrDefault("pollIntervalMs"), out var pm) ? pm : 50;
+                        bool clearAfter = !string.Equals(
+                            node.Params.GetValueOrDefault("clearAfter", "true")?.Trim(),
+                            "false",
+                            StringComparison.OrdinalIgnoreCase)
+                            && node.Params.GetValueOrDefault("clearAfter", "true") != "0";
+
+                        bool ok = FlowWaitPlcBit(flagReg, bit, timeoutMs, pollMs);
+                        if (!ok)
+                            throw new InvalidOperationException(
+                                $"监听焊接完成超时：{flagReg}.bit{bit} 在 {timeoutMs}ms 内未变为 1");
+
+                        if (clearAfter)
+                            FlowWritePlcBit(flagReg, bit, false);
+
+                        node.Outputs["Done"] = true;
+                        node.ResultSummary = $"焊接完成 {flagReg}.bit{bit}{(clearAfter ? "，已清 0" : "")}";
+                        break;
+                    }
+
+                    case "plc_read_camera_capture":
+                    {
+                        _ = RequireFlowPlcD();
+                        string sigReg = ResolveFlowPlcRegister(
+                            node.Params.GetValueOrDefault("signalRegister"),
+                            "CameraCaptureStart",
+                            "D1800L");
+                        int bit = int.TryParse(node.Params.GetValueOrDefault("bit"), out var bi) ? bi : 0;
+                        bool triggered = FlowReadPlcBit(sigReg, bit);
+                        node.Outputs["Triggered"] = triggered;
+                        node.ResultSummary = $"相机拍照信号 {sigReg}.bit{bit} = {(triggered ? "1" : "0")}";
+                        break;
+                    }
+
+                    case "plc_wait_camera_capture":
+                    {
+                        _ = RequireFlowPlcD();
+                        string sigReg = ResolveFlowPlcRegister(
+                            node.Params.GetValueOrDefault("signalRegister"),
+                            "CameraCaptureStart",
+                            "D1800L");
+                        int bit = int.TryParse(node.Params.GetValueOrDefault("bit"), out var wb) ? wb : 0;
+                        int timeoutMs = int.TryParse(node.Params.GetValueOrDefault("timeoutMs"), out var tm) ? tm : 60_000;
+                        int pollMs = int.TryParse(node.Params.GetValueOrDefault("pollIntervalMs"), out var pm) ? pm : 20;
+                        bool clearAfter = string.Equals(
+                            node.Params.GetValueOrDefault("clearAfter", "false")?.Trim(),
+                            "true",
+                            StringComparison.OrdinalIgnoreCase)
+                            || node.Params.GetValueOrDefault("clearAfter") == "1";
+
+                        bool ok = FlowWaitPlcBit(sigReg, bit, timeoutMs, pollMs);
+                        if (!ok)
+                            throw new InvalidOperationException(
+                                $"监听相机拍照信号超时：{sigReg}.bit{bit} 在 {timeoutMs}ms 内未变为 1");
+
+                        if (clearAfter)
+                            FlowWritePlcBit(sigReg, bit, false);
+
+                        node.Outputs["Triggered"] = true;
+                        node.ResultSummary = $"已收到拍照信号 {sigReg}.bit{bit}{(clearAfter ? "，已清 0" : "")}";
+                        break;
+                    }
+
+                    case "plc_clear_weld_done":
+                    {
+                        _ = RequireFlowPlcD();
+                        string flagReg = ResolveFlowPlcRegister(
+                            node.Params.GetValueOrDefault("flagRegister"),
+                            "WeldDoneFlag",
+                            "D803L");
+                        int bit = int.TryParse(node.Params.GetValueOrDefault("bit"), out var cb) ? cb : 0;
+                        FlowWritePlcBit(flagReg, bit, false);
+                        node.Outputs["Cleared"] = true;
+                        node.ResultSummary = $"焊接完成标志 {flagReg}.bit{bit} 已清 0";
+                        break;
+                    }
+
+                    case "plc_set_weld_done_to_plc":
+                    {
+                        _ = RequireFlowPlcD();
+                        string flagReg = ResolveFlowPlcRegister(
+                            node.Params.GetValueOrDefault("flagRegister"),
+                            "WeldDoneHostFlag",
+                            "D804L");
+                        int bit = int.TryParse(node.Params.GetValueOrDefault("bit"), out var sb) ? sb : 0;
+                        FlowWritePlcBit(flagReg, bit, true);
+                        node.Outputs["Signaled"] = true;
+                        node.ResultSummary = $"轨迹已下发通知 {flagReg}.bit{bit} = 1 (上位机→PLC)";
+                        break;
+                    }
+
+                    case "plc_pou_enable":
+                    {
+                        if (!_flowPlcConnected || _flowPlc == null)
+                            throw new InvalidOperationException("PLC POU使能: PLC 未连接，请先执行 PLC连接 算子");
+
+                        bool enabled;
+                        if (inputs.TryGetValue("Enable", out var enObj) && enObj is bool eb)
+                            enabled = eb;
+                        else
+                        {
+                            string enParam = (node.Params.GetValueOrDefault("enable", "ON") ?? "ON").Trim();
+                            enabled = enParam.Equals("ON", StringComparison.OrdinalIgnoreCase)
+                                || enParam == "1"
+                                || enParam.Equals("true", StringComparison.OrdinalIgnoreCase);
+                        }
+
+                        string regLabel = node.Params.GetValueOrDefault("enableRegister", "D801L")?.Trim() ?? "D801L";
+                        FlowWritePlcBit(regLabel, 0, enabled);
+
+                        node.Outputs["Enabled"] = enabled;
+                        node.ResultSummary = $"POU使能 {(enabled ? "ON" : "OFF")} → {regLabel}";
+                        break;
+                    }
+
+                    case "plc_set_segment_count":
+                    {
+                        XinJETcpNet plcCount = RequireFlowPlcD();
+
+                        int count;
+                        if (inputs.TryGetValue("Count", out var countObj) && countObj != null)
+                        {
+                            count = countObj switch
+                            {
+                                int ci => ci,
+                                long cl => (int)cl,
+                                double cd => (int)Math.Round(cd),
+                                float cf => (int)Math.Round(cf),
+                                _ when int.TryParse(countObj.ToString(), System.Globalization.NumberStyles.Integer,
+                                    System.Globalization.CultureInfo.InvariantCulture, out int parsed) => parsed,
+                                _ => throw new InvalidOperationException(
+                                    $"PLC 设置线段数量: Count 无法解析为整数 ({countObj.GetType().Name})")
+                            };
+                        }
+                        else if (int.TryParse(node.Params.GetValueOrDefault("segmentCount"), System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture, out int paramCount))
+                        {
+                            count = paramCount;
+                        }
+                        else
+                            throw new InvalidOperationException("PLC 设置线段数量: 请连接 Count 输入或填写 segmentCount 参数");
+
+                        if (count < 0)
+                            throw new InvalidOperationException($"PLC 设置线段数量: 数量不能为负 ({count})");
+                        if (count > short.MaxValue)
+                            throw new InvalidOperationException($"PLC 设置线段数量: 超过 Int16 上限 ({count})");
+
+                        string countReg = NormalizeFlowDAddress(
+                            node.Params.GetValueOrDefault("countRegister", "D800") ?? "D800");
+                        var wr = plcCount.Write(countReg, (short)count);
+                        if (!wr.IsSuccess)
+                            throw new InvalidOperationException($"PLC 设置线段数量失败(@{countReg}): {wr.Message}");
+
+                        node.Outputs["Count"] = count;
+                        node.ResultSummary = $"线段数量={count} → {countReg}";
+                        break;
+                    }
+
                     case "send_plc":
                     {
-                        CalibPoint3D[]? pts3 = inputs["Points"] as CalibPoint3D[];
-                        Point2D[]? pts2 = inputs["Points"] as Point2D[];
-                        int n = pts3?.Length ?? pts2?.Length ?? 0;
-                        if (n == 0)
-                            throw new InvalidOperationException("发送PLC: 缺少有效的点位数据（CalibPoint3D[] 或 Point2D[]）");
-                        if (!_flowPlcConnected || _flowPlc == null)
-                            throw new InvalidOperationException("发送PLC: PLC 未连接，请先执行 PLC连接 算子");
-
-                        // ===== 参数解析 =====
-                        int baseRegister = int.TryParse(
-                            node.Params.GetValueOrDefault("baseRegister"),
-                            System.Globalization.NumberStyles.Integer,
-                            System.Globalization.CultureInfo.InvariantCulture,
-                            out var br)
-                            ? br : 0;
                         short gvarType = short.TryParse(
                             node.Params.GetValueOrDefault("gvarType"),
                             System.Globalization.NumberStyles.Integer,
                             System.Globalization.CultureInfo.InvariantCulture,
                             out var gt)
-                            ? gt : (short)2;  // 默认直线类型
+                            ? gt : (short)1; // 默认 1=线段
 
-                        // ===== 完整GVAR格式 (每条28寄存器) =====
-                        // 寄存器布局: [type1][pad][p0.x,p0.y,p0.z][p1.x,p1.y,p1.z][cx,cy,r][start_deg,end_deg][z0,z1]
-                        // 与 PlcPage.WriteGvarList() 保持一致
-                        var wrCount = _flowPlc.Write(baseRegister.ToString(), (short)n);
-                        if (!wrCount.IsSuccess)
-                            throw new InvalidOperationException($"发送PLC失败(计数@{baseRegister}): {wrCount.Message}");
-
-                        int written = 0;
-                        for (int i = 0; i < n; i++)
+                        string splitByBar = (node.Params.GetValueOrDefault("splitByBar", "none") ?? "none").Trim();
+                        if (!PlcGvarBuilder.TryResolveSendPlcGvar(
+                                inputs,
+                                node.Params.GetValueOrDefault("usePlcPageGvar"),
+                                gvarType,
+                                splitByBar,
+                                out GVAR[] gvarItems,
+                                out List<(int BarId, GVAR[] Gvars)>? barBatches,
+                                out string gvarSource,
+                                out string? resolveDiag))
                         {
-                            float x0, y0, z0, x1, y1, z1;
+                            throw new InvalidOperationException($"发送PLC: {resolveDiag}");
+                        }
 
-                            if (pts3 != null)
+                        XinJETcpNet plcD = RequireFlowPlcD();
+                        string plcVia = (_flowPlc != null && _flowPlcConnected) ? "Flow" : PlcXinjeSession.DescribeActive();
+
+                        string countRegLabel = (node.Params.GetValueOrDefault("countRegister", "D800") ?? "D800").Trim();
+                        string gvarRegLabel = (node.Params.GetValueOrDefault("gvarStartRegister") ?? "").Trim();
+                        if (string.IsNullOrEmpty(gvarRegLabel))
+                            gvarRegLabel = (node.Params.GetValueOrDefault("baseRegister", "D30000") ?? "D30000").Trim();
+                        string countReg = NormalizeFlowDAddress(countRegLabel);
+                        var flowCfg = LoadFlowPlcConfig();
+                        string gvarStart = NormalizeFlowDAddress(
+                            PlcXinjeHelper.ResolveGvarStartAddress(gvarRegLabel, flowCfg.GvarList?.StartAddress));
+                        int maxCount = int.TryParse(
+                            node.Params.GetValueOrDefault("maxSegmentCount", "1024"),
+                            System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var mc)
+                            ? mc : 1024;
+
+                        bool skipCountWrite = (node.Params.GetValueOrDefault("skipCountWrite", "true") ?? "true")
+                            .Trim().Equals("true", StringComparison.OrdinalIgnoreCase)
+                            || node.Params.GetValueOrDefault("skipCountWrite", "true") == "1";
+                        bool separateBatchMode = string.Equals(
+                            splitByBar, "separate_batch", StringComparison.OrdinalIgnoreCase);
+                        // 分批下发：每批必须写 D800=当批线段数（不受 skipCountWrite 影响）
+                        bool writeCountPerBatch = separateBatchMode && barBatches != null && barBatches.Count > 0;
+                        bool runDownstreamPerBatch = SendPlcBatchPlanner.ParseBoolParam(
+                            node.Params.GetValueOrDefault("runDownstreamPerBatch"),
+                            defaultValue: separateBatchMode && barBatches != null && barBatches.Count > 0);
+
+                        bool stackBars = string.Equals(
+                            (node.Params.GetValueOrDefault("barGvarLayout", "overwrite") ?? "overwrite").Trim(),
+                            "stack",
+                            StringComparison.OrdinalIgnoreCase);
+
+                        string hostFlagReg = (node.Params.GetValueOrDefault("weldDoneHostRegister", "D804L") ?? "").Trim();
+                        bool setWeldDoneHostOnSend = SendPlcBatchPlanner.ParseBoolParam(
+                            node.Params.GetValueOrDefault("setWeldDoneHostOnSend"), false);
+                        bool setWeldDoneHostAfterAllBatches = SendPlcBatchPlanner.ParseBoolParam(
+                            node.Params.GetValueOrDefault("setWeldDoneHostAfterAllBatches"),
+                            defaultValue: separateBatchMode);
+                        int batchCount = barBatches?.Count ?? 0;
+                        bool signalHostAfterAll = SendPlcBatchPlanner.ShouldSignalHostAfterAllBatches(
+                            separateBatchMode,
+                            batchCount,
+                            setWeldDoneHostOnSend,
+                            setWeldDoneHostAfterAllBatches,
+                            !string.IsNullOrEmpty(hostFlagReg));
+
+                        List<(int BarId, int SegmentCount)>? batchMeta = null;
+                        if (barBatches != null && barBatches.Count > 0)
+                        {
+                            batchMeta = barBatches
+                                .Select(b => (b.BarId, b.Gvars.Length))
+                                .ToList();
+                        }
+
+                        var plan = SendPlcBatchPlanner.BuildSteps(
+                            separateBatchMode,
+                            batchMeta,
+                            gvarItems.Length,
+                            writeCountPerBatch,
+                            skipCountWrite,
+                            signalHostAfterAll);
+
+                        if (!SendPlcBatchPlanner.ValidateHostSignalLast(plan, out string? planErr))
+                            throw new InvalidOperationException($"发送PLC: 下发计划无效 — {planErr}");
+
+                        string resultMsg;
+                        int n;
+                        bool hostSignaled = false;
+                        int wordOff = 0;
+                        var parts = new List<string>();
+                        int execD800 = 0;
+                        int execD804Clear = 0;
+                        int execD804Set = 0;
+                        int execGvarBatch = 0;
+
+                        foreach (var step in plan)
+                        {
+                            switch (step.Kind)
                             {
-                                x0 = (float)pts3[i].X; y0 = (float)pts3[i].Y; z0 = (float)pts3[i].Z;
-                                x1 = (i + 1 < n) ? (float)pts3[i + 1].X : x0;
-                                y1 = (i + 1 < n) ? (float)pts3[i + 1].Y : y0;
-                                z1 = (i + 1 < n) ? (float)pts3[i + 1].Z : z0;
-                            }
-                            else
-                            {
-                                x0 = (float)pts2[i].X; y0 = (float)pts2[i].Y; z0 = 0;
-                                x1 = (i + 1 < n) ? (float)pts2[i + 1].X : x0;
-                                y1 = (i + 1 < n) ? (float)pts2[i + 1].Y : y0;
-                                z1 = 0;
-                            }
+                                case PlcSendStepKind.ClearHostFlag:
+                                    FlowWritePlcBit(hostFlagReg, 0, false);
+                                    execD804Clear++;
+                                    break;
 
-                            // 与 PlcPage 一致: itemBase = baseRegister + i * 28
-                            int itemBase = baseRegister + i * 28;
+                                case PlcSendStepKind.WriteSegmentCount:
+                                    var wrCount = plcD.Write(countReg, (short)step.SegmentCount);
+                                    execD800++;
+                                    if (!wrCount.IsSuccess)
+                                        throw new InvalidOperationException(
+                                            $"发送PLC失败(BarId={step.BarId} 线段数 {step.SegmentCount}→{countReg}): {FormatFlowPlcOperateFailure(wrCount)}");
+                                    break;
 
-                            // 写 type1 (short) 到寄存器 0
-                            var wrType = _flowPlc.Write(itemBase.ToString(), gvarType);
-                            if (!wrType.IsSuccess)
-                                throw new InvalidOperationException($"发送PLC失败(type1 @{itemBase}): {wrType.Message}");
+                                case PlcSendStepKind.WriteGvarBatch:
+                                    if (barBatches != null && barBatches.Count > 0)
+                                    {
+                                        var (barId, batchGvars) = barBatches[step.BatchIndex];
+                                        int nb = batchGvars.Length;
+                                        if (nb > maxCount)
+                                            throw new InvalidOperationException(
+                                                $"发送PLC: BarId={barId} 线段数 {nb} 超过 maxSegmentCount={maxCount}");
+                                        string addr = stackBars
+                                            ? PlcXinjeHelper.OffsetDAddress(gvarStart, wordOff)
+                                            : gvarStart;
+                                        var wrGvarBatch = PlcGvarModbus.SendGvarList(plcD, addr, batchGvars, out int batchWords);
+                                        if (!wrGvarBatch.IsSuccess)
+                                            throw new InvalidOperationException(
+                                                $"发送PLC失败(BarId={barId}, {nb} 条, {batchWords} 字 @{addr}): {PlcGvarModbus.FormatOperateFailure(wrGvarBatch)}");
+                                        wordOff += nb * GVAR.WORD_COUNT;
+                                        parts.Add($"bar{barId}:{nb}@{addr}");
+                                        execGvarBatch++;
+                                        if (runDownstreamPerBatch)
+                                            ExecuteSendPlcDownstreamChain(
+                                                node, step.BatchIndex, barBatches.Count, barId, nb);
+                                    }
+                                    else
+                                    {
+                                        n = gvarItems.Length;
+                                        if (n > maxCount)
+                                            throw new InvalidOperationException(
+                                                $"发送PLC: GVAR 条数 {n} 超过上限 maxSegmentCount={maxCount}（来源={gvarSource}）");
+                                        var wrGvar = PlcGvarModbus.SendGvarList(plcD, gvarStart, gvarItems, out int totalWords);
+                                        if (!wrGvar.IsSuccess)
+                                            throw new InvalidOperationException(
+                                                $"发送PLC失败(GVAR {n} 条, {totalWords} 字 @{gvarStart}, 通道={plcVia}): {PlcGvarModbus.FormatOperateFailure(wrGvar)}");
+                                        execGvarBatch++;
+                                    }
 
-                            // 写 13 个连续 float: 从寄存器 2 开始（跳过 pad 寄存器 1）
-                            // 寄存器 2..27 = p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, cx, cy, r, start_deg, end_deg, z0, z1
-                            float[] floats = new float[]
-                            {
-                                x0, y0, z0,
-                                x1, y1, z1,
-                                x0, y0, 0,  // cx, cy, r
-                                0, 0,       // start_deg, end_deg
-                                z0, z1      // z0, z1
-                            };
-                            var wrFloats = _flowPlc.Write((itemBase + 2).ToString(), floats);
-                            if (!wrFloats.IsSuccess)
-                                throw new InvalidOperationException($"发送PLC失败(GVAR数据@{itemBase + 2}): {wrFloats.Message}");
+                                    break;
 
-                            written++;
-                            if (n > 50 && written % 50 == 0)
-                            {
-                                StatusText.Dispatcher.Invoke(() => StatusText.Text = $"PLC发送中: {written}/{n}");
+                                case PlcSendStepKind.SignalHostComplete:
+                                    try
+                                    {
+                                        FlowWritePlcBit(hostFlagReg, 0, true);
+                                        hostSignaled = true;
+                                        execD804Set++;
+                                    }
+                                    catch (Exception exBit)
+                                    {
+                                        throw new InvalidOperationException(
+                                            $"发送PLC: 全部批次已写入，但置位 {hostFlagReg} 失败: {exBit.Message}");
+                                    }
+
+                                    break;
                             }
                         }
 
-                        string resultMsg = $"GVAR: count={n} @{baseRegister}, type={gvarType}";
+                        if (barBatches != null && barBatches.Count > 0)
+                        {
+                            n = barBatches.Sum(b => b.Gvars.Length);
+                            resultMsg = writeCountPerBatch || !skipCountWrite
+                                ? $"GVAR分批({barBatches.Count}): {string.Join("; ", parts)}, 共{n}段+各批{countRegLabel}为当批段数, type={gvarType}, src={gvarSource} ({plcVia})"
+                                : $"GVAR分批({barBatches.Count}): {string.Join("; ", parts)}, 共{n}段, type={gvarType}, src={gvarSource} ({plcVia})";
+                        }
+                        else
+                        {
+                            n = gvarItems.Length;
+                            resultMsg = skipCountWrite
+                                ? $"GVAR: {n} 条 @{gvarStart}, type={gvarType}, src={gvarSource} ({plcVia})"
+                                : $"GVAR: count={n}→{countReg}, {n} 条 @{gvarStart}, type={gvarType}, src={gvarSource} ({plcVia})";
+                        }
+
+                        int reportedBatches = execGvarBatch > 0 ? execGvarBatch : (gvarItems.Length > 0 ? 1 : 0);
+                        string dispatchStats =
+                            $"批{reportedBatches} D800×{execD800} {hostFlagReg}清0×{execD804Clear} 置1×{execD804Set}";
+                        if (runDownstreamPerBatch && execGvarBatch > 0)
+                        {
+                            int downN = ResolveSendPlcDownstreamChain(node).Count;
+                            dispatchStats += $" 下游×{downN}节点/批";
+                        }
+
+                        AppendLog($"[send_plc] {dispatchStats} | {SendPlcBatchPlanner.SummarizePlan(plan, hostFlagReg)} | src={gvarSource}");
+                        if (hostSignaled)
+                            resultMsg += $", 全部批次下发完成→{hostFlagReg}=1";
+                        resultMsg += $" | {dispatchStats}";
+
+                        node.Outputs["GvarSent"] = true;
+                        node.Outputs["HostWeldDoneSignaled"] = hostSignaled;
                         StatusText.Dispatcher.Invoke(() => StatusText.Text = $"发送成功: {resultMsg}");
                         node.ResultSummary = resultMsg;
                         break;
@@ -8307,7 +8872,6 @@ namespace CalibOperatorCLI_Example
                     {
                         string ip = (node.Params.GetValueOrDefault("ip", "192.168.6.6") ?? "192.168.6.6").Trim();
                         int port = int.TryParse(node.Params.GetValueOrDefault("port"), out var p) ? p : 502;
-                        byte station = byte.TryParse(node.Params.GetValueOrDefault("station"), out var s) ? s : (byte)1;
 
                         if (_flowPlc != null)
                         {
@@ -8315,14 +8879,22 @@ namespace CalibOperatorCLI_Example
                             _flowPlc = null;
                         }
 
-                        _flowPlc = new ModbusTcpNet(ip, port, station);
+                        var cfg = LoadFlowPlcConfig();
+                        byte station = (byte)Math.Clamp(cfg.ModbusStation, 0, 255);
+                        string? stParam = node.Params.GetValueOrDefault("station");
+                        if (!string.IsNullOrWhiteSpace(stParam) && byte.TryParse(stParam.Trim(), out var st))
+                            station = st;
+                        string series = cfg.GvarList?.PlcSeries ?? "XD";
+                        string floatFmt = PlcXinjeHelper.ResolveFloatDataFormatString(cfg);
+                        _flowPlc = PlcXinjeHelper.CreateClient(series, ip, port, station, floatFmt);
                         var conn = _flowPlc.ConnectServer();
                         if (!conn.IsSuccess)
                             throw new InvalidOperationException($"PLC连接失败: {conn.Message}");
 
                         _flowPlcConnected = true;
+                        PlcXinjeSession.Register(_flowPlc, "Flow");
                         node.Outputs["Connected"] = true;
-                        node.ResultSummary = $"Connected {ip}:{port} st={station}";
+                        node.ResultSummary = $"Connected {ip}:{port} XinJE/{series} st={station}";
                         break;
                     }
 
@@ -8330,6 +8902,7 @@ namespace CalibOperatorCLI_Example
                     {
                         if (_flowPlc != null)
                         {
+                            PlcXinjeSession.ClearIfOwnedBy(_flowPlc);
                             try { _flowPlc.ConnectClose(); } catch { }
                             _flowPlc = null;
                         }
@@ -8905,6 +9478,529 @@ namespace CalibOperatorCLI_Example
                         break;
                     }
 
+                    case "halcon_shape_match_grid_to_trajectory":
+                    {
+#if !HALCON_ENABLED
+                        throw new NotSupportedException("HALCON 落格匹配轮廓→轨迹 需要启用 HALCON");
+#else
+                        if (!inputs.TryGetValue("ModelId", out var midTr) || midTr is not long modelIdTr)
+                            throw new InvalidOperationException("落格匹配轮廓→轨迹: 请连接 ModelId（与 FindShapeModel 相同模板）");
+                        double[] rows = inputs.TryGetValue("Row", out var rTr) && rTr is double[] raTr ? raTr : Array.Empty<double>();
+                        double[] cols = inputs.TryGetValue("Column", out var cTr) && cTr is double[] caTr ? caTr : Array.Empty<double>();
+                        inputs.TryGetValue("Angle", out var aTr);
+                        var anglesTr = aTr as double[];
+                        inputs.TryGetValue("GridRow", out var grTr);
+                        inputs.TryGetValue("GridCol", out var gcTr);
+                        var gridRow = grTr as int[];
+                        var gridCol = gcTr as int[];
+                        int contourLevel = int.TryParse(
+                            node.Params.GetValueOrDefault("contourLevel", "1"),
+                            System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var clTr)
+                            ? clTr
+                            : 1;
+                        string contourMode = node.Params.GetValueOrDefault("contourMode", "outer") ?? "outer";
+                        string connectOrder = node.Params.GetValueOrDefault("connectOrder", "col_major") ?? "col_major";
+                        string barIdSource = node.Params.GetValueOrDefault("barIdSource", "per_match") ?? "per_match";
+                        double closeTolPx = double.TryParse(
+                            node.Params.GetValueOrDefault("closeTolPx", "0.5")?.Trim(),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var ctTr)
+                            ? ctTr
+                            : 0.5;
+                        double defaultZ = double.TryParse(
+                            node.Params.GetValueOrDefault("defaultZ", "0")?.Trim(),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var dzTr)
+                            ? dzTr
+                            : 0;
+
+                        var traj = HalconShapeMatchGridTrajectory.Build(
+                            modelIdTr,
+                            rows,
+                            cols,
+                            anglesTr,
+                            gridRow,
+                            gridCol,
+                            contourLevel,
+                            contourMode,
+                            connectOrder,
+                            barIdSource,
+                            closeTolPx,
+                            defaultZ);
+                        node.Outputs["Points"] = traj.Points;
+                        node.Outputs["BarIds"] = traj.BarIds;
+                        node.Outputs["GroupBarIds"] = traj.GroupBarIds;
+                        node.Outputs["SamplePts"] = traj.SamplePts;
+                        node.ResultSummary = traj.OrderSummary;
+#endif
+                        break;
+                    }
+
+                    case "halcon_chain_strip_pick_uv_grid":
+                    {
+                        double[] rows = inputs.TryGetValue("Row", out var rUv) && rUv is double[] raUv ? raUv : Array.Empty<double>();
+                        double[] cols = inputs.TryGetValue("Column", out var cUv) && cUv is double[] caUv ? caUv : Array.Empty<double>();
+                        inputs.TryGetValue("Angle", out var aUv);
+                        double[]? anglesUv = aUv as double[];
+                        inputs.TryGetValue("Score", out var sUv);
+                        double[]? scoresUv = sUv as double[];
+
+                        int gridRowsUv = int.TryParse(node.Params.GetValueOrDefault("gridRows"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int grUv) ? grUv : 8;
+                        int gridColsUv = int.TryParse(node.Params.GetValueOrDefault("gridCols"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int gcUv) ? gcUv : 2;
+                        double minScoreUv = double.TryParse(node.Params.GetValueOrDefault("minScoreKeep"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double msUv) ? msUv : 0;
+                        double snapTolUv = double.TryParse(node.Params.GetValueOrDefault("snapTolerancePx"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double stUv) ? stUv : 0;
+
+                        double latticeHintDeg = double.NaN;
+                        if (inputs.TryGetValue("ChainBootstrapAngle", out var latObj) && latObj is double ld && !double.IsNaN(ld))
+                            latticeHintDeg = ld;
+
+                        int[]? bootIdx = inputs.TryGetValue("BootstrapPickIndices", out var bpiUv) && bpiUv is int[] bi && bi.Length > 0
+                            ? bi
+                            : null;
+
+                        double pcaChainDeg = double.NaN;
+                        if (inputs.TryGetValue("PcaChainAngle", out var pcaObj) && pcaObj is double pd && !double.IsNaN(pd))
+                            pcaChainDeg = pd;
+
+                        string? svgOutPath = null;
+                        string svgParam = node.Params.GetValueOrDefault("uvProjectionSvg") ?? "";
+                        if (!string.IsNullOrWhiteSpace(svgParam))
+                            svgOutPath = ResolveCompositeFlowPath(svgParam);
+
+                        string diagTagUv = $"{node.Def.DisplayName}#{node.Id.ToString()[..8]}";
+                        bool wantLogUv = HalconShapeMatchGridDiagnostics.ShouldLogForParam(
+                            node.Params.GetValueOrDefault("debugLog", "auto"), MirrorErrorsToStderr);
+                        if (wantLogUv && !HalconShapeMatchGridDiagnostics.IsEnabled)
+                            HalconShapeMatchGridDiagnostics.Enable(mirrorConsole: MirrorErrorsToStderr, sessionName: diagTagUv);
+
+                        var pickUv = HalconShapeMatchLatticePick.PickUvGridAfterBootstrap(
+                            rows, cols, anglesUv, scoresUv,
+                            gridRowsUv, gridColsUv, latticeHintDeg, bootIdx,
+                            minScoreUv, snapTolUv,
+                            wantLogUv ? diagTagUv : null, svgOutPath, pcaChainDeg);
+
+                        node.Outputs["Row"] = pickUv.Rows;
+                        node.Outputs["Column"] = pickUv.Cols;
+                        node.Outputs["Angle"] = pickUv.Angles;
+                        node.Outputs["Score"] = pickUv.Scores;
+                        node.Outputs["GridRow"] = pickUv.GridRow;
+                        node.Outputs["GridCol"] = pickUv.GridCol;
+                        node.Outputs["LatticeAngle"] = pickUv.LatticeAngleDeg;
+                        node.Outputs["ChainDirectionAngle"] = pickUv.ChainDirectionAngleDeg;
+                        node.Outputs["ConsensusMatchAngle"] = pickUv.ConsensusMatchAngleDeg;
+                        node.Outputs["ConsensusPickIndices"] = pickUv.KeptIndices;
+                        node.Outputs["LatticeRows"] = pickUv.LatticeRows;
+                        node.Outputs["LatticeCols"] = pickUv.LatticeCols;
+                        node.Outputs["AxesSwapped"] = pickUv.AxesSwapped ? 1 : 0;
+                        node.Outputs["TwoColumnDeltaU"] = pickUv.TwoColumnDeltaU;
+                        node.Outputs["TwoColumnDeltaV"] = pickUv.TwoColumnDeltaV;
+                        node.Outputs["TwoColumnDeltaSummary"] = pickUv.TwoColumnDeltaSummary ?? "";
+
+                        int targetUv = gridRowsUv * gridColsUv;
+                        string logHintUv = wantLogUv && !string.IsNullOrEmpty(HalconShapeMatchGridDiagnostics.LogFilePath)
+                            ? " 详见.grid-filter.log" : "";
+                        string deltaHint = !string.IsNullOrEmpty(pickUv.TwoColumnDeltaSummary)
+                            ? $" {pickUv.TwoColumnDeltaSummary}" : "";
+                        node.ResultSummary =
+                            $"{pickUv.InputCount} 点 → {pickUv.KeptCount}/{targetUv} (u/v 落格, θ≈{pickUv.LatticeAngleDeg:F1}°){deltaHint}{logHintUv}";
+                        break;
+                    }
+
+                    case "halcon_ransac_pick_shape_match_lattice":
+                    {
+                        double[] rows = inputs.TryGetValue("Row", out var rRs) && rRs is double[] raRs ? raRs : Array.Empty<double>();
+                        double[] cols = inputs.TryGetValue("Column", out var cRs) && cRs is double[] caRs ? caRs : Array.Empty<double>();
+                        inputs.TryGetValue("Angle", out var aRs);
+                        double[]? anglesRs = aRs as double[];
+                        inputs.TryGetValue("Score", out var sRs);
+                        double[]? scoresRs = sRs as double[];
+
+                        int gridRowsRs = int.TryParse(node.Params.GetValueOrDefault("gridRows"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int grRs) ? grRs : 8;
+                        int gridColsRs = int.TryParse(node.Params.GetValueOrDefault("gridCols"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int gcRs) ? gcRs : 2;
+                        double minScoreRs = double.TryParse(node.Params.GetValueOrDefault("minScoreKeep"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double mskRs) ? mskRs : 0;
+                        double snapTolRs = double.TryParse(node.Params.GetValueOrDefault("snapTolerancePx"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double stRs) ? stRs : 0;
+                        int ransacIter = int.TryParse(node.Params.GetValueOrDefault("ransacIterations"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int riRs) ? riRs : 500;
+                        double inlierSnap = double.TryParse(node.Params.GetValueOrDefault("inlierSnapFactor"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double isfRs) ? isfRs : 0.45;
+
+                        string? svgOutRs = null;
+                        string svgParamRs = node.Params.GetValueOrDefault("uvProjectionSvg") ?? "";
+                        if (!string.IsNullOrWhiteSpace(svgParamRs))
+                            svgOutRs = ResolveCompositeFlowPath(svgParamRs);
+
+                        string diagTagRs = $"{node.Def.DisplayName}#{node.Id.ToString()[..8]}";
+                        bool wantLogRs = HalconShapeMatchGridDiagnostics.ShouldLogForParam(
+                            node.Params.GetValueOrDefault("debugLog", "auto"), MirrorErrorsToStderr);
+                        if (wantLogRs && !HalconShapeMatchGridDiagnostics.IsEnabled)
+                            HalconShapeMatchGridDiagnostics.Enable(mirrorConsole: MirrorErrorsToStderr, sessionName: diagTagRs);
+
+                        var pickRs = HalconShapeMatchLatticePick.PickRansac(
+                            rows, cols, anglesRs, scoresRs,
+                            gridRowsRs, gridColsRs,
+                            minScoreRs, snapTolRs,
+                            wantLogRs ? diagTagRs : null, svgOutRs,
+                            ransacIter, inlierSnap);
+
+                        node.Outputs["Row"] = pickRs.Rows;
+                        node.Outputs["Column"] = pickRs.Cols;
+                        node.Outputs["Angle"] = pickRs.Angles;
+                        node.Outputs["Score"] = pickRs.Scores;
+                        node.Outputs["GridRow"] = pickRs.GridRow;
+                        node.Outputs["GridCol"] = pickRs.GridCol;
+                        node.Outputs["LatticeAngle"] = pickRs.LatticeAngleDeg;
+                        node.Outputs["ChainDirectionAngle"] = pickRs.ChainDirectionAngleDeg;
+                        node.Outputs["ConsensusMatchAngle"] = pickRs.ConsensusMatchAngleDeg;
+                        node.Outputs["ConsensusPickIndices"] = pickRs.KeptIndices;
+                        node.Outputs["LatticeRows"] = pickRs.LatticeRows;
+                        node.Outputs["LatticeCols"] = pickRs.LatticeCols;
+                        node.Outputs["AxesSwapped"] = pickRs.AxesSwapped ? 1 : 0;
+                        node.Outputs["TwoColumnDeltaU"] = pickRs.TwoColumnDeltaU;
+                        node.Outputs["TwoColumnDeltaV"] = pickRs.TwoColumnDeltaV;
+                        node.Outputs["TwoColumnDeltaSummary"] = pickRs.TwoColumnDeltaSummary ?? "";
+
+                        int targetRs = gridRowsRs * gridColsRs;
+                        string logHintRs = wantLogRs && !string.IsNullOrEmpty(HalconShapeMatchGridDiagnostics.LogFilePath)
+                            ? " 详见.grid-filter.log" : "";
+                        string deltaHintRs = !string.IsNullOrEmpty(pickRs.TwoColumnDeltaSummary)
+                            ? $" {pickRs.TwoColumnDeltaSummary}" : "";
+                        node.ResultSummary =
+                            $"{pickRs.InputCount} 点 → {pickRs.KeptCount}/{targetRs} (RANSAC, θ≈{pickRs.LatticeAngleDeg:F1}°){deltaHintRs}{logHintRs}";
+                        break;
+                    }
+
+                    case "halcon_pick_shape_match_lattice":
+                    {
+                        double[] rows = inputs.TryGetValue("Row", out var rPk) && rPk is double[] raPk ? raPk : Array.Empty<double>();
+                        double[] cols = inputs.TryGetValue("Column", out var cPk) && cPk is double[] caPk ? caPk : Array.Empty<double>();
+                        inputs.TryGetValue("Angle", out var aPk);
+                        double[]? anglesPk = aPk as double[];
+                        inputs.TryGetValue("Score", out var sPk);
+                        double[]? scoresPk = sPk as double[];
+
+                        int gridRowsPk = int.TryParse(node.Params.GetValueOrDefault("gridRows"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int grPk) ? grPk : 2;
+                        int gridColsPk = int.TryParse(node.Params.GetValueOrDefault("gridCols"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int gcPk) ? gcPk : 8;
+                        double minScorePk = double.TryParse(node.Params.GetValueOrDefault("minScoreKeep"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double mskPk) ? mskPk : 0;
+
+                        string diagTagPk = $"{node.Def.DisplayName}#{node.Id.ToString()[..8]}";
+                        bool wantLogPk = HalconShapeMatchGridDiagnostics.ShouldLogForParam(
+                            node.Params.GetValueOrDefault("debugLog", "auto"), MirrorErrorsToStderr);
+                        if (wantLogPk && !HalconShapeMatchGridDiagnostics.IsEnabled)
+                            HalconShapeMatchGridDiagnostics.Enable(mirrorConsole: MirrorErrorsToStderr, sessionName: diagTagPk);
+
+                        var pickResult = HalconShapeMatchLatticePick.Pick(
+                            rows, cols, anglesPk, scoresPk,
+                            gridRowsPk, gridColsPk,
+                            minScorePk,
+                            wantLogPk ? diagTagPk : null);
+
+                        node.Outputs["Row"] = pickResult.Rows;
+                        node.Outputs["Column"] = pickResult.Cols;
+                        node.Outputs["Angle"] = pickResult.Angles;
+                        node.Outputs["Score"] = pickResult.Scores;
+                        node.Outputs["GridRow"] = pickResult.GridRow;
+                        node.Outputs["GridCol"] = pickResult.GridCol;
+                        node.Outputs["LatticeAngle"] = pickResult.LatticeAngleDeg;
+                        node.Outputs["ChainDirectionAngle"] = pickResult.ChainDirectionAngleDeg;
+                        node.Outputs["ConsensusMatchAngle"] = pickResult.ConsensusMatchAngleDeg;
+                        node.Outputs["ConsensusPickIndices"] = pickResult.KeptIndices;
+                        node.Outputs["LatticeRows"] = pickResult.LatticeRows;
+                        node.Outputs["LatticeCols"] = pickResult.LatticeCols;
+                        node.Outputs["AxesSwapped"] = pickResult.AxesSwapped ? 1 : 0;
+
+                        int target = gridRowsPk * gridColsPk;
+                        node.ResultSummary =
+                            $"{pickResult.InputCount} 点 → {pickResult.KeptCount}/{target} 模板 " +
+                            $"({pickResult.LatticeRows}×{pickResult.LatticeCols} 物理格, 链向≈{pickResult.ChainDirectionAngleDeg:F1}°)";
+                        break;
+                    }
+
+                    case "halcon_chain_strip_bootstrap":
+                    case "halcon_chain_strip_orient":
+                    case "halcon_chain_strip_pick_col0":
+                    case "halcon_chain_strip_fill":
+                    case "halcon_chain_strip_pick_fill":
+                    {
+                        double[] rows = inputs.TryGetValue("Row", out var rSt) && rSt is double[] raSt ? raSt : Array.Empty<double>();
+                        double[] cols = inputs.TryGetValue("Column", out var cSt) && cSt is double[] caSt ? caSt : Array.Empty<double>();
+                        inputs.TryGetValue("Angle", out var aSt);
+                        double[]? anglesSt = aSt as double[];
+                        inputs.TryGetValue("Score", out var sSt);
+                        double[]? scoresSt = sSt as double[];
+
+                        int gridRowsSt = int.TryParse(node.Params.GetValueOrDefault("gridRows"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int grSt) ? grSt : 8;
+                        int gridColsSt = int.TryParse(node.Params.GetValueOrDefault("gridCols"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int gcSt) ? gcSt : 2;
+
+                        string diagTagSt = $"{node.Def.DisplayName}#{node.Id.ToString()[..8]}";
+                        bool wantLogSt = HalconShapeMatchGridDiagnostics.ShouldLogForParam(
+                            node.Params.GetValueOrDefault("debugLog", "auto"), MirrorErrorsToStderr);
+                        if (wantLogSt && !HalconShapeMatchGridDiagnostics.IsEnabled)
+                            HalconShapeMatchGridDiagnostics.Enable(mirrorConsole: MirrorErrorsToStderr, sessionName: diagTagSt);
+                        string? logTag = wantLogSt ? diagTagSt : null;
+
+                        switch (node.Def.TypeId)
+                        {
+                            case "halcon_chain_strip_bootstrap":
+                            {
+                                var boot = HalconShapeMatchLatticeStrip.Bootstrap(
+                                    rows, cols, anglesSt, scoresSt, gridRowsSt, gridColsSt, logTag);
+                                node.Outputs["BootstrapPickIndices"] = boot.BootstrapPickIndices;
+                                node.Outputs["ChainBootstrapAngle"] = boot.LatticeAngleDeg;
+                                node.Outputs["LatticeAngle"] = boot.LatticeAngleDeg;
+                                node.Outputs["PcaChainAngle"] = boot.PcaAxisAngleDeg;
+                                node.Outputs["VAxisImageAngle"] = boot.VAxisImageAngleDeg;
+                                node.Outputs["ConsensusMatchAngle"] = boot.ConsensusMatchAngleDeg;
+                                node.Outputs["MatchConcentration"] = boot.MatchConcentration;
+                                node.ResultSummary =
+                                    $"{boot.InputCount} 点 → 格网θ≈{boot.LatticeAngleDeg:F1}°, v≈{boot.VAxisImageAngleDeg:F1}° (PCA链向≈{boot.PcaAxisAngleDeg:F1}°, 模板≈{boot.ConsensusMatchAngleDeg:F1}°)";
+                                break;
+                            }
+                            case "halcon_chain_strip_orient":
+                            {
+                                HalconLatticeStripBootstrapResult? bootIn = null;
+                                if (inputs.TryGetValue("BootstrapPickIndices", out var bpi) && bpi is int[] bootIdx && bootIdx.Length > 0)
+                                {
+                                    var fullBoot = HalconShapeMatchLatticeStrip.Bootstrap(
+                                        rows, cols, anglesSt, scoresSt, gridRowsSt, gridColsSt, logTag);
+                                    double latticeDeg = inputs.TryGetValue("ChainBootstrapAngle", out var cba) && cba is double cd && !double.IsNaN(cd)
+                                        ? cd
+                                        : fullBoot.LatticeAngleDeg;
+                                    bootIn = new HalconLatticeStripBootstrapResult
+                                    {
+                                        InputCount = fullBoot.InputCount,
+                                        BootstrapPickIndices = bootIdx,
+                                        LatticeAngleDeg = latticeDeg,
+                                        VAxisImageAngleDeg = fullBoot.VAxisImageAngleDeg,
+                                        PcaAxisAngleDeg = fullBoot.PcaAxisAngleDeg,
+                                        ConsensusMatchAngleDeg = fullBoot.ConsensusMatchAngleDeg,
+                                        MatchConcentration = fullBoot.MatchConcentration
+                                    };
+                                }
+
+                                var ctx = HalconShapeMatchLatticeStrip.BuildOrient(
+                                    rows, cols, anglesSt, scoresSt, gridRowsSt, gridColsSt, bootIn, logTag);
+                                if (ctx == null)
+                                {
+                                    node.ResultSummary = "定向失败（格距）";
+                                    break;
+                                }
+
+                                node.Outputs["StripContext"] = ctx;
+                                node.Outputs["LatticeAngle"] = ctx.LatticeAngleDeg;
+                                node.Outputs["PcaAxisAngle"] = ctx.PcaAxisDeg;
+                                node.Outputs["PitchRow"] = ctx.PitchV;
+                                node.Outputs["PitchCol"] = ctx.PitchU;
+                                node.Outputs["LatticeRows"] = ctx.EffRows;
+                                node.Outputs["LatticeCols"] = ctx.EffCols;
+                                node.Outputs["AxesSwapped"] = ctx.AxesSwapped ? 1 : 0;
+                                node.ResultSummary =
+                                    $"{ctx.InputCount} 点 → PCA≈{ctx.PcaAxisDeg:F1}° 格网θ≈{ctx.LatticeAngleDeg:F1}°, " +
+                                    $"{ctx.EffRows}×{ctx.EffCols}, pitchV×pitchU={ctx.PitchV:F0}×{ctx.PitchU:F0}";
+                                break;
+                            }
+                            case "halcon_chain_strip_pick_col0":
+                            {
+                                if (!inputs.TryGetValue("StripContext", out var ctxIn) || ctxIn is not HalconLatticeStripContext ctx0)
+                                {
+                                    node.ResultSummary = "缺少 StripContext";
+                                    break;
+                                }
+
+                                var ctx1 = HalconShapeMatchLatticeStrip.PickColumn0(ctx0, rows, cols, scoresSt, logTag);
+                                double chainDeg = ctx1.LatticeAngleDeg;
+                                if (double.IsNaN(chainDeg))
+                                    chainDeg = ctx1.PcaAxisDeg;
+                                node.Outputs["StripContext"] = ctx1;
+                                node.Outputs["Column0PickIndices"] = ctx1.Column0PickIndices;
+                                node.Outputs["ChainDirectionAngle"] = chainDeg;
+                                node.ResultSummary =
+                                    $"列0 N={ctx1.Column0PickIndices.Length}, 格网θ≈{chainDeg:F1}° (PCA≈{ctx1.PcaAxisDeg:F1}°)";
+                                break;
+                            }
+                            case "halcon_chain_strip_fill":
+                            {
+                                if (!inputs.TryGetValue("StripContext", out var ctxFillIn) || ctxFillIn is not HalconLatticeStripContext ctxFill)
+                                {
+                                    node.ResultSummary = "缺少 StripContext";
+                                    break;
+                                }
+
+                                var fill = HalconShapeMatchLatticeStrip.FillStrip(
+                                    ctxFill, rows, cols, anglesSt, scoresSt, 0, logTag);
+                                SetChainStripFillOutputs(node, fill);
+                                int nC0f = fill.GridCol.Count(ic => ic == 0);
+                                int nC1f = fill.GridCol.Count(ic => ic == 1);
+                                string logHintF = wantLogSt && !string.IsNullOrEmpty(HalconShapeMatchGridDiagnostics.LogFilePath)
+                                    ? " 详见.grid-filter.log" : "";
+                                node.ResultSummary =
+                                    $"{fill.InputCount} 点 → 显示={fill.ConsensusPickIndices.Length}(列0={nC0f},列1={nC1f}){logHintF}";
+                                break;
+                            }
+                            case "halcon_chain_strip_pick_fill":
+                            {
+                                if (!inputs.TryGetValue("StripContext", out var ctxPfIn) || ctxPfIn is not HalconLatticeStripContext ctxPf)
+                                {
+                                    node.ResultSummary = "缺少 StripContext";
+                                    break;
+                                }
+
+                                var (ctxPfOut, fillPf) = HalconShapeMatchLatticeStrip.PickColumn0AndFill(
+                                    ctxPf, rows, cols, anglesSt, scoresSt, 0, logTag);
+                                double chainDegPf = ctxPfOut.LatticeAngleDeg;
+                                if (double.IsNaN(chainDegPf))
+                                    chainDegPf = ctxPfOut.PcaAxisDeg;
+                                node.Outputs["StripContext"] = ctxPfOut;
+                                node.Outputs["Column0PickIndices"] = ctxPfOut.Column0PickIndices;
+                                SetChainStripFillOutputs(node, fillPf);
+                                node.Outputs["ChainDirectionAngle"] = chainDegPf;
+
+                                int nC0Pf = fillPf.GridCol.Count(ic => ic == 0);
+                                int nC1Pf = fillPf.GridCol.Count(ic => ic == 1);
+                                string logHintPf = wantLogSt && !string.IsNullOrEmpty(HalconShapeMatchGridDiagnostics.LogFilePath)
+                                    ? " 详见.grid-filter.log" : "";
+                                node.ResultSummary =
+                                    $"列0 N={ctxPfOut.Column0PickIndices.Length}, θ≈{chainDegPf:F1}° → 显示={fillPf.ConsensusPickIndices.Length}(列0={nC0Pf},列1={nC1Pf}){logHintPf}";
+                                break;
+                            }
+                        }
+                        break;
+                    }
+
+                    case "halcon_estimate_shape_match_chain":
+                    {
+                        double[] rows = inputs.TryGetValue("Row", out var rCh) && rCh is double[] raCh ? raCh : Array.Empty<double>();
+                        double[] cols = inputs.TryGetValue("Column", out var cCh) && cCh is double[] caCh ? caCh : Array.Empty<double>();
+                        inputs.TryGetValue("Angle", out var aCh);
+                        double[]? anglesCh = aCh as double[];
+                        inputs.TryGetValue("Score", out var sCh);
+                        double[]? scoresCh = sCh as double[];
+
+                        int gridRowsCh = int.TryParse(node.Params.GetValueOrDefault("gridRows"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int grCh) ? grCh : 3;
+                        int gridColsCh = int.TryParse(node.Params.GetValueOrDefault("gridCols"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int gcCh) ? gcCh : 3;
+
+                        string diagTagCh = $"{node.Def.DisplayName}#{node.Id.ToString()[..8]}";
+                        bool wantLogCh = HalconShapeMatchGridDiagnostics.ShouldLogForParam(
+                            node.Params.GetValueOrDefault("debugLog", "auto"), MirrorErrorsToStderr);
+                        if (wantLogCh && !HalconShapeMatchGridDiagnostics.IsEnabled)
+                            HalconShapeMatchGridDiagnostics.Enable(mirrorConsole: MirrorErrorsToStderr, sessionName: diagTagCh);
+
+                        var chainResult = HalconShapeMatchChainDirection.Estimate(
+                            rows, cols, anglesCh, scoresCh,
+                            gridRowsCh, gridColsCh,
+                            wantLogCh ? diagTagCh : null);
+
+                        node.Outputs["ChainDirectionAngle"] = chainResult.ChainDirectionAngleDeg;
+                        node.Outputs["ConsensusMatchAngle"] = chainResult.ConsensusMatchAngleDeg;
+                        node.Outputs["MatchConcentration"] = chainResult.MatchConcentration;
+                        node.Outputs["ConsensusPickIndices"] = chainResult.ConsensusPickIndices;
+                        node.Outputs["GridRow"] = chainResult.GridRow;
+                        node.Outputs["GridCol"] = chainResult.GridCol;
+                        node.Outputs["CollinearRow"] = chainResult.Rows;
+                        node.Outputs["CollinearColumn"] = chainResult.Cols;
+
+                        int nC0 = chainResult.GridCol.Count(ic => ic == 0);
+                        int nC1 = chainResult.GridCol.Count(ic => ic == 1);
+                        string angCh = !double.IsNaN(chainResult.ConsensusMatchAngleDeg)
+                            ? $", 模板角≈{chainResult.ConsensusMatchAngleDeg:F1}°"
+                            : "";
+                        string dirCh = !double.IsNaN(chainResult.ChainDirectionAngleDeg)
+                            ? $"链向≈{chainResult.ChainDirectionAngleDeg:F1}°"
+                            : "无链向";
+                        string logHint = wantLogCh && !string.IsNullOrEmpty(HalconShapeMatchGridDiagnostics.LogFilePath)
+                            ? " 详见.grid-filter.log"
+                            : "";
+                        node.ResultSummary =
+                            $"{chainResult.InputCount} 点 → {dirCh}, 显示={chainResult.ConsensusPickIndices.Length}(列0={nC0},列1={nC1}){angCh}{logHint}";
+                        break;
+                    }
+
+                    case "halcon_fit_shape_match_lattice":
+                    {
+                        double[] rows = inputs.TryGetValue("Row", out var rIn0) && rIn0 is double[] ra0 ? ra0 : Array.Empty<double>();
+                        double[] cols = inputs.TryGetValue("Column", out var cIn0) && cIn0 is double[] ca0 ? ca0 : Array.Empty<double>();
+                        inputs.TryGetValue("Angle", out var aIn0);
+                        double[]? angles0 = aIn0 as double[];
+                        inputs.TryGetValue("Score", out var sIn0);
+                        double[]? scores0 = sIn0 as double[];
+
+                        int gridRows0 = int.TryParse(node.Params.GetValueOrDefault("gridRows"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int gr0) ? gr0 : 3;
+                        int gridCols0 = int.TryParse(node.Params.GetValueOrDefault("gridCols"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int gc0) ? gc0 : 3;
+                        double pitchRow0 = double.TryParse(node.Params.GetValueOrDefault("pitchRow"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double pr0) ? pr0 : 0;
+                        double pitchCol0 = double.TryParse(node.Params.GetValueOrDefault("pitchCol"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double pc0) ? pc0 : 0;
+                        string angleRaw0 = (node.Params.GetValueOrDefault("gridAngleDeg", "auto") ?? "auto").Trim();
+                        double? gridAngle0 = string.Equals(angleRaw0, "auto", StringComparison.OrdinalIgnoreCase)
+                            ? null
+                            : double.TryParse(angleRaw0, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double gad0)
+                                ? gad0
+                                : null;
+                        double snapTol0 = double.TryParse(node.Params.GetValueOrDefault("snapTolerancePx"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double st0) ? st0 : 0;
+
+                        double latticeIn = TryGetDoubleInput(inputs, "LatticeAngle");
+                        if (double.IsNaN(latticeIn))
+                            latticeIn = TryGetDoubleInput(inputs, "ChainDirectionAngle");
+                        double consensusIn = TryGetDoubleInput(inputs, "ConsensusMatchAngle");
+                        int[]? pickIn = inputs.TryGetValue("ConsensusPickIndices", out var pickObj) && pickObj is int[] pickArr && pickArr.Length > 0
+                            ? pickArr
+                            : null;
+                        HalconShapeMatchLatticeFitOptions? chainOpts = null;
+                        if (!double.IsNaN(latticeIn) || !double.IsNaN(consensusIn) || pickIn != null)
+                        {
+                            chainOpts = new HalconShapeMatchLatticeFitOptions
+                            {
+                                ChainDirectionAngleDeg = double.IsNaN(latticeIn) ? null : latticeIn,
+                                ConsensusMatchAngleDeg = double.IsNaN(consensusIn) ? null : consensusIn,
+                                ConsensusPickIndices = pickIn
+                            };
+                        }
+
+                        string diagTag0 = $"{node.Def.DisplayName}#{node.Id.ToString()[..8]}";
+                        bool wantLog0 = HalconShapeMatchGridDiagnostics.ShouldLogForParam(
+                            node.Params.GetValueOrDefault("debugLog", "auto"), MirrorErrorsToStderr);
+                        if (wantLog0 && !HalconShapeMatchGridDiagnostics.IsEnabled)
+                            HalconShapeMatchGridDiagnostics.Enable(mirrorConsole: MirrorErrorsToStderr, sessionName: diagTag0);
+
+                        var fitResult = HalconShapeMatchLatticeFit.Fit(
+                            rows, cols, angles0, scores0,
+                            gridRows0, gridCols0,
+                            pitchRow0, pitchCol0,
+                            gridAngle0,
+                            snapTol0,
+                            wantLog0 ? diagTag0 : null,
+                            chainOpts);
+
+                        node.Outputs["ColCenterU"] = fitResult.ColCenterU;
+                        node.Outputs["RowCenterV"] = fitResult.RowCenterV;
+                        node.Outputs["LatticeAngle"] = fitResult.EstimatedAngleDeg;
+                        node.Outputs["ConsensusMatchAngle"] = fitResult.ConsensusMatchAngleDeg;
+                        node.Outputs["ChainDirectionAngle"] = fitResult.ChainDirectionAngleDeg;
+                        node.Outputs["PitchRow"] = fitResult.PitchRow;
+                        node.Outputs["PitchCol"] = fitResult.PitchCol;
+                        node.Outputs["AxesSwapped"] = fitResult.AxesSwapped ? 1 : 0;
+                        node.Outputs["SnapU"] = fitResult.SnapU;
+                        node.Outputs["SnapV"] = fitResult.SnapV;
+                        node.Outputs["LatticeRows"] = fitResult.LatticeRows;
+                        node.Outputs["LatticeCols"] = fitResult.LatticeCols;
+                        node.Outputs["CellRow"] = fitResult.CellRow;
+                        node.Outputs["CellCol"] = fitResult.CellCol;
+                        node.Outputs["CellFound"] = fitResult.CellFound;
+                        node.Outputs["CellAngle"] = fitResult.CellAngle;
+                        node.Outputs["PointGridRow"] = fitResult.PointGridRow;
+                        node.Outputs["PointGridCol"] = fitResult.PointGridCol;
+
+                        string angNote0 = !double.IsNaN(fitResult.ConsensusMatchAngleDeg)
+                            ? $", 模板角≈{fitResult.ConsensusMatchAngleDeg:F1}°"
+                            : "";
+                        string chainNote0 = !double.IsNaN(fitResult.ChainDirectionAngleDeg)
+                            ? $", 链向≈{fitResult.ChainDirectionAngleDeg:F1}°"
+                            : "";
+                        node.ResultSummary =
+                            $"阵列聚类 {fitResult.InputCount} 点 → {fitResult.LatticeRows}×{fitResult.LatticeCols} " +
+                            $"(θu≈{fitResult.EstimatedAngleDeg:F1}°, 间距≈{fitResult.PitchRow:F1}×{fitResult.PitchCol:F1}px{chainNote0}{angNote0})";
+                        break;
+                    }
+
                     case "halcon_filter_shape_match_grid":
                     {
                         double[] rows = inputs.TryGetValue("Row", out var rIn) && rIn is double[] ra ? ra : Array.Empty<double>();
@@ -8944,6 +10040,32 @@ namespace CalibOperatorCLI_Example
                                 AppendLog($"[GridFilter] 诊断日志 → {logPath}");
                         }
 
+                        HalconShapeMatchGridFilter.LatticeFitResult? precomputed = null;
+                        if (inputs.TryGetValue("ColCenterU", out var ccuObj) && ccuObj is double[] ccu && ccu.Length > 0
+                            && inputs.TryGetValue("RowCenterV", out var rcvObj) && rcvObj is double[] rcv && rcv.Length > 0)
+                        {
+                            double gridAngForImport = TryGetDoubleInput(inputs, "ChainDirectionAngle");
+                            if (double.IsNaN(gridAngForImport))
+                                gridAngForImport = TryGetDoubleInput(inputs, "LatticeAngle");
+                            double impPitchCol = TryGetDoubleInput(inputs, "PitchCol");
+                            double impPitchRow = TryGetDoubleInput(inputs, "PitchRow");
+                            if (impPitchCol <= 0) impPitchCol = pitchCol;
+                            if (impPitchRow <= 0) impPitchRow = pitchRow;
+                            double consensusIn = double.NaN;
+                            if (inputs.TryGetValue("ConsensusMatchAngle", out var cmaObj) && cmaObj != null)
+                                consensusIn = TryGetDoubleInput(inputs, "ConsensusMatchAngle");
+                            precomputed = HalconShapeMatchGridFilter.TryImportLatticeFit(
+                                rows, cols, anglesIn, scoresIn,
+                                gridRows, gridCols,
+                                ccu, rcv,
+                                impPitchCol, impPitchRow,
+                                gridAngForImport,
+                                TryGetIntInput(inputs, "AxesSwapped"),
+                                TryGetDoubleInput(inputs, "SnapU"),
+                                TryGetDoubleInput(inputs, "SnapV"),
+                                consensusIn);
+                        }
+
                         var filtered = HalconShapeMatchGridFilter.Filter(
                             rows, cols, anglesIn, scoresIn,
                             gridRows, gridCols,
@@ -8954,17 +10076,208 @@ namespace CalibOperatorCLI_Example
                             minVotes,
                             minScoreKeep,
                             maxAngleDev,
-                            wantGridLog ? diagTag : null);
+                            wantGridLog ? diagTag : null,
+                            precomputed);
 
                         node.Outputs["Row"] = filtered.Rows;
                         node.Outputs["Column"] = filtered.Cols;
                         node.Outputs["Angle"] = filtered.Angles;
                         node.Outputs["Score"] = filtered.Scores;
+                        node.Outputs["GridRow"] = filtered.GridRow;
+                        node.Outputs["GridCol"] = filtered.GridCol;
+                        node.Outputs["LatticeRows"] = filtered.LatticeRows;
+                        node.Outputs["LatticeCols"] = filtered.LatticeCols;
+                        node.Outputs["CellRow"] = filtered.CellRow;
+                        node.Outputs["CellCol"] = filtered.CellCol;
+                        node.Outputs["CellFound"] = filtered.CellFound;
+                        node.Outputs["PitchRow"] = filtered.EstimatedPitchRow;
+                        node.Outputs["PitchCol"] = filtered.EstimatedPitchCol;
+                        node.Outputs["LatticeAngle"] = filtered.EstimatedAngleDeg;
+                        node.Outputs["ChainDirectionAngle"] = filtered.ChainDirectionAngleDeg;
+                        node.Outputs["ColCenterU"] = filtered.ColCenterU;
+                        node.Outputs["RowCenterV"] = filtered.RowCenterV;
+                        node.Outputs["CellAngle"] = filtered.CellAngleDeg;
+                        int missingCells = filtered.CellFound.Count(f => !f);
                         string swapNote = filtered.AxesSwapped ? ", 行列轴已对调" : "";
+                        string gridSample = filtered.GridRow.Length > 0
+                            ? $" 格[{filtered.GridRow[0]},{filtered.GridCol[0]}]…"
+                            : "";
+                        string matchAngNote = !double.IsNaN(filtered.ConsensusMatchAngleDeg)
+                            ? $", 匹配角≈{filtered.ConsensusMatchAngleDeg:F1}°"
+                            : "";
                         node.ResultSummary =
                             $"阵列过滤 {filtered.InputCount}→{filtered.Rows.Length} " +
-                            $"(阵列 {gridRows}×{gridCols}, 间距≈{filtered.EstimatedPitchRow:F1}×{filtered.EstimatedPitchCol:F1}px, θ≈{filtered.EstimatedAngleDeg:F1}°{swapNote})";
+                            $"(阵列 {gridRows}×{gridCols}, 缺失{missingCells}格, 间距≈{filtered.EstimatedPitchRow:F1}×{filtered.EstimatedPitchCol:F1}px{matchAngNote}{swapNote}{gridSample})";
                         break;
+                    }
+
+                    case "halcon_mask_image_by_shape_match":
+                    {
+#if HALCON_ENABLED
+                        var srcImg = inputs["Image"] as CalibImage;
+                        if (srcImg == null)
+                            throw new InvalidOperationException("HALCON 形状匹配 Mask: 缺少 Image");
+                        double[] rows = inputs.TryGetValue("Row", out var rowObj) && rowObj is double[] ra
+                            ? ra
+                            : Array.Empty<double>();
+                        double[] cols = inputs.TryGetValue("Column", out var colObj) && colObj is double[] ca
+                            ? ca
+                            : Array.Empty<double>();
+                        inputs.TryGetValue("Angle", out var angObj);
+                        double[]? angles = angObj as double[];
+                        if (!inputs.TryGetValue("ModelId", out var midObj))
+                            throw new InvalidOperationException("HALCON 形状匹配 Mask: 缺少 ModelId");
+
+                        long modelId = Convert.ToInt64(midObj);
+                        int contourLevel = int.TryParse(
+                            node.Params.GetValueOrDefault("contourLevel"),
+                            System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out int cl)
+                            ? cl
+                            : 1;
+                        double insetPx = double.TryParse(
+                            node.Params.GetValueOrDefault("insetPx"),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out double ins)
+                            ? ins
+                            : 0;
+                        double maskMin = double.TryParse(
+                            node.Params.GetValueOrDefault("maskMin"),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out double mn)
+                            ? mn
+                            : 1;
+                        double maskMax = double.TryParse(
+                            node.Params.GetValueOrDefault("maskMax"),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out double mx)
+                            ? mx
+                            : 255;
+                        bool preserveColor = !string.Equals(
+                            node.Params.GetValueOrDefault("preserveColor"),
+                            "false",
+                            StringComparison.OrdinalIgnoreCase);
+
+                        var masked = HalconFlowBridge.MaskCalibImageByShapeMatch(
+                            srcImg,
+                            modelId,
+                            rows,
+                            cols,
+                            angles,
+                            contourLevel,
+                            insetPx,
+                            maskMin,
+                            maskMax,
+                            preserveColor);
+
+                        node.Outputs["Out"] = masked.MaskedImage;
+                        node.Outputs["Mask"] = masked.Mask;
+                        node.ResultSummary =
+                            $"形状匹配 Mask 匹配{masked.MatchCount} 有效区域{masked.ValidRegionCount} " +
+                            $"→ {masked.MaskedImage.Width}×{masked.MaskedImage.Height}";
+                        break;
+#else
+                        throw new InvalidOperationException("HALCON 形状匹配 Mask: 需要 HALCON 支持编译");
+#endif
+                    }
+
+                    case "halcon_filter_shape_match_inside_region":
+                    {
+#if HALCON_ENABLED
+                        double[] regionRows = inputs.TryGetValue("RegionRow", out var rr) && rr is double[] rra
+                            ? rra
+                            : Array.Empty<double>();
+                        double[] regionCols = inputs.TryGetValue("RegionColumn", out var rc) && rc is double[] rca
+                            ? rca
+                            : Array.Empty<double>();
+                        inputs.TryGetValue("RegionAngle", out var raObj);
+                        double[]? regionAngles = raObj as double[];
+
+                        double[] queryRows = inputs.TryGetValue("Row", out var qr) && qr is double[] qra
+                            ? qra
+                            : Array.Empty<double>();
+                        double[] queryCols = inputs.TryGetValue("Column", out var qc) && qc is double[] qca
+                            ? qca
+                            : Array.Empty<double>();
+                        inputs.TryGetValue("Angle", out var qaObj);
+                        double[]? queryAngles = qaObj as double[];
+                        inputs.TryGetValue("Score", out var qsObj);
+                        double[]? queryScores = qsObj as double[];
+
+                        if (!inputs.TryGetValue("RegionModelId", out var rmidObj))
+                            throw new InvalidOperationException("HALCON 区域内过滤: 缺少 RegionModelId");
+                        if (!inputs.TryGetValue("ModelId", out var qmidObj))
+                            throw new InvalidOperationException("HALCON 区域内过滤: 缺少 ModelId（待过滤模板）");
+
+                        long regionModelId = Convert.ToInt64(rmidObj);
+                        long queryModelId = Convert.ToInt64(qmidObj);
+
+                        int contourLevel = int.TryParse(
+                            node.Params.GetValueOrDefault("contourLevel"),
+                            System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out int cl)
+                            ? cl
+                            : 1;
+                        double insetPx = double.TryParse(
+                            node.Params.GetValueOrDefault("insetPx"),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out double ins)
+                            ? ins
+                            : 2;
+                        double minSepPx = double.TryParse(
+                            node.Params.GetValueOrDefault("minSeparationPx"),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out double msep)
+                            ? msep
+                            : 0;
+
+                        var filtered = HalconShapeMatchRegionFilter.Filter(
+                            regionModelId,
+                            regionRows,
+                            regionCols,
+                            regionAngles,
+                            queryModelId,
+                            queryRows,
+                            queryCols,
+                            queryAngles,
+                            queryScores,
+                            contourLevel,
+                            insetPx,
+                            minSepPx);
+
+                        node.Outputs["Row"] = filtered.Rows;
+                        node.Outputs["Column"] = filtered.Columns;
+                        node.Outputs["Angle"] = filtered.Angles;
+                        node.Outputs["Score"] = filtered.Scores;
+                        node.Outputs["KeptIndices"] = filtered.KeptIndices;
+                        node.Outputs["RegionMatchCount"] = filtered.RegionMatchCount;
+                        node.Outputs["ValidRegionCount"] = filtered.ValidRegionCount;
+                        string sepNote = filtered.TouchFilterEnabled
+                            ? $"间距≥{filtered.MinSeparationPx:F1}px"
+                            : "未启用间距互斥";
+                        string regionNote = filtered.ValidRegionCount > 0
+                            ? $"有效区域{filtered.ValidRegionCount}/{filtered.RegionMatchCount}" +
+                              (filtered.UsedHalconRegion ? "(HALCON)" : "(多边形)")
+                            : "有效区域0";
+                        string diagNote = string.IsNullOrWhiteSpace(filtered.RegionDiagnostic)
+                            ? ""
+                            : $" {filtered.RegionDiagnostic}";
+                        node.ResultSummary =
+                            $"区域内过滤 {filtered.InputCount}→{filtered.Rows.Length} " +
+                            $"(区域内{filtered.InsideRegionCount}, {regionNote}, {sepNote}){diagNote}";
+                        if (filtered.RegionMatchCount == 0 || filtered.ValidRegionCount == 0)
+                            AppendLog($"[区域内过滤] {node.ResultSummary}", MirrorErrorsToStderr);
+                        break;
+#else
+                        throw new InvalidOperationException("HALCON 区域内过滤: 需要 HALCON 支持编译");
+#endif
                     }
 
                     case "halcon_display_shape_match":
@@ -8981,16 +10294,54 @@ namespace CalibOperatorCLI_Example
                         double[] angles = angObj as double[] ?? Array.Empty<double>();
                         inputs.TryGetValue("Score", out var scObj);
                         double[] scores = scObj as double[] ?? Array.Empty<double>();
+                        int[]? pickIndices = inputs.TryGetValue("ConsensusPickIndices", out var pickObj) && pickObj is int[] pickArr && pickArr.Length > 0
+                            ? pickArr
+                            : null;
+                        int totalMatches = Math.Min(rows.Length, cols.Length);
+                        string dispDiagTag = $"{node.Def.DisplayName}#{node.Id.ToString()[..8]}";
+                        int[]? gridColForLog = inputs.TryGetValue("GridCol", out var gcLog) && gcLog is int[] gca ? gca : null;
+                        if (pickIndices != null)
+                        {
+                            if (HalconShapeMatchGridDiagnostics.ShouldLogForParam(
+                                    node.Params.GetValueOrDefault("debugLog", "auto"), MirrorErrorsToStderr)
+                                && !HalconShapeMatchGridDiagnostics.IsEnabled)
+                                HalconShapeMatchGridDiagnostics.Enable(mirrorConsole: MirrorErrorsToStderr, sessionName: dispDiagTag);
+
+                            // u/v 落格已输出筛选后的 Row（长度=16）；若仍用 Find 下标去 Subset 26 点会越界，只剩 1～2 个能显示
+                            bool rowsAlreadyFromPick = pickIndices.Length > 0
+                                && rows.Length == pickIndices.Length
+                                && rows.Length < totalMatches;
+                            if (!rowsAlreadyFromPick)
+                            {
+                                SubsetShapeMatchesByIndices(rows, cols, angles, scores, pickIndices,
+                                    out rows, out cols, out angles, out scores);
+                            }
+
+                            HalconShapeMatchGridFilter.LogDisplayPickSubset(
+                                dispDiagTag, rows, cols, scores, pickIndices, gridColForLog, totalMatches);
+                        }
                         int contourLevel = int.TryParse(node.Params.GetValueOrDefault("contourLevel"), out int cl) && cl > 0 ? cl : 1;
                         float crossHalf = float.TryParse(node.Params.GetValueOrDefault("crossHalf"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float ch) ? ch : 14f;
                         float strokeWidth = float.TryParse(node.Params.GetValueOrDefault("strokeWidth"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float sw) ? sw : 2.5f;
                         bool drawScores = !string.Equals(node.Params.GetValueOrDefault("drawScores", "true")?.Trim(), "false", StringComparison.OrdinalIgnoreCase);
                         string dispSlot = node.Id.ToString("D");
                         string dispTitle = $"{node.Def.DisplayName} [{node.Id.ToString("N")[..8]}]";
-                        ShowShapeMatchPreview(matchImg, modelId, rows, cols, angles, scores, dispSlot, dispTitle, contourLevel, crossHalf, strokeWidth, drawScores);
+                        ShowShapeMatchPreview(matchImg, modelId, rows, cols, angles, scores,
+                            dispSlot, dispTitle, contourLevel, crossHalf, strokeWidth, drawScores);
                         node.Outputs["Out"] = matchImg;
                         int n = Math.Min(rows.Length, cols.Length);
-                        node.ResultSummary = n == 0 ? "无匹配可显示" : $"已显示 {n} 个匹配";
+                        string colNote = "";
+                        if (pickIndices != null && inputs.TryGetValue("GridCol", out var gcObj) && gcObj is int[] gridCol && gridCol.Length == n)
+                        {
+                            int c0 = gridCol.Count(ic => ic == 0);
+                            int c1 = gridCol.Count(ic => ic == 1);
+                            colNote = $", 列0={c0} 列1={c1}";
+                        }
+                        node.ResultSummary = n == 0
+                            ? "无匹配可显示"
+                            : pickIndices != null
+                                ? $"已显示 {n}/{totalMatches} 个匹配{colNote}"
+                                : $"已显示 {n} 个匹配";
                         break;
                     }
 
@@ -9461,7 +10812,7 @@ namespace CalibOperatorCLI_Example
             var m = (mode ?? "auto").Trim().ToLowerInvariant();
             if (m == "single" || m == "one" || m == "polyline")
                 return false;
-            if (m == "bars" || m == "per_bar" || m == "split")
+            if (m == "bars" || m == "per_bar" || m == "split" || m == "true")
                 return idsOk;
             return idsOk && BarIdsHaveMultipleRuns(barIds);
         }
@@ -9574,7 +10925,7 @@ namespace CalibOperatorCLI_Example
                                     var arr = new System.Drawing.PointF[segLen];
                                     for (int k = 0; k < segLen; k++)
                                         arr[k] = Map(pts[segStart + k]);
-                                    g.DrawLines(linePen, arr);
+                                    DrawPointOverlaySegment(g, linePen, arr);
                                 }
 
                                 segStart = i;
@@ -9584,7 +10935,7 @@ namespace CalibOperatorCLI_Example
                     else
                     {
                         var arr = pts.Select(Map).ToArray();
-                        g.DrawLines(linePen, arr);
+                        DrawPointOverlaySegment(g, linePen, arr);
                     }
                 }
 
@@ -9606,7 +10957,94 @@ namespace CalibOperatorCLI_Example
             return bmp;
         }
 
+        /// <summary>绘制点列折线段；≥3 点时用 DrawPolygon 自动闭合首尾。</summary>
+        private static void DrawPointOverlaySegment(
+            System.Drawing.Graphics g,
+            System.Drawing.Pen pen,
+            System.Drawing.PointF[] arr)
+        {
+            if (arr.Length < 2)
+                return;
+            if (arr.Length >= 3)
+                g.DrawPolygon(pen, arr);
+            else
+                g.DrawLines(pen, arr);
+        }
+
         /// <summary>HALCON FindShapeModel 专用预览：模板轮廓按位姿叠加、十字、得分。</summary>
+        private static int TryGetIntInput(Dictionary<string, object?> inputs, string key)
+        {
+            if (!inputs.TryGetValue(key, out var v) || v == null) return 0;
+            return v switch
+            {
+                int i => i,
+                long l => (int)l,
+                double d => (int)d,
+                string s when int.TryParse(s, out int p) => p,
+                _ => 0
+            };
+        }
+
+        private static double TryGetDoubleInput(Dictionary<string, object?> inputs, string key)
+        {
+            if (!inputs.TryGetValue(key, out var v) || v == null) return 0;
+            return v switch
+            {
+                double d => d,
+                float f => f,
+                int i => i,
+                long l => l,
+                string s when double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double p) => p,
+                _ => 0
+            };
+        }
+
+        private static void SetChainStripFillOutputs(FlowNode node, HalconShapeMatchChainDirectionResult fill)
+        {
+            node.Outputs["ChainDirectionAngle"] = fill.ChainDirectionAngleDeg;
+            node.Outputs["ConsensusMatchAngle"] = fill.ConsensusMatchAngleDeg;
+            node.Outputs["MatchConcentration"] = fill.MatchConcentration;
+            node.Outputs["ConsensusPickIndices"] = fill.ConsensusPickIndices;
+            node.Outputs["GridRow"] = fill.GridRow;
+            node.Outputs["GridCol"] = fill.GridCol;
+            node.Outputs["CollinearRow"] = fill.Rows;
+            node.Outputs["CollinearColumn"] = fill.Cols;
+        }
+
+        /// <summary>按 FindShapeModel 原始下标筛选要显示的匹配（ConsensusPickIndices）。</summary>
+        private static void SubsetShapeMatchesByIndices(
+            double[] rows,
+            double[] cols,
+            double[] angles,
+            double[] scores,
+            int[] pickIndices,
+            out double[] outRows,
+            out double[] outCols,
+            out double[] outAngles,
+            out double[] outScores)
+        {
+            int n = Math.Min(rows.Length, cols.Length);
+            var or = new List<double>();
+            var oc = new List<double>();
+            var oa = new List<double>();
+            var os = new List<double>();
+            foreach (int i in pickIndices)
+            {
+                if (i < 0 || i >= n)
+                    continue;
+                or.Add(rows[i]);
+                oc.Add(cols[i]);
+                if (angles.Length > i)
+                    oa.Add(angles[i]);
+                if (scores.Length > i)
+                    os.Add(scores[i]);
+            }
+            outRows = or.ToArray();
+            outCols = oc.ToArray();
+            outAngles = oa.ToArray();
+            outScores = os.ToArray();
+        }
+
         private void ShowShapeMatchPreview(
             CalibImage img,
             long modelId,
@@ -9635,7 +11073,8 @@ namespace CalibOperatorCLI_Example
                 null,
                 null,
                 (drawBmp) => HalconShapeMatchVisualizer.DrawOnBitmap(
-                    drawBmp, modelId, rows, cols, angles, scores, contourLevel, crossHalf, strokeWidth, drawScores));
+                    drawBmp, modelId, rows, cols, angles, scores,
+                    contourLevel, crossHalf, strokeWidth, drawScores));
 #else
             if (n > 0)
             {
@@ -9740,7 +11179,7 @@ namespace CalibOperatorCLI_Example
                                                 gdiSeg[k] = new System.Drawing.PointF((float)p.X, (float)p.Y);
                                             }
 
-                                            g.DrawLines(linePen, gdiSeg);
+                                            DrawPointOverlaySegment(g, linePen, gdiSeg);
                                         }
 
                                         segStart = i;
@@ -9750,7 +11189,7 @@ namespace CalibOperatorCLI_Example
                             else
                             {
                                 var gdiPts = overlayPoints.Select(p => new System.Drawing.PointF((float)p.X, (float)p.Y)).ToArray();
-                                g.DrawLines(linePen, gdiPts);
+                                DrawPointOverlaySegment(g, linePen, gdiPts);
                             }
                         }
 
@@ -10343,6 +11782,8 @@ namespace CalibOperatorCLI_Example
 
         private async System.Threading.Tasks.Task<bool> RunAllManagedFallbackAsync()
         {
+            _skipFlowRunNodeIds = new HashSet<Guid>();
+            _sendPlcDownstreamChainCache = null;
             try
             {
                 if (TraceEnginePathToConsole)
@@ -10610,6 +12051,13 @@ namespace CalibOperatorCLI_Example
                 {
                     ThrowIfExecutionCancelled();
                     var node = sorted[i];
+                    if (_skipFlowRunNodeIds.Contains(node.Id))
+                    {
+                        successCount++;
+                        AppendLog($"[{i + 1}/{sorted.Count}] 跳过: {node.Def.DisplayName}（已在 send_plc 分批下游执行）");
+                        continue;
+                    }
+
                     StatusText.Text = $"执行 [{i + 1}/{sorted.Count}] {node.Def.DisplayName}...";
                     AppendLog($"[{i + 1}/{sorted.Count}] 执行: {node.Def.DisplayName}");
                     await System.Threading.Tasks.Task.Yield();
@@ -10672,6 +12120,11 @@ namespace CalibOperatorCLI_Example
                 }
                 AppendLog("========== 执行中止 ==========");
                 return false;
+            }
+            finally
+            {
+                _skipFlowRunNodeIds = null;
+                _sendPlcDownstreamChainCache = null;
             }
         }
 

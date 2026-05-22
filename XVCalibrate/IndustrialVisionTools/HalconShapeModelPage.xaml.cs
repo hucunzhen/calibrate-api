@@ -416,7 +416,7 @@ namespace CalibOperatorCLI_Example
             return new Point(colImg, rowImg);
         }
 
-        private void DrawFindResultOverlay(double[] rows, double[] cols, double[] angles, double[] scores)
+        private void DrawFindResultOverlay(double[] rows, double[] cols, double[] angles, double[] scores, int[]? gridRow = null, int[]? gridCol = null)
         {
             if (FindResultOverlay == null || rows.Length == 0)
                 return;
@@ -481,9 +481,15 @@ namespace CalibOperatorCLI_Example
                     StrokeThickness = 2
                 });
 
+                var labelParts = new List<string>();
+                if (scores.Length > m)
+                    labelParts.Add($"{scores[m]:F3}");
+                if (gridRow != null && gridCol != null && m < gridRow.Length && m < gridCol.Length
+                    && gridRow[m] >= 0 && gridCol[m] >= 0)
+                    labelParts.Add($"[{gridRow[m]},{gridCol[m]}]");
                 var label = new TextBlock
                 {
-                    Text = scores.Length > m ? $"{scores[m]:F3}" : "",
+                    Text = string.Join(" ", labelParts),
                     Foreground = brush,
                     FontSize = 12,
                     FontWeight = FontWeights.Bold,
@@ -1655,9 +1661,33 @@ namespace CalibOperatorCLI_Example
                     cols = filtered.Cols;
                     angles = filtered.Angles;
                     scores = filtered.Scores;
+                    int[] gridRowOut = filtered.GridRow;
+                    int[] gridColOut = filtered.GridCol;
                     string swapNote = filtered.AxesSwapped ? ", 行列轴已对调" : "";
                     string angleDevNote = maxAngleDev > 0 ? $", 角度±{maxAngleDev}°" : "";
                     AppendLog($"阵列过滤 {gridRows}×{gridCols}: {rawCount} → {rows.Length}（θ≈{filtered.EstimatedAngleDeg:F1}°{swapNote}{angleDevNote}）");
+
+                    if (rows.Length == 0)
+                    {
+                        ClearFindResultOverlay();
+                        TxtFindResult.Text = "未找到匹配";
+                        AppendLog("未找到匹配（可尝试 MinScore≈0.35、Greediness≈0.65、扩大角度范围）");
+                        return;
+                    }
+
+                    DrawFindResultOverlay(rows, cols, angles, scores, gridRowOut, gridColOut);
+                    var filteredResult = new System.Text.StringBuilder();
+                    filteredResult.AppendLine($"找到 {rows.Length} 个匹配（阵列 {gridRows}×{gridCols}）:");
+                    for (int i = 0; i < rows.Length; i++)
+                    {
+                        string gridNote = i < gridRowOut.Length && gridRowOut[i] >= 0
+                            ? $" 格[{gridRowOut[i]},{gridColOut[i]}]"
+                            : "";
+                        filteredResult.AppendLine($"[{i}] Row={rows[i]:F1}, Col={cols[i]:F1}, Angle={angles[i]:F2}°, Score={scores[i]:F3}{gridNote}");
+                    }
+                    TxtFindResult.Text = filteredResult.ToString();
+                    AppendLog($"查找完成: {rows.Length} 个匹配（已在图像上高亮）");
+                    return;
                 }
                 else if (rawCount > 0)
                 {
@@ -1674,7 +1704,7 @@ namespace CalibOperatorCLI_Example
                 {
                     DrawFindResultOverlay(rows, cols, angles, scores);
                     var result = new System.Text.StringBuilder();
-                    result.AppendLine($"找到 {rows.Length} 个匹配:");
+                    result.AppendLine($"找到 {rows.Length} 个匹配（未做阵列格标注）:");
                     for (int i = 0; i < rows.Length; i++)
                     {
                         result.AppendLine($"[{i}] Row={rows[i]:F1}, Col={cols[i]:F1}, Angle={angles[i]:F2}°, Score={scores[i]:F3}");

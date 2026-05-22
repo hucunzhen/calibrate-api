@@ -18,7 +18,7 @@ namespace CalibOperatorCLI_Example
 
     /// </summary>
 
-    internal static class HalconShapeMatchGridFilter
+    internal static partial class HalconShapeMatchGridFilter
 
     {
 
@@ -44,53 +44,44 @@ namespace CalibOperatorCLI_Example
 
             public bool AxesSwapped { get; init; }
 
-        }
+            /// <summary>阵列格行索引（0-based），与 Rows 等长；未落格为 -1。</summary>
+            public int[] GridRow { get; init; } = Array.Empty<int>();
 
+            /// <summary>阵列格列索引（0-based），与 Rows 等长；未落格为 -1。</summary>
+            public int[] GridCol { get; init; } = Array.Empty<int>();
 
+            /// <summary>阵列行数（与 CellRow 等长 = LatticeRows×LatticeCols）。</summary>
+            public int LatticeRows { get; init; }
 
-        /// <summary>先按 v 聚类分行，再在每行内对 u 做等间距列拟合。</summary>
-        private sealed class RowColumnLattice
-        {
-            public int Rows { get; init; }
-            public int Cols { get; init; }
-            public double PitchV { get; init; }
-            public double MeanPitchU { get; init; }
-            public double[] RowV { get; init; } = Array.Empty<double>();
-            public double[] RowU0 { get; init; } = Array.Empty<double>();
-            public double[] RowPitchU { get; init; } = Array.Empty<double>();
-            public int[] PointRow { get; init; } = Array.Empty<int>();
+            /// <summary>阵列列数。</summary>
+            public int LatticeCols { get; init; }
 
-            public double IdealU(int ir, int ic) => RowU0[ir] + ic * RowPitchU[ir];
-            public double IdealV(int ir) => RowV[ir];
-        }
+            /// <summary>全部理论格中心 Row（行优先 ir×cols+ic），图像坐标。</summary>
+            public double[] CellRow { get; init; } = Array.Empty<double>();
 
+            /// <summary>全部理论格中心 Column，图像坐标。</summary>
+            public double[] CellCol { get; init; } = Array.Empty<double>();
 
+            /// <summary>该格是否在最终输出中命中。</summary>
+            public bool[] CellFound { get; init; } = Array.Empty<bool>();
 
-        private readonly struct OrientationChoice
+            /// <summary>各格绘制框用的角度(°)，与 CellRow 等长；缺格为阵列共识匹配角。</summary>
+            public double[] CellAngleDeg { get; init; } = Array.Empty<double>();
 
-        {
+            /// <summary>模板匹配角共识值(°)，用于阵列 u/v 投影。</summary>
+            public double ConsensusMatchAngleDeg { get; init; }
 
-            public double AngleRad { get; init; }
+            /// <summary>N 连排布链向角(°)，用于绘制格框旋转。</summary>
+            public double ChainDirectionAngleDeg { get; init; } = double.NaN;
 
-            public bool SwapUv { get; init; }
+            public double[] ColCenterU { get; init; } = Array.Empty<double>();
 
-        }
-
-
-
-        private readonly struct AlignmentMetrics
-
-        {
-
-            public int UniqueCells { get; init; }
-
-            public int SnappedCount { get; init; }
-
-            public bool MatchesUserGridDims { get; init; }
-
-            public int AspectBonus { get; init; }
+            public double[] RowCenterV { get; init; } = Array.Empty<double>();
 
         }
+
+
+
 
 
 
@@ -160,7 +151,9 @@ namespace CalibOperatorCLI_Example
 
             double maxAngleDeviationDeg = 0,
 
-            string? diagnosticTag = null)
+            string? diagnosticTag = null,
+
+            LatticeFitResult? precomputedLattice = null)
 
         {
 
@@ -200,60 +193,32 @@ namespace CalibOperatorCLI_Example
 
 
 
-            bool userFixedAngle = gridAngleDeg.HasValue && !double.IsNaN(gridAngleDeg.Value);
+            var fit = precomputedLattice ?? FitLattice(
+                r, c, angles, scores, gridRows, gridCols, pitchRow, pitchCol, gridAngleDeg, snapTolerancePx, tag);
 
-            var orientation = userFixedAngle
+            double angleRad = fit.AngleRad;
+            bool swapUv = fit.AxesSwapped;
+            var u = fit.U;
+            var v = fit.V;
+            double consensusMatchDeg = fit.ConsensusMatchAngleDeg;
+            double chainDirectionDeg = fit.ChainDirectionAngleDeg;
+            var lattice = fit.Lattice;
+            double snapU = fit.SnapU;
+            double snapV = fit.SnapV;
 
-                ? ResolveOrientationWithFixedAngle(c, r, angles, gridRows, gridCols, gridAngleDeg!.Value, tag)
-
-                : ResolveOrientationAuto(c, r, angles, gridRows, gridCols, tag);
-
-
-
-            double angleRad = orientation.AngleRad;
-
-            bool swapUv = orientation.SwapUv;
-
-            int effRows = swapUv ? gridCols : gridRows;
-
-            int effCols = swapUv ? gridRows : gridCols;
-
-
-
-            ProjectToUv(c, r, angleRad, out var u, out var v);
-
-
-
-            double pitchU = pitchCol > 0 ? pitchCol : EstimatePitchFromProjections(u, effCols);
-
-            double pitchV = pitchRow > 0 ? pitchRow : EstimatePitchFromProjections(v, effRows);
-
-            if (pitchU < 1e-3 || pitchV < 1e-3)
-
+            if (lattice.ColU.Length == 0 || lattice.RowV.Length == 0
+                || (fit.PitchCol < 1e-3 && pitchCol <= 0) || (fit.PitchRow < 1e-3 && pitchRow <= 0))
             {
-
-                Diag(tag, "格距估计失败，原样输出");
-
-                return PassThrough(r, c, angles, scores, n, pitchV, pitchU, angleRad * 180.0 / Math.PI, swapUv);
-
+                Diag(tag, "阵列聚类/格距失败，原样输出");
+                return PassThrough(r, c, angles, scores, n, fit.PitchRow, fit.PitchCol, fit.EstimatedAngleDeg, swapUv);
             }
 
+            if (precomputedLattice == null)
+                Diag(tag, $"阵列聚类: pitchU={lattice.PitchU:F1}, pitchV={lattice.PitchV:F1}, snapU={snapU:F1}, snapV={snapV:F1}");
 
-
-            var lattice = FitRowColumnLattice(u, v, effRows, effCols, pitchU, pitchV);
-
-            ComputeLatticeSnapTolerance(lattice, snapTolerancePx, out double snapU, out double snapV);
-
-            Diag(tag, $"分行+行内等间距: pitchV={lattice.PitchV:F1}, 平均pitchU={lattice.MeanPitchU:F1}, snapU={snapU:F1}, snapV={snapV:F1}");
-
-            LogLatticeLines(tag, lattice);
-
-
-
-            double scoreRescueMin = Math.Max(0.9, minScoreKeep);
-            var perCell = BuildLatticeCandidates(u, v, scores, n, lattice, snapU, snapV, scoreRescueMin, out int rejectedSnap, out int rescuedHighScore);
+            var perCell = BuildLatticeCandidates(u, v, scores, n, lattice, snapU, snapV, 0, out int rejectedSnap, out int rescuedHighScore);
             if (rescuedHighScore > 0)
-                Diag(tag, $"高分放宽落格: {rescuedHighScore} 个 (score>={scoreRescueMin:F2}, snap≈{2.6 * lattice.MeanPitchU:F0}px)");
+                Diag(tag, $"snap 放宽落格: {rescuedHighScore} 个 (≈{2.6 * lattice.MeanPitchU:F0}px)");
 
             Diag(tag, $"落格: {perCell.Count} 格有候选, 拒绝(距格点过远)={rejectedSnap}");
 
@@ -263,7 +228,27 @@ namespace CalibOperatorCLI_Example
 
             var cellBest = SelectOnePerCellLatticeFirst(perCell, tag);
 
-            var kept = new List<int>(cellBest.Values);
+            int effRows = swapUv ? gridCols : gridRows;
+            int effCols = swapUv ? gridRows : gridCols;
+            int chainWindow = ConsensusChainWindowSize(gridRows, gridCols);
+            double chainDegForPick = !double.IsNaN(chainDirectionDeg) ? chainDirectionDeg : angleRad * 180.0 / Math.PI;
+            int wPick = Math.Min(chainWindow, effRows);
+            int[] linePick = Array.Empty<int>();
+            if (chainWindow > 0 && chainWindow < ExpectedConsensusMatchCount(gridRows, gridCols))
+            {
+                linePick = effCols == 2
+                    ? SelectColumn0ChainPick(r, c, u, v, scores, n, wPick, chainDegForPick, tag)
+                    : SelectChainIndicesFromPool(
+                        Enumerable.Range(0, n).ToArray(), u, v, scores, r, c, wPick, 0.88, chainDegForPick,
+                        useImageColCrossSpan: false, tag);
+            }
+            int[] col1ChainPick = Array.Empty<int>();
+            if (linePick.Length > 0 && effCols == 2)
+                col1ChainPick = ApplyTwoColumnStripPicks(linePick, r, c, u, v, scores, n, effRows, lattice, chainWindow, cellBest, chainDegForPick, tag);
+
+            var kept = effCols == 2
+                ? CollectStripCellIndices(cellBest, effRows, effCols)
+                : new List<int>(cellBest.Values);
 
 
 
@@ -280,22 +265,6 @@ namespace CalibOperatorCLI_Example
                 if (kept.Count != before)
 
                     Diag(tag, $"邻格一致性: {before}→{kept.Count}");
-
-            }
-
-
-
-            if (minScoreKeep > 0 && scores != null)
-
-            {
-
-                int before = kept.Count;
-
-                kept = kept.Where(i => i < scores.Length && scores[i] >= minScoreKeep).ToList();
-
-                if (kept.Count != before)
-
-                    Diag(tag, $"minScoreKeep: {before}→{kept.Count}");
 
             }
 
@@ -337,7 +306,28 @@ namespace CalibOperatorCLI_Example
 
 
 
-            var result = Pack(r, c, angles, scores, kept, n, lattice.PitchV, lattice.MeanPitchU, angleRad * 180.0 / Math.PI, swapUv);
+            var keptSet = new HashSet<int>(kept);
+            int[] consensusPick = Array.Empty<int>();
+            if (angles != null && angles.Length >= n)
+                (_, _, consensusPick) = ComputeConsensusMatchAngle(angles, scores, c, r, n, gridRows, gridCols, tag);
+
+            if (consensusPick.Length > 0)
+                lattice = RefineLatticeFromConsensusPick(lattice, u, v, scores, consensusPick, tag);
+
+            lattice = RefineLatticeFromCellMatches(lattice, u, v, scores, cellBest, keptSet);
+
+            if (consensusPick.Length == 0)
+                lattice = EnforceUniformColumnsPreserveRows(lattice);
+
+            Diag(tag, consensusPick.Length > 0
+                ? "已用共识高分点+落格匹配修正行/列中心（保留模板贴合）"
+                : "已用落格匹配修正行/列中心：列等间距、行跟模板");
+
+            if (double.IsNaN(consensusMatchDeg) && angles != null && angles.Length >= n)
+                (consensusMatchDeg, _, _) = ComputeConsensusMatchAngle(angles, scores, c, r, n, gridRows, gridCols, tag);
+
+            var result = Pack(r, c, angles, scores, kept, cellBest, lattice, angleRad, n, lattice.PitchV, lattice.MeanPitchU,
+                angleRad * 180.0 / Math.PI, swapUv, consensusMatchDeg, chainDirectionDeg);
 
             Diag(tag, $"输出 {result.Rows.Length} / 期望 {gridRows * gridCols}");
 
@@ -345,114 +335,6 @@ namespace CalibOperatorCLI_Example
 
         }
 
-
-
-        /// <summary>1) v 方向 KMeans 分行；2) 每行内 u 方向 KMeans + 等间距列格点。</summary>
-        private static RowColumnLattice FitRowColumnLattice(double[] u, double[] v, int rows, int cols, double pitchUHint, double pitchVHint)
-        {
-            int n = u.Length;
-            var pointRow = new int[n];
-
-            double[] rowCenters = KMeans1D(v, rows);
-            Array.Sort(rowCenters);
-            double pitchV = pitchVHint > 1e-3 ? pitchVHint : (rows > 1 ? (rowCenters[^1] - rowCenters[0]) / (rows - 1) : 1);
-            var rowV = new double[rows];
-            for (int ir = 0; ir < rows; ir++)
-                rowV[ir] = rows > 1 ? rowCenters[0] + ir * pitchV : rowCenters[0];
-
-            for (int i = 0; i < n; i++)
-                pointRow[i] = NearestIndex1D(rowCenters, v[i]);
-
-            RefineRowLines(v, pointRow, rows, ref rowV, ref pitchV);
-
-            var rowU0 = new double[rows];
-            var rowPitchU = new double[rows];
-            var rowLists = Enumerable.Range(0, rows).Select(_ => new List<double>()).ToArray();
-            for (int i = 0; i < n; i++)
-                rowLists[pointRow[i]].Add(u[i]);
-
-            for (int ir = 0; ir < rows; ir++)
-            {
-                FitRowColumnLine(rowLists[ir], cols, pitchUHint, out rowU0[ir], out rowPitchU[ir]);
-            }
-
-            var validPitches = rowPitchU.Where((p, ir) => rowLists[ir].Count > 0 && p > 1e-3).ToList();
-            double meanPitchU = validPitches.Count > 0 ? Median(validPitches) : (pitchUHint > 1e-3 ? pitchUHint : 1);
-            for (int ir = 0; ir < rows; ir++)
-            {
-                if (rowLists[ir].Count > 0)
-                    rowPitchU[ir] = meanPitchU;
-            }
-
-            return new RowColumnLattice
-            {
-                Rows = rows,
-                Cols = cols,
-                PitchV = pitchV,
-                MeanPitchU = meanPitchU,
-                RowV = rowV,
-                RowU0 = rowU0,
-                RowPitchU = rowPitchU,
-                PointRow = pointRow
-            };
-        }
-
-        private static void RefineRowLines(double[] v, int[] pointRow, int rows, ref double[] rowV, ref double pitchV)
-        {
-            for (int iter = 0; iter < 4; iter++)
-            {
-                var offsets = Enumerable.Range(0, rows).Select(_ => new List<double>()).ToArray();
-                for (int i = 0; i < v.Length; i++)
-                {
-                    int ir = pointRow[i];
-                    offsets[ir].Add(v[i] - rowV[ir]);
-                }
-
-                for (int ir = 0; ir < rows; ir++)
-                {
-                    if (offsets[ir].Count == 0)
-                        continue;
-                    rowV[ir] += Median(offsets[ir]);
-                }
-            }
-
-            if (rows > 1)
-            {
-                var sorted = rowV.OrderBy(x => x).ToArray();
-                pitchV = (sorted[^1] - sorted[0]) / (rows - 1);
-                double v0 = sorted[0];
-                for (int ir = 0; ir < rows; ir++)
-                    rowV[ir] = v0 + ir * pitchV;
-            }
-        }
-
-        private static void FitRowColumnLine(List<double> uInRow, int cols, double pitchUHint, out double u0, out double pitchU)
-        {
-            if (uInRow.Count == 0)
-            {
-                u0 = 0;
-                pitchU = pitchUHint > 1e-3 ? pitchUHint : 1;
-                return;
-            }
-
-            var arr = uInRow.ToArray();
-            double[] colCenters = KMeans1D(arr, cols);
-            Array.Sort(colCenters);
-            pitchU = pitchUHint > 1e-3 ? pitchUHint : (cols > 1 ? (colCenters[^1] - colCenters[0]) / (cols - 1) : 1);
-            u0 = colCenters[0];
-
-            for (int iter = 0; iter < 6; iter++)
-            {
-                var offsets = new List<double>();
-                foreach (double uv in arr)
-                {
-                    int ic = ClampIndex((int)Math.Round((uv - u0) / pitchU), 0, cols - 1);
-                    offsets.Add(uv - ic * pitchU);
-                }
-
-                u0 = Median(offsets);
-            }
-        }
 
 
 
@@ -480,6 +362,32 @@ namespace CalibOperatorCLI_Example
                         ic = c;
                         found = true;
                     }
+                }
+            }
+            return found;
+        }
+
+        /// <summary>仅在指定列内找满足 snap 且距离最小的行格，避免右列点因 u 偏差占左列格。</summary>
+        private static bool TryFindBestSnapCellInColumn(
+            double ui, double vi, int ic, RowColumnLattice lattice, double snapU, double snapV,
+            out int ir, out double dist)
+        {
+            ir = 0;
+            dist = double.MaxValue;
+            bool found = false;
+            ic = ClampIndex(ic, 0, lattice.Cols - 1);
+            for (int r = 0; r < lattice.Rows; r++)
+            {
+                double du = Math.Abs(ui - lattice.IdealU(r, ic));
+                double dv = Math.Abs(vi - lattice.IdealV(r));
+                if (du > snapU || dv > snapV)
+                    continue;
+                double d = Math.Sqrt(du * du + dv * dv);
+                if (d < dist)
+                {
+                    dist = d;
+                    ir = r;
+                    found = true;
                 }
             }
             return found;
@@ -535,11 +443,8 @@ namespace CalibOperatorCLI_Example
 
                 if (!TryFindBestSnapCell(u[i], v[i], lattice, snapU, snapV, out int ir, out int ic, out double dist))
                 {
-                    if (sc >= scoreRescueMin &&
-                        TryFindBestSnapCell(u[i], v[i], lattice, rescueSnapU, rescueSnapV, out ir, out ic, out dist))
-                    {
+                    if (TryFindBestSnapCell(u[i], v[i], lattice, rescueSnapU, rescueSnapV, out ir, out ic, out dist))
                         rescuedHighScore++;
-                    }
                     else
                     {
                         rejectedSnap++;
@@ -573,7 +478,194 @@ namespace CalibOperatorCLI_Example
 
         }
 
+        /// <summary>双列 u/v 落格：先按图像 Col 定列，再在该列内 snap 到行格。</summary>
+        private static Dictionary<(int ir, int ic), List<GridCellCandidate>> BuildLatticeCandidatesTwoColumn(
+            double[] cols,
+            double[] u,
+            double[] v,
+            double[]? scores,
+            int n,
+            RowColumnLattice lattice,
+            double snapU,
+            double snapV,
+            double scoreRescueMin,
+            double col0ImageCol,
+            double col1ImageCol,
+            double imageColMargin,
+            out int rejectedSnap,
+            out int rescuedHighScore)
+        {
+            var perCell = new Dictionary<(int ir, int ic), List<GridCellCandidate>>();
+            rejectedSnap = 0;
+            rescuedHighScore = 0;
+            double rescueSnapU = Math.Max(snapU, lattice.MeanPitchU * HighScoreRescuePitchFactor);
+            double rescueSnapV = Math.Max(snapV, lattice.PitchV * 0.55);
 
+            for (int i = 0; i < n; i++)
+            {
+                if (IsImageColumnGapOutlier(i, cols, col0ImageCol, col1ImageCol))
+                {
+                    rejectedSnap++;
+                    continue;
+                }
+
+                double sc = scores != null && i < scores.Length ? scores[i] : 0;
+                int ic = ResolveLatticeColumnIndex(i, cols, u, lattice, col0ImageCol, col1ImageCol, imageColMargin);
+
+                if (!TryFindBestSnapCellInColumn(u[i], v[i], ic, lattice, snapU, snapV, out int ir, out double dist))
+                {
+                    if (TryFindBestSnapCellInColumn(u[i], v[i], ic, lattice, rescueSnapU, rescueSnapV, out ir, out dist))
+                        rescuedHighScore++;
+                    else
+                    {
+                        rejectedSnap++;
+                        continue;
+                    }
+                }
+
+                var key = (ir, ic);
+                if (!perCell.TryGetValue(key, out var list))
+                {
+                    list = new List<GridCellCandidate>();
+                    perCell[key] = list;
+                }
+
+                list.Add(new GridCellCandidate(i, ir, ic, dist, sc));
+            }
+
+            return perCell;
+        }
+
+        private static Dictionary<(int ir, int ic), List<GridCellCandidate>> BuildLatticeCandidatesNearest(
+            double[] u,
+            double[] v,
+            double[]? scores,
+            int n,
+            RowColumnLattice lattice)
+        {
+            var perCell = new Dictionary<(int ir, int ic), List<GridCellCandidate>>();
+            for (int i = 0; i < n; i++)
+            {
+                double sc = scores != null && i < scores.Length ? scores[i] : 0;
+                FindNearestLatticeCell(u[i], v[i], lattice, out int ir, out int ic, out double dist);
+                var key = (ir, ic);
+                if (!perCell.TryGetValue(key, out var list))
+                {
+                    list = new List<GridCellCandidate>();
+                    perCell[key] = list;
+                }
+
+                list.Add(new GridCellCandidate(i, ir, ic, dist, sc));
+            }
+
+            return perCell;
+        }
+
+        /// <summary>u/v 落格：每点在本列内按距格心最近行入候选（无 snap 门槛），列归属用 ResolveLatticeColumnIndex。</summary>
+        private static Dictionary<(int ir, int ic), List<GridCellCandidate>> BuildLatticeCandidatesTwoColumnNearest(
+            double[] cols,
+            double[] u,
+            double[] v,
+            double[]? scores,
+            int n,
+            RowColumnLattice lattice,
+            double col0ImageCol,
+            double col1ImageCol,
+            double imageColMargin)
+        {
+            var perCell = new Dictionary<(int ir, int ic), List<GridCellCandidate>>();
+            for (int i = 0; i < n; i++)
+            {
+                if (IsImageColumnGapOutlier(i, cols, col0ImageCol, col1ImageCol))
+                    continue;
+
+                double sc = scores != null && i < scores.Length ? scores[i] : 0;
+                int ic = ResolveLatticeColumnIndex(i, cols, u, lattice, col0ImageCol, col1ImageCol, imageColMargin);
+                int bestIr = 0;
+                double bestDist = double.MaxValue;
+                for (int ir = 0; ir < lattice.Rows; ir++)
+                {
+                    double du = Math.Abs(u[i] - lattice.IdealU(ir, ic));
+                    double dv = Math.Abs(v[i] - lattice.IdealV(ir));
+                    double d = Math.Sqrt(du * du + dv * dv);
+                    if (d < bestDist)
+                    {
+                        bestDist = d;
+                        bestIr = ir;
+                    }
+                }
+
+                var key = (bestIr, ic);
+                if (!perCell.TryGetValue(key, out var list))
+                {
+                    list = new List<GridCellCandidate>();
+                    perCell[key] = list;
+                }
+
+                list.Add(new GridCellCandidate(i, bestIr, ic, bestDist, sc));
+            }
+
+            return perCell;
+        }
+
+        /// <summary>snap 未通过的高分点：在本图像列内找距格心最近的行，加入候选（与同格仍按分数优先竞争）。</summary>
+        private static int AddNearestColumnCandidatesForUnassigned(
+            Dictionary<(int ir, int ic), List<GridCellCandidate>> perCell,
+            double[] cols,
+            double[] u,
+            double[] v,
+            double[]? scores,
+            int n,
+            RowColumnLattice lattice,
+            double col0ImageCol,
+            double col1ImageCol,
+            double imageColMargin,
+            double minScore,
+            string? tag)
+        {
+            var already = new HashSet<int>(perCell.Values.SelectMany(list => list).Select(c => c.Index));
+            int added = 0;
+            for (int i = 0; i < n; i++)
+            {
+                if (already.Contains(i))
+                    continue;
+                if (IsImageColumnGapOutlier(i, cols, col0ImageCol, col1ImageCol))
+                    continue;
+                double sc = scores != null && i < scores.Length ? scores[i] : 0;
+                if (minScore > 0 && sc < minScore)
+                    continue;
+
+                int ic = ResolveLatticeColumnIndex(i, cols, u, lattice, col0ImageCol, col1ImageCol, imageColMargin);
+                int bestIr = 0;
+                double bestDist = double.MaxValue;
+                for (int ir = 0; ir < lattice.Rows; ir++)
+                {
+                    double du = Math.Abs(u[i] - lattice.IdealU(ir, ic));
+                    double dv = Math.Abs(v[i] - lattice.IdealV(ir));
+                    double d = Math.Sqrt(du * du + dv * dv);
+                    if (d < bestDist)
+                    {
+                        bestDist = d;
+                        bestIr = ir;
+                    }
+                }
+
+                var key = (bestIr, ic);
+                if (!perCell.TryGetValue(key, out var list))
+                {
+                    list = new List<GridCellCandidate>();
+                    perCell[key] = list;
+                }
+
+                list.Add(new GridCellCandidate(i, bestIr, ic, bestDist, sc));
+                already.Add(i);
+                added++;
+            }
+
+            if (added > 0 && !string.IsNullOrEmpty(tag))
+                Diag(tag, $"snap 外补候选(本列最近格): +{added} 点");
+            return added;
+        }
 
         private static int NearestLatticeIndex(double value, double origin, double pitch, int count)
 
@@ -592,35 +684,37 @@ namespace CalibOperatorCLI_Example
 
 
         private static Dictionary<(int ir, int ic), int> SelectOnePerCellLatticeFirst(
-
-            Dictionary<(int ir, int ic), List<GridCellCandidate>> perCell, string tag)
-
+            Dictionary<(int ir, int ic), List<GridCellCandidate>> perCell,
+            string? tag,
+            double maxDistLattice = double.PositiveInfinity,
+            bool distanceFirst = false)
         {
-
             var assignment = new Dictionary<(int ir, int ic), int>();
-
+            int skippedFar = 0;
             foreach (var kv in perCell)
-
             {
+                List<GridCellCandidate> pool = double.IsFinite(maxDistLattice) && maxDistLattice > 0
+                    ? kv.Value.Where(c => c.DistLattice <= maxDistLattice).ToList()
+                    : kv.Value;
+                if (pool.Count == 0)
+                {
+                    skippedFar++;
+                    continue;
+                }
 
-                var best = kv.Value
-
-                    .OrderByDescending(c => c.Score)
-
-                    .ThenBy(c => c.DistLattice)
-
-                    .First();
-
+                GridCellCandidate best = distanceFirst
+                    ? pool.OrderBy(c => c.DistLattice).ThenByDescending(c => c.Score).ThenBy(c => c.Index).First()
+                    : pool.OrderByDescending(c => c.Score).ThenBy(c => c.DistLattice).ThenBy(c => c.Index).First();
                 assignment[kv.Key] = best.Index;
-
             }
 
-
-
-            Diag(tag, $"每格选取(分数优先、其次距格点): {assignment.Count} 格");
-
+            if (skippedFar > 0 && !string.IsNullOrEmpty(tag))
+                Diag(tag, $"每格选取: 距格心>{maxDistLattice:F0}px 无候选，跳过 {skippedFar} 格");
+            if (!string.IsNullOrEmpty(tag))
+                Diag(tag, distanceFirst
+                    ? $"每格选取(距格心优先、其次分数): {assignment.Count} 格"
+                    : $"每格选取(分数优先、其次距格点): {assignment.Count} 格");
             return assignment;
-
         }
 
 
@@ -678,57 +772,6 @@ namespace CalibOperatorCLI_Example
 
 
 
-        private static void ComputeLatticeSnapTolerance(RowColumnLattice lattice, double snapTolerancePx, out double snapU, out double snapV)
-
-        {
-
-            if (snapTolerancePx > 0)
-
-            {
-
-                snapU = snapV = snapTolerancePx;
-
-                return;
-
-            }
-
-
-
-            snapU = Math.Max(12.0, 0.5 * lattice.MeanPitchU);
-
-            snapV = Math.Max(12.0, 0.5 * lattice.PitchV);
-
-        }
-
-
-
-        private static void LogLatticeLines(string tag, RowColumnLattice lattice)
-
-        {
-
-            if (!HalconShapeMatchGridDiagnostics.IsEnabled)
-
-                return;
-
-
-
-            Diag(tag, $"行线 V: [{string.Join(", ", lattice.RowV.Select(x => x.ToString("F1", CultureInfo.InvariantCulture)))}]");
-
-            for (int ir = 0; ir < lattice.Rows; ir++)
-
-            {
-
-                var uLine = Enumerable.Range(0, lattice.Cols)
-
-                    .Select(ic => lattice.IdealU(ir, ic).ToString("F1", CultureInfo.InvariantCulture));
-
-                Diag(tag, $"  行{ir} 列线 U (u0={lattice.RowU0[ir]:F1}, pitch={lattice.RowPitchU[ir]:F1}): [{string.Join(", ", uLine)}]");
-
-            }
-
-        }
-
-
 
         private static void LogCandidateDisposition(
 
@@ -756,8 +799,7 @@ namespace CalibOperatorCLI_Example
 
                 double sc = scores != null && i < scores.Length ? scores[i] : 0;
 
-                if (sc < 0.88)
-
+                if (sc <= 0)
                     continue;
 
 
@@ -778,7 +820,7 @@ namespace CalibOperatorCLI_Example
 
                 int roundIr = lattice.PointRow[i];
 
-                int roundIc = ClampIndex((int)Math.Round((u[i] - lattice.RowU0[roundIr]) / lattice.RowPitchU[roundIr]), 0, lattice.Cols - 1);
+                int roundIc = lattice.PointCol[i];
 
                 double roundDu = Math.Abs(u[i] - lattice.IdealU(roundIr, roundIc));
 
@@ -832,295 +874,9 @@ namespace CalibOperatorCLI_Example
 
 
 
-        private static int ClampIndex(int value, int min, int max) => Math.Max(min, Math.Min(max, value));
 
 
 
-        private static double Median(List<double> values)
-
-        {
-
-            if (values.Count == 0)
-
-                return 0;
-
-            var sorted = values.OrderBy(x => x).ToArray();
-
-            return sorted[sorted.Length / 2];
-
-        }
-
-
-
-        private static void Diag(string tag, string message) =>
-
-            HalconShapeMatchGridDiagnostics.Log($"[{tag}] {message}");
-
-
-
-        private static void ProjectToUv(double[] cols, double[] rows, double angleRad, out double[] u, out double[] v)
-
-        {
-
-            int n = cols.Length;
-
-            double cos = Math.Cos(angleRad);
-
-            double sin = Math.Sin(angleRad);
-
-            u = new double[n];
-
-            v = new double[n];
-
-            for (int i = 0; i < n; i++)
-
-            {
-
-                u[i] = cols[i] * cos + rows[i] * sin;
-
-                v[i] = -cols[i] * sin + rows[i] * cos;
-
-            }
-
-        }
-
-
-
-        private static OrientationChoice ResolveOrientationAuto(
-
-            double[] cols, double[] rows, double[]? angles, int gridRows, int gridCols, string tag)
-
-        {
-
-            var trials = new List<OrientationChoice>();
-
-            double pca = EstimatePrincipalAngleRad(cols, rows);
-
-
-
-            void Add(double angleRad)
-
-            {
-
-                trials.Add(new OrientationChoice { AngleRad = angleRad, SwapUv = false });
-
-                trials.Add(new OrientationChoice { AngleRad = angleRad, SwapUv = true });
-
-                trials.Add(new OrientationChoice { AngleRad = angleRad + Math.PI / 2.0, SwapUv = false });
-
-                trials.Add(new OrientationChoice { AngleRad = angleRad + Math.PI / 2.0, SwapUv = true });
-
-            }
-
-
-
-            Add(pca);
-
-            if (angles != null && angles.Length >= cols.Length && MatchAngleConcentration(angles) >= 0.55)
-
-                Add(CircularMeanDegrees(angles) * Math.PI / 180.0);
-
-
-
-            return PickBestOrientation(cols, rows, trials, gridRows, gridCols, tag);
-
-        }
-
-
-
-        private static OrientationChoice ResolveOrientationWithFixedAngle(
-
-            double[] cols, double[] rows, double[]? angles, int gridRows, int gridCols, double gridAngleDeg, string tag)
-
-        {
-
-            double angleRad = gridAngleDeg * Math.PI / 180.0;
-
-            var trials = new List<OrientationChoice>
-
-            {
-
-                new() { AngleRad = angleRad, SwapUv = false },
-
-                new() { AngleRad = angleRad, SwapUv = true }
-
-            };
-
-            return PickBestOrientation(cols, rows, trials, gridRows, gridCols, tag);
-
-        }
-
-
-
-        private static OrientationChoice PickBestOrientation(
-
-            double[] cols, double[] rows, List<OrientationChoice> trials, int gridRows, int gridCols, string tag)
-
-        {
-
-            int bestScore = -1;
-
-            var best = trials[0];
-
-            foreach (var t in trials)
-
-            {
-
-                int effRows = t.SwapUv ? gridCols : gridRows;
-
-                int effCols = t.SwapUv ? gridRows : gridCols;
-
-                var m = EvaluateLatticeAlignment(cols, rows, t.AngleRad, effRows, effCols, gridRows, gridCols);
-
-                int score = ScoreOrientation(m, gridRows, gridCols, t.SwapUv);
-
-                if (HalconShapeMatchGridDiagnostics.IsEnabled)
-
-                    Diag(tag, $"  试 θ={t.AngleRad * 180 / Math.PI:F1}° swap={t.SwapUv} cells={m.UniqueCells} snap={m.SnappedCount} total={score}");
-
-                if (score > bestScore)
-
-                {
-
-                    bestScore = score;
-
-                    best = t;
-
-                }
-
-            }
-
-
-
-            return best;
-
-        }
-
-
-
-        private static int ScoreOrientation(AlignmentMetrics m, int gridRows, int gridCols, bool swapUv)
-
-        {
-
-            int target = gridRows * gridCols;
-
-            int filled = Math.Min(m.UniqueCells, target);
-
-            int dimBonus = m.MatchesUserGridDims ? 50_000 : 0;
-
-            int swapPenalty = swapUv && gridRows != gridCols ? -5_000 : 0;
-
-            return dimBonus + swapPenalty + filled * 1_000 + m.SnappedCount + m.AspectBonus * 200;
-
-        }
-
-
-
-        private static AlignmentMetrics EvaluateLatticeAlignment(
-
-            double[] cols, double[] rows, double angleRad, int effRows, int effCols, int userRows, int userCols)
-
-        {
-
-            int n = cols.Length;
-
-            if (n == 0 || effRows < 1 || effCols < 1)
-
-                return default;
-
-
-
-            ProjectToUv(cols, rows, angleRad, out var u, out var v);
-
-            double pitchU = EstimatePitchFromProjections(u, effCols);
-
-            double pitchV = EstimatePitchFromProjections(v, effRows);
-
-            if (pitchU < 1e-3 || pitchV < 1e-3)
-
-                return default;
-
-
-
-            var lattice = FitRowColumnLattice(u, v, effRows, effCols, pitchU, pitchV);
-
-            ComputeLatticeSnapTolerance(lattice, 0, out double snapU, out double snapV);
-
-
-
-            int snapped = 0;
-
-            var cells = new HashSet<(int, int)>();
-
-            for (int i = 0; i < n; i++)
-
-            {
-
-                if (!TryFindBestSnapCell(u[i], v[i], lattice, snapU, snapV, out int ir, out int ic, out _))
-
-                    continue;
-
-                snapped++;
-
-                cells.Add((ir, ic));
-
-            }
-
-
-
-            double spanU = lattice.MeanPitchU * Math.Max(0, effCols - 1);
-
-            double spanV = lattice.PitchV * Math.Max(0, effRows - 1);
-
-            bool uIsMajor = spanU >= spanV;
-
-            bool colsAreMajor = effCols >= effRows;
-
-
-
-            return new AlignmentMetrics
-
-            {
-
-                SnappedCount = snapped,
-
-                UniqueCells = cells.Count,
-
-                MatchesUserGridDims = effRows == userRows && effCols == userCols,
-
-                AspectBonus = uIsMajor == colsAreMajor ? 1 : 0
-
-            };
-
-        }
-
-
-
-        private static double MatchAngleConcentration(double[] anglesDeg)
-
-        {
-
-            if (anglesDeg.Length == 0) return 0;
-
-            double sumSin = 0, sumCos = 0;
-
-            foreach (double a in anglesDeg)
-
-            {
-
-                double rad = a * Math.PI / 180.0;
-
-                sumSin += Math.Sin(rad);
-
-                sumCos += Math.Cos(rad);
-
-            }
-
-
-
-            return Math.Sqrt(sumSin * sumSin + sumCos * sumCos) / anglesDeg.Length;
-
-        }
 
 
 
@@ -1200,201 +956,6 @@ namespace CalibOperatorCLI_Example
 
 
 
-        private static double EstimatePrincipalAngleRad(double[] cols, double[] rows)
-
-        {
-
-            int n = cols.Length;
-
-            double mx = cols.Average();
-
-            double my = rows.Average();
-
-            double sxx = 0, syy = 0, sxy = 0;
-
-            for (int i = 0; i < n; i++)
-
-            {
-
-                double dx = cols[i] - mx;
-
-                double dy = rows[i] - my;
-
-                sxx += dx * dx;
-
-                syy += dy * dy;
-
-                sxy += dx * dy;
-
-            }
-
-
-
-            if (sxx + syy < 1e-6) return 0;
-
-            return 0.5 * Math.Atan2(2 * sxy, sxx - syy);
-
-        }
-
-
-
-        private static double EstimatePitchFromProjections(double[] proj, int expectedCells)
-
-        {
-
-            if (proj.Length < 2) return 0;
-
-            var sorted = proj.OrderBy(x => x).ToArray();
-
-            var diffs = new List<double>();
-
-            for (int i = 1; i < sorted.Length; i++)
-
-            {
-
-                double d = sorted[i] - sorted[i - 1];
-
-                if (d > 1e-3) diffs.Add(d);
-
-            }
-
-
-
-            if (diffs.Count == 0) return 0;
-
-            diffs.Sort();
-
-            double median = diffs[diffs.Count / 2];
-
-            if (expectedCells > 1 && sorted.Length >= expectedCells)
-
-            {
-
-                double fromSpan = (sorted[^1] - sorted[0]) / Math.Max(1, expectedCells - 1);
-
-                if (fromSpan > 1e-3)
-
-                    return (median + fromSpan) * 0.5;
-
-            }
-
-
-
-            return median;
-
-        }
-
-
-
-        private static double[] KMeans1D(double[] values, int k)
-
-        {
-
-            k = Math.Max(1, Math.Min(k, values.Length));
-
-            var sorted = values.OrderBy(x => x).ToArray();
-
-            var centers = new double[k];
-
-            for (int i = 0; i < k; i++)
-
-            {
-
-                double q = (i + 0.5) / k;
-
-                int idx = (int)Math.Clamp(Math.Round(q * sorted.Length - 0.5), 0, sorted.Length - 1);
-
-                centers[i] = sorted[idx];
-
-            }
-
-
-
-            for (int iter = 0; iter < 30; iter++)
-
-            {
-
-                var sums = new double[k];
-
-                var counts = new int[k];
-
-                foreach (double val in values)
-
-                {
-
-                    int b = NearestIndex1D(centers, val);
-
-                    sums[b] += val;
-
-                    counts[b]++;
-
-                }
-
-
-
-                bool moved = false;
-
-                for (int j = 0; j < k; j++)
-
-                {
-
-                    if (counts[j] == 0) continue;
-
-                    double next = sums[j] / counts[j];
-
-                    if (Math.Abs(next - centers[j]) > 1e-4) moved = true;
-
-                    centers[j] = next;
-
-                }
-
-
-
-                if (!moved) break;
-
-            }
-
-
-
-            Array.Sort(centers);
-
-            return centers;
-
-        }
-
-
-
-        private static int NearestIndex1D(double[] centers, double value)
-
-        {
-
-            int best = 0;
-
-            double dMin = Math.Abs(value - centers[0]);
-
-            for (int k = 1; k < centers.Length; k++)
-
-            {
-
-                double d = Math.Abs(value - centers[k]);
-
-                if (d < dMin)
-
-                {
-
-                    dMin = d;
-
-                    best = k;
-
-                }
-
-            }
-
-
-
-            return best;
-
-        }
 
 
 
@@ -1414,6 +975,20 @@ namespace CalibOperatorCLI_Example
 
                 Scores = scores != null && scores.Length >= n ? scores.Take(n).ToArray() : Array.Empty<double>(),
 
+                GridRow = Enumerable.Repeat(-1, n).ToArray(),
+
+                GridCol = Enumerable.Repeat(-1, n).ToArray(),
+
+                LatticeRows = 0,
+
+                LatticeCols = 0,
+
+                CellRow = Array.Empty<double>(),
+
+                CellCol = Array.Empty<double>(),
+
+                CellFound = Array.Empty<bool>(),
+
                 InputCount = n,
 
                 EstimatedPitchRow = pitchV,
@@ -1430,9 +1005,19 @@ namespace CalibOperatorCLI_Example
 
 
 
-        private static Result Pack(double[] r, double[] c, double[]? angles, double[]? scores, List<int> kept, int inputCount, double pitchV, double pitchU, double angleDeg, bool swapUv)
+        private static Result Pack(
+            double[] r, double[] c, double[]? angles, double[]? scores, List<int> kept,
+            Dictionary<(int ir, int ic), int> cellBest,
+            RowColumnLattice lattice,
+            double angleRad,
+            int inputCount, double pitchV, double pitchU,             double angleDeg, bool swapUv,
+            double consensusMatchDeg,
+            double chainDirectionDeg)
 
         {
+            var keptSet = new HashSet<int>(kept);
+            BuildCellGridGeometry(lattice, angleRad, cellBest, keptSet, consensusMatchDeg,
+                out double[] cellRow, out double[] cellCol, out bool[] cellFound, out double[] cellAngleDeg);
 
             var outR = new double[kept.Count];
 
@@ -1441,6 +1026,25 @@ namespace CalibOperatorCLI_Example
             var outA = new double[kept.Count];
 
             var outS = new double[kept.Count];
+
+            var outGr = new int[kept.Count];
+
+            var outGc = new int[kept.Count];
+
+            var indexToCell = cellBest.ToDictionary(kv => kv.Value, kv => kv.Key);
+
+            if (kept.Count >= 2 && lattice.Cols >= 1)
+            {
+                ComputeLatticeSnapTolerance(lattice, 0, out double snapU, out double snapV);
+                ProjectToUv(c, r, angleRad, out var uPr, out var vPr);
+                kept = PrunePickIndicesByColumnCollinearitySafe(uPr, vPr, kept.ToArray(), indexToCell, lattice, snapU, snapV, null).ToList();
+                outR = new double[kept.Count];
+                outC = new double[kept.Count];
+                outA = new double[kept.Count];
+                outS = new double[kept.Count];
+                outGr = new int[kept.Count];
+                outGc = new int[kept.Count];
+            }
 
             for (int k = 0; k < kept.Count; k++)
 
@@ -1456,9 +1060,27 @@ namespace CalibOperatorCLI_Example
 
                 outS[k] = scores != null && scores.Length > i ? scores[i] : 0;
 
+                if (indexToCell.TryGetValue(i, out var cell))
+
+                {
+
+                    outGr[k] = cell.ir;
+
+                    outGc[k] = cell.ic;
+
+                }
+
+                else
+
+                {
+
+                    outGr[k] = -1;
+
+                    outGc[k] = -1;
+
+                }
+
             }
-
-
 
             return new Result
 
@@ -1472,6 +1094,26 @@ namespace CalibOperatorCLI_Example
 
                 Scores = outS,
 
+                GridRow = outGr,
+
+                GridCol = outGc,
+
+                LatticeRows = lattice.Rows,
+
+                LatticeCols = lattice.Cols,
+
+                CellRow = cellRow,
+
+                CellCol = cellCol,
+
+                CellFound = cellFound,
+
+                CellAngleDeg = cellAngleDeg,
+
+                ConsensusMatchAngleDeg = double.IsNaN(consensusMatchDeg) ? angleDeg : consensusMatchDeg,
+
+                ChainDirectionAngleDeg = chainDirectionDeg,
+
                 InputCount = inputCount,
 
                 EstimatedPitchRow = pitchV,
@@ -1480,7 +1122,11 @@ namespace CalibOperatorCLI_Example
 
                 EstimatedAngleDeg = angleDeg,
 
-                AxesSwapped = swapUv
+                AxesSwapped = swapUv,
+
+                ColCenterU = lattice.ColU,
+
+                RowCenterV = lattice.RowV
 
             };
 

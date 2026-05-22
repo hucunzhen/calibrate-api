@@ -3,13 +3,16 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       Title="PLC 通讯"
       Background="{StaticResource Ui.PageBackground}">
+    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  PanningMode="VerticalOnly">
     <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="150"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- Connection -->
@@ -51,8 +54,7 @@
                     <Button x:Name="BtnXForward" Content="Forward" Width="90" Height="28" Margin="0,0,6,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture"/>
                     <Button x:Name="BtnXReverse" Content="Reverse" Width="90" Height="28" Margin="0,0,4,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture"/>
                     <TextBlock x:Name="TxtXRotateStatus" Text="---" VerticalAlignment="Center" Margin="4,0,8,0" Foreground="Gray" FontFamily="Consolas"/>
-                    <Button x:Name="BtnXZero" Content="Zero" Width="120" Height="28" Margin="0,0,8,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture" Foreground="#D32F2F" FontWeight="Bold"/>
-                    <Button x:Name="BtnXHome" Content="Home" Width="120" Height="28" Margin="0,0,12,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture" Foreground="#1565C0" FontWeight="Bold"/>
+                    <Button x:Name="BtnXZero" Content="Zero" Width="120" Height="28" Margin="0,0,12,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture" Foreground="#D32F2F" FontWeight="Bold"/>
                     <Button x:Name="BtnManual" Content="Manual" Width="120" Height="28" Margin="0,0,6,0" Click="BtnManual_Click" Foreground="#6A1B9A" FontWeight="Bold"/>
                     <Button x:Name="BtnAuto" Content="Auto" Width="120" Height="28" Margin="0,0,12,0" Click="BtnAuto_Click" Foreground="#2E7D32" FontWeight="Bold"/>
                     <TextBlock x:Name="TxtModeStatus" Text="---" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="Gray" FontFamily="Consolas" FontWeight="Bold"/>
@@ -63,8 +65,7 @@
                     <Button x:Name="BtnYForward" Content="Forward" Width="90" Height="28" Margin="0,0,6,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture"/>
                     <Button x:Name="BtnYReverse" Content="Reverse" Width="90" Height="28" Margin="0,0,4,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture"/>
                     <TextBlock x:Name="TxtYRotateStatus" Text="---" VerticalAlignment="Center" Margin="4,0,8,0" Foreground="Gray" FontFamily="Consolas"/>
-                    <Button x:Name="BtnYZero" Content="Zero" Width="120" Height="28" Margin="0,0,8,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture" Foreground="#D32F2F" FontWeight="Bold"/>
-                    <Button x:Name="BtnYHome" Content="Home" Width="120" Height="28" Margin="0,0,12,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture" Foreground="#1565C0" FontWeight="Bold"/>
+                    <Button x:Name="BtnYZero" Content="Zero" Width="120" Height="28" Margin="0,0,12,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture" Foreground="#D32F2F" FontWeight="Bold"/>
                 </StackPanel>
                 <!-- Z轴正反转控制 -->
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
@@ -72,8 +73,7 @@
                     <Button x:Name="BtnZForward" Content="Forward" Width="90" Height="28" Margin="0,0,6,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture"/>
                     <Button x:Name="BtnZReverse" Content="Reverse" Width="90" Height="28" Margin="0,0,4,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture"/>
                     <TextBlock x:Name="TxtZRotateStatus" Text="---" VerticalAlignment="Center" Margin="4,0,8,0" Foreground="Gray" FontFamily="Consolas"/>
-                    <Button x:Name="BtnZZero" Content="Zero" Width="120" Height="28" Margin="0,0,8,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture" Foreground="#D32F2F" FontWeight="Bold"/>
-                    <Button x:Name="BtnZHome" Content="Home" Width="120" Height="28" Margin="0,0,12,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture" Foreground="#1565C0" FontWeight="Bold"/>
+                    <Button x:Name="BtnZZero" Content="Zero" Width="120" Height="28" Margin="0,0,12,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture" Foreground="#D32F2F" FontWeight="Bold"/>
                 </StackPanel>
                 <!-- 启动/停止控制 -->
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
@@ -87,27 +87,115 @@
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                     <TextBlock Text="Axis Enable:" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="Bold"/>
                     <TextBlock x:Name="LblXEnable" Text="X:" VerticalAlignment="Center" Foreground="#D32F2F" FontWeight="Bold" Margin="0,0,4,0"/>
-                    <ToggleButton x:Name="TogXEnable" Content="Enable" Width="80" Height="26" Click="TogXEnable_Click" ToolTip="X轴使能控制"/>
+                    <Button x:Name="BtnXEnable" Content="Enable" Width="80" Height="26" Click="BtnXEnable_Click" ToolTip="X轴使能"/>
                     <TextBlock x:Name="TxtXEnableStatus" Text="OFF" VerticalAlignment="Center" Margin="6,0,12,0" Foreground="Gray" FontFamily="Consolas" FontWeight="Bold"/>
                     <TextBlock x:Name="LblYEnable" Text="Y:" VerticalAlignment="Center" Foreground="#1976D2" FontWeight="Bold" Margin="0,0,4,0"/>
-                    <ToggleButton x:Name="TogYEnable" Content="Enable" Width="80" Height="26" Click="TogYEnable_Click" ToolTip="Y轴使能控制"/>
+                    <Button x:Name="BtnYEnable" Content="Enable" Width="80" Height="26" Click="BtnYEnable_Click" ToolTip="Y轴使能"/>
                     <TextBlock x:Name="TxtYEnableStatus" Text="OFF" VerticalAlignment="Center" Margin="6,0,12,0" Foreground="Gray" FontFamily="Consolas" FontWeight="Bold"/>
                     <TextBlock x:Name="LblZEnable" Text="Z:" VerticalAlignment="Center" Foreground="#388E3C" FontWeight="Bold" Margin="0,0,4,0"/>
-                    <ToggleButton x:Name="TogZEnable" Content="Enable" Width="80" Height="26" Click="TogZEnable_Click" ToolTip="Z轴使能控制"/>
+                    <Button x:Name="BtnZEnable" Content="Enable" Width="80" Height="26" Click="BtnZEnable_Click" ToolTip="Z轴使能"/>
                     <TextBlock x:Name="TxtZEnableStatus" Text="OFF" VerticalAlignment="Center" Margin="6,0,0,0" Foreground="Gray" FontFamily="Consolas" FontWeight="Bold"/>
                 </StackPanel>
                 <!-- 报警清除控制 -->
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                     <TextBlock Text="Alarm Clear:" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="Bold"/>
                     <TextBlock x:Name="LblXAlarm" Text="X:" VerticalAlignment="Center" Foreground="#D32F2F" FontWeight="Bold" Margin="0,0,4,0"/>
-                    <Button x:Name="BtnXAlarmClear" Content="Clear" Width="80" Height="26" Margin="0,0,4,0" Click="BtnXAlarmClear_Click" Foreground="#D32F2F" FontWeight="Bold" ToolTip="X轴报警清除（清位置写0）"/>
-                    <TextBox x:Name="TxtXAlarmPos" Text="0" Width="50" Height="24" VerticalContentAlignment="Center" Margin="0,0,12,0" ToolTip="报警清除时写入的位置值"/>
+                    <Button x:Name="BtnXAlarmClear" Content="Clear" Width="80" Height="26" Margin="0,0,12,0" Click="BtnXAlarmClear_Click" Foreground="#D32F2F" FontWeight="Bold" ToolTip="X轴报警清除"/>
                     <TextBlock x:Name="LblYAlarm" Text="Y:" VerticalAlignment="Center" Foreground="#1976D2" FontWeight="Bold" Margin="0,0,4,0"/>
-                    <Button x:Name="BtnYAlarmClear" Content="Clear" Width="80" Height="26" Margin="0,0,4,0" Click="BtnYAlarmClear_Click" Foreground="#D32F2F" FontWeight="Bold" ToolTip="Y轴报警清除（清位置写0）"/>
-                    <TextBox x:Name="TxtYAlarmPos" Text="0" Width="50" Height="24" VerticalContentAlignment="Center" Margin="0,0,12,0" ToolTip="报警清除时写入的位置值"/>
+                    <Button x:Name="BtnYAlarmClear" Content="Clear" Width="80" Height="26" Margin="0,0,12,0" Click="BtnYAlarmClear_Click" Foreground="#D32F2F" FontWeight="Bold" ToolTip="Y轴报警清除"/>
                     <TextBlock x:Name="LblZAlarm" Text="Z:" VerticalAlignment="Center" Foreground="#388E3C" FontWeight="Bold" Margin="0,0,4,0"/>
-                    <Button x:Name="BtnZAlarmClear" Content="Clear" Width="80" Height="26" Margin="0,0,4,0" Click="BtnZAlarmClear_Click" Foreground="#D32F2F" FontWeight="Bold" ToolTip="Z轴报警清除（清位置写0）"/>
-                    <TextBox x:Name="TxtZAlarmPos" Text="0" Width="50" Height="24" VerticalContentAlignment="Center" ToolTip="报警清除时写入的位置值"/>
+                    <Button x:Name="BtnZAlarmClear" Content="Clear" Width="80" Height="26" Click="BtnZAlarmClear_Click" Foreground="#D32F2F" FontWeight="Bold" ToolTip="Z轴报警清除"/>
+                </StackPanel>
+                <!-- 激光功率 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="Laser:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold" Foreground="#E65100"/>
+                    <TextBlock x:Name="LblLaserPower" Text="功率 HD1900:" VerticalAlignment="Center" Foreground="#666"/>
+                    <TextBox x:Name="TxtLaserPower" Width="80" Height="24" VerticalContentAlignment="Center" Margin="2,0,4,0" ToolTip="激光功率设定值"/>
+                    <Button x:Name="BtnReadLaserPower" Content="读取" Width="48" Height="24" Margin="0,0,4,0" Click="BtnReadLaserPower_Click" ToolTip="从 PLC 读取激光功率"/>
+                    <Button x:Name="BtnWriteLaserPower" Content="设置" Width="48" Height="24" Margin="0,0,12,0" Click="BtnWriteLaserPower_Click" Foreground="#E65100" FontWeight="Bold" ToolTip="写入激光功率到 HD1900"/>
+                    <TextBlock Text="使能" VerticalAlignment="Center" Foreground="#666" Margin="0,0,4,0"/>
+                    <Button x:Name="BtnLaserEnable" Content="ON" Width="52" Height="24" Margin="0,0,4,0" Click="BtnLaserEnable_Click" Foreground="#E65100" FontWeight="Bold" ToolTip="激光使能 D1900L.bit0=ON"/>
+                    <Button x:Name="BtnLaserDisable" Content="OFF" Width="52" Height="24" Margin="0,0,4,0" Click="BtnLaserDisable_Click" ToolTip="激光使能 D1900L.bit0=OFF"/>
+                    <TextBlock x:Name="TxtLaserEnableStatus" Text="OFF" VerticalAlignment="Center" Foreground="Gray" FontFamily="Consolas" FontWeight="Bold" Margin="0,0,16,0"/>
+                    <TextBlock Text="红光" VerticalAlignment="Center" Foreground="#C62828" FontWeight="Bold" Margin="0,0,4,0"/>
+                    <Button x:Name="BtnRedLightEnable" Content="ON" Width="52" Height="24" Margin="0,0,4,0" Click="BtnRedLightEnable_Click" Foreground="#C62828" FontWeight="Bold" ToolTip="红光使能 D1901L.bit0=ON"/>
+                    <Button x:Name="BtnRedLightDisable" Content="OFF" Width="52" Height="24" Margin="0,0,4,0" Click="BtnRedLightDisable_Click" ToolTip="红光使能 D1901L.bit0=OFF"/>
+                    <TextBlock x:Name="TxtRedLightEnableStatus" Text="OFF" VerticalAlignment="Center" Foreground="Gray" FontFamily="Consolas" FontWeight="Bold" Margin="0,0,16,0"/>
+                    <TextBlock Text="吹气" VerticalAlignment="Center" Foreground="#0277BD" FontWeight="Bold" Margin="0,0,4,0"/>
+                    <Button x:Name="BtnBlowEnable" Content="ON" Width="52" Height="24" Margin="0,0,4,0" Click="BtnBlowEnable_Click" Foreground="#0277BD" FontWeight="Bold" ToolTip="吹气使能 D1902L.bit0=ON"/>
+                    <Button x:Name="BtnBlowDisable" Content="OFF" Width="52" Height="24" Margin="0,0,4,0" Click="BtnBlowDisable_Click" ToolTip="吹气使能 D1902L.bit0=OFF"/>
+                    <TextBlock x:Name="TxtBlowEnableStatus" Text="OFF" VerticalAlignment="Center" Foreground="Gray" FontFamily="Consolas" FontWeight="Bold"/>
+                </StackPanel>
+                <!-- 相机拍照 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="相机:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold" Foreground="#5E35B1"/>
+                    <Button x:Name="BtnCameraCaptureStart" Content="开始拍照" Width="90" Height="28" Click="BtnCameraCaptureStart_Click" Foreground="#5E35B1" FontWeight="Bold" ToolTip="触发拍照：D1800L.bit0 脉冲 ON→OFF"/>
+                </StackPanel>
+                <!-- 焊接完成 D803L PLC→上位机 / D804L 上位机→PLC -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <TextBlock Text="完成(PLC→上位机):" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold" Foreground="#6A1B9A"/>
+                    <TextBlock x:Name="TxtWeldDoneFlagAddr" Text="D803L" VerticalAlignment="Center" Foreground="#666" Margin="0,0,6,0" FontFamily="Consolas"/>
+                    <TextBlock Text="状态" VerticalAlignment="Center" Foreground="#666" Margin="0,0,4,0"/>
+                    <TextBlock x:Name="TxtWeldDoneStatus" Text="---" VerticalAlignment="Center" Foreground="Gray" FontFamily="Consolas" FontWeight="Bold" Margin="0,0,8,0"/>
+                    <Button x:Name="BtnReadWeldDone" Content="读取" Width="48" Height="24" Margin="0,0,4,0" Click="BtnReadWeldDone_Click" ToolTip="读取 D803L"/>
+                    <Button x:Name="BtnClearWeldDone" Content="清零" Width="48" Height="24" Click="BtnClearWeldDone_Click" Foreground="#6A1B9A" FontWeight="Bold" ToolTip="D803L 清 0，下一轮开始前须执行"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="轨迹已下发(上位机→PLC):" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold" Foreground="#4527A0"/>
+                    <TextBlock x:Name="TxtWeldDoneHostFlagAddr" Text="D804L" VerticalAlignment="Center" Foreground="#666" Margin="0,0,8,0" FontFamily="Consolas"/>
+                    <Button x:Name="BtnSetWeldDoneHost" Content="置1" Width="48" Height="24" Margin="0,0,4,0" Click="BtnSetWeldDoneHost_Click" Foreground="#4527A0" FontWeight="Bold" ToolTip="最后一段轨迹下发后置 D804L=1"/>
+                    <Button x:Name="BtnClearWeldDoneHost" Content="清零" Width="48" Height="24" Click="BtnClearWeldDoneHost_Click" ToolTip="D804L 清 0"/>
+                    <TextBlock x:Name="TxtWeldDoneHostStatus" Text="---" VerticalAlignment="Center" Foreground="Gray" FontFamily="Consolas" FontWeight="Bold" Margin="8,0,0,0"/>
+                </StackPanel>
+                <!-- 停机安全位 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="停机安全位:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold" Foreground="#455A64"/>
+                    <TextBlock x:Name="LblStopSafeX" Text="X HD1700:" VerticalAlignment="Center" Foreground="#D32F2F" FontWeight="Bold" Margin="0,0,2,0"/>
+                    <TextBox x:Name="TxtStopSafeX" Width="72" Height="24" VerticalContentAlignment="Center" Margin="0,0,8,0" ToolTip="停机安全位 X"/>
+                    <TextBlock x:Name="LblStopSafeY" Text="Y HD1702:" VerticalAlignment="Center" Foreground="#1976D2" FontWeight="Bold" Margin="0,0,2,0"/>
+                    <TextBox x:Name="TxtStopSafeY" Width="72" Height="24" VerticalContentAlignment="Center" Margin="0,0,8,0" ToolTip="停机安全位 Y"/>
+                    <TextBlock x:Name="LblStopSafeZ" Text="Z HD1704:" VerticalAlignment="Center" Foreground="#388E3C" FontWeight="Bold" Margin="0,0,2,0"/>
+                    <TextBox x:Name="TxtStopSafeZ" Width="72" Height="24" VerticalContentAlignment="Center" Margin="0,0,8,0" ToolTip="停机安全位 Z"/>
+                    <Button x:Name="BtnReadStopSafePos" Content="读取" Width="48" Height="24" Margin="0,0,4,0" Click="BtnReadStopSafePos_Click" ToolTip="读取停机安全位 XYZ"/>
+                    <Button x:Name="BtnWriteStopSafePos" Content="设置" Width="48" Height="24" Click="BtnWriteStopSafePos_Click" Foreground="#455A64" FontWeight="Bold" ToolTip="写入停机安全位 XYZ"/>
+                </StackPanel>
+                <!-- 拍照位 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="拍照位:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold" Foreground="#5E35B1"/>
+                    <TextBlock x:Name="LblPhotoPosX" Text="X HD1710:" VerticalAlignment="Center" Foreground="#D32F2F" FontWeight="Bold" Margin="0,0,2,0"/>
+                    <TextBox x:Name="TxtPhotoPosX" Width="72" Height="24" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock x:Name="LblPhotoPosY" Text="Y HD1712:" VerticalAlignment="Center" Foreground="#1976D2" FontWeight="Bold" Margin="0,0,2,0"/>
+                    <TextBox x:Name="TxtPhotoPosY" Width="72" Height="24" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock x:Name="LblPhotoPosZ" Text="Z HD1714:" VerticalAlignment="Center" Foreground="#388E3C" FontWeight="Bold" Margin="0,0,2,0"/>
+                    <TextBox x:Name="TxtPhotoPosZ" Width="72" Height="24" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+                    <Button x:Name="BtnReadPhotoPos" Content="读取" Width="48" Height="24" Margin="0,0,4,0" Click="BtnReadPhotoPos_Click"/>
+                    <Button x:Name="BtnWritePhotoPos" Content="设置" Width="48" Height="24" Click="BtnWritePhotoPos_Click" Foreground="#5E35B1" FontWeight="Bold"/>
+                </StackPanel>
+                <!-- 激光位相对坐标 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="激光相对:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold" Foreground="#E65100"/>
+                    <TextBlock x:Name="LblLaserRelX" Text="X HD1720:" VerticalAlignment="Center" Foreground="#D32F2F" FontWeight="Bold" Margin="0,0,2,0"/>
+                    <TextBox x:Name="TxtLaserRelX" Width="72" Height="24" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock x:Name="LblLaserRelY" Text="Y HD1722:" VerticalAlignment="Center" Foreground="#1976D2" FontWeight="Bold" Margin="0,0,2,0"/>
+                    <TextBox x:Name="TxtLaserRelY" Width="72" Height="24" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock x:Name="LblLaserRelZ" Text="Z HD1724:" VerticalAlignment="Center" Foreground="#388E3C" FontWeight="Bold" Margin="0,0,2,0"/>
+                    <TextBox x:Name="TxtLaserRelZ" Width="72" Height="24" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+                    <Button x:Name="BtnReadLaserRelPos" Content="读取" Width="48" Height="24" Margin="0,0,4,0" Click="BtnReadLaserRelPos_Click"/>
+                    <Button x:Name="BtnWriteLaserRelPos" Content="设置" Width="48" Height="24" Click="BtnWriteLaserRelPos_Click" Foreground="#E65100" FontWeight="Bold"/>
+                </StackPanel>
+                <!-- 运动速度 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="速度:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold" Foreground="#F57F17"/>
+                    <TextBlock x:Name="LblWeldSpeed" Text="焊接 HD5000:" VerticalAlignment="Center" Foreground="#666" Margin="0,0,2,0"/>
+                    <TextBox x:Name="TxtWeldSpeed" Width="64" Height="24" VerticalContentAlignment="Center" Margin="0,0,8,0" ToolTip="焊接速度"/>
+                    <TextBlock x:Name="LblReturnSafeSpeed" Text="返安全 HD5002:" VerticalAlignment="Center" Foreground="#666" Margin="0,0,2,0"/>
+                    <TextBox x:Name="TxtReturnSafeSpeed" Width="64" Height="24" VerticalContentAlignment="Center" Margin="0,0,8,0" ToolTip="返回安全点速度"/>
+                    <TextBlock x:Name="LblPhotoApproachSpeed" Text="到拍照 HD5004:" VerticalAlignment="Center" Foreground="#666" Margin="0,0,2,0"/>
+                    <TextBox x:Name="TxtPhotoApproachSpeed" Width="64" Height="24" VerticalContentAlignment="Center" Margin="0,0,8,0" ToolTip="到拍照点速度"/>
+                    <TextBlock x:Name="LblFastOffsetSpeed" Text="快偏 HD5006:" VerticalAlignment="Center" Foreground="#666" Margin="0,0,2,0"/>
+                    <TextBox x:Name="TxtFastOffsetSpeed" Width="64" Height="24" VerticalContentAlignment="Center" Margin="0,0,8,0" ToolTip="快速偏移速度"/>
+                    <Button x:Name="BtnReadMotionSpeed" Content="读取" Width="48" Height="24" Margin="0,0,4,0" Click="BtnReadMotionSpeed_Click"/>
+                    <Button x:Name="BtnWriteMotionSpeed" Content="设置" Width="48" Height="24" Click="BtnWriteMotionSpeed_Click" Foreground="#F57F17" FontWeight="Bold"/>
                 </StackPanel>
                 <!-- X轴参数读写 -->
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
@@ -225,6 +313,10 @@
                     <Button x:Name="BtnRemoveGvar" Content="-" Width="26" Height="26" Margin="0,0,8,0" Click="BtnRemoveGvar_Click" FontWeight="Bold" FontSize="14" Foreground="#D32F2F"/>
                 </StackPanel>
                 <DataGrid x:Name="DgGvarList"
+                          MinHeight="280"
+                          Height="360"
+                          MaxHeight="520"
+                          VerticalScrollBarVisibility="Auto"
                           AutoGenerateColumns="False"
                           CanUserAddRows="False"
                           CanUserDeleteRows="False"
@@ -261,10 +353,13 @@
 
         <!-- Log -->
         <TextBox x:Name="LogTextBox" Grid.Row="4"
+                 Height="140"
+                 MinHeight="100"
                  IsReadOnly="True"
                  FontFamily="Consolas" FontSize="11"
                  VerticalScrollBarVisibility="Auto"
                  Background="#1E1E1E" Foreground="#90EE90"
                  AcceptsReturn="True" TextWrapping="Wrap"/>
     </Grid>
+    </ScrollViewer>
 </Page>

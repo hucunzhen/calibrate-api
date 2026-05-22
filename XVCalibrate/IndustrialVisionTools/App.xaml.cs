@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows;
 
@@ -25,6 +26,29 @@ namespace CalibOperatorCLI_Example
                 SetDllDirectory(baseDir);
             }
             catch { /* ignore */ }
+
+            AppDomain.CurrentDomain.AssemblyResolve += OnResolveAssemblyFromAppDir;
+        }
+
+        /// <summary>从 exe 同目录加载 HslCommunication（PLC 信捷协议），避免仅复制 exe 时运行期 FileNotFound。</summary>
+        private static Assembly? OnResolveAssemblyFromAppDir(object? sender, ResolveEventArgs args)
+        {
+            string? simple = new AssemblyName(args.Name).Name;
+            if (!string.Equals(simple, "HslCommunication", StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            string path = Path.Combine(AppContext.BaseDirectory, "HslCommunication.dll");
+            if (!File.Exists(path))
+                return null;
+
+            try
+            {
+                return Assembly.LoadFrom(path);
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         protected override void OnStartup(StartupEventArgs e)

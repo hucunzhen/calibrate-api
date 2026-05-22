@@ -59,7 +59,7 @@
   <ItemGroup>
     <PackageReference Include="HelixToolkit.Wpf" Version="2.25.0" />
     <PackageReference Include="System.Drawing.Common" Version="6.0.0" />
-    <PackageReference Include="HslCommunication" Version="12.7.0" />
+    <PackageReference Include="HslCommunication" Version="12.7.0" GeneratePathProperty="true" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
     <PackageReference Include="Tokenizers.DotNet" Version="1.4.0" />
     <PackageReference Include="Tokenizers.DotNet.runtime.win-x64" Version="1.4.0" />
@@ -114,6 +114,21 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
+
+  <!-- 信捷 PLC（XinJETcpNet）依赖：强制复制到输出，避免 exe 被占用时 NuGet 拷贝被跳过导致运行期 FileNotFound -->
+  <Target Name="CopyHslCommunicationToOutput" AfterTargets="Build">
+    <PropertyGroup>
+      <_HslDll Condition="Exists('$(PkgHslCommunication)\lib\netstandard2.1\HslCommunication.dll')">$(PkgHslCommunication)\lib\netstandard2.1\HslCommunication.dll</_HslDll>
+      <_HslDll Condition="'$(_HslDll)' == '' and Exists('$(PkgHslCommunication)\lib\netstandard2.0\HslCommunication.dll')">$(PkgHslCommunication)\lib\netstandard2.0\HslCommunication.dll</_HslDll>
+    </PropertyGroup>
+    <Error Condition="'$(_HslDll)' == ''"
+           Text="未找到 HslCommunication.dll，请执行: dotnet restore $(MSBuildProjectFile)" />
+    <Copy SourceFiles="$(_HslDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="false" />
+    <Copy SourceFiles="$(PkgHslCommunication)\lib\netstandard2.1\HslCommunication.xml"
+          DestinationFolder="$(OutputPath)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(PkgHslCommunication)\lib\netstandard2.1\HslCommunication.xml')" />
+  </Target>
 
   <!-- 海康威视相机 SDK（Private 确保 publish 带上托管 DLL；原生 MvCameraControl.dll 来自 MVS Runtime 复制） -->
   <ItemGroup>

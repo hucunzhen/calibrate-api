@@ -3,18 +3,21 @@ using System.Collections.Generic;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using System.Text.Json;
 using HslCommunication.ModBus;
+using HslCommunication.Profinet.XINJE;
 
 namespace CalibOperatorCLI_Example
 {
     public partial class PlcPage : Page
     {
-        private ModbusTcpNet? _plc;
+        /// <summary>信捷 D / GVAR / D 位（XinJETcpNet，地址如 D30000）。</summary>
+        private XinJETcpNet? _plcD;
+        /// <summary>HD 浮点（ModbusTcpNet，HDnnnn → HdModbusOffset+nnnn）。</summary>
+        private ModbusTcpNet? _plcHd;
         private bool _plcConnected = false;
         private DispatcherTimer? _readTimer;
 
@@ -28,7 +31,7 @@ namespace CalibOperatorCLI_Example
             InitializeComponent();
             LoadConfig();
             ApplyConfigToUI();
-            Log("PLC Communication Page Loaded (ModbusTcp)");
+            Log("PLC Communication Page Loaded (D=XinJETcpNet, HD=ModbusTcp)");
         }
 
         private void LoadConfig()
@@ -70,15 +73,12 @@ namespace CalibOperatorCLI_Example
             ApplyBitButton(BtnXForward, "XForward");
             ApplyBitButton(BtnXReverse, "XReverse");
             ApplyBitButton(BtnXZero, "XZero");
-            ApplyBitButton(BtnXHome, "XHome");
             ApplyBitButton(BtnYForward, "YForward");
             ApplyBitButton(BtnYReverse, "YReverse");
             ApplyBitButton(BtnYZero, "YZero");
-            ApplyBitButton(BtnYHome, "YHome");
             ApplyBitButton(BtnZForward, "ZForward");
             ApplyBitButton(BtnZReverse, "ZReverse");
             ApplyBitButton(BtnZZero, "ZZero");
-            ApplyBitButton(BtnZHome, "ZHome");
 
             // 模式/启停按钮
             BtnManual.Content = $"Manual ({TryReg("ManualMode", "M509")}=ON)";
@@ -108,16 +108,45 @@ namespace CalibOperatorCLI_Example
             LblZPosLimit.Text = $"+Limit {TryReg("ZPosLimit", "---")}:";
             LblZNegLimit.Text = $"-Limit {TryReg("ZNegLimit", "---")}:";
 
+            LblLaserPower.Text = $"功率 {TryReg("LaserPower", "HD1900")}:";
+
+            LblStopSafeX.Text = $"X {TryReg("StopSafePosX", "HD1700")}:";
+            LblStopSafeY.Text = $"Y {TryReg("StopSafePosY", "HD1702")}:";
+            LblStopSafeZ.Text = $"Z {TryReg("StopSafePosZ", "HD1704")}:";
+            LblPhotoPosX.Text = $"X {TryReg("PhotoPosX", "HD1710")}:";
+            LblPhotoPosY.Text = $"Y {TryReg("PhotoPosY", "HD1712")}:";
+            LblPhotoPosZ.Text = $"Z {TryReg("PhotoPosZ", "HD1714")}:";
+            LblLaserRelX.Text = $"X {TryReg("LaserRelPosX", "HD1720")}:";
+            LblLaserRelY.Text = $"Y {TryReg("LaserRelPosY", "HD1722")}:";
+            LblLaserRelZ.Text = $"Z {TryReg("LaserRelPosZ", "HD1724")}:";
+            LblWeldSpeed.Text = $"焊接 {TryReg("WeldSpeed", "HD5000")}:";
+            LblReturnSafeSpeed.Text = $"返安全 {TryReg("ReturnSafeSpeed", "HD5002")}:";
+            LblPhotoApproachSpeed.Text = $"到拍照 {TryReg("PhotoApproachSpeed", "HD5004")}:";
+            LblFastOffsetSpeed.Text = $"快偏 {TryReg("FastOffsetSpeed", "HD5006")}:";
+
             // GVAR 列表地址
             TxtGvarAddr.Text = _config?.GvarList?.StartAddress ?? "D5000";
 
             // 使能/报警清除按钮提示
-            ApplyEnableButton(TogXEnable, "XEnableL");
-            ApplyEnableButton(TogYEnable, "YEnableL");
-            ApplyEnableButton(TogZEnable, "ZEnableL");
+            ApplyEnableButton(BtnXEnable, "XEnableL");
+            ApplyEnableButton(BtnYEnable, "YEnableL");
+            ApplyEnableButton(BtnZEnable, "ZEnableL");
+            ApplyEnableButton(BtnLaserEnable, "LaserEnable");
+            BtnLaserDisable.ToolTip = $"激光关闭: {TryReg("LaserEnable", "D1900L")}.bit0=OFF";
+            ApplyEnableButton(BtnRedLightEnable, "RedLightEnable");
+            BtnRedLightDisable.ToolTip = $"红光关闭: {TryReg("RedLightEnable", "D1901L")}.bit0=OFF";
+            ApplyEnableButton(BtnBlowEnable, "BlowEnable");
+            BtnBlowDisable.ToolTip = $"吹气关闭: {TryReg("BlowEnable", "D1902L")}.bit0=OFF";
+            BtnCameraCaptureStart.ToolTip = $"相机开始拍照: {TryReg("CameraCaptureStart", "D1800L")}.bit0 脉冲触发";
+            TxtWeldDoneFlagAddr.Text = TryReg("WeldDoneFlag", "D803L");
+            BtnReadWeldDone.ToolTip = $"读取焊接完成标志 {TryReg("WeldDoneFlag", "D803L")} (PLC→上位机)";
+            BtnClearWeldDone.ToolTip = $"清零 {TryReg("WeldDoneFlag", "D803L")}，下一轮开始前须清 0";
+            TxtWeldDoneHostFlagAddr.Text = TryReg("WeldDoneHostFlag", "D804L");
+            BtnSetWeldDoneHost.ToolTip = $"轨迹下发完成通知 {TryReg("WeldDoneHostFlag", "D804L")}=1 (上位机→PLC)";
+            BtnClearWeldDoneHost.ToolTip = $"清零 {TryReg("WeldDoneHostFlag", "D804L")}";
         }
 
-        private void ApplyEnableButton(ToggleButton btn, string regKey)
+        private void ApplyEnableButton(Button btn, string regKey)
         {
             try
             {
@@ -180,34 +209,12 @@ namespace CalibOperatorCLI_Example
         }
 
 
-        /// <summary>
-        /// 将信捷地址字符串转为 (Modbus寄存器地址, 位偏移)
-        /// HD2100 → (43188, 0)
-        /// D2000  → (2000, 0)
-        /// D2043L → (2043, 0)  // L = 低字节 bit 0
-        /// D2043H → (2043, 8)  // H = 高字节 bit 8
-        /// </summary>
-        private (int addr, int extraBitOffset) XinjeAddressToModbus(string addr)
-        {
-            addr = addr.Trim().ToUpper();
-            int extraBitOffset = 0;
-            if (addr.EndsWith("L"))
-                extraBitOffset = 0;
-            else if (addr.EndsWith("H"))
-                extraBitOffset = 8;
-            string baseAddr = addr;
-            if (addr.EndsWith("L") || addr.EndsWith("H"))
-                baseAddr = addr[..^1];
-            if (baseAddr.StartsWith("HD") && int.TryParse(baseAddr[2..], out int hdIdx))
-                return (HdModbusOffset + hdIdx, extraBitOffset);
-            if (baseAddr.StartsWith("D") && int.TryParse(baseAddr[1..], out int dIdx))
-                return (dIdx, extraBitOffset);
-            return (-1, 0);
-        }
+        private int HdAddressToModbus(string xinjeAddr)
+            => XinjePlcAddress.HdToModbus(xinjeAddr, HdModbusOffset);
 
         private void ReadAxisPositions()
         {
-            if (_plc == null || !_plcConnected) return;
+            if (!_plcConnected) return;
 
             try
             {
@@ -228,26 +235,33 @@ namespace CalibOperatorCLI_Example
             }
         }
 
-        /// <summary>
-        /// 读取 PLC 浮点值（32位，占2个连续寄存器）
-        /// 通过 ModbusTcpNet.ReadFloat 直接读取，地址为 Modbus 寄存器地址。
-        /// </summary>
+        /// <summary>读取 PLC 浮点：HD→Modbus；D→XinJETcpNet 信捷地址。</summary>
         private double ReadPlcFloat(string xinjeAddr, string label)
         {
-            if (_plc == null || !_plcConnected) return double.NaN;
+            if (!_plcConnected) return double.NaN;
 
-            var (addr, _) = XinjeAddressToModbus(xinjeAddr);
-            if (addr < 0)
+            if (XinjePlcAddress.IsHdAddress(xinjeAddr))
             {
-                Log($"[PLC] 无效地址: {xinjeAddr}");
+                if (_plcHd == null) return double.NaN;
+                int modbus = HdAddressToModbus(xinjeAddr);
+                if (modbus < 0)
+                {
+                    Log($"[PLC] 无效 HD 地址: {xinjeAddr}");
+                    return double.NaN;
+                }
+                var result = _plcHd.ReadFloat(modbus.ToString());
+                if (result.IsSuccess)
+                    return (double)result.Content;
+                Log($"[PLC] {label}({xinjeAddr}→Modbus {modbus}) 读取失败: {result.Message}");
                 return double.NaN;
             }
 
-            var result = _plc.ReadFloat(addr.ToString());
-            if (result.IsSuccess)
-                return (double)result.Content;
-
-            Log($"[PLC] {label}({xinjeAddr}→{addr}) 读取失败: {result.Message}");
+            if (_plcD == null) return double.NaN;
+            string dAddr = PlcXinjeHelper.NormalizeWordAddress(xinjeAddr, out _);
+            var dResult = _plcD.ReadFloat(dAddr);
+            if (dResult.IsSuccess)
+                return (double)dResult.Content;
+            Log($"[PLC] {label}({dAddr}) 读取失败: {dResult.Message}");
             return double.NaN;
         }
 
@@ -258,10 +272,7 @@ namespace CalibOperatorCLI_Example
             Log("[PLC] 手动读取位置完成");
         }
 
-        /// <summary>
-        /// 写入浮点值到指定地址（32位，占2个连续寄存器）
-        /// 通过 ModbusTcpNet.Write 直接写入 float。
-        /// </summary>
+        /// <summary>写入 PLC 浮点：HD→Modbus；D→XinJETcpNet。</summary>
         private bool WritePlcFloat(string xinjeAddr, string textBoxName, string label)
         {
             var txt = this.FindName(textBoxName) as TextBox;
@@ -273,48 +284,57 @@ namespace CalibOperatorCLI_Example
             }
             if (!CheckPlcConnected()) return false;
 
-            var (addr, _) = XinjeAddressToModbus(xinjeAddr);
-            if (addr < 0)
+            if (XinjePlcAddress.IsHdAddress(xinjeAddr))
             {
-                Log($"[PLC] 无效地址: {xinjeAddr}");
+                if (_plcHd == null) return false;
+                int modbus = HdAddressToModbus(xinjeAddr);
+                if (modbus < 0)
+                {
+                    Log($"[PLC] 无效 HD 地址: {xinjeAddr}");
+                    return false;
+                }
+                var result = _plcHd.Write(modbus.ToString(), (float)value);
+                if (result.IsSuccess)
+                {
+                    Log($"[PLC] {label}({xinjeAddr}→Modbus {modbus})={value:F3} 写入成功");
+                    return true;
+                }
+                Log($"[PLC] {label}({xinjeAddr}→Modbus {modbus})={value:F3} 写入失败: {result.Message}");
                 return false;
             }
 
-            var result = _plc.Write(addr.ToString(), (float)value);
-            if (result.IsSuccess)
+            if (_plcD == null) return false;
+            string dAddr = PlcXinjeHelper.NormalizeWordAddress(xinjeAddr, out _);
+            var dResult = _plcD.Write(dAddr, (float)value);
+            if (dResult.IsSuccess)
             {
-                Log($"[PLC] {label}({xinjeAddr}→{addr})={value:F3} 写入成功");
+                Log($"[PLC] {label}({dAddr})={value:F3} 写入成功");
                 return true;
             }
-            Log($"[PLC] {label}({xinjeAddr}→{addr})={value:F3} 写入失败: {result.Message}");
+            Log($"[PLC] {label}({dAddr})={value:F3} 写入失败: {dResult.Message}");
             return false;
         }
 
-        /// <summary>
-        /// 写入线圈（M寄存器）bool 值
-        /// ModbusTcpNet 通过 Write(address, bool) 写线圈
-        /// </summary>
         private void WriteCoil(string mAddr, bool value)
         {
-            if (_plc == null || !_plcConnected) return;
-            string addr = mAddr.Trim().ToUpper();
-            if (!addr.StartsWith("M") || !int.TryParse(addr[1..], out int coilAddr)) return;
+            if (_plcHd == null || !_plcConnected) return;
+            string addr = mAddr.Trim().ToUpperInvariant();
+            if (!addr.StartsWith("M", StringComparison.Ordinal) || !int.TryParse(addr[1..], out int coilAddr))
+                return;
 
-            var result = _plc.Write(coilAddr.ToString(), value);
+            var result = _plcHd.Write(coilAddr.ToString(), value);
             if (!result.IsSuccess)
                 Log($"[PLC] Write {mAddr}={(value ? "ON" : "OFF")} failed: {result.Message}");
         }
 
-        /// <summary>
-        /// 读取线圈（M寄存器）bool 值
-        /// </summary>
         private bool ReadCoil(string mAddr)
         {
-            if (_plc == null || !_plcConnected) return false;
-            string addr = mAddr.Trim().ToUpper();
-            if (!addr.StartsWith("M") || !int.TryParse(addr[1..], out int coilAddr)) return false;
+            if (_plcHd == null || !_plcConnected) return false;
+            string addr = mAddr.Trim().ToUpperInvariant();
+            if (!addr.StartsWith("M", StringComparison.Ordinal) || !int.TryParse(addr[1..], out int coilAddr))
+                return false;
 
-            var result = _plc.ReadBool(coilAddr.ToString());
+            var result = _plcHd.ReadBool(coilAddr.ToString());
             return result.IsSuccess && result.Content;
         }
 
@@ -327,11 +347,11 @@ namespace CalibOperatorCLI_Example
         public GVAR[] GvarList => _gvarList ?? Array.Empty<GVAR>();
 
         /// <summary>
-        /// 读取 GVAR 列表（从 D5000 开始，批量读取所有寄存器后解析）
+        /// 读取 GVAR 列表（起始地址见 plc_config GvarList.StartAddress，默认 D30000）
         /// </summary>
         private bool ReadGvarList(int count)
         {
-            if (_plc == null || !_plcConnected) return false;
+            if (_plcD == null || !_plcConnected) return false;
             var gvarCfg = _config?.GvarList;
             if (gvarCfg == null)
             {
@@ -339,37 +359,25 @@ namespace CalibOperatorCLI_Example
                 return false;
             }
 
-            int totalRegisters = count * GVAR.WORD_COUNT;
-            if (totalRegisters <= 0 || totalRegisters > 2000)
+            int maxCount = gvarCfg.MaxCount > 0 ? gvarCfg.MaxCount : 1024;
+            if (count <= 0 || count > maxCount)
             {
-                Log($"[PLC] GVAR count={count} 无效（寄存器总数={totalRegisters}）");
+                Log($"[PLC] GVAR count={count} 无效（允许 1-{maxCount}）");
                 return false;
             }
 
-            var (startAddr, _) = XinjeAddressToModbus(gvarCfg.StartAddress);
-            if (startAddr < 0)
-            {
-                Log($"[PLC] GVAR 起始地址无效: {gvarCfg.StartAddress}");
-                return false;
-            }
-
-            var result = _plc.ReadUInt16(startAddr.ToString(), (ushort)totalRegisters);
+            string startD = PlcXinjeHelper.ResolveGvarStartAddress(TxtGvarAddr.Text, gvarCfg.StartAddress);
+            var result = PlcGvarModbus.ReadGvarListFromPlc(_plcD, startD, count);
             if (!result.IsSuccess)
             {
-                Log($"[PLC] 读取 GVAR 列表失败: {result.Message}");
+                Log($"[PLC] 读取 GVAR 列表失败({startD}): {PlcGvarModbus.FormatOperateFailure(result)}");
                 return false;
             }
 
-            ushort[] regs = result.Content;
-            _gvarList = new GVAR[count];
-            for (int i = 0; i < count; i++)
-            {
-                int offset = i * GVAR.WORD_COUNT;
-                if (offset + GVAR.WORD_COUNT <= regs.Length)
-                    _gvarList[i] = GVAR.FromRegisters(regs, offset);
-            }
-
-            Log($"[PLC] 读取 GVAR 列表成功：{count} 项，起始 {gvarCfg.StartAddress}，共 {totalRegisters} 寄存器");
+            _gvarList = result.Content;
+            int totalRegisters = count * GVAR.WORD_COUNT;
+            Log($"[PLC] 读取 GVAR 成功：{count} 项 @{startD}，{totalRegisters} 寄存器（ReadFloat/{PlcXinjeHelper.ResolveFloatDataFormatString(_config)}）");
+            PlcGvarDraft.Set(_gvarList, "ReadGvar");
             return true;
         }
 
@@ -378,7 +386,7 @@ namespace CalibOperatorCLI_Example
         /// </summary>
         private bool WriteGvarList()
         {
-            if (_plc == null || !_plcConnected) return false;
+            if (_plcD == null || !_plcConnected) return false;
             if (_gvarList == null || _gvarList.Length == 0)
             {
                 Log("[PLC] GVAR 列表为空，无数据可写入");
@@ -393,54 +401,15 @@ namespace CalibOperatorCLI_Example
             }
 
             int count = _gvarList.Length;
-            int totalRegisters = count * GVAR.WORD_COUNT;
-            var (startAddr, _) = XinjeAddressToModbus(gvarCfg.StartAddress);
-            if (startAddr < 0)
+            string startD = PlcXinjeHelper.ResolveGvarStartAddress(TxtGvarAddr.Text, gvarCfg.StartAddress);
+            var wr = PlcGvarModbus.SendGvarList(_plcD, startD, _gvarList, out int totalRegisters);
+            if (!wr.IsSuccess)
             {
-                Log($"[PLC] GVAR 起始地址无效: {gvarCfg.StartAddress}");
+                Log($"[PLC] 写入 GVAR 失败({startD}): {PlcGvarModbus.FormatOperateFailure(wr)}");
                 return false;
             }
 
-            // 分批写入，每条 GVAR 写 2 次：type1(short) + 连续 float 数组
-            // 让 HslCommunication 自动处理信捷 PLC 的字节序
-            int totalItems = count;
-            int written = 0;
-            for (int i = 0; i < totalItems; i++)
-            {
-                var g = _gvarList[i];
-                int itemBase = startAddr + i * GVAR.WORD_COUNT;
-
-                try
-                {
-                    // 写 type1 (short) 到寄存器 0
-                    var r = _plc.Write(itemBase.ToString(), (short)g.type1);
-                    if (!r.IsSuccess) throw new Exception(r.Message);
-
-                    // 写 13 个连续 float: 从寄存器 2 开始（跳过 pad 寄存器 1）
-                    // 寄存器 2..27 = p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, cx, cy, r, start_deg, end_deg, z0, z1
-                    float[] floats = new float[]
-                    {
-                        g.spVec3_p0.x, g.spVec3_p0.y, g.spVec3_p0.z,
-                        g.spVec3_p1.x, g.spVec3_p1.y, g.spVec3_p1.z,
-                        g.cx, g.cy, g.r,
-                        g.start_deg, g.end_deg,
-                        g.z0, g.z1
-                    };
-                    r = _plc.Write((itemBase + 2).ToString(), floats);
-                    if (!r.IsSuccess) throw new Exception(r.Message);
-                }
-                catch (Exception ex)
-                {
-                    Log($"[PLC] 写入 GVAR 第 {i + 1}/{totalItems} 条失败: {ex.Message}");
-                    Log($"[PLC] 已写入 {written}/{totalItems} 条");
-                    return false;
-                }
-                written++;
-                if (totalItems > 10 && (written % 100 == 0 || written == totalItems))
-                    Log($"[PLC] 写入进度: {written}/{totalItems} 条");
-            }
-
-            Log($"[PLC] 写入 GVAR 列表成功：{count} 项，起始 {gvarCfg.StartAddress}，共 {totalRegisters} 寄存器");
+            Log($"[PLC] 写入 GVAR 成功：{count} 项 @{startD}，{totalRegisters} 寄存器（线段数 D800 请用流程算子）");
             return true;
         }
 
@@ -456,9 +425,10 @@ namespace CalibOperatorCLI_Example
         private void BtnReadGvar_Click(object sender, RoutedEventArgs e)
         {
             if (!CheckPlcConnected()) return;
-            if (!int.TryParse(TxtGvarCount.Text.Trim(), out int count) || count <= 0 || count > 200)
+            int maxRead = _config?.GvarList?.MaxCount ?? 1024;
+            if (!int.TryParse(TxtGvarCount.Text.Trim(), out int count) || count <= 0 || count > maxRead)
             {
-                MessageBox.Show("条数应为 1-200 的整数", "输入错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show($"条数应为 1-{maxRead} 的整数", "输入错误", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
             if (ReadGvarList(count))
@@ -484,6 +454,7 @@ namespace CalibOperatorCLI_Example
             for (int i = 0; i < items.Count; i++)
                 _gvarList[i] = items[i].ToGVAR();
 
+            PlcGvarDraft.Set(_gvarList, "WriteAllGrid");
             if (WriteGvarList())
                 Log($"[PLC] 已将 {items.Count} 条 GVAR 写入 PLC");
         }
@@ -538,15 +509,12 @@ namespace CalibOperatorCLI_Example
             if (btn == BtnXForward) actionKey = "XForward";
             else if (btn == BtnXReverse) actionKey = "XReverse";
             else if (btn == BtnXZero) actionKey = "XZero";
-            else if (btn == BtnXHome) actionKey = "XHome";
             else if (btn == BtnYForward) actionKey = "YForward";
             else if (btn == BtnYReverse) actionKey = "YReverse";
             else if (btn == BtnYZero) actionKey = "YZero";
-            else if (btn == BtnYHome) actionKey = "YHome";
             else if (btn == BtnZForward) actionKey = "ZForward";
             else if (btn == BtnZReverse) actionKey = "ZReverse";
             else if (btn == BtnZZero) actionKey = "ZZero";
-            else if (btn == BtnZHome) actionKey = "ZHome";
             if (actionKey == null) return;
 
             var action = BitAction(actionKey);
@@ -594,15 +562,28 @@ namespace CalibOperatorCLI_Example
         /// 操作 D 寄存器的单个 bit：读取当前值 → 置位/复位 → 写回
         /// L后缀 → bit 0, H后缀 → bit 8
         /// </summary>
+        private bool ReadBit(string xinjeAddr, int bitIndex)
+        {
+            if (_plcD == null || !_plcConnected) return false;
+            string word = PlcXinjeHelper.NormalizeWordAddress(xinjeAddr, out int extraBitOffset);
+            int finalBit = bitIndex + extraBitOffset;
+            var readResult = _plcD.ReadUInt16(word);
+            if (!readResult.IsSuccess)
+            {
+                Log($"[PLC] ReadBit {xinjeAddr} failed: {readResult.Message}");
+                return false;
+            }
+
+            return (readResult.Content & (1 << finalBit)) != 0;
+        }
+
         private void WriteBit(string xinjeAddr, int bitIndex, bool set)
         {
-            if (_plc == null || !_plcConnected) return;
-            var (addr, extraBitOffset) = XinjeAddressToModbus(xinjeAddr);
-            if (addr < 0) return;
-
+            if (_plcD == null || !_plcConnected) return;
+            string word = PlcXinjeHelper.NormalizeWordAddress(xinjeAddr, out int extraBitOffset);
             int finalBit = bitIndex + extraBitOffset;
 
-            var readResult = _plc.ReadUInt16(addr.ToString());
+            var readResult = _plcD.ReadUInt16(word);
             if (!readResult.IsSuccess)
             {
                 Log($"[PLC] WriteBit read {xinjeAddr} failed: {readResult.Message}");
@@ -614,7 +595,7 @@ namespace CalibOperatorCLI_Example
             else
                 val &= (ushort)~(1 << finalBit);
 
-            var writeResult = _plc.Write(addr.ToString(), val);
+            var writeResult = _plcD.Write(word, val);
             if (!writeResult.IsSuccess)
                 Log($"[PLC] WriteBit write {xinjeAddr} failed: {writeResult.Message}");
         }
@@ -656,7 +637,7 @@ namespace CalibOperatorCLI_Example
 
         private void UpdateRunStatus()
         {
-            if (_plc == null || !_plcConnected) return;
+            if (!_plcConnected) return;
             bool running = ReadCoil(Reg("RunStatus"));
             Dispatcher.Invoke(() =>
             {
@@ -784,6 +765,214 @@ namespace CalibOperatorCLI_Example
         private void BtnWriteZPosLimit_Click(object sender, RoutedEventArgs e) => WritePlcFloat(Reg("ZPosLimit"), "TxtZPosLimit", "Z正限位");
         private void BtnWriteZNegLimit_Click(object sender, RoutedEventArgs e) => WritePlcFloat(Reg("ZNegLimit"), "TxtZNegLimit", "Z负限位");
 
+        private void BtnReadLaserPower_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            double v = ReadPlcFloat(Reg("LaserPower"), "激光功率");
+            TxtLaserPower.Text = double.IsNaN(v) ? "ERR" : v.ToString("F3");
+            Log($"[PLC] 激光功率 {Reg("LaserPower")}={TxtLaserPower.Text}");
+        }
+
+        private void BtnWriteLaserPower_Click(object sender, RoutedEventArgs e) =>
+            WritePlcFloat(Reg("LaserPower"), "TxtLaserPower", "激光功率");
+
+        private void BtnLaserEnable_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            WriteBit(Reg("LaserEnable"), 0, true);
+            TxtLaserEnableStatus.Text = "ON";
+            TxtLaserEnableStatus.Foreground = new SolidColorBrush(Colors.Green);
+            Log($"[PLC] 激光使能 {Reg("LaserEnable")} = ON");
+        }
+
+        private void BtnLaserDisable_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            WriteBit(Reg("LaserEnable"), 0, false);
+            TxtLaserEnableStatus.Text = "OFF";
+            TxtLaserEnableStatus.Foreground = new SolidColorBrush(Colors.Gray);
+            Log($"[PLC] 激光使能 {Reg("LaserEnable")} = OFF");
+        }
+
+        private void BtnRedLightEnable_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            WriteBit(Reg("RedLightEnable"), 0, true);
+            TxtRedLightEnableStatus.Text = "ON";
+            TxtRedLightEnableStatus.Foreground = new SolidColorBrush(Colors.Green);
+            Log($"[PLC] 红光使能 {Reg("RedLightEnable")} = ON");
+        }
+
+        private void BtnRedLightDisable_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            WriteBit(Reg("RedLightEnable"), 0, false);
+            TxtRedLightEnableStatus.Text = "OFF";
+            TxtRedLightEnableStatus.Foreground = new SolidColorBrush(Colors.Gray);
+            Log($"[PLC] 红光使能 {Reg("RedLightEnable")} = OFF");
+        }
+
+        private void BtnBlowEnable_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            WriteBit(Reg("BlowEnable"), 0, true);
+            TxtBlowEnableStatus.Text = "ON";
+            TxtBlowEnableStatus.Foreground = new SolidColorBrush(Colors.Green);
+            Log($"[PLC] 吹气使能 {Reg("BlowEnable")} = ON");
+        }
+
+        private void BtnBlowDisable_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            WriteBit(Reg("BlowEnable"), 0, false);
+            TxtBlowEnableStatus.Text = "OFF";
+            TxtBlowEnableStatus.Foreground = new SolidColorBrush(Colors.Gray);
+            Log($"[PLC] 吹气使能 {Reg("BlowEnable")} = OFF");
+        }
+
+        private void BtnCameraCaptureStart_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            string addr = Reg("CameraCaptureStart");
+            WriteBit(addr, 0, true);
+            Log($"[PLC] 相机开始拍照 {addr} 触发");
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+            timer.Tick += (_, _) => { WriteBit(addr, 0, false); timer.Stop(); };
+            timer.Start();
+        }
+
+        private void UpdateWeldDoneStatusDisplay(bool done)
+        {
+            TxtWeldDoneStatus.Text = done ? "完成(1)" : "未完成(0)";
+            TxtWeldDoneStatus.Foreground = new SolidColorBrush(done ? Colors.Green : Colors.Gray);
+        }
+
+        private void BtnReadWeldDone_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            string addr = Reg("WeldDoneFlag");
+            bool done = ReadBit(addr, 0);
+            UpdateWeldDoneStatusDisplay(done);
+            Log($"[PLC] 焊接完成标志 {addr} = {(done ? "ON(1)" : "OFF(0)")}");
+        }
+
+        private void BtnClearWeldDone_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            string addr = Reg("WeldDoneFlag");
+            WriteBit(addr, 0, false);
+            UpdateWeldDoneStatusDisplay(false);
+            Log($"[PLC] 焊接完成标志 {addr} 已清零");
+        }
+
+        private void BtnSetWeldDoneHost_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            string addr = Reg("WeldDoneHostFlag");
+            WriteBit(addr, 0, true);
+            TxtWeldDoneHostStatus.Text = "已通知(1)";
+            TxtWeldDoneHostStatus.Foreground = new SolidColorBrush(Colors.Green);
+            Log($"[PLC] 轨迹下发完成 {addr} = 1 (上位机→PLC)");
+        }
+
+        private void BtnClearWeldDoneHost_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            string addr = Reg("WeldDoneHostFlag");
+            WriteBit(addr, 0, false);
+            TxtWeldDoneHostStatus.Text = "未通知(0)";
+            TxtWeldDoneHostStatus.Foreground = new SolidColorBrush(Colors.Gray);
+            Log($"[PLC] 轨迹下发完成 {addr} 已清零");
+        }
+
+        private void BtnReadStopSafePos_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            double x = ReadPlcFloat(Reg("StopSafePosX"), "停机安全位X");
+            double y = ReadPlcFloat(Reg("StopSafePosY"), "停机安全位Y");
+            double z = ReadPlcFloat(Reg("StopSafePosZ"), "停机安全位Z");
+            TxtStopSafeX.Text = double.IsNaN(x) ? "ERR" : x.ToString("F3");
+            TxtStopSafeY.Text = double.IsNaN(y) ? "ERR" : y.ToString("F3");
+            TxtStopSafeZ.Text = double.IsNaN(z) ? "ERR" : z.ToString("F3");
+            Log($"[PLC] 停机安全位 X={TxtStopSafeX.Text} Y={TxtStopSafeY.Text} Z={TxtStopSafeZ.Text}");
+        }
+
+        private void BtnWriteStopSafePos_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            bool ok = WritePlcFloat(Reg("StopSafePosX"), "TxtStopSafeX", "停机安全位X")
+                & WritePlcFloat(Reg("StopSafePosY"), "TxtStopSafeY", "停机安全位Y")
+                & WritePlcFloat(Reg("StopSafePosZ"), "TxtStopSafeZ", "停机安全位Z");
+            if (ok)
+                Log($"[PLC] 停机安全位已写入 X={TxtStopSafeX.Text} Y={TxtStopSafeY.Text} Z={TxtStopSafeZ.Text}");
+        }
+
+        private void BtnReadPhotoPos_Click(object sender, RoutedEventArgs e) =>
+            ReadCoordTriple("PhotoPosX", "PhotoPosY", "PhotoPosZ", "拍照位",
+                TxtPhotoPosX, TxtPhotoPosY, TxtPhotoPosZ);
+
+        private void BtnWritePhotoPos_Click(object sender, RoutedEventArgs e) =>
+            WriteCoordTriple("PhotoPosX", "PhotoPosY", "PhotoPosZ", "拍照位",
+                "TxtPhotoPosX", "TxtPhotoPosY", "TxtPhotoPosZ");
+
+        private void BtnReadLaserRelPos_Click(object sender, RoutedEventArgs e) =>
+            ReadCoordTriple("LaserRelPosX", "LaserRelPosY", "LaserRelPosZ", "激光相对位",
+                TxtLaserRelX, TxtLaserRelY, TxtLaserRelZ);
+
+        private void BtnWriteLaserRelPos_Click(object sender, RoutedEventArgs e) =>
+            WriteCoordTriple("LaserRelPosX", "LaserRelPosY", "LaserRelPosZ", "激光相对位",
+                "TxtLaserRelX", "TxtLaserRelY", "TxtLaserRelZ");
+
+        private void BtnReadMotionSpeed_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            SetTextBoxFloat(TxtWeldSpeed, ReadPlcFloat(Reg("WeldSpeed"), "焊接速度"));
+            SetTextBoxFloat(TxtReturnSafeSpeed, ReadPlcFloat(Reg("ReturnSafeSpeed"), "返回安全点速度"));
+            SetTextBoxFloat(TxtPhotoApproachSpeed, ReadPlcFloat(Reg("PhotoApproachSpeed"), "到拍照点速度"));
+            SetTextBoxFloat(TxtFastOffsetSpeed, ReadPlcFloat(Reg("FastOffsetSpeed"), "快速偏移速度"));
+            Log($"[PLC] 速度 焊接={TxtWeldSpeed.Text} 返安全={TxtReturnSafeSpeed.Text} 到拍照={TxtPhotoApproachSpeed.Text} 快偏={TxtFastOffsetSpeed.Text}");
+        }
+
+        private void BtnWriteMotionSpeed_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            bool ok = WritePlcFloat(Reg("WeldSpeed"), "TxtWeldSpeed", "焊接速度")
+                & WritePlcFloat(Reg("ReturnSafeSpeed"), "TxtReturnSafeSpeed", "返回安全点速度")
+                & WritePlcFloat(Reg("PhotoApproachSpeed"), "TxtPhotoApproachSpeed", "到拍照点速度")
+                & WritePlcFloat(Reg("FastOffsetSpeed"), "TxtFastOffsetSpeed", "快速偏移速度");
+            if (ok)
+                Log($"[PLC] 速度已写入 焊接={TxtWeldSpeed.Text} 返安全={TxtReturnSafeSpeed.Text} 到拍照={TxtPhotoApproachSpeed.Text} 快偏={TxtFastOffsetSpeed.Text}");
+        }
+
+        private static void SetTextBoxFloat(TextBox box, double v) =>
+            box.Text = double.IsNaN(v) ? "ERR" : v.ToString("F3");
+
+        private void ReadCoordTriple(string keyX, string keyY, string keyZ, string label,
+            TextBox txtX, TextBox txtY, TextBox txtZ)
+        {
+            if (!CheckPlcConnected()) return;
+            SetTextBoxFloat(txtX, ReadPlcFloat(Reg(keyX), label + "X"));
+            SetTextBoxFloat(txtY, ReadPlcFloat(Reg(keyY), label + "Y"));
+            SetTextBoxFloat(txtZ, ReadPlcFloat(Reg(keyZ), label + "Z"));
+            Log($"[PLC] {label} X={txtX.Text} Y={txtY.Text} Z={txtZ.Text}");
+        }
+
+        private void WriteCoordTriple(string keyX, string keyY, string keyZ, string label,
+            string txtXName, string txtYName, string txtZName)
+        {
+            if (!CheckPlcConnected()) return;
+            bool ok = WritePlcFloat(Reg(keyX), txtXName, label + "X")
+                & WritePlcFloat(Reg(keyY), txtYName, label + "Y")
+                & WritePlcFloat(Reg(keyZ), txtZName, label + "Z");
+            if (ok)
+            {
+                var tx = (TextBox)FindName(txtXName)!;
+                var ty = (TextBox)FindName(txtYName)!;
+                var tz = (TextBox)FindName(txtZName)!;
+                Log($"[PLC] {label}已写入 X={tx.Text} Y={ty.Text} Z={tz.Text}");
+            }
+        }
+
         private bool CheckPlcConnected()
         {
             if (_plcConnected) return true;
@@ -792,119 +981,62 @@ namespace CalibOperatorCLI_Example
         }
 
         // ===== 轴使能控制 =====
-        private void TogXEnable_Click(object sender, RoutedEventArgs e)
+        private void BtnXEnable_Click(object sender, RoutedEventArgs e)
         {
-            if (!CheckPlcConnected()) { TogXEnable.IsChecked = false; return; }
-            bool enable = TogXEnable.IsChecked == true;
-            WriteBit(Reg("XEnableL"), 0, enable);
-            TxtXEnableStatus.Text = enable ? "ON" : "OFF";
-            TxtXEnableStatus.Foreground = enable ? new SolidColorBrush(Colors.Green) : new SolidColorBrush(Colors.Gray);
-            Log($"[PLC] X使能 = {(enable ? "ON" : "OFF")}");
+            if (!CheckPlcConnected()) return;
+            WriteBit(Reg("XEnableL"), 0, true);
+            TxtXEnableStatus.Text = "ON";
+            TxtXEnableStatus.Foreground = new SolidColorBrush(Colors.Green);
+            Log("[PLC] X使能 = ON");
         }
 
-        private void TogYEnable_Click(object sender, RoutedEventArgs e)
+        private void BtnYEnable_Click(object sender, RoutedEventArgs e)
         {
-            if (!CheckPlcConnected()) { TogYEnable.IsChecked = false; return; }
-            bool enable = TogYEnable.IsChecked == true;
-            WriteBit(Reg("YEnableL"), 0, enable);
-            TxtYEnableStatus.Text = enable ? "ON" : "OFF";
-            TxtYEnableStatus.Foreground = enable ? new SolidColorBrush(Colors.Green) : new SolidColorBrush(Colors.Gray);
-            Log($"[PLC] Y使能 = {(enable ? "ON" : "OFF")}");
+            if (!CheckPlcConnected()) return;
+            WriteBit(Reg("YEnableL"), 0, true);
+            TxtYEnableStatus.Text = "ON";
+            TxtYEnableStatus.Foreground = new SolidColorBrush(Colors.Green);
+            Log("[PLC] Y使能 = ON");
         }
 
-        private void TogZEnable_Click(object sender, RoutedEventArgs e)
+        private void BtnZEnable_Click(object sender, RoutedEventArgs e)
         {
-            if (!CheckPlcConnected()) { TogZEnable.IsChecked = false; return; }
-            bool enable = TogZEnable.IsChecked == true;
-            WriteBit(Reg("ZEnableL"), 0, enable);
-            TxtZEnableStatus.Text = enable ? "ON" : "OFF";
-            TxtZEnableStatus.Foreground = enable ? new SolidColorBrush(Colors.Green) : new SolidColorBrush(Colors.Gray);
-            Log($"[PLC] Z使能 = {(enable ? "ON" : "OFF")}");
+            if (!CheckPlcConnected()) return;
+            WriteBit(Reg("ZEnableL"), 0, true);
+            TxtZEnableStatus.Text = "ON";
+            TxtZEnableStatus.Foreground = new SolidColorBrush(Colors.Green);
+            Log("[PLC] Z使能 = ON");
         }
 
         // ===== 报警清除控制 =====
         private void BtnXAlarmClear_Click(object sender, RoutedEventArgs e)
         {
             if (!CheckPlcConnected()) return;
-            if (!float.TryParse(TxtXAlarmPos.Text.Trim(), out float pos))
-                pos = 0;
-            WriteBit(Reg("XAlarmClearL"), 0, true);
-            WritePlcFloat(Reg("PositionX"), "TxtXAlarmPos", "X报警清除位置");
-            Log($"[PLC] X报警清除，位置={pos}");
-            // 释放信号
+            WriteBit(Reg("XAlarmClear"), 0, true);
+            Log("[PLC] X报警清除");
             var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-            timer.Tick += (_, _) => { WriteBit(Reg("XAlarmClearL"), 0, false); timer.Stop(); };
+            timer.Tick += (_, _) => { WriteBit(Reg("XAlarmClear"), 0, false); timer.Stop(); };
             timer.Start();
         }
 
         private void BtnYAlarmClear_Click(object sender, RoutedEventArgs e)
         {
             if (!CheckPlcConnected()) return;
-            if (!float.TryParse(TxtYAlarmPos.Text.Trim(), out float pos))
-                pos = 0;
-            WriteBit(Reg("YAlarmClearL"), 0, true);
-            WritePlcFloat(Reg("PositionY"), "TxtYAlarmPos", "Y报警清除位置");
-            Log($"[PLC] Y报警清除，位置={pos}");
+            WriteBit(Reg("YAlarmClear"), 0, true);
+            Log("[PLC] Y报警清除");
             var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-            timer.Tick += (_, _) => { WriteBit(Reg("YAlarmClearL"), 0, false); timer.Stop(); };
+            timer.Tick += (_, _) => { WriteBit(Reg("YAlarmClear"), 0, false); timer.Stop(); };
             timer.Start();
         }
 
         private void BtnZAlarmClear_Click(object sender, RoutedEventArgs e)
         {
             if (!CheckPlcConnected()) return;
-            if (!float.TryParse(TxtZAlarmPos.Text.Trim(), out float pos))
-                pos = 0;
-            WriteBit(Reg("ZAlarmClearL"), 0, true);
-            WritePlcFloat(Reg("PositionZ"), "TxtZAlarmPos", "Z报警清除位置");
-            Log($"[PLC] Z报警清除，位置={pos}");
+            WriteBit(Reg("ZAlarmClear"), 0, true);
+            Log("[PLC] Z报警清除");
             var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-            timer.Tick += (_, _) => { WriteBit(Reg("ZAlarmClearL"), 0, false); timer.Stop(); };
+            timer.Tick += (_, _) => { WriteBit(Reg("ZAlarmClear"), 0, false); timer.Stop(); };
             timer.Start();
-        }
-
-        /// <summary>
-        /// 读取单个使能状态（bit 0）
-        /// </summary>
-        private bool ReadEnableBit(string xinjeAddr)
-        {
-            if (_plc == null || !_plcConnected) return false;
-            var (addr, _) = XinjeAddressToModbus(xinjeAddr);
-            if (addr < 0) return false;
-            var result = _plc.ReadUInt16(addr.ToString());
-            if (!result.IsSuccess) return false;
-            return (result.Content & 1) != 0;
-        }
-
-        private void ReadEnableStatus()
-        {
-            try
-            {
-                bool xEn = ReadEnableBit(Reg("XEnableL"));
-                Dispatcher.Invoke(() =>
-                {
-                    TogXEnable.IsChecked = xEn;
-                    TxtXEnableStatus.Text = xEn ? "ON" : "OFF";
-                    TxtXEnableStatus.Foreground = xEn ? new SolidColorBrush(Colors.Green) : new SolidColorBrush(Colors.Gray);
-                });
-
-                bool yEn = ReadEnableBit(Reg("YEnableL"));
-                Dispatcher.Invoke(() =>
-                {
-                    TogYEnable.IsChecked = yEn;
-                    TxtYEnableStatus.Text = yEn ? "ON" : "OFF";
-                    TxtYEnableStatus.Foreground = yEn ? new SolidColorBrush(Colors.Green) : new SolidColorBrush(Colors.Gray);
-                });
-
-                bool zEn = ReadEnableBit(Reg("ZEnableL"));
-                Dispatcher.Invoke(() =>
-                {
-                    TogZEnable.IsChecked = zEn;
-                    TxtZEnableStatus.Text = zEn ? "ON" : "OFF";
-                    TxtZEnableStatus.Foreground = zEn ? new SolidColorBrush(Colors.Green) : new SolidColorBrush(Colors.Gray);
-                });
-            }
-            catch { }
         }
 
         private void ChkAutoRead_Checked(object sender, RoutedEventArgs e)
@@ -919,7 +1051,7 @@ namespace CalibOperatorCLI_Example
                 ms = 500;
 
             _readTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ms) };
-            _readTimer.Tick += (s, args) => { ReadAxisPositions(); UpdateRunStatus(); ReadEnableStatus(); };
+            _readTimer.Tick += (s, args) => { ReadAxisPositions(); UpdateRunStatus(); };
             _readTimer.Start();
             Log($"[PLC] 自动读取已启动，间隔 {ms}ms");
         }
@@ -958,21 +1090,27 @@ namespace CalibOperatorCLI_Example
 
                 Log($"[PLC] Connecting to {ip}:{port}...");
 
-                if (_plc != null)
-                {
-                    if (_plcConnected) _plc.ConnectClose();
-                    _plc = null;
-                    _plcConnected = false;
-                }
+                ClosePlcConnections();
 
-                _plc = new ModbusTcpNet(ip, port);
-                _plc.Station = (byte)(_config?.ModbusStation ?? 0);
+                byte station = (byte)(_config?.ModbusStation ?? 0);
+                string series = _config?.GvarList?.PlcSeries ?? "XD";
 
-                var result = _plc.ConnectServer();
-                if (result.IsSuccess)
+                string floatFmt = PlcXinjeHelper.ResolveFloatDataFormatString(_config);
+                var dataFormat = PlcXinjeHelper.ParseFloatDataFormat(floatFmt);
+
+                _plcHd = new ModbusTcpNet(ip, port);
+                _plcHd.Station = station;
+                _plcHd.DataFormat = dataFormat;
+                var hdConn = _plcHd.ConnectServer();
+
+                _plcD = PlcXinjeHelper.CreateClient(series, ip, port, station, floatFmt);
+                var dConn = _plcD.ConnectServer();
+
+                if (hdConn.IsSuccess && dConn.IsSuccess)
                 {
                     _plcConnected = true;
-                    Log($"[PLC] Connected to {ip}:{port} (ModbusTcp)");
+                    PlcXinjeSession.Register(_plcD, "PlcPage");
+                    Log($"[PLC] Connected {ip}:{port} (D=XinJE/{series}, HD=Modbus offset={HdModbusOffset}, float={floatFmt})");
                     BtnPlcConnect.IsEnabled = false;
                     BtnPlcDisconnect.IsEnabled = true;
                     TxtPlcIp.IsEnabled = false;
@@ -983,19 +1121,34 @@ namespace CalibOperatorCLI_Example
                 }
                 else
                 {
-                    _plcConnected = false;
-                    _plc = null;
-                    Log($"[PLC] Failed: {result.Message}");
-                    MessageBox.Show($"PLC connection failed!\n\nError: {result.Message}", "PLC Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    ClosePlcConnections();
+                    string err = !hdConn.IsSuccess ? $"HD: {hdConn.Message}" : $"D: {dConn.Message}";
+                    Log($"[PLC] Failed: {err}");
+                    MessageBox.Show($"PLC connection failed!\n\n{err}", "PLC Error", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
             catch (Exception ex)
             {
-                _plcConnected = false;
-                _plc = null;
+                ClosePlcConnections();
                 Log($"[PLC] Error: {ex.Message}");
                 MessageBox.Show(ex.Message, "PLC Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private void ClosePlcConnections()
+        {
+            if (_plcHd != null)
+            {
+                try { if (_plcConnected) _plcHd.ConnectClose(); } catch { }
+                _plcHd = null;
+            }
+            if (_plcD != null)
+            {
+                PlcXinjeSession.ClearIfOwnedBy(_plcD);
+                try { if (_plcConnected) _plcD.ConnectClose(); } catch { }
+                _plcD = null;
+            }
+            _plcConnected = false;
         }
 
         private void BtnPlcDisconnect_Click(object sender, RoutedEventArgs e)
@@ -1004,16 +1157,11 @@ namespace CalibOperatorCLI_Example
             {
                 Log("[PLC] Disconnecting...");
 
-                // 停止自动读取
                 _readTimer?.Stop();
                 _readTimer = null;
                 ChkAutoRead.IsChecked = false;
 
-                if (_plc != null && _plcConnected)
-                    _plc.ConnectClose();
-
-                _plc = null;
-                _plcConnected = false;
+                ClosePlcConnections();
 
                 BtnPlcConnect.IsEnabled = true;
                 BtnPlcDisconnect.IsEnabled = false;
@@ -1039,6 +1187,8 @@ namespace CalibOperatorCLI_Example
     {
         public int ModbusStation { get; set; } = 0;
         public int HdModbusOffset { get; set; } = 0xA080;
+        /// <summary>HD / D 区 float 字节序（Hsl DataFormat），默认 CDAB。</summary>
+        public string FloatDataFormat { get; set; } = "CDAB";
         public Dictionary<string, string>? Registers { get; set; }
         public Dictionary<string, BitActionConfig>? BitActions { get; set; }
         public GvarListConfig? GvarList { get; set; }
@@ -1053,6 +1203,12 @@ namespace CalibOperatorCLI_Example
         internal class GvarListConfig
         {
             public string StartAddress { get; set; } = "D5000";
+            /// <summary>信捷系列：XC / XD(XD5/XL)；D30000 等请用 XD。仍不对时在 ModbusStartAddress 填 PLC 文档地址。</summary>
+            public string PlcSeries { get; set; } = XinjePlcAddress.Series.XD;
+            /// <summary>强制 Modbus 起始字地址；-1 表示按 StartAddress 换算。</summary>
+            public int ModbusStartAddress { get; set; } = -1;
+            /// <summary>GVAR 浮点字节序；未填则用 PlcConfig.FloatDataFormat。</summary>
+            public string FloatDataFormat { get; set; } = "CDAB";
             public int MaxCount { get; set; } = 50;
             /// <summary>
             /// 每个 GVAR 占用的寄存器数量
@@ -1193,7 +1349,7 @@ namespace CalibOperatorCLI_Example
         public void ToRegisters(ushort[] regs, int offset)
         {
             regs[offset + 0] = (ushort)type1;
-            // offset+1: pad
+            regs[offset + 1] = 0; // pad
             WriteFloat(regs, offset + 2, spVec3_p0.x);
             WriteFloat(regs, offset + 4, spVec3_p0.y);
             WriteFloat(regs, offset + 6, spVec3_p0.z);
@@ -1215,10 +1371,9 @@ namespace CalibOperatorCLI_Example
         private static void WriteFloat(ushort[] regs, int idx, float value)
         {
             byte[] bytes = BitConverter.GetBytes(value);
-            // BitConverter on little-endian: bytes = [D, C, B, A] (A=MSB, D=LSB)
-            // 信捷 Modbus float ABCD 大端: 寄存器0=[A,B], 寄存器1=[C,D]
-            regs[idx] = (ushort)((bytes[3] << 8) | bytes[2]);     // 寄存器0 = A,B (高字)
-            regs[idx + 1] = (ushort)((bytes[1] << 8) | bytes[0]); // 寄存器1 = C,D (低字)
+            // CDAB（与 Hsl DataFormat.CDAB / plc_config FloatDataFormat 一致）
+            regs[idx] = (ushort)((bytes[1] << 8) | bytes[0]);
+            regs[idx + 1] = (ushort)((bytes[3] << 8) | bytes[2]);
         }
     }
 }

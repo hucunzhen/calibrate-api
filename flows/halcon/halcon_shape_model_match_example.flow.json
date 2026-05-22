@@ -93,9 +93,24 @@
       }
     },
     {
+      "Id": "a1000001-0001-4001-8001-00000000000e",
+      "TypeId": "halcon_fit_shape_match_lattice",
+      "X": 1070,
+      "Y": 260,
+      "Params": {
+        "gridRows": "3",
+        "gridCols": "3",
+        "pitchRow": "0",
+        "pitchCol": "0",
+        "gridAngleDeg": "auto",
+        "snapTolerancePx": "0",
+        "debugLog": "auto"
+      }
+    },
+    {
       "Id": "a1000001-0001-4001-8001-00000000000d",
       "TypeId": "halcon_filter_shape_match_grid",
-      "X": 1120,
+      "X": 1270,
       "Y": 260,
       "Params": {
         "gridRows": "3",
@@ -113,7 +128,7 @@
     {
       "Id": "a1000001-0001-4001-8001-000000000009",
       "TypeId": "halcon_display_shape_match",
-      "X": 1320,
+      "X": 1470,
       "Y": 260,
       "Params": {
         "contourLevel": "1",
@@ -190,6 +205,84 @@
       "FromPort": "Out",
       "ToNodeId": "a1000001-0001-4001-8001-000000000008",
       "ToPort": "In"
+    },
+    {
+      "FromNodeId": "a1000001-0001-4001-8001-000000000008",
+      "FromPort": "Row",
+      "ToNodeId": "a1000001-0001-4001-8001-00000000000e",
+      "ToPort": "Row"
+    },
+    {
+      "FromNodeId": "a1000001-0001-4001-8001-000000000008",
+      "FromPort": "Column",
+      "ToNodeId": "a1000001-0001-4001-8001-00000000000e",
+      "ToPort": "Column"
+    },
+    {
+      "FromNodeId": "a1000001-0001-4001-8001-000000000008",
+      "FromPort": "Angle",
+      "ToNodeId": "a1000001-0001-4001-8001-00000000000e",
+      "ToPort": "Angle"
+    },
+    {
+      "FromNodeId": "a1000001-0001-4001-8001-000000000008",
+      "FromPort": "Score",
+      "ToNodeId": "a1000001-0001-4001-8001-00000000000e",
+      "ToPort": "Score"
+    },
+    {
+      "FromNodeId": "a1000001-0001-4001-8001-00000000000e",
+      "FromPort": "ColCenterU",
+      "ToNodeId": "a1000001-0001-4001-8001-00000000000d",
+      "ToPort": "ColCenterU"
+    },
+    {
+      "FromNodeId": "a1000001-0001-4001-8001-00000000000e",
+      "FromPort": "RowCenterV",
+      "ToNodeId": "a1000001-0001-4001-8001-00000000000d",
+      "ToPort": "RowCenterV"
+    },
+    {
+      "FromNodeId": "a1000001-0001-4001-8001-00000000000e",
+      "FromPort": "LatticeAngle",
+      "ToNodeId": "a1000001-0001-4001-8001-00000000000d",
+      "ToPort": "LatticeAngle"
+    },
+    {
+      "FromNodeId": "a1000001-0001-4001-8001-00000000000e",
+      "FromPort": "ConsensusMatchAngle",
+      "ToNodeId": "a1000001-0001-4001-8001-00000000000d",
+      "ToPort": "ConsensusMatchAngle"
+    },
+    {
+      "FromNodeId": "a1000001-0001-4001-8001-00000000000e",
+      "FromPort": "PitchRow",
+      "ToNodeId": "a1000001-0001-4001-8001-00000000000d",
+      "ToPort": "PitchRow"
+    },
+    {
+      "FromNodeId": "a1000001-0001-4001-8001-00000000000e",
+      "FromPort": "PitchCol",
+      "ToNodeId": "a1000001-0001-4001-8001-00000000000d",
+      "ToPort": "PitchCol"
+    },
+    {
+      "FromNodeId": "a1000001-0001-4001-8001-00000000000e",
+      "FromPort": "AxesSwapped",
+      "ToNodeId": "a1000001-0001-4001-8001-00000000000d",
+      "ToPort": "AxesSwapped"
+    },
+    {
+      "FromNodeId": "a1000001-0001-4001-8001-00000000000e",
+      "FromPort": "SnapU",
+      "ToNodeId": "a1000001-0001-4001-8001-00000000000d",
+      "ToPort": "SnapU"
+    },
+    {
+      "FromNodeId": "a1000001-0001-4001-8001-00000000000e",
+      "FromPort": "SnapV",
+      "ToNodeId": "a1000001-0001-4001-8001-00000000000d",
+      "ToPort": "SnapV"
     },
     {
       "FromNodeId": "a1000001-0001-4001-8001-000000000008",

@@ -1,12 +1,36 @@
 {
   "ModbusStation": 0,
   "HdModbusOffset": 41088,
+  "FloatDataFormat": "CDAB",
 
   "Registers": {
     "PositionX": "HD2000",
     "PositionY": "HD2100",
     "PositionZ": "HD2200",
     "SpeedXY": "D4004",
+    "LaserPower": "HD1900",
+    "LaserEnable": "D1900L",
+    "RedLightEnable": "D1901L",
+    "BlowEnable": "D1902L",
+    "CameraCaptureStart": "D1800L",
+    "SegmentCount": "D800",
+    "PouEnable": "D801L",
+    "WeldDoneFlag": "D803L",
+    "WeldDoneHostFlag": "D804L",
+
+    "StopSafePosX": "HD1700",
+    "StopSafePosY": "HD1702",
+    "StopSafePosZ": "HD1704",
+    "PhotoPosX": "HD1710",
+    "PhotoPosY": "HD1712",
+    "PhotoPosZ": "HD1714",
+    "LaserRelPosX": "HD1720",
+    "LaserRelPosY": "HD1722",
+    "LaserRelPosZ": "HD1724",
+    "WeldSpeed": "HD5000",
+    "ReturnSafeSpeed": "HD5002",
+    "PhotoApproachSpeed": "HD5004",
+    "FastOffsetSpeed": "HD5006",
 
     "XHomeSpeed": "HD2020",
     "XManualSpeed": "HD2014",
@@ -18,8 +42,7 @@
     "XHome": "D2006",
     "XEnableL": "D2002L",
     "XEnableH": "D2002H",
-    "XAlarmClearL": "D2003L",
-    "XAlarmClearH": "D2003H",
+    "XAlarmClear": "D2003L",
 
     "YHomeSpeed": "HD2120",
     "YManualSpeed": "HD2114",
@@ -30,8 +53,7 @@
     "YHome": "D2026",
     "YEnableL": "D2022L",
     "YEnableH": "D2022H",
-    "YAlarmClearL": "D2023L",
-    "YAlarmClearH": "D2023H",
+    "YAlarmClear": "D2023L",
 
     "ZHomeSpeed": "HD2220",
     "ZManualSpeed": "HD2214",
@@ -42,8 +64,7 @@
     "ZHome": "D2046",
     "ZEnableL": "D2042L",
     "ZEnableH": "D2042H",
-    "ZAlarmClearL": "D2043L",
-    "ZAlarmClearH": "D2043H",
+    "ZAlarmClear": "D2043L",
 
     "ManualMode": "M509",
     "RunStartStop": "M500",
@@ -52,6 +73,9 @@
 
   "GvarList": {
     "StartAddress": "D30000",
+    "PlcSeries": "XD",
+    "ModbusStartAddress": -1,
+    "FloatDataFormat": "CDAB",
     "MaxCount": 1024,
     "RegistersPerItem": 28
   },

@@ -1422,16 +1422,18 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>
-        /// HALCON 闭合轮廓的 XLD 点列通常不包含重复的起点；补终点使折线/轨迹含最后一条闭合边。
+        /// HALCON 轮廓点列通常不含重复起点；补终点使折线含闭合边。
+        /// <paramref name="forceClose"/> 为 true 时除首尾几乎重合外一律补起点（避免容差过大误判为已闭合）。
         /// </summary>
-        public static Point2D[] EnsureClosedContourPoints(Point2D[]? pts, double tolerancePx = 0.5)
+        public static Point2D[] EnsureClosedContourPoints(Point2D[]? pts, double tolerancePx = 0.5, bool forceClose = false)
         {
-            if (pts == null || pts.Length < 3)
+            if (pts == null || pts.Length < 2)
                 return pts ?? Array.Empty<Point2D>();
 
             double dx = pts[0].X - pts[^1].X;
             double dy = pts[0].Y - pts[^1].Y;
-            if (dx * dx + dy * dy <= tolerancePx * tolerancePx)
+            double tol = forceClose ? 1e-6 : Math.Max(tolerancePx, 1e-6);
+            if (dx * dx + dy * dy <= tol * tol)
                 return pts;
 
             var closed = new Point2D[pts.Length + 1];
@@ -2569,7 +2571,7 @@ namespace CalibOperatorCLI_Example
                 {
                     Point2D[] pts = ContourXldToPointArray(one);
                     if (pts.Length >= 2)
-                        list.Add(pts);
+                        list.Add(EnsureClosedContourPoints(pts, 0.5, forceClose: true));
                 }
                 finally
                 {
@@ -2578,6 +2580,432 @@ namespace CalibOperatorCLI_Example
             }
 
             return list.ToArray();
+        }
+
+        /// <summary>形状模型点（X=列,Y=行）按匹配位姿变换到图像坐标。</summary>
+        public static Point2D TransformShapeModelPointToImage(
+            Point2D modelPt,
+            double matchRow,
+            double matchCol,
+            double angleDeg)
+        {
+            double a = angleDeg * Math.PI / 180.0;
+            double c = Math.Cos(a);
+            double s = Math.Sin(a);
+            double row = modelPt.Y;
+            double col = modelPt.X;
+            double rowImg = row * c - col * s + matchRow;
+            double colImg = row * s + col * c + matchCol;
+            return new Point2D(colImg, rowImg);
+        }
+
+        /// <summary>将单条模型轮廓折线变换到图像坐标。</summary>
+        public static Point2D[] TransformShapeModelContourToImage(
+            Point2D[] modelContour,
+            double matchRow,
+            double matchCol,
+            double angleDeg)
+        {
+            if (modelContour == null || modelContour.Length == 0)
+                return Array.Empty<Point2D>();
+
+            var imgPts = new Point2D[modelContour.Length];
+            for (int i = 0; i < modelContour.Length; i++)
+                imgPts[i] = TransformShapeModelPointToImage(modelContour[i], matchRow, matchCol, angleDeg);
+            return imgPts;
+        }
+
+        /// <summary>从模型轮廓集合中取变换后面积最大的外形折线（与区域过滤一致）。</summary>
+        public static Point2D[] GetOuterTransformedShapeContour(
+            Point2D[][] modelContours,
+            double matchRow,
+            double matchCol,
+            double angleDeg)
+        {
+            if (modelContours == null || modelContours.Length == 0)
+                return Array.Empty<Point2D>();
+
+            Point2D[]? best = null;
+            double bestArea = 0;
+            int bestLen = 0;
+            foreach (Point2D[] contour in modelContours)
+            {
+                if (contour == null || contour.Length < 2)
+                    continue;
+
+                Point2D[] img = TransformShapeModelContourToImage(contour, matchRow, matchCol, angleDeg);
+                double area = Math.Abs(ShapeContourSignedArea(img));
+                if (area >= 4 && img.Length >= 3 && area > bestArea)
+                {
+                    bestArea = area;
+                    best = img;
+                }
+                else if (best == null && img.Length > bestLen)
+                {
+                    bestLen = img.Length;
+                    best = img;
+                }
+            }
+
+            if (best == null || best.Length < 2)
+                return Array.Empty<Point2D>();
+
+            return EnsureClosedContourPoints(best, 0.5, forceClose: true);
+        }
+
+        private static double ShapeContourSignedArea(IReadOnlyList<Point2D> polygon)
+        {
+            if (polygon.Count < 3)
+                return 0;
+            double a = 0;
+            int n = polygon.Count;
+            for (int i = 0; i < n; i++)
+            {
+                int j = (i + 1) % n;
+                a += polygon[i].X * polygon[j].Y - polygon[j].X * polygon[i].Y;
+            }
+
+            return a * 0.5;
+        }
+
+        /// <summary>单个 Find 实例对应的填充区域（HALCON Region），用于 TestRegionPoint。</summary>
+        public sealed class ShapeMatchRegionMask : IDisposable
+        {
+            internal HRegion? Region { get; set; }
+
+            public void Dispose()
+            {
+                Region?.Dispose();
+                Region = null;
+            }
+        }
+
+        /// <summary>
+        /// 将形状模型轮廓按匹配位姿变换到图像，生成填充 Region（最大轮廓为外，较小为孔洞）。
+        /// </summary>
+        public static ShapeMatchRegionMask[] BuildShapeMatchFilledRegions(
+            long modelId,
+            double[] rows,
+            double[] cols,
+            double[]? angles,
+            int contourLevel,
+            double erosionInsetPx)
+        {
+            if (modelId < 0)
+                throw new ArgumentException("ModelId 无效", nameof(modelId));
+
+            int n = Math.Min(rows?.Length ?? 0, cols?.Length ?? 0);
+            var masks = new ShapeMatchRegionMask[n];
+            if (n == 0)
+                return masks;
+
+            HShapeModel shapeModel = HalconShapeModelRegistry.Get(modelId);
+            using HXLDCont modelXld = shapeModel.GetShapeModelContours(contourLevel);
+            int objCount = modelXld.CountObj();
+            if (objCount <= 0)
+                return masks;
+
+            for (int m = 0; m < n; m++)
+            {
+                masks[m] = new ShapeMatchRegionMask { Region = null };
+                double matchRow = rows[m];
+                double matchCol = cols[m];
+                double angleDeg = angles != null && angles.Length > m ? angles[m] : 0;
+                double angleRad = angleDeg * Math.PI / 180.0;
+
+                HOperatorSet.HomMat2dIdentity(out HTuple hom);
+                HOperatorSet.HomMat2dRotate(hom, angleRad, 0, 0, out hom);
+                HOperatorSet.HomMat2dTranslate(hom, matchRow, matchCol, out hom);
+                HOperatorSet.AffineTransContourXld(modelXld, out HObject transXld, hom);
+
+                try
+                {
+                    HRegion? filled = BuildFilledRegionFromTransformedXld(transXld);
+                    if (filled == null || !filled.IsInitialized())
+                        continue;
+
+                    if (erosionInsetPx > 0.5)
+                    {
+                        HRegion eroded = filled.ErosionCircle(erosionInsetPx);
+                        filled.Dispose();
+                        filled = eroded;
+                    }
+
+                    masks[m].Region = filled;
+                }
+                finally
+                {
+                    transXld.Dispose();
+                }
+            }
+
+            return masks;
+        }
+
+        /// <summary>合并所有有效匹配区域（并集）。</summary>
+        public static HRegion? UnionShapeMatchRegions(ShapeMatchRegionMask[] masks)
+        {
+            if (masks == null || masks.Length == 0)
+                return null;
+
+            HRegion? acc = null;
+            foreach (ShapeMatchRegionMask? m in masks)
+            {
+                HRegion? r = m?.Region;
+                if (r == null || !r.IsInitialized())
+                    continue;
+
+                if (acc == null)
+                {
+                    acc = r.CopyObj(1, -1);
+                    continue;
+                }
+
+                HRegion merged = acc.Union2(r);
+                acc.Dispose();
+                acc = merged;
+            }
+
+            return acc;
+        }
+
+        /// <summary>填充 Region → 单通道 Mask 图（区域内 255，外 0）。</summary>
+        public static CalibImage RegionToMaskCalibImage(HRegion region, int width, int height)
+        {
+            if (region == null || !region.IsInitialized())
+                throw new ArgumentException("Region 无效", nameof(region));
+            if (width <= 0 || height <= 0)
+                throw new ArgumentException("图像尺寸无效");
+
+            HOperatorSet.RegionToBin(region, out HObject bin, 255.0, 0.0, width, height);
+            try
+            {
+                return ToCalibGray(bin);
+            }
+            finally
+            {
+                bin.Dispose();
+            }
+        }
+
+        public sealed class ShapeMatchImageMaskResult
+        {
+            public CalibImage MaskedImage { get; init; } = null!;
+            public CalibImage Mask { get; init; } = null!;
+            public int MatchCount { get; init; }
+            public int ValidRegionCount { get; init; }
+        }
+
+        /// <summary>用 FindShapeModel 位姿 + 模板轮廓生成区域，对原图做 Mask（区域外置 0）。</summary>
+        public static ShapeMatchImageMaskResult MaskCalibImageByShapeMatch(
+            CalibImage image,
+            long modelId,
+            double[] rows,
+            double[] cols,
+            double[]? angles,
+            int contourLevel,
+            double erosionInsetPx,
+            double maskMin,
+            double maskMax,
+            bool preserveColor)
+        {
+            if (image == null)
+                throw new ArgumentNullException(nameof(image));
+            if (modelId < 0)
+                throw new ArgumentException("ModelId 无效", nameof(modelId));
+
+            int n = Math.Min(rows?.Length ?? 0, cols?.Length ?? 0);
+            if (n == 0)
+                throw new InvalidOperationException("形状匹配 Mask: Row/Column 为空，请先连接 Find 结果");
+
+            image.RefreshProperties();
+            int w = image.Width;
+            int h = image.Height;
+
+            ShapeMatchRegionMask[] masks = BuildShapeMatchFilledRegions(
+                modelId, rows, cols, angles, contourLevel, erosionInsetPx);
+            try
+            {
+                int valid = 0;
+                foreach (ShapeMatchRegionMask m in masks)
+                {
+                    if (m?.Region != null && m.Region.IsInitialized())
+                        valid++;
+                }
+
+                if (valid == 0)
+                    throw new InvalidOperationException(
+                        $"形状匹配 Mask: 无法从 {n} 个匹配生成有效区域，请检查 ModelId/contourLevel={contourLevel}");
+
+                using HRegion? union = UnionShapeMatchRegions(masks);
+                if (union == null || !union.IsInitialized())
+                    throw new InvalidOperationException("形状匹配 Mask: 区域合并失败");
+
+                CalibImage mask = RegionToMaskCalibImage(union, w, h);
+                try
+                {
+                    CalibImage masked = ApplyMaskToCalibImage(image, mask, maskMin, maskMax, preserveColor);
+                    return new ShapeMatchImageMaskResult
+                    {
+                        MaskedImage = masked,
+                        Mask = mask,
+                        MatchCount = n,
+                        ValidRegionCount = valid
+                    };
+                }
+                catch
+                {
+                    mask.Dispose();
+                    throw;
+                }
+            }
+            finally
+            {
+                foreach (ShapeMatchRegionMask m in masks)
+                    m?.Dispose();
+            }
+        }
+
+        /// <summary>Mask 在 [maskMin,maskMax] 内保留原图像素，否则为 0；支持 1/3 通道。</summary>
+        public static CalibImage ApplyMaskToCalibImage(
+            CalibImage image,
+            CalibImage mask,
+            double maskMin,
+            double maskMax,
+            bool preserveColor)
+        {
+            if (image == null)
+                throw new ArgumentNullException(nameof(image));
+            if (mask == null)
+                throw new ArgumentNullException(nameof(mask));
+
+            image.RefreshProperties();
+            if (!preserveColor || image.Channels == 1)
+            {
+                CalibImage gray = ToSingleChannelGray(image);
+                try
+                {
+                    return GrayMaskApply(gray, mask, maskMin, maskMax);
+                }
+                finally
+                {
+                    gray.Dispose();
+                }
+            }
+
+            if (image.Channels != 3)
+                throw new InvalidOperationException($"HALCON Mask: 不支持 {image.Channels} 通道");
+
+            CalibImage gm = ToSingleChannelGray(mask);
+            try
+            {
+                var ni = image.GetNativeStruct();
+                var nm = gm.GetNativeStruct();
+                if (ni.width != nm.width || ni.height != nm.height)
+                    throw new InvalidOperationException(
+                        $"HALCON Mask: 图像与 Mask 须同尺寸 {ni.width}x{ni.height} vs {nm.width}x{nm.height}");
+
+                int nPix = ni.width * ni.height;
+                var bgr = new byte[nPix * 3];
+                var bufM = new byte[nPix];
+                Marshal.Copy(ni.data, bgr, 0, nPix * 3);
+                Marshal.Copy(nm.data, bufM, 0, nPix);
+
+                int mmn = (int)Math.Clamp(Math.Round(maskMin), 0, 255);
+                int mmx = (int)Math.Clamp(Math.Round(maskMax), 0, 255);
+                for (int p = 0; p < nPix; p++)
+                {
+                    if (bufM[p] < mmn || bufM[p] > mmx)
+                    {
+                        bgr[p * 3] = 0;
+                        bgr[p * 3 + 1] = 0;
+                        bgr[p * 3 + 2] = 0;
+                    }
+                }
+
+                var dst = new CalibImage(ni.width, ni.height, 3);
+                var nd = dst.GetNativeStruct();
+                Marshal.Copy(bgr, 0, nd.data, nPix * 3);
+                return dst;
+            }
+            finally
+            {
+                gm.Dispose();
+            }
+        }
+
+        /// <summary>点 (row,col) 是否落在任一区域实例内。</summary>
+        public static int FindShapeMatchRegionIndex(ShapeMatchRegionMask[] masks, double row, double col)
+        {
+            if (masks == null || masks.Length == 0)
+                return -1;
+
+            for (int i = 0; i < masks.Length; i++)
+            {
+                HRegion? r = masks[i]?.Region;
+                if (r == null || !r.IsInitialized())
+                    continue;
+                int isInside = r.TestRegionPoint(row, col);
+                if (isInside == 1)
+                    return i;
+            }
+
+            return -1;
+        }
+
+        private static HRegion? BuildFilledRegionFromTransformedXld(HObject transXld)
+        {
+            HOperatorSet.CountObj(transXld, out HTuple count);
+            int n = count.I;
+            if (n <= 0)
+                return null;
+
+            var parts = new List<(double area, HRegion region)>();
+            for (int i = 1; i <= n; i++)
+            {
+                HObject one = transXld.SelectObj(i);
+                try
+                {
+                    HOperatorSet.GenRegionContourXld(one, out HObject regObj, new HTuple("filled"));
+                    var reg = new HRegion(regObj);
+                    regObj.Dispose();
+                    HOperatorSet.AreaCenter(reg, out HTuple area, out HTuple _, out HTuple _);
+                    double a = area.Length > 0 ? area[0].D : 0;
+                    if (a >= 4)
+                        parts.Add((a, reg));
+                    else
+                        reg.Dispose();
+                }
+                finally
+                {
+                    one.Dispose();
+                }
+            }
+
+            if (parts.Count == 0)
+                return null;
+
+            parts.Sort((x, y) => y.area.CompareTo(x.area));
+            HRegion result = parts[0].region;
+            bool disposeResult = false;
+            for (int pi = 1; pi < parts.Count; pi++)
+            {
+                if (parts[pi].area < parts[0].area * 0.02)
+                {
+                    parts[pi].region.Dispose();
+                    continue;
+                }
+
+                HRegion diff = result.Difference(parts[pi].region);
+                parts[pi].region.Dispose();
+                if (disposeResult)
+                    result.Dispose();
+                else
+                    disposeResult = true;
+                result = diff;
+            }
+
+            return result;
         }
 
         /// <summary>
