@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+
+
   <PropertyGroup>
 
     <OutputType>Exe</OutputType>
@@ -14,29 +16,18 @@
 
     <RootNamespace>HalconLatticePickTest</RootNamespace>
 
-    <IndustrialVisionToolsProj>$(MSBuildThisFileDirectory)..\..\XVCalibrate\IndustrialVisionTools\IndustrialVisionTools.csproj</IndustrialVisionToolsProj>
-
-    <IndustrialVisionToolsObj>$(MSBuildThisFileDirectory)..\..\XVCalibrate\IndustrialVisionTools\obj\$(Configuration)\$(TargetFramework)\IndustrialVisionTools.dll</IndustrialVisionToolsObj>
-
   </PropertyGroup>
 
-  <Target Name="CompileIndustrialVisionTools" BeforeTargets="ResolveAssemblyReferences">
 
-    <MSBuild Projects="$(IndustrialVisionToolsProj)" Targets="CoreCompile" Properties="UseAppHost=false;Configuration=$(Configuration);Platform=$(Platform)" />
-
-  </Target>
 
   <ItemGroup>
 
-    <Reference Include="IndustrialVisionTools">
-
-      <HintPath>$(IndustrialVisionToolsObj)</HintPath>
-
-      <Private>true</Private>
-
-    </Reference>
+    <ProjectReference Include="..\..\XVCalibrate\IndustrialVisionTools\IndustrialVisionTools.csproj" />
 
   </ItemGroup>
 
+
+
 </Project>
+
 

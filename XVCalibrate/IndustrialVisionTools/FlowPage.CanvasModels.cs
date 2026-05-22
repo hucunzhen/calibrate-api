@@ -58,6 +58,9 @@ namespace CalibOperatorCLI_Example
             /// <summary>组合算子标题下显示子流程文件名（仅 UI）</summary>
             public TextBlock? CompositeCaptionText { get; set; }
 
+            /// <summary>最近一次执行子流程时各子节点的端口变量（仅组合算子）</summary>
+            public CompositeRunSnapshot? LastCompositeRun { get; set; }
+
             public FlowNode(OperatorDef def, double x, double y, Guid? fixedId = null)
             {
                 Id = fixedId ?? Guid.NewGuid();

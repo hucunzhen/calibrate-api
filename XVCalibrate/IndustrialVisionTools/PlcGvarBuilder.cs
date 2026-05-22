@@ -89,7 +89,11 @@ namespace CalibOperatorCLI_Example
             return items.ToArray();
         }
 
-        /// <summary>按 BarId 连续区间拆成多批（每批一条「折线」→ 若干 GVAR 线段）。</summary>
+        /// <summary>
+        /// separate_batch：每个不同的逐点 BarId（= GroupBarIds / 焊道条号）写一批 PLC。
+        /// 同一条号在点列中若分多段出现，合并为同一批（各段各自生成 GVAR 线段，段与段之间不连线）。
+        /// 16 个匹配且 BarId 为 0～15 各一段 → 16 批；与「找形匹配个数」一致的前提是 BarIds 来自轨迹 GroupBarIds。
+        /// </summary>
         public static List<(int BarId, GVAR[] Gvars)> BuildSegmentGvarBatchesByBarId(
             CalibPoint3D[] pts3,
             int[] barIds,
@@ -99,23 +103,35 @@ namespace CalibOperatorCLI_Example
             if (pts3 == null || pts3.Length == 0 || barIds == null || barIds.Length != pts3.Length)
                 return batches;
 
-            int start = 0;
-            for (int i = 1; i <= pts3.Length; i++)
+            var barOrder = new List<int>();
+            for (int i = 0; i < barIds.Length; i++)
             {
-                if (i == pts3.Length || barIds[i] != barIds[i - 1])
-                {
-                    int len = i - start;
-                    if (len > 0)
-                    {
-                        var run = new CalibPoint3D[len];
-                        Array.Copy(pts3, start, run, 0, len);
-                        var gvars = BuildSegmentGvarsFromPolyline(run, gvarType);
-                        if (gvars.Length > 0)
-                            batches.Add((barIds[start], gvars));
-                    }
+                if (!barOrder.Contains(barIds[i]))
+                    barOrder.Add(barIds[i]);
+            }
 
-                    start = i;
+            foreach (int barId in barOrder)
+            {
+                var gvars = new List<GVAR>();
+                int start = 0;
+                for (int i = 1; i <= pts3.Length; i++)
+                {
+                    if (i == pts3.Length || barIds[i] != barIds[i - 1])
+                    {
+                        if (i > start && barIds[start] == barId)
+                        {
+                            int len = i - start;
+                            var run = new CalibPoint3D[len];
+                            Array.Copy(pts3, start, run, 0, len);
+                            gvars.AddRange(BuildSegmentGvarsFromPolyline(run, gvarType));
+                        }
+
+                        start = i;
+                    }
                 }
+
+                if (gvars.Count > 0)
+                    batches.Add((barId, gvars.ToArray()));
             }
 
             return batches;
@@ -193,8 +209,10 @@ namespace CalibOperatorCLI_Example
 
                     barBatches = BuildSegmentGvarBatchesByBarId(pts3, barIds, defaultGvarType);
                     int total = barBatches.Sum(b => b.Gvars.Length);
+                    int uniqBar = barIds.Distinct().Count();
                     gvarItems = Array.Empty<GVAR>();
-                    sourceTag = $"Points3D×{pts3.Length}→{barBatches.Count}条BarId批/共{total}段GVAR";
+                    sourceTag =
+                        $"Points3D×{pts3.Length} 焊道条号(BarId)种类={uniqBar}→{barBatches.Count}批/共{total}段GVAR";
                     return barBatches.Count > 0;
                 }
 

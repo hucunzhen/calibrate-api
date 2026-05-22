@@ -1207,7 +1207,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "polyline_simplify_dp",
                 DisplayName = "轮廓点简化",
-                Description = "对有序点列做 Douglas–Peucker：输入可为轮廓/轨迹/等弧长采样点等任意 Point2D[]。若连接 BarIds（与 In 等长），则按条号分段简化后再合并，并输出 OutBarIds 供下游（如「轮廓转焊道路径」的 SamplePts+BarIds）。未接 BarIds 时整条 In 视为一条折线；OutBarIds 为全 0（与 Out 等长）。",
+                Description = "对有序点列做 Douglas–Peucker。须接与 In 等长的 BarIds 或 GroupBarIds（落格轨迹请用 GroupBarIds=按匹配序号），按条号分段简化并保留原条号到 OutBarIds；未接或不等长时整条视为一条、OutBarIds 全 0（send_plc separate_batch 只会发 1 批）。",
                 Category = "预处理",
                 Params =
                 {
@@ -1217,7 +1217,8 @@ namespace CalibOperatorCLI_Example
                 Ports =
                 {
                     new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
-                    new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107" },
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "GroupBarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFEB3B", IsOptional = true },
                     new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "OutBarIds", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#FFC107" }
                 }
@@ -1390,6 +1391,7 @@ namespace CalibOperatorCLI_Example
                 {
                     new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "GroupBarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFEB3B", IsOptional = true },
                     new PortDef { Name = "HandEyeJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
                     new PortDef { Name = "Points3D", Direction = PortDirection.Output, DataType = typeof(CalibPoint3D[]), ColorHex = "#00BCD4" },
                     new PortDef { Name = "BarIds", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true }
@@ -1742,8 +1744,15 @@ namespace CalibOperatorCLI_Example
                         Name = "splitByBar",
                         DisplayName = "按条号下发",
                         DefaultValue = "none",
-                        Description = "none=整列连续线段；break_segment=同条号内才成段；separate_batch=每个 BarId 一批 GVAR，每批写 D800=当批段数（须接 BarIds）",
+                        Description = "none=整列连续线段；break_segment=同条号内才成段；separate_batch=每个不同 BarId(焊道/落格条号)一批 GVAR，须接与点列等长的 BarIds(来自轨迹 GroupBarIds→简化 OutBarIds)，批次数=条号种类数",
                         Options = new List<string> { "none", "break_segment", "separate_batch" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "expectedBatchCount",
+                        DisplayName = "期望批次数",
+                        DefaultValue = "0",
+                        Description = "仅 separate_batch：>0 时若实际批次数不符则写日志警告（如 16 格模板填 16）；0=不检查"
                     },
                     new OperatorParam
                     {
@@ -2707,9 +2716,11 @@ namespace CalibOperatorCLI_Example
                         Name = "barIdSource",
                         DisplayName = "分组条号",
                         DefaultValue = "per_match",
-                        Description = "写入 GroupBarIds（焊道分组）；BarIds 恒为每段闭合轮廓独立段号，避免显示/简化跨轮廓连线",
-                        Options = new List<string> { "per_match", "grid_col", "grid_row", "single" }
+                        Description = "写入 GroupBarIds（PLC separate_batch 用）；per_match=0..N-1；grid_cell=行×列格号(须 gridCols)；BarIds 为轮廓段号",
+                        Options = new List<string> { "per_match", "grid_cell", "grid_col", "grid_row", "single" }
                     },
+                    new OperatorParam { Name = "gridRows", DisplayName = "落格行数", DefaultValue = "8", Description = "barIdSource=grid_cell 时用于 gr×cols+gc；0=从 GridRow/Col 推断" },
+                    new OperatorParam { Name = "gridCols", DisplayName = "落格列数", DefaultValue = "2", Description = "barIdSource=grid_cell 时格号列宽；须与落格算子一致(如 8×2=16 格)" },
                     new OperatorParam { Name = "closeTolPx", DisplayName = "闭合容差(px)", DefaultValue = "0.5", Description = "仅当首尾几乎重合(≤容差)时不补点；否则强制在末尾补起点闭合" },
                     new OperatorParam { Name = "defaultZ", DisplayName = "SamplePts Z", DefaultValue = "0", Description = "SamplePts 的 Z" }
                 },

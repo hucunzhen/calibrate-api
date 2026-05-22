@@ -3,10 +3,11 @@
     {
       "Id": "f97281da-9776-402f-a7f0-3b9012eaa556",
       "TypeId": "send_plc",
-      "X": 1056,
-      "Y": 239,
+      "X": 872,
+      "Y": 390,
       "Params": {
         "splitByBar": "separate_batch",
+        "expectedBatchCount": "16",
         "barGvarLayout": "overwrite",
         "usePlcPageGvar": "false",
         "gvarStartRegister": "D30000",
@@ -24,8 +25,8 @@
     {
       "Id": "d5e6f7a8-9b0c-4d1e-8f2a-3b4c5d6e7f8a",
       "TypeId": "plc_wait_weld_done",
-      "X": 1563,
-      "Y": 183,
+      "X": 1207,
+      "Y": 346,
       "Params": {
         "flagRegister": "",
         "bit": "0",
@@ -38,7 +39,7 @@
       "Id": "190efde3-f5c0-46ba-b0ea-da6b49752bb8",
       "TypeId": "plc_connect",
       "X": 0,
-      "Y": 140,
+      "Y": 109,
       "Params": {
         "ip": "192.168.6.6",
         "port": "502",
@@ -48,8 +49,8 @@
     {
       "Id": "c89e74f7-8c8d-4cae-bfd9-a24b1c203aa4",
       "TypeId": "if_gate",
-      "X": 243,
-      "Y": 70,
+      "X": 201,
+      "Y": 110,
       "Params": {
         "op": "\u003E",
         "threshold": "0",
@@ -59,15 +60,15 @@
     {
       "Id": "5314bfb3-9dbb-4a46-b022-59ef0ea1f2ec",
       "TypeId": "route_true",
-      "X": 483,
-      "Y": 156,
+      "X": 405,
+      "Y": 109,
       "Params": {}
     },
     {
       "Id": "78222510-71d2-4938-b91c-e6c39e30aefa",
       "TypeId": "plc_wait_camera_capture",
-      "X": 200,
-      "Y": 346,
+      "X": 199,
+      "Y": 0,
       "Params": {
         "signalRegister": "",
         "bit": "0",
@@ -79,8 +80,8 @@
     {
       "Id": "55d4b1c2-be25-439c-8648-abf5d7881038",
       "TypeId": "if_gate",
-      "X": 712,
-      "Y": 41,
+      "X": 614,
+      "Y": 98,
       "Params": {
         "op": "\u003E",
         "threshold": "0",
@@ -90,15 +91,15 @@
     {
       "Id": "ae3ea651-1a1b-47a3-b3ef-0c017aaaba51",
       "TypeId": "route_true",
-      "X": 831,
-      "Y": 170,
+      "X": 625,
+      "Y": 218,
       "Params": {}
     },
     {
       "Id": "3caa064d-d6b1-4880-a709-518d8ea3213b",
       "TypeId": "plc_pou_enable",
-      "X": 1348,
-      "Y": 285,
+      "X": 1088,
+      "Y": 212,
       "Params": {
         "enableRegister": "D801L",
         "enable": "ON"
@@ -107,10 +108,10 @@
     {
       "Id": "875ab525-2c11-4507-897d-3a3619c2080f",
       "TypeId": "composite",
-      "X": 674,
-      "Y": 348,
+      "X": 383,
+      "Y": 254,
       "Params": {
-        "innerFlowPath": "D:\\work\\calibrate-api\\flows\\halcon\\5_22.flow.json",
+        "innerFlowPath": "D:\\work\\calibrate-api\\flows\\halcon\\genCountorMod.flow.json",
         "innerFlowJson": "",
         "bindingsJson": "{}"
       }
@@ -118,10 +119,20 @@
     {
       "Id": "a324ab77-b804-4ea6-a7c3-2c4d8c33ee44",
       "TypeId": "load_image",
-      "X": 423,
-      "Y": 410,
+      "X": 142,
+      "Y": 282,
       "Params": {
-        "filePath": "D:\\work\\calibrate-api\\test_images\\Image_20260417090749340.bmp"
+        "filePath": "D:\\work\\data\\Image_20260518154103272.bmp"
+      }
+    },
+    {
+      "Id": "9fecd54d-b519-47ca-b7e3-1cd772cd3e18",
+      "TypeId": "display",
+      "X": 581,
+      "Y": 461,
+      "Params": {
+        "dotRadius": "3",
+        "pointLineJoin": "auto"
       }
     }
   ],
@@ -181,16 +192,34 @@
       "ToPort": "BarIds"
     },
     {
-      "FromNodeId": "ae3ea651-1a1b-47a3-b3ef-0c017aaaba51",
-      "FromPort": "Out",
-      "ToNodeId": "f97281da-9776-402f-a7f0-3b9012eaa556",
-      "ToPort": "Points3D"
-    },
-    {
       "FromNodeId": "a324ab77-b804-4ea6-a7c3-2c4d8c33ee44",
       "FromPort": "Image",
       "ToNodeId": "875ab525-2c11-4507-897d-3a3619c2080f",
       "ToPort": "In"
+    },
+    {
+      "FromNodeId": "a324ab77-b804-4ea6-a7c3-2c4d8c33ee44",
+      "FromPort": "Image",
+      "ToNodeId": "9fecd54d-b519-47ca-b7e3-1cd772cd3e18",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "875ab525-2c11-4507-897d-3a3619c2080f",
+      "FromPort": "Out2",
+      "ToNodeId": "9fecd54d-b519-47ca-b7e3-1cd772cd3e18",
+      "ToPort": "BarIds"
+    },
+    {
+      "FromNodeId": "ae3ea651-1a1b-47a3-b3ef-0c017aaaba51",
+      "FromPort": "Out",
+      "ToNodeId": "9fecd54d-b519-47ca-b7e3-1cd772cd3e18",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "ae3ea651-1a1b-47a3-b3ef-0c017aaaba51",
+      "FromPort": "Out",
+      "ToNodeId": "f97281da-9776-402f-a7f0-3b9012eaa556",
+      "ToPort": "Points"
     }
   ]
 }

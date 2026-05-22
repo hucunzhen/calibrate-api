@@ -503,6 +503,9 @@ namespace CalibOperatorCLI_Example
             var menuParams = new MenuItem { Header = "算子配置面板" };
             menuParams.Click += (s, e) => EditNodeParams(node);
 
+            var menuCompositeVars = new MenuItem { Header = "查看子流程变量" };
+            menuCompositeVars.Click += (_, _) => ShowCompositeVariablesWindow(node);
+
             var menuRunTo = new MenuItem { Header = "执行到此节点（含上游）" };
             menuRunTo.Click += (_, _) => { _ = RunUpstreamToNodeAsync(node); };
 
@@ -513,6 +516,8 @@ namespace CalibOperatorCLI_Example
             ctx.Items.Add(menuPaste);
             ctx.Items.Add(new Separator());
             ctx.Items.Add(menuParams);
+            if (def.TypeId == "composite")
+                ctx.Items.Add(menuCompositeVars);
             ctx.Items.Add(menuRunTo);
             ctx.Items.Add(menuPreviewPts);
             ctx.Items.Add(menuDelete);
@@ -767,7 +772,9 @@ namespace CalibOperatorCLI_Example
             {
                 if (sender is FrameworkElement fe2 && fe2.Tag is FlowNode node2)
                 {
-                    if (node2.Def.Params.Count > 0)
+                    if (node2.Def.TypeId == "composite")
+                        ShowCompositeVariablesWindow(node2);
+                    else if (node2.Def.Params.Count > 0)
                         EditNodeParams(node2);
                 }
                 return;
@@ -1253,74 +1260,7 @@ namespace CalibOperatorCLI_Example
             sb.AppendLine($"端口: {conn.FromPort.Definition.Name} -> {conn.ToPort.Definition.Name}");
             sb.AppendLine($"类型: {data.GetType().Name}");
             sb.AppendLine();
-
-            switch (data)
-            {
-                case int n:
-                    sb.AppendLine($"值: {n}");
-                    break;
-                case AffineTransform t:
-                    sb.AppendLine($"X = {t.A:F6}*x + {t.B:F6}*y + {t.C:F6}");
-                    sb.AppendLine($"Y = {t.D:F6}*x + {t.E:F6}*y + {t.F:F6}");
-                    break;
-                case TrajectoryResult tr:
-                    sb.AppendLine($"Success: {tr.Success}");
-                    sb.AppendLine($"Count: {tr.Count}");
-                    if (tr.Points != null && tr.Points.Length > 0)
-                        sb.AppendLine($"First Point: ({tr.Points[0].X:F2}, {tr.Points[0].Y:F2})");
-                    break;
-                case ValueTuple<int[], int[], int[], int> contours:
-                    sb.AppendLine($"Contours: {contours.Item4}");
-                    sb.AppendLine($"Total Points: {contours.Item1?.Length ?? 0}");
-                    if (contours.Item3 != null && contours.Item3.Length > 0)
-                        sb.AppendLine($"First Contour Length: {contours.Item3[0]}");
-                    break;
-                case ValueTuple<double[], double[], int[], int> cw:
-                    sb.AppendLine($"ContoursWorld (条数): {cw.Item4}");
-                    sb.AppendLine($"Total Points: {cw.Item1?.Length ?? 0}");
-                    if (cw.Item3 != null && cw.Item3.Length > 0)
-                        sb.AppendLine($"First Contour Length: {cw.Item3[0]}");
-                    if (cw.Item1 != null && cw.Item1.Length > 0 && cw.Item2 != null)
-                    {
-                        sb.AppendLine($"首点: ({cw.Item1[0]:F4}, {cw.Item2[0]:F4})");
-                        if (cw.Item1.Length > 1)
-                            sb.AppendLine($"末点: ({cw.Item1[^1]:F4}, {cw.Item2[^1]:F4})");
-                    }
-                    break;
-                case ValueTuple<double[], double[], double[], int[], int> c3:
-                    sb.AppendLine($"ContoursBase3D (条数): {c3.Item5}");
-                    sb.AppendLine($"Total Points: {c3.Item1?.Length ?? 0}");
-                    if (c3.Item4 != null && c3.Item4.Length > 0)
-                        sb.AppendLine($"First Contour Length: {c3.Item4[0]}");
-                    if (c3.Item1 != null && c3.Item1.Length > 0 && c3.Item2 != null && c3.Item3 != null)
-                    {
-                        sb.AppendLine($"首点: ({c3.Item1[0]:F4}, {c3.Item2[0]:F4}, {c3.Item3[0]:F4})");
-                        if (c3.Item1.Length > 1)
-                            sb.AppendLine($"末点: ({c3.Item1[^1]:F4}, {c3.Item2[^1]:F4}, {c3.Item3[^1]:F4})");
-                    }
-                    break;
-                case Point2D[] pp:
-                    sb.AppendLine($"点数: {pp.Length}");
-                    if (pp.Length > 0)
-                    {
-                        sb.AppendLine($"首点: ({pp[0].X:F4}, {pp[0].Y:F4})");
-                        if (pp.Length > 1)
-                            sb.AppendLine($"末点: ({pp[^1].X:F4}, {pp[^1].Y:F4})");
-                    }
-                    break;
-                case CalibPoint3D[] p3:
-                    sb.AppendLine($"点数(基座3D): {p3.Length}");
-                    if (p3.Length > 0)
-                    {
-                        sb.AppendLine($"首点: ({p3[0].X:F4}, {p3[0].Y:F4}, {p3[0].Z:F4})");
-                        if (p3.Length > 1)
-                            sb.AppendLine($"末点: ({p3[^1].X:F4}, {p3[^1].Y:F4}, {p3[^1].Z:F4})");
-                    }
-                    break;
-                default:
-                    sb.AppendLine(data.ToString() ?? "(无可显示内容)");
-                    break;
-            }
+            sb.Append(FormatFlowPortValue(data));
 
             return sb.ToString();
         }
@@ -5417,6 +5357,12 @@ namespace CalibOperatorCLI_Example
                     swInner.Stop();
                     LogOperatorTiming(inner, swInner.Elapsed.TotalMilliseconds, "composite");
                 }
+
+                string? flowLabel = !string.IsNullOrWhiteSpace(path)
+                    ? System.IO.Path.GetFileName(path)
+                    : (!string.IsNullOrWhiteSpace(embedded.Trim()) ? "内嵌 JSON" : null);
+                compositeNode.LastCompositeRun = CaptureCompositeRunSnapshot(sorted, compositeInputs, flowLabel);
+                LogCompositeContourPipelineDigest(compositeNode);
             }
             finally
             {
@@ -8076,12 +8022,17 @@ namespace CalibOperatorCLI_Example
                         }
 
                         node.Outputs["Points3D"] = out3;
+                        int[]? barPass = null;
                         if (inputs.TryGetValue("BarIds", out var barIn) && barIn is int[] barIds)
+                            barPass = barIds;
+                        else if (inputs.TryGetValue("GroupBarIds", out var gbIn) && gbIn is int[] groupBarIds)
+                            barPass = groupBarIds;
+                        if (barPass != null)
                         {
-                            if (barIds.Length != planePts.Length)
+                            if (barPass.Length != planePts.Length)
                                 throw new InvalidOperationException(
-                                    $"平面→基座(手眼): BarIds 长度 {barIds.Length} 与 Points {planePts.Length} 不一致。");
-                            node.Outputs["BarIds"] = (int[])barIds.Clone();
+                                    $"平面→基座(手眼): BarIds/GroupBarIds 长度 {barPass.Length} 与 Points {planePts.Length} 不一致。");
+                            node.Outputs["BarIds"] = (int[])barPass.Clone();
                         }
 
                         string barNote = node.Outputs.ContainsKey("BarIds") ? ", BarIds 已透传" : "";
@@ -8425,25 +8376,32 @@ namespace CalibOperatorCLI_Example
                         bool closed = !string.Equals(closedRaw, "false", StringComparison.OrdinalIgnoreCase)
                                       && !string.Equals(closedRaw, "0", StringComparison.OrdinalIgnoreCase);
 
-                        inputs.TryGetValue("BarIds", out var barObj);
-                        var barIn = barObj as int[];
+                        int[]? barIn = null;
+                        if (inputs.TryGetValue("GroupBarIds", out var gbObj) && gbObj is int[] gb && gb.Length == pts.Length)
+                            barIn = gb;
+                        if (barIn == null)
+                        {
+                            inputs.TryGetValue("BarIds", out var barObj);
+                            barIn = barObj as int[];
+                        }
+
+                        if (barIn == null || barIn.Length != pts.Length)
+                            barIn = null;
 
                         Point2D[] simplified;
                         int[] outBarIds;
                         if (barIn != null && barIn.Length == pts.Length)
                         {
-                            var groups = SplitSampledPointsToContourPolylines(pts, barIn);
+                            SplitSampledPointsToContourPolylinesWithBarIds(pts, barIn, out var groups, out var segBarIds);
                             var outPts = new List<Point2D>();
                             var outIds = new List<int>();
-                            int bid = 0;
-                            foreach (var seg in groups)
+                            for (int gi = 0; gi < groups.Count; gi++)
                             {
+                                var seg = groups[gi];
                                 if (seg == null || seg.Length == 0)
-                                {
-                                    bid++;
                                     continue;
-                                }
 
+                                int barId = gi < segBarIds.Count ? segBarIds[gi] : gi;
                                 Point2D[] simpSeg;
                                 if (seg.Length <= 2)
                                     simpSeg = seg;
@@ -8454,10 +8412,8 @@ namespace CalibOperatorCLI_Example
                                 foreach (var p in simpSeg)
                                 {
                                     outPts.Add(p);
-                                    outIds.Add(bid);
+                                    outIds.Add(barId);
                                 }
-
-                                bid++;
                             }
 
                             simplified = outPts.ToArray();
@@ -8682,6 +8638,33 @@ namespace CalibOperatorCLI_Example
                                 out string? resolveDiag))
                         {
                             throw new InvalidOperationException($"发送PLC: {resolveDiag}");
+                        }
+
+                        if (string.Equals(splitByBar, "separate_batch", StringComparison.OrdinalIgnoreCase)
+                            && barBatches != null
+                            && barBatches.Count > 0)
+                        {
+                            int expectedBatches = int.TryParse(
+                                node.Params.GetValueOrDefault("expectedBatchCount", "0"),
+                                System.Globalization.NumberStyles.Integer,
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                out var expB)
+                                ? expB
+                                : 0;
+                            string batchBarSummary = string.Join(
+                                ", ",
+                                barBatches.Select(b => $"BarId={b.BarId}×{b.Gvars.Length}段"));
+                            AppendLog(
+                                $"[send_plc] separate_batch: {barBatches.Count} 批（{batchBarSummary}）| {gvarSource}");
+                            if (expectedBatches > 0 && barBatches.Count != expectedBatches)
+                            {
+                                AppendLog(
+                                    $"[send_plc] 警告: 期望 {expectedBatches} 批，实际 {barBatches.Count} 批。"
+                                    + " 批次数=逐点 BarId 种类数(每条焊道一批)，与找形个数无关；须用 GroupBarIds→OutBarIds。"
+                                    + " 若复合内落格为 16/16 仍不足 16 批，说明 BarIds 未传到 send_plc 或条号不是 0～15。");
+                                AppendCompositePipelineHintsForBatchMismatch(
+                                    expectedBatches, barBatches.Count, inputs);
+                            }
                         }
 
                         XinJETcpNet plcD = RequireFlowPlcD();
@@ -9517,6 +9500,20 @@ namespace CalibOperatorCLI_Example
                             out var dzTr)
                             ? dzTr
                             : 0;
+                        int latticeGridRowsTr = int.TryParse(
+                            node.Params.GetValueOrDefault("gridRows"),
+                            System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var lgrTr)
+                            ? lgrTr
+                            : 0;
+                        int latticeGridColsTr = int.TryParse(
+                            node.Params.GetValueOrDefault("gridCols"),
+                            System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var lgcTr)
+                            ? lgcTr
+                            : 0;
 
                         var traj = HalconShapeMatchGridTrajectory.Build(
                             modelIdTr,
@@ -9530,7 +9527,9 @@ namespace CalibOperatorCLI_Example
                             connectOrder,
                             barIdSource,
                             closeTolPx,
-                            defaultZ);
+                            defaultZ,
+                            latticeGridRowsTr,
+                            latticeGridColsTr);
                         node.Outputs["Points"] = traj.Points;
                         node.Outputs["BarIds"] = traj.BarIds;
                         node.Outputs["GroupBarIds"] = traj.GroupBarIds;
@@ -11687,6 +11686,7 @@ namespace CalibOperatorCLI_Example
                 n.Executed = false;
                 n.ErrorMessage = null;
                 n.Outputs.Clear();
+                n.LastCompositeRun = null;
                 SetNodeStatus(n, false);
             }
 

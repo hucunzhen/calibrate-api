@@ -1,0 +1,107 @@
+{
+  "Nodes": [
+    {
+      "Id": "fac5b1d1-465e-4fd4-a012-8c95adc6da1f",
+      "TypeId": "load_image",
+      "X": 173,
+      "Y": 187,
+      "Params": {
+        "filePath": "D:\\work\\data\\Image_20260518154103272.bmp"
+      }
+    },
+    {
+      "Id": "07082a97-23d8-4bac-8703-7309e369e5ea",
+      "TypeId": "composite",
+      "X": 518,
+      "Y": 173,
+      "Params": {
+        "innerFlowPath": "D:\\work\\calibrate-api\\flows\\halcon\\genCountorMod.flow.json",
+        "innerFlowJson": "",
+        "bindingsJson": "{}"
+      }
+    },
+    {
+      "Id": "76570448-bc2d-4410-8853-5a4a2a214478",
+      "TypeId": "display",
+      "X": 1100,
+      "Y": 434,
+      "Params": {
+        "dotRadius": "3",
+        "pointLineJoin": "auto"
+      }
+    },
+    {
+      "Id": "94752e1a-d289-4163-b22a-3d98ccd81a5c",
+      "TypeId": "route_true",
+      "X": 896,
+      "Y": 183,
+      "Params": {}
+    },
+    {
+      "Id": "63a77938-8058-44d1-9973-78356d48ce02",
+      "TypeId": "if_gate",
+      "X": 630,
+      "Y": 14,
+      "Params": {
+        "op": "\u003E",
+        "threshold": "0",
+        "epsilon": "1e-6"
+      }
+    },
+    {
+      "Id": "75137ab9-223f-4edb-8eda-38e1d8b1bdd3",
+      "TypeId": "plc_connect",
+      "X": 193,
+      "Y": 22,
+      "Params": {
+        "ip": "192.168.6.6",
+        "port": "502",
+        "station": "0"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "fac5b1d1-465e-4fd4-a012-8c95adc6da1f",
+      "FromPort": "Image",
+      "ToNodeId": "07082a97-23d8-4bac-8703-7309e369e5ea",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "fac5b1d1-465e-4fd4-a012-8c95adc6da1f",
+      "FromPort": "Image",
+      "ToNodeId": "76570448-bc2d-4410-8853-5a4a2a214478",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "63a77938-8058-44d1-9973-78356d48ce02",
+      "FromPort": "True",
+      "ToNodeId": "94752e1a-d289-4163-b22a-3d98ccd81a5c",
+      "ToPort": "Condition"
+    },
+    {
+      "FromNodeId": "07082a97-23d8-4bac-8703-7309e369e5ea",
+      "FromPort": "Out",
+      "ToNodeId": "94752e1a-d289-4163-b22a-3d98ccd81a5c",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "94752e1a-d289-4163-b22a-3d98ccd81a5c",
+      "FromPort": "Out",
+      "ToNodeId": "76570448-bc2d-4410-8853-5a4a2a214478",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "07082a97-23d8-4bac-8703-7309e369e5ea",
+      "FromPort": "Out2",
+      "ToNodeId": "76570448-bc2d-4410-8853-5a4a2a214478",
+      "ToPort": "BarIds"
+    },
+    {
+      "FromNodeId": "75137ab9-223f-4edb-8eda-38e1d8b1bdd3",
+      "FromPort": "Connected",
+      "ToNodeId": "63a77938-8058-44d1-9973-78356d48ce02",
+      "ToPort": "Value"
+    }
+  ]
+}

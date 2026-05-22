@@ -35,7 +35,9 @@ namespace CalibOperatorCLI_Example
             string connectOrder,
             string barIdSource,
             double closeTolPx,
-            double defaultZ)
+            double defaultZ,
+            int latticeGridRows = 0,
+            int latticeGridCols = 0)
         {
 #if !HALCON_ENABLED
             _ = modelId;
@@ -86,9 +88,13 @@ namespace CalibOperatorCLI_Example
             int nextSegmentBarId = 0;
             int matchSeq = 0;
 
+            int gridColsForCell = latticeGridCols > 0
+                ? latticeGridCols
+                : (hasGrid ? items.Max(t => t.Gc) + 1 : 1);
+
             foreach (var it in ordered)
             {
-                int groupBarId = ResolveGroupBarId(it, matchSeq, barIdSource);
+                int groupBarId = ResolveGroupBarId(it, matchSeq, barIdSource, gridColsForCell);
                 if (useAllContours)
                     nextSegmentBarId = AppendAllTransformedContours(
                         outPts, outBarIds, outGroupBarIds, templates, it.Row, it.Col, it.Angle,
@@ -110,6 +116,10 @@ namespace CalibOperatorCLI_Example
             string orderTag = NormalizeConnectOrder(connectOrder);
             string barTag = NormalizeBarIdSource(barIdSource);
             string contourTag = useAllContours ? "全部子轮廓" : "外形";
+            int uniqGroup = groupBarIds.Length > 0 ? groupBarIds.Distinct().Count() : 0;
+            string gridHint = hasGrid
+                ? $" GridRow/Col 已接"
+                : "";
             return new HalconShapeMatchGridTrajectoryResult
             {
                 Points = pts,
@@ -120,7 +130,7 @@ namespace CalibOperatorCLI_Example
                 SegmentCount = nextSegmentBarId,
                 PointCount = pts.Length,
                 OrderSummary =
-                    $"{ordered.Count} 匹配 · {nextSegmentBarId} 闭合段 · {pts.Length} 点 · {contourTag} · {orderTag} · 分组={barTag}"
+                    $"{ordered.Count} 匹配 · GroupBarId {uniqGroup} 种 · {nextSegmentBarId} 闭合段 · {pts.Length} 点 · {contourTag} · {orderTag} · 分组={barTag}{gridHint}"
             };
 #endif
         }
@@ -196,10 +206,17 @@ namespace CalibOperatorCLI_Example
 
 #endif
 
-        private static int ResolveGroupBarId((int Idx, int Gr, int Gc, double Row, double Col, double Angle) it, int matchSeq, string barIdSource)
+        private static int ResolveGroupBarId(
+            (int Idx, int Gr, int Gc, double Row, double Col, double Angle) it,
+            int matchSeq,
+            string barIdSource,
+            int latticeGridCols)
         {
             switch (NormalizeBarIdSource(barIdSource))
             {
+                case "grid_cell":
+                    int cols = Math.Max(1, latticeGridCols);
+                    return it.Gr * cols + it.Gc;
                 case "grid_col":
                     return it.Gc;
                 case "grid_row":
@@ -291,6 +308,7 @@ namespace CalibOperatorCLI_Example
             {
                 "grid_row" or "row" => "grid_row",
                 "grid_col" or "col" or "column" => "grid_col",
+                "grid_cell" or "cell" or "lattice" => "grid_cell",
                 "single" or "one" or "0" => "single",
                 "per_match" or "match" or "index" => "per_match",
                 _ => "per_match"

@@ -168,6 +168,15 @@ namespace CalibOperatorCLI_Example
             var batches = PlcGvarBuilder.BuildSegmentGvarBatchesByBarId(pts3, barIds, 1);
             fails += Check("按条分批: 3 个 BarId → 3 批",
                 () => batches.Count == 3);
+
+            // 同条号分两段出现 → 仍 2 批（按条号种类），非 3 批（按连续段）
+            var barSplit = new[] { 1, 1, 2, 2, 1, 1 };
+            var ptsSplit = new CalibPoint3D[barSplit.Length];
+            for (int i = 0; i < ptsSplit.Length; i++)
+                ptsSplit[i] = new CalibPoint3D(i, i, 0);
+            var batchesSplit = PlcGvarBuilder.BuildSegmentGvarBatchesByBarId(ptsSplit, barSplit, 1);
+            fails += Check("按条分批: 条号 1 分两段仍合并为 1 批 → 共 2 批",
+                () => batchesSplit.Count == 2 && batchesSplit[0].Gvars.Length == 2 && batchesSplit[1].Gvars.Length == 1);
             fails += Check("按条分批: 各批 D800 段数分别为 2,3,2",
                 () => batches[0].Gvars.Length == 2
                     && batches[1].Gvars.Length == 3
