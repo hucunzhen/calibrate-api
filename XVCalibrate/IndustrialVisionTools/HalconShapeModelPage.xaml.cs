@@ -1064,6 +1064,11 @@ namespace CalibOperatorCLI_Example
                 : HalconShapeModelKind.Shape;
         }
 
+        private static string ComboTag(ComboBox? cmb, string fallback) =>
+            (cmb?.SelectedItem as ComboBoxItem)?.Tag?.ToString()
+            ?? (cmb?.SelectedItem as ComboBoxItem)?.Content?.ToString()
+            ?? fallback;
+
         private HalconShapeModelCreateOptions ReadCreateOptionsFromUi()
         {
             if (!int.TryParse(TxtNumLevels.Text, out int numLevels)) numLevels = 0;
@@ -1087,14 +1092,14 @@ namespace CalibOperatorCLI_Example
                 AngleStartDeg = angleStart,
                 AngleExtentDeg = angleExtent,
                 AngleStepDeg = angleStep,
-                Optimization = (CmbOptimization.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "auto",
-                Metric = (CmbMetric.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "ignore_local_polarity",
+                Optimization = ComboTag(CmbOptimization, "auto"),
+                Metric = ComboTag(CmbMetric, "ignore_local_polarity"),
                 Contrast = string.IsNullOrWhiteSpace(TxtContrast.Text) ? "auto" : TxtContrast.Text.Trim(),
                 MinContrast = minContrast,
                 ScaleMin = scaleMin,
                 ScaleMax = scaleMax,
                 ScaleStep = scaleStep,
-                GenContourMode = (CmbGenContourMode.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "border",
+                GenContourMode = ComboTag(CmbGenContourMode, "border"),
                 MinContourPoints = minContourPts,
                 LargestContourOnly = ChkLargestContourOnly.IsChecked == true,
                 EdgeAlpha = edgeAlpha,
@@ -1750,7 +1755,7 @@ namespace CalibOperatorCLI_Example
                 string summary = HalconFlowBridge.GetShapeModelParamsSummary(_modelId);
                 TxtModelInfo.Text = $"来源: 文件导入\n文件: {dlg.FileName}\n{summary}";
                 AppendLog($"模型已导入: {dlg.FileName} (ModelID={_modelId})");
-                MessageBox.Show($"形状模型已导入，可进行 FindShapeModel 测试。\nModelID: {_modelId}", "导入成功",
+                MessageBox.Show($"形状模型已导入，可进行形状匹配测试。\nModelID: {_modelId}", "导入成功",
                     MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
