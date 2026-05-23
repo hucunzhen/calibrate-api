@@ -2153,6 +2153,15 @@ namespace CalibOperatorCLI_Example
             }
         }
 
+        /// <summary>实心圆区域（row/col 为 HALCON 图像坐标）。</summary>
+        public static HObject GenRegionCircle(double row, double col, double radius)
+        {
+            if (radius <= 0)
+                throw new ArgumentException("半径必须大于 0", nameof(radius));
+            HOperatorSet.GenCircle(out HObject reg, row, col, radius);
+            return reg;
+        }
+
         /// <summary>圆环区域：外圆减内圆（row/col 为 HALCON 图像坐标）。</summary>
         public static HObject GenRegionAnnulus(double row, double col, double innerRadius, double outerRadius)
         {

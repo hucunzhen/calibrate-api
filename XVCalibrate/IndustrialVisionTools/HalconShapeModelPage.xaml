@@ -28,6 +28,10 @@
                     <RadioButton x:Name="RbRectMode" Content="矩形" GroupName="DrawMode" IsChecked="True" 
                                  Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,8,0"
                                  Checked="DrawMode_Changed"/>
+                    <RadioButton x:Name="RbCircleMode" Content="圆形" GroupName="DrawMode"
+                                 Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,8,0"
+                                 Checked="DrawMode_Changed"
+                                 ToolTip="按下圆心拖动设置半径，松开完成"/>
                     <RadioButton x:Name="RbPolygonMode" Content="多边形" GroupName="DrawMode"
                                  Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,8,0"
                                  Checked="DrawMode_Changed"/>
@@ -54,6 +58,8 @@
                                Visibility="Collapsed"/>
                         <Rectangle x:Name="RoiRect" Stroke="#00FF00" StrokeThickness="2" StrokeDashArray="4,2"
                                    Fill="#2000FF00" Visibility="Collapsed" Canvas.Left="0" Canvas.Top="0"/>
+                        <Ellipse x:Name="RoiCircle" Stroke="#00FF00" StrokeThickness="2" StrokeDashArray="4,2"
+                                 Fill="#2000FF00" Visibility="Collapsed" Canvas.Left="0" Canvas.Top="0"/>
                         <Polyline x:Name="PolygonLine" Stroke="#FFFF00" StrokeThickness="2"
                                   Visibility="Collapsed" Points=""/>
                         <Polyline x:Name="RingOuterLine" Stroke="#00FF00" StrokeThickness="2"
@@ -87,7 +93,7 @@
                             <ComboBoxItem Content="标准形状" Tag="Shape" IsSelected="True"/>
                             <ComboBoxItem Content="缩放形状" Tag="ScaledShape"/>
                         </ComboBox>
-                        <TextBlock Text="矩形/多边形/环形 ROI 可限制提取与图像模板区域；环形=外多边形减内多边形（环带）" FontSize="10" Foreground="#888" 
+                        <TextBlock Text="矩形/圆形/多边形/环形 ROI 可限制提取与图像模板区域；环形=外多边形减内多边形（环带）" FontSize="10" Foreground="#888" 
                                    TextWrapping="Wrap" Margin="0,8,0,0"/>
                     </StackPanel>
                 </Border>

@@ -33,6 +33,10 @@ namespace CalibOperatorCLI_Example
         private bool _hasRoi;
         private Rect _roiRectImage;
 
+        // 圆形 ROI：圆心 + 半径（图像像素系，X=列 Y=行）
+        private Point _circleCenterImage;
+        private double _circleRadiusImage;
+
         // 环形 ROI：外圈 + 内圈两条多边形；_ringPolygonPhase 0=绘外圈 1=绘内圈 2=完成
         private bool _hasRingRoi;
         private readonly List<Point> _ringOuterPolygon = new List<Point>();
@@ -248,11 +252,74 @@ namespace CalibOperatorCLI_Example
                 RoiRect.Width = _roiRectImage.Width;
                 RoiRect.Height = _roiRectImage.Height;
             }
-            else if (!_isDrawing)
+            else if (!_isDrawing || RbCircleMode?.IsChecked == true)
                 RoiRect.Visibility = Visibility.Collapsed;
 
+            UpdateCirclePreview();
             UpdatePolygonPreview();
             UpdateRingPreview();
+        }
+
+        private bool IsCircleModeActive() => RbCircleMode?.IsChecked == true;
+
+        private bool HasUsableCircleRoi() =>
+            _hasRoi && IsCircleModeActive() && _circleRadiusImage > 5;
+
+        private bool IsPointInCircleRoi(double x, double y)
+        {
+            if (!HasUsableCircleRoi())
+                return false;
+            double dx = x - _circleCenterImage.X;
+            double dy = y - _circleCenterImage.Y;
+            return dx * dx + dy * dy <= _circleRadiusImage * _circleRadiusImage;
+        }
+
+        private static List<Point> CircleToPolygonPoints(Point center, double radius, int segments = 64)
+        {
+            var list = new List<Point>(segments + 1);
+            for (int i = 0; i <= segments; i++)
+            {
+                double t = 2 * Math.PI * i / segments;
+                list.Add(new Point(
+                    center.X + radius * Math.Cos(t),
+                    center.Y + radius * Math.Sin(t)));
+            }
+
+            return list;
+        }
+
+        private void ResetCircleDrawState()
+        {
+            _circleCenterImage = default;
+            _circleRadiusImage = 0;
+            if (RoiCircle != null)
+                RoiCircle.Visibility = Visibility.Collapsed;
+        }
+
+        private void UpdateCirclePreview()
+        {
+            if (RoiCircle == null)
+                return;
+
+            if (!IsCircleModeActive())
+            {
+                RoiCircle.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            if (!HasUsableCircleRoi() && !(_isDrawing && _circleRadiusImage > 0))
+            {
+                RoiCircle.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            double r = Math.Max(1, _circleRadiusImage);
+            double d = r * 2;
+            Canvas.SetLeft(RoiCircle, _circleCenterImage.X - r);
+            Canvas.SetTop(RoiCircle, _circleCenterImage.Y - r);
+            RoiCircle.Width = d;
+            RoiCircle.Height = d;
+            RoiCircle.Visibility = Visibility.Visible;
         }
 
         private bool IsRingModeActive() => RbRingMode?.IsChecked == true;
@@ -356,6 +423,7 @@ namespace CalibOperatorCLI_Example
             _hasRoi = false;
             _isDrawing = false;
             _polygonPointsImage.Clear();
+            ResetCircleDrawState();
             ResetRingDrawState();
 
             try
@@ -542,6 +610,13 @@ namespace CalibOperatorCLI_Example
                     RoiRect.Height = 0;
                 }
             }
+            else if (IsCircleModeActive())
+            {
+                _isDrawing = true;
+                _circleCenterImage = imgPt;
+                _circleRadiusImage = 0;
+                UpdateCirclePreview();
+            }
             else if (RbPolygonMode.IsChecked == true)
             {
                 if (_polygonPointsImage.Count >= 3)
@@ -630,9 +705,22 @@ namespace CalibOperatorCLI_Example
                 return;
             }
 
-            if (!_isDrawing || RbRectMode.IsChecked != true) return;
+            if (!_isDrawing) return;
 
             var cur = GetImagePointFromMouse(e);
+
+            if (IsCircleModeActive())
+            {
+                double dx = cur.X - _circleCenterImage.X;
+                double dy = cur.Y - _circleCenterImage.Y;
+                _circleRadiusImage = Math.Sqrt(dx * dx + dy * dy);
+                ClampCircleRadiusToImage();
+                UpdateCirclePreview();
+                return;
+            }
+
+            if (RbRectMode.IsChecked != true) return;
+
             double ix = Math.Min(_drawStartImage.X, cur.X);
             double iy = Math.Min(_drawStartImage.Y, cur.Y);
             double iw = Math.Abs(cur.X - _drawStartImage.X);
@@ -652,10 +740,33 @@ namespace CalibOperatorCLI_Example
         {
             ViewHost.ReleaseMouseCapture();
 
-            if (RbRectMode.IsChecked == true && _isDrawing)
+            if (!_isDrawing) return;
+
+            _isDrawing = false;
+            var cur = GetImagePointFromMouse(e);
+
+            if (IsCircleModeActive())
             {
-                _isDrawing = false;
-                var cur = GetImagePointFromMouse(e);
+                double dx = cur.X - _circleCenterImage.X;
+                double dy = cur.Y - _circleCenterImage.Y;
+                _circleRadiusImage = Math.Sqrt(dx * dx + dy * dy);
+                ClampCircleRadiusToImage();
+
+                if (_circleRadiusImage > 5)
+                {
+                    _hasRoi = true;
+                    RefreshRoiVisuals();
+                    UpdateThresholdPreview();
+                    AppendLog($"圆形ROI: 圆心=({_circleCenterImage.X:F0},{_circleCenterImage.Y:F0}) R={_circleRadiusImage:F0}");
+                }
+                else
+                    ResetCircleDrawState();
+
+                return;
+            }
+
+            if (RbRectMode.IsChecked == true)
+            {
                 double x = Math.Min(_drawStartImage.X, cur.X);
                 double y = Math.Min(_drawStartImage.Y, cur.Y);
                 double w = Math.Abs(cur.X - _drawStartImage.X);
@@ -675,6 +786,19 @@ namespace CalibOperatorCLI_Example
                     RoiRect.Visibility = Visibility.Collapsed;
                 }
             }
+        }
+
+        private void ClampCircleRadiusToImage()
+        {
+            if (_imgWidth <= 0 || _imgHeight <= 0 || _circleRadiusImage <= 0)
+                return;
+
+            double maxR = Math.Min(
+                Math.Min(_circleCenterImage.X, _imgWidth - 1 - _circleCenterImage.X),
+                Math.Min(_circleCenterImage.Y, _imgHeight - 1 - _circleCenterImage.Y));
+            if (maxR < 1)
+                maxR = 1;
+            _circleRadiusImage = Math.Min(_circleRadiusImage, maxR);
         }
 
         // ───────── 右键拖动 ─────────
@@ -763,6 +887,15 @@ namespace CalibOperatorCLI_Example
         // ───────── 撤销多边形点 ─────────
         private void BtnUndoPoint_Click(object sender, RoutedEventArgs e)
         {
+            if (IsCircleModeActive() && HasUsableCircleRoi())
+            {
+                _hasRoi = false;
+                ResetCircleDrawState();
+                UpdateThresholdPreview();
+                AppendLog("圆形 ROI 已清除");
+                return;
+            }
+
             if (IsRingModeActive())
             {
                 _hasRingRoi = false;
@@ -810,6 +943,7 @@ namespace CalibOperatorCLI_Example
             int[] hist = new int[256];
             int roiHits = 0;
             bool useRect = _hasRoi && RbRectMode?.IsChecked == true;
+            bool useCircle = HasUsableCircleRoi();
             bool usePoly = _hasRoi && RbPolygonMode?.IsChecked == true && _polygonPointsImage.Count >= 3;
             bool useRing = HasUsableRingRoi();
 
@@ -821,6 +955,11 @@ namespace CalibOperatorCLI_Example
                     {
                         if (x + 0.5 < _roiRectImage.X || x + 0.5 >= _roiRectImage.Right ||
                             y + 0.5 < _roiRectImage.Y || y + 0.5 >= _roiRectImage.Bottom)
+                            continue;
+                    }
+                    else if (useCircle)
+                    {
+                        if (!IsPointInCircleRoi(x + 0.5, y + 0.5))
                             continue;
                     }
                     else if (usePoly)
@@ -883,6 +1022,8 @@ namespace CalibOperatorCLI_Example
                 if (useRect)
                     return x + 0.5 >= _roiRectImage.X && x + 0.5 < _roiRectImage.Right &&
                            y + 0.5 >= _roiRectImage.Y && y + 0.5 < _roiRectImage.Bottom;
+                if (useCircle)
+                    return IsPointInCircleRoi(x + 0.5, y + 0.5);
                 if (usePoly)
                     return IsPointInPolygon(x + 0.5, y + 0.5, _polygonPointsImage);
                 if (useRing)
@@ -894,7 +1035,7 @@ namespace CalibOperatorCLI_Example
                 _grayPixels, _imgWidth, _imgHeight, thresh, InsideRoi);
             TxtMinGray.Text = minG.ToString(CultureInfo.InvariantCulture);
             TxtMaxGray.Text = maxG.ToString(CultureInfo.InvariantCulture);
-            AppendLog(useRect || usePoly || useRing
+            AppendLog(useRect || useCircle || usePoly || useRing
                 ? $"ROI 内自动阈值: [{minG}, {maxG}]（Otsu={thresh}，样本 {roiHits} 像素）"
                 : $"全图自动阈值: [{minG}, {maxG}]（Otsu={thresh}）");
             UpdateThresholdPreview();
@@ -959,6 +1100,7 @@ namespace CalibOperatorCLI_Example
             int h = _imgHeight;
             int x0 = 0, y0 = 0, x1 = w, y1 = h;
             bool useRect = _hasRoi && RbRectMode?.IsChecked == true;
+            bool useCircle = HasUsableCircleRoi();
             bool usePoly = _hasRoi && RbPolygonMode?.IsChecked == true && _polygonPointsImage.Count >= 3;
             bool useRing = HasUsableRingRoi();
 
@@ -968,6 +1110,13 @@ namespace CalibOperatorCLI_Example
                 y0 = Math.Max(0, (int)Math.Floor(_roiRectImage.Y));
                 x1 = Math.Min(w, (int)Math.Ceiling(_roiRectImage.Right));
                 y1 = Math.Min(h, (int)Math.Ceiling(_roiRectImage.Bottom));
+            }
+            else if (useCircle)
+            {
+                x0 = Math.Max(0, (int)Math.Floor(_circleCenterImage.X - _circleRadiusImage));
+                y0 = Math.Max(0, (int)Math.Floor(_circleCenterImage.Y - _circleRadiusImage));
+                x1 = Math.Min(w, (int)Math.Ceiling(_circleCenterImage.X + _circleRadiusImage));
+                y1 = Math.Min(h, (int)Math.Ceiling(_circleCenterImage.Y + _circleRadiusImage));
             }
             else if (useRing)
             {
@@ -985,6 +1134,8 @@ namespace CalibOperatorCLI_Example
             {
                 for (int x = x0; x < x1; x++)
                 {
+                    if (useCircle && !IsPointInCircleRoi(x + 0.5, y + 0.5))
+                        continue;
                     if (usePoly && !IsPointInPolygon(x + 0.5, y + 0.5, _polygonPointsImage))
                         continue;
                     if (useRing && !IsPointInRingRoi(x + 0.5, y + 0.5))
@@ -1114,6 +1265,10 @@ namespace CalibOperatorCLI_Example
             if (HasUsableRingRoi())
                 return TryBuildRingRegion();
 #endif
+            if (HasUsableCircleRoi())
+                return HalconFlowBridge.GenRegionCircle(
+                    _circleCenterImage.Y, _circleCenterImage.X, _circleRadiusImage);
+
             if (RbPolygonMode.IsChecked == true && _polygonPointsImage.Count >= 3)
             {
                 var pts = _polygonPointsImage.Select(p => new Point2D(p.X, p.Y)).ToList();
@@ -1145,14 +1300,21 @@ namespace CalibOperatorCLI_Example
 #endif
             if (src == HalconShapeModelSourceKind.ImageRectangle)
             {
+                if (HasUsableCircleRoi())
+                    return HalconFlowBridge.GenRegionCircle(
+                        _circleCenterImage.Y, _circleCenterImage.X, _circleRadiusImage);
                 if (!_hasRoi || RbRectMode.IsChecked != true)
-                    throw new InvalidOperationException("矩形灰度模板：请用「矩形」或「环形」模式绘制 ROI。");
+                    throw new InvalidOperationException("矩形灰度模板：请用「矩形」「圆形」或「环形」模式绘制 ROI。");
                 return HalconFlowBridge.GenRegionRectangle(
                     _roiRectImage.Y, _roiRectImage.X, _roiRectImage.Bottom, _roiRectImage.Right);
             }
 
+            if (HasUsableCircleRoi())
+                return HalconFlowBridge.GenRegionCircle(
+                    _circleCenterImage.Y, _circleCenterImage.X, _circleRadiusImage);
+
             if (_polygonPointsImage.Count < 3)
-                throw new InvalidOperationException("多边形灰度模板：请用「多边形」或「环形」模式绘制 ROI。");
+                throw new InvalidOperationException("多边形灰度模板：请用「多边形」「圆形」或「环形」模式绘制 ROI。");
             var pts = _polygonPointsImage.Select(p => new Point2D(p.X, p.Y)).ToList();
             return HalconFlowBridge.GenRegionPolygonFilled(pts);
         }
@@ -1210,6 +1372,9 @@ namespace CalibOperatorCLI_Example
                 };
             }
 #endif
+            if (HasUsableCircleRoi())
+                return PolygonToXldBundle(CircleToPolygonPoints(_circleCenterImage, _circleRadiusImage));
+
             if (_polygonPointsImage.Count >= 3)
                 return PolygonToXldBundle(_polygonPointsImage);
 
@@ -1226,7 +1391,7 @@ namespace CalibOperatorCLI_Example
                 return PolygonToXldBundle(corners);
             }
 
-            throw new InvalidOperationException("多边形 XLD：请绘制多边形/矩形/环形 ROI。");
+            throw new InvalidOperationException("多边形 XLD：请绘制多边形/矩形/圆形/环形 ROI。");
         }
 
         private HalconXldContourBundle? ExtractXldFromWholeImage(double minGray, double maxGray, string genMode, int minPts)

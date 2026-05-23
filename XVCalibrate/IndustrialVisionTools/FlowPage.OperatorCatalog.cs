@@ -182,7 +182,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "camera_snap",
                 DisplayName = "相机取一帧",
-                Description = "从相机抓取单帧图像",
+                Description = "从相机抓取单帧图像。上游算子 Out → After 可排在任意算子之后取图；Out 透传 After 供下游继续。",
                 Category = "输入",
                 Params =
                 {
@@ -190,7 +190,12 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "targetWidth", DisplayName = "目标宽度", DefaultValue = "0", Description = "预留参数，当前未缩放（填0即可）" },
                     new OperatorParam { Name = "targetHeight", DisplayName = "目标高度", DefaultValue = "0", Description = "预留参数，当前未缩放（填0即可）" }
                 },
-                Ports = { new PortDef { Name = "Image", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" } }
+                Ports =
+                {
+                    new PortDef { Name = "After", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Image", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true }
+                }
             },
             new OperatorDef
             {
@@ -1273,7 +1278,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "weld_trajectory_world",
                 DisplayName = "焊接轨迹(世界mm)",
-                Description = "在工件世界坐标系(mm)生成规则点列：轨迹类型用下拉选择；兼容旧流程英文键。接「发送PLC」或后续标定。",
+                Description = "在工件世界坐标系(mm)生成规则点列（含 Z）：轨迹类型用下拉选择；兼容旧流程英文键。输出 Points(XY) 与 Points3D(XYZ)。接「发送PLC」/「发送PLC(每点一点)」或后续标定。",
                 Category = "标定",
                 Params =
                 {
@@ -1296,6 +1301,7 @@ namespace CalibOperatorCLI_Example
                     },
                     new OperatorParam { Name = "centerX", DisplayName = "中心X(mm)", DefaultValue = "0", Description = "世界坐标中心 X" },
                     new OperatorParam { Name = "centerY", DisplayName = "中心Y(mm)", DefaultValue = "0", Description = "世界坐标中心 Y" },
+                    new OperatorParam { Name = "centerZ", DisplayName = "中心Z(mm)", DefaultValue = "0", Description = "所有轨迹点的 Z 高度（基座/world mm）" },
                     new OperatorParam { Name = "stepMm", DisplayName = "步距(mm)", DefaultValue = "10", Description = "九宫/蛇形/矩形边插补、L 形沿边步长" },
                     new OperatorParam { Name = "armMm", DisplayName = "臂长/半长(mm)", DefaultValue = "50", Description = "十字/直线：半边长；矩形：半边宽=armMm、半边高=armMm（与 line 总长=2×armMm）" },
                     new OperatorParam { Name = "legXmm", DisplayName = "L水平腿长(mm)", DefaultValue = "50", Description = "l_shape 水平段总长" },
@@ -1307,7 +1313,8 @@ namespace CalibOperatorCLI_Example
                 },
                 Ports =
                 {
-                    new PortDef { Name = "Points", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
+                    new PortDef { Name = "Points", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Points3D", Direction = PortDirection.Output, DataType = typeof(CalibPoint3D[]), ColorHex = "#00ACC1" }
                 }
             },
             new OperatorDef
@@ -1604,7 +1611,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "plc_read_camera_capture",
                 DisplayName = "PLC 读相机拍照信号",
-                Description = "读取相机开始拍照位（默认 plc_config Registers.CameraCaptureStart = D1800L.bit0，1=PLC 请求拍照）。须先 PLC连接。",
+                Description = "读取相机开始拍照位（默认 D1800L）。可将上游任意算子 Out 连到 After，保证在本算子之后再读 PLC。须先 PLC连接。",
                 Category = "输出",
                 Params =
                 {
@@ -1613,14 +1620,16 @@ namespace CalibOperatorCLI_Example
                 },
                 Ports =
                 {
-                    new PortDef { Name = "Triggered", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#5E35B1" }
+                    new PortDef { Name = "After", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Triggered", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#5E35B1" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true }
                 }
             },
             new OperatorDef
             {
                 TypeId = "plc_wait_camera_capture",
                 DisplayName = "PLC 监听相机拍照",
-                Description = "阻塞轮询直到 D1800L（或 signalRegister）拍照位为 1，再执行下游（如「相机取一帧」）。须先 PLC连接。",
+                Description = "阻塞轮询直到拍照位为 1。上游算子 Out → After 可排在任意算子之后执行；Out 透传 After 数据供下游继续。须先 PLC连接。",
                 Category = "输出",
                 Params =
                 {
@@ -1639,7 +1648,9 @@ namespace CalibOperatorCLI_Example
                 },
                 Ports =
                 {
-                    new PortDef { Name = "Triggered", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#5E35B1" }
+                    new PortDef { Name = "After", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Triggered", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#5E35B1" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true }
                 }
             },
             new OperatorDef
@@ -1833,6 +1844,71 @@ namespace CalibOperatorCLI_Example
                         Description = "仅 separate_batch：每批写完 GVAR 后按拓扑序执行 GvarSent 连线的下游子节点（如 POU 使能、等待焊接完成）；主流程中这些节点不再重复执行",
                         Options = new List<string> { "true", "false" }
                     }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "GvarList", Direction = PortDirection.Input, DataType = typeof(GVAR[]), ColorHex = "#FF9800", IsOptional = true },
+                    new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3", IsOptional = true },
+                    new PortDef { Name = "Points3D", Direction = PortDirection.Input, DataType = typeof(CalibPoint3D[]), ColorHex = "#2196F3", IsOptional = true },
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "GvarSent", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#FF9800", IsOptional = true },
+                    new PortDef { Name = "HostWeldDoneSignaled", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#673AB7", IsOptional = true },
+                    new PortDef { Name = "BatchIndex", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "BatchCount", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "BatchBarId", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "BatchSegmentCount", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FFC107", IsOptional = true }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "send_plc_point",
+                DisplayName = "发送PLC(每点一点)",
+                Description = "与「发送PLC」相同下发逻辑，但从点列生成 GVAR 时：每个输入点写一条 GVAR，p0 与 p1 坐标相同（退化线段/点标记）。n 点 → n 条。",
+                Category = "输出",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "splitByBar",
+                        DisplayName = "按条号下发",
+                        DefaultValue = "none",
+                        Description = "none=整列；break_segment=同条号内成段；separate_batch=按 BarId 分批",
+                        Options = new List<string> { "none", "break_segment", "separate_batch" }
+                    },
+                    new OperatorParam { Name = "expectedBatchCount", DisplayName = "期望批次数", DefaultValue = "0", Description = "仅 separate_batch：不符时写日志警告；0=不检查" },
+                    new OperatorParam
+                    {
+                        Name = "barGvarLayout",
+                        DisplayName = "分批地址布局",
+                        DefaultValue = "overwrite",
+                        Description = "仅 separate_batch：overwrite 或 stack",
+                        Options = new List<string> { "overwrite", "stack" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "usePlcPageGvar",
+                        DisplayName = "使用PLC页GVAR表",
+                        DefaultValue = "false",
+                        Description = "true=下发 PLC 页表格数据",
+                        Options = new List<string> { "true", "false" }
+                    },
+                    new OperatorParam { Name = "gvarStartRegister", DisplayName = "GVAR起始地址", DefaultValue = "D30000", Description = "与 GvarList.StartAddress 一致" },
+                    new OperatorParam { Name = "baseRegister", DisplayName = "起始地址(兼容)", DefaultValue = "", Description = "未填 gvarStartRegister 时使用" },
+                    new OperatorParam { Name = "gvarType", DisplayName = "GVAR类型", DefaultValue = "1", Description = "与 PLC 程序约定一致" },
+                    new OperatorParam { Name = "maxSegmentCount", DisplayName = "最大线段数", DefaultValue = "1024", Description = "超过则中止" },
+                    new OperatorParam
+                    {
+                        Name = "skipCountWrite",
+                        DisplayName = "跳过写线段数",
+                        DefaultValue = "true",
+                        Description = "单次不下写 D800；separate_batch 仍每批写当批段数",
+                        Options = new List<string> { "true", "false" }
+                    },
+                    new OperatorParam { Name = "countRegister", DisplayName = "线段数量寄存器", DefaultValue = "D800", Description = "D800 等" },
+                    new OperatorParam { Name = "weldDoneHostRegister", DisplayName = "下发完成标志", DefaultValue = "D804L", Description = "发完后置位；留空不置位" },
+                    new OperatorParam { Name = "setWeldDoneHostOnSend", DisplayName = "发完自动置位", DefaultValue = "false", Options = new List<string> { "true", "false" } },
+                    new OperatorParam { Name = "setWeldDoneHostAfterAllBatches", DisplayName = "分批全部完成后置位", DefaultValue = "true", Options = new List<string> { "true", "false" } },
+                    new OperatorParam { Name = "runDownstreamPerBatch", DisplayName = "每批执行下游", DefaultValue = "true", Options = new List<string> { "true", "false" } }
                 },
                 Ports =
                 {
@@ -2701,12 +2777,25 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "halcon_shape_match_centers",
                 DisplayName = "HALCON 匹配中心→点列",
-                Description = "将 FindShapeModel 的 Row/Column 转为 Point2D[]（X=列,Y=行），供「显示图像」叠加匹配位置。",
+                Description = "将 FindShapeModel 的 Row/Column 转为 Point2D[]（X=列,Y=行），并按参数排序。默认 yx=先行后列（与九点世界坐标行优先一致）；接阵列过滤时可设 grid 并按 GridRow/GridCol 排序。",
                 Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "sortMode",
+                        DisplayName = "排序方式",
+                        DefaultValue = "yx",
+                        Description = "yx=按图像行Y再列X；xy=先列X再行Y；grid=按 GridRow/GridCol（须连接）；none=保持输入顺序",
+                        Options = new List<string> { "yx", "xy", "grid", "none" }
+                    }
+                },
                 Ports =
                 {
                     new PortDef { Name = "Row", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "GridRow", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#8BC34A", IsOptional = true },
+                    new PortDef { Name = "GridCol", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#CDDC39", IsOptional = true },
                     new PortDef { Name = "Points", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
                 }
             },

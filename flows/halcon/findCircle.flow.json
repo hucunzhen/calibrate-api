@@ -1,0 +1,88 @@
+{
+  "Nodes": [
+    {
+      "Id": "5138dbc7-998f-405b-92f5-bc9dac1653fd",
+      "TypeId": "composite_bind_in",
+      "X": 80,
+      "Y": 120,
+      "Params": {
+        "externalPort": "In"
+      }
+    },
+    {
+      "Id": "7633d2db-e5b8-40f5-afb3-d962d116626e",
+      "TypeId": "halcon_load_shape_model",
+      "X": 280,
+      "Y": 320,
+      "Params": {
+        "filePath": "shape_model_circle.shm"
+      }
+    },
+    {
+      "Id": "654f727f-0158-404d-8913-3a514127cb25",
+      "TypeId": "halcon_find_shape_model",
+      "X": 520,
+      "Y": 120,
+      "Params": {
+        "angleStart": "-30",
+        "angleExtent": "60",
+        "minScore": "0.87",
+        "numMatches": "0",
+        "maxOverlap": "0.5",
+        "subPixel": "interpolation",
+        "numLevels": "0",
+        "greediness": "0.75"
+      }
+    },
+    {
+      "Id": "b9d5f2a3-4c6e-5b0f-ad2e-3f8a7b6c5d4e",
+      "TypeId": "halcon_shape_match_centers",
+      "X": 1000,
+      "Y": 120,
+      "Params": {
+        "sortMode": "grid"
+      }
+    },
+    {
+      "Id": "f1950930-0576-4c9a-b96b-9a9b4a567192",
+      "TypeId": "composite_bind_out",
+      "X": 1240,
+      "Y": 120,
+      "Params": {
+        "externalPort": "Out"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "5138dbc7-998f-405b-92f5-bc9dac1653fd",
+      "FromPort": "Out",
+      "ToNodeId": "654f727f-0158-404d-8913-3a514127cb25",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "7633d2db-e5b8-40f5-afb3-d962d116626e",
+      "FromPort": "ModelId",
+      "ToNodeId": "654f727f-0158-404d-8913-3a514127cb25",
+      "ToPort": "ModelId"
+    },
+    {
+      "FromNodeId": "b9d5f2a3-4c6e-5b0f-ad2e-3f8a7b6c5d4e",
+      "FromPort": "Points",
+      "ToNodeId": "f1950930-0576-4c9a-b96b-9a9b4a567192",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "654f727f-0158-404d-8913-3a514127cb25",
+      "FromPort": "Row",
+      "ToNodeId": "b9d5f2a3-4c6e-5b0f-ad2e-3f8a7b6c5d4e",
+      "ToPort": "Row"
+    },
+    {
+      "FromNodeId": "654f727f-0158-404d-8913-3a514127cb25",
+      "FromPort": "Column",
+      "ToNodeId": "b9d5f2a3-4c6e-5b0f-ad2e-3f8a7b6c5d4e",
+      "ToPort": "Column"
+    }
+  ]
+}

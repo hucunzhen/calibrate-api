@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using CalibOperatorPInvoke;
 
 namespace CalibOperatorCLI_Example
@@ -91,6 +92,26 @@ namespace CalibOperatorCLI_Example
                 "grid_snake" => BuildGridSnake(centerX, centerY, stepMm, gridCols, gridRows),
                 _ => throw new InvalidOperationException($"焊接轨迹: 未识别的 pattern 键「{key}」")
             };
+        }
+
+        /// <summary>世界 XY 轨迹 + 统一 Z，输出基座 3D 点列。</summary>
+        private static CalibPoint3D[] GenerateWeldTrajectoryWorld3D(
+            string patternRaw,
+            double centerX,
+            double centerY,
+            double centerZ,
+            double stepMm,
+            double armMm,
+            double legXmm,
+            double legYmm,
+            double angleDeg,
+            int gridCols,
+            int gridRows,
+            int samplesPerSegment)
+        {
+            Point2D[] xy = GenerateWeldTrajectoryWorld(
+                patternRaw, centerX, centerY, stepMm, armMm, legXmm, legYmm, angleDeg, gridCols, gridRows, samplesPerSegment);
+            return xy.Select(p => new CalibPoint3D(p.X, p.Y, centerZ)).ToArray();
         }
 
         private static Point2D[] BuildNineGrid(double cx, double cy, double step, int cols, int rows)

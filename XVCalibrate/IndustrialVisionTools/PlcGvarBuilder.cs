@@ -6,6 +6,13 @@ using CalibOperatorPInvoke;
 
 namespace CalibOperatorCLI_Example
 {
+    /// <summary>点列生成 GVAR 的方式：线段（p0→p1，n点→n-1条）或每点退化为一点（p0=p1，n点→n条）。</summary>
+    internal enum PlcGvarSegmentMode
+    {
+        Line,
+        PointDegenerate
+    }
+
     internal static class PlcGvarBuilder
     {
         /// <summary>折线点列 → 线段 GVAR（n 点 → n-1 段；与 PLC 页手工填 p0→p1 一致）。</summary>
@@ -62,6 +69,40 @@ namespace CalibOperatorCLI_Example
                 z0 = z0, z1 = z1
             };
 
+        private static GVAR MakePointGvar(short gvarType, float x, float y, float z)
+            => MakeLineGvar(gvarType, x, y, z, x, y, z);
+
+        /// <summary>点列每点一个 GVAR，p0 与 p1 相同（退化线段）。n 点 → n 条。</summary>
+        public static GVAR[] BuildPointGvarsFromPolyline(CalibPoint3D[] pts3, short gvarType, string? _ = null)
+        {
+            if (pts3 == null || pts3.Length == 0)
+                return Array.Empty<GVAR>();
+
+            var items = new GVAR[pts3.Length];
+            for (int i = 0; i < pts3.Length; i++)
+            {
+                float x = (float)pts3[i].X, y = (float)pts3[i].Y, z = (float)pts3[i].Z;
+                items[i] = MakePointGvar(gvarType, x, y, z);
+            }
+
+            return items;
+        }
+
+        public static GVAR[] BuildPointGvarsFromPolyline(Point2D[] pts2, short gvarType, string? _ = null)
+        {
+            if (pts2 == null || pts2.Length == 0)
+                return Array.Empty<GVAR>();
+
+            var items = new GVAR[pts2.Length];
+            for (int i = 0; i < pts2.Length; i++)
+            {
+                float x = (float)pts2[i].X, y = (float)pts2[i].Y;
+                items[i] = MakePointGvar(gvarType, x, y, 0);
+            }
+
+            return items;
+        }
+
         /// <summary>同条号内才生成线段；条号变化处不连跨条 GVAR（用于 splitByBar=break_segment）。</summary>
         public static GVAR[] BuildSegmentGvarsRespectingBarIds(CalibPoint3D[] pts3, int[]? barIds, short gvarType)
         {
@@ -89,6 +130,19 @@ namespace CalibOperatorCLI_Example
             return items.ToArray();
         }
 
+        /// <summary>每点一个退化点 GVAR（p0=p1）；与 break_segment 线段模式不同，不按相邻点成段过滤。</summary>
+        public static GVAR[] BuildPointGvarsRespectingBarIds(CalibPoint3D[] pts3, int[]? barIds, short gvarType, string? _ = null)
+            => BuildPointGvarsFromPolyline(pts3, gvarType);
+
+        private static GVAR[] BuildGvarsFromPolylineRun(
+            CalibPoint3D[] run,
+            short gvarType,
+            PlcGvarSegmentMode mode,
+            string pointAt)
+            => mode == PlcGvarSegmentMode.PointDegenerate
+                ? BuildPointGvarsFromPolyline(run, gvarType, pointAt)
+                : BuildSegmentGvarsFromPolyline(run, gvarType);
+
         /// <summary>
         /// separate_batch：每个不同的逐点 BarId（= GroupBarIds / 焊道条号）写一批 PLC。
         /// 同一条号在点列中若分多段出现，合并为同一批（各段各自生成 GVAR 线段，段与段之间不连线）。
@@ -98,6 +152,21 @@ namespace CalibOperatorCLI_Example
             CalibPoint3D[] pts3,
             int[] barIds,
             short gvarType)
+            => BuildGvarBatchesByBarId(pts3, barIds, gvarType, PlcGvarSegmentMode.Line, "mid");
+
+        public static List<(int BarId, GVAR[] Gvars)> BuildPointGvarBatchesByBarId(
+            CalibPoint3D[] pts3,
+            int[] barIds,
+            short gvarType,
+            string pointAt = "mid")
+            => BuildGvarBatchesByBarId(pts3, barIds, gvarType, PlcGvarSegmentMode.PointDegenerate, pointAt);
+
+        private static List<(int BarId, GVAR[] Gvars)> BuildGvarBatchesByBarId(
+            CalibPoint3D[] pts3,
+            int[] barIds,
+            short gvarType,
+            PlcGvarSegmentMode mode,
+            string pointAt)
         {
             var batches = new List<(int BarId, GVAR[] Gvars)>();
             if (pts3 == null || pts3.Length == 0 || barIds == null || barIds.Length != pts3.Length)
@@ -123,7 +192,7 @@ namespace CalibOperatorCLI_Example
                             int len = i - start;
                             var run = new CalibPoint3D[len];
                             Array.Copy(pts3, start, run, 0, len);
-                            gvars.AddRange(BuildSegmentGvarsFromPolyline(run, gvarType));
+                            gvars.AddRange(BuildGvarsFromPolylineRun(run, gvarType, mode, pointAt));
                         }
 
                         start = i;
@@ -148,7 +217,7 @@ namespace CalibOperatorCLI_Example
             return null;
         }
 
-        /// <summary>解析 send_plc 输入：优先 GVAR 列表 / PLC 页草稿，再 Points3D/Points。</summary>
+        /// <summary>解析 send_plc / send_plc_point 输入：优先 GVAR 列表 / PLC 页草稿，再 Points3D/Points。</summary>
         public static bool TryResolveSendPlcGvar(
             Dictionary<string, object?> inputs,
             string? usePlcPageGvarParam,
@@ -157,8 +226,13 @@ namespace CalibOperatorCLI_Example
             out GVAR[] gvarItems,
             out List<(int BarId, GVAR[] Gvars)>? barBatches,
             out string sourceTag,
-            out string? diagnostic)
+            out string? diagnostic,
+            PlcGvarSegmentMode segmentMode = PlcGvarSegmentMode.Line,
+            string? pointAt = "mid")
         {
+            bool asPoint = segmentMode == PlcGvarSegmentMode.PointDegenerate;
+            string ptAt = pointAt ?? "mid";
+            string segLabel = asPoint ? "点GVAR(p0=p1)" : "段GVAR";
             barBatches = null;
             gvarItems = Array.Empty<GVAR>();
             sourceTag = "";
@@ -207,20 +281,26 @@ namespace CalibOperatorCLI_Example
                         return false;
                     }
 
-                    barBatches = BuildSegmentGvarBatchesByBarId(pts3, barIds, defaultGvarType);
+                    barBatches = asPoint
+                        ? BuildPointGvarBatchesByBarId(pts3, barIds, defaultGvarType, ptAt)
+                        : BuildSegmentGvarBatchesByBarId(pts3, barIds, defaultGvarType);
                     int total = barBatches.Sum(b => b.Gvars.Length);
                     int uniqBar = barIds.Distinct().Count();
                     gvarItems = Array.Empty<GVAR>();
                     sourceTag =
-                        $"Points3D×{pts3.Length} 焊道条号(BarId)种类={uniqBar}→{barBatches.Count}批/共{total}段GVAR";
+                        $"Points3D×{pts3.Length} 焊道条号(BarId)种类={uniqBar}→{barBatches.Count}批/共{total}{segLabel}";
                     return barBatches.Count > 0;
                 }
 
                 if (split == "break_segment" && barIds != null && barIds.Length == pts3.Length)
-                    gvarItems = BuildSegmentGvarsRespectingBarIds(pts3, barIds, defaultGvarType);
+                    gvarItems = asPoint
+                        ? BuildPointGvarsRespectingBarIds(pts3, barIds, defaultGvarType, ptAt)
+                        : BuildSegmentGvarsRespectingBarIds(pts3, barIds, defaultGvarType);
                 else
-                    gvarItems = BuildSegmentGvarsFromPolyline(pts3, defaultGvarType);
-                sourceTag = $"Points3D×{pts3.Length}→{gvarItems.Length}段GVAR";
+                    gvarItems = asPoint
+                        ? BuildPointGvarsFromPolyline(pts3, defaultGvarType, ptAt)
+                        : BuildSegmentGvarsFromPolyline(pts3, defaultGvarType);
+                sourceTag = $"Points3D×{pts3.Length}→{gvarItems.Length}{segLabel}";
                 return true;
             }
 
@@ -245,21 +325,27 @@ namespace CalibOperatorCLI_Example
                     }
 
                     var pts3from2 = pts2.Select(p => new CalibPoint3D(p.X, p.Y, 0)).ToArray();
-                    barBatches = BuildSegmentGvarBatchesByBarId(pts3from2, barIds, defaultGvarType);
+                    barBatches = asPoint
+                        ? BuildPointGvarBatchesByBarId(pts3from2, barIds, defaultGvarType, ptAt)
+                        : BuildSegmentGvarBatchesByBarId(pts3from2, barIds, defaultGvarType);
                     int total = barBatches.Sum(b => b.Gvars.Length);
                     gvarItems = Array.Empty<GVAR>();
-                    sourceTag = $"Points×{pts2.Length}→{barBatches.Count}条BarId批/共{total}段GVAR";
+                    sourceTag = $"Points×{pts2.Length}→{barBatches.Count}条BarId批/共{total}{segLabel}";
                     return barBatches.Count > 0;
                 }
 
                 if (split == "break_segment" && barIds != null && barIds.Length == pts2.Length)
                 {
                     var pts3from2 = pts2.Select(p => new CalibPoint3D(p.X, p.Y, 0)).ToArray();
-                    gvarItems = BuildSegmentGvarsRespectingBarIds(pts3from2, barIds, defaultGvarType);
+                    gvarItems = asPoint
+                        ? BuildPointGvarsRespectingBarIds(pts3from2, barIds, defaultGvarType, ptAt)
+                        : BuildSegmentGvarsRespectingBarIds(pts3from2, barIds, defaultGvarType);
                 }
                 else
-                    gvarItems = BuildSegmentGvarsFromPolyline(pts2, defaultGvarType);
-                sourceTag = $"Points×{pts2.Length}→{gvarItems.Length}段GVAR";
+                    gvarItems = asPoint
+                        ? BuildPointGvarsFromPolyline(pts2, defaultGvarType, ptAt)
+                        : BuildSegmentGvarsFromPolyline(pts2, defaultGvarType);
+                sourceTag = $"Points×{pts2.Length}→{gvarItems.Length}{segLabel}";
                 return true;
             }
 

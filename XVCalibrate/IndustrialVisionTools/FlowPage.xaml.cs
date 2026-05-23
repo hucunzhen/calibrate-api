@@ -955,6 +955,54 @@ namespace CalibOperatorCLI_Example
             return false;
         }
 
+        /// <summary>匹配中心点列排序：返回原下标 permute，pts[k]=原 (cols[order[k]], rows[order[k]])。</summary>
+        private static int[] SortShapeMatchCenterIndices(
+            int n,
+            double[] rows,
+            double[] cols,
+            int[]? gridRow,
+            int[]? gridCol,
+            string sortMode)
+        {
+            var order = Enumerable.Range(0, n).ToArray();
+            if (n <= 1 || sortMode is "none" or "preserve")
+                return order;
+
+            bool canGrid = sortMode is "grid" or "grid_row_col"
+                && gridRow != null && gridCol != null
+                && gridRow.Length >= n && gridCol.Length >= n
+                && gridRow.Take(n).All(r => r >= 0)
+                && gridCol.Take(n).All(c => c >= 0);
+
+            if (canGrid)
+            {
+                Array.Sort(order, (a, b) =>
+                {
+                    int cmp = gridRow![a].CompareTo(gridRow[b]);
+                    return cmp != 0 ? cmp : gridCol![a].CompareTo(gridCol[b]);
+                });
+                return order;
+            }
+
+            if (sortMode is "xy" or "col_row" or "x_then_y")
+            {
+                Array.Sort(order, (a, b) =>
+                {
+                    int cmp = cols[a].CompareTo(cols[b]);
+                    return cmp != 0 ? cmp : rows[a].CompareTo(rows[b]);
+                });
+                return order;
+            }
+
+            // yx / row_col / row_major：先行(Y)后列(X)，与九点世界坐标默认顺序一致
+            Array.Sort(order, (a, b) =>
+            {
+                int cmp = rows[a].CompareTo(rows[b]);
+                return cmp != 0 ? cmp : cols[a].CompareTo(cols[b]);
+            });
+            return order;
+        }
+
         // ================================================================
         // 连线管理
         // ================================================================
@@ -5999,7 +6047,11 @@ namespace CalibOperatorCLI_Example
                         int targetHeight = int.TryParse(node.Params.GetValueOrDefault("targetHeight"), out var th) ? th : 0;
                         var img = GrabOneCameraFrameOrThrow(deviceIndex, targetWidth, targetHeight);
                         node.Outputs["Image"] = img;
-                        node.ResultSummary = $"Snap OK: dev={deviceIndex}";
+                        if (inputs.TryGetValue("After", out var afterSnap))
+                            node.Outputs["Out"] = afterSnap;
+                        node.ResultSummary = inputs.ContainsKey("After")
+                            ? $"Snap OK: dev={deviceIndex}（After 上游已执行）"
+                            : $"Snap OK: dev={deviceIndex}";
                         break;
                     }
 
@@ -6034,6 +6086,7 @@ namespace CalibOperatorCLI_Example
                         string pattern = node.Params.GetValueOrDefault("pattern", "九宫格 (3×3)") ?? "九宫格 (3×3)";
                         double cx = double.TryParse(node.Params.GetValueOrDefault("centerX"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var tcx) ? tcx : 0.0;
                         double cy = double.TryParse(node.Params.GetValueOrDefault("centerY"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var tcy) ? tcy : 0.0;
+                        double cz = double.TryParse(node.Params.GetValueOrDefault("centerZ"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var tcz) ? tcz : 0.0;
                         double step = double.TryParse(node.Params.GetValueOrDefault("stepMm"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ts) ? ts : 10.0;
                         double arm = double.TryParse(node.Params.GetValueOrDefault("armMm"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ta) ? ta : 50.0;
                         double legX = double.TryParse(node.Params.GetValueOrDefault("legXmm"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var lx) ? lx : 50.0;
@@ -6044,8 +6097,10 @@ namespace CalibOperatorCLI_Example
                         int samp = int.TryParse(node.Params.GetValueOrDefault("samplesPerSegment"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var sp) ? sp : 1;
 
                         var coords = GenerateWeldTrajectoryWorld(pattern, cx, cy, step, arm, legX, legY, ang, gcols, grows, samp);
+                        var coords3 = GenerateWeldTrajectoryWorld3D(pattern, cx, cy, cz, step, arm, legX, legY, ang, gcols, grows, samp);
                         node.Outputs["Points"] = coords;
-                        node.ResultSummary = $"{pattern.Trim()}: {coords.Length} pts (center {cx:G},{cy:G})";
+                        node.Outputs["Points3D"] = coords3;
+                        node.ResultSummary = $"{pattern.Trim()}: {coords.Length} pts (center {cx:G},{cy:G},{cz:G} mm)";
                         break;
                     }
 
@@ -8606,6 +8661,8 @@ namespace CalibOperatorCLI_Example
                         int bit = int.TryParse(node.Params.GetValueOrDefault("bit"), out var bi) ? bi : 0;
                         bool triggered = FlowReadPlcBit(sigReg, bit);
                         node.Outputs["Triggered"] = triggered;
+                        if (inputs.TryGetValue("After", out var afterRead))
+                            node.Outputs["Out"] = afterRead;
                         node.ResultSummary = $"相机拍照信号 {sigReg}.bit{bit} = {(triggered ? "1" : "0")}";
                         break;
                     }
@@ -8635,6 +8692,8 @@ namespace CalibOperatorCLI_Example
                             FlowWritePlcBit(sigReg, bit, false);
 
                         node.Outputs["Triggered"] = true;
+                        if (inputs.TryGetValue("After", out var afterWait))
+                            node.Outputs["Out"] = afterWait;
                         node.ResultSummary = $"已收到拍照信号 {sigReg}.bit{bit}{(clearAfter ? "，已清 0" : "")}";
                         break;
                     }
@@ -8735,7 +8794,10 @@ namespace CalibOperatorCLI_Example
                     }
 
                     case "send_plc":
+                    case "send_plc_point":
                     {
+                        bool sendAsPoint = node.Def.TypeId == "send_plc_point";
+                        string sendPlcLogTag = sendAsPoint ? "send_plc_point" : "send_plc";
                         short gvarType = short.TryParse(
                             node.Params.GetValueOrDefault("gvarType"),
                             System.Globalization.NumberStyles.Integer,
@@ -8744,6 +8806,9 @@ namespace CalibOperatorCLI_Example
                             ? gt : (short)1; // 默认 1=线段
 
                         string splitByBar = (node.Params.GetValueOrDefault("splitByBar", "none") ?? "none").Trim();
+                        var segmentMode = sendAsPoint
+                            ? PlcGvarSegmentMode.PointDegenerate
+                            : PlcGvarSegmentMode.Line;
                         if (!PlcGvarBuilder.TryResolveSendPlcGvar(
                                 inputs,
                                 node.Params.GetValueOrDefault("usePlcPageGvar"),
@@ -8752,9 +8817,11 @@ namespace CalibOperatorCLI_Example
                                 out GVAR[] gvarItems,
                                 out List<(int BarId, GVAR[] Gvars)>? barBatches,
                                 out string gvarSource,
-                                out string? resolveDiag))
+                                out string? resolveDiag,
+                                segmentMode))
                         {
-                            throw new InvalidOperationException($"发送PLC: {resolveDiag}");
+                            throw new InvalidOperationException(
+                                $"{(sendAsPoint ? "发送PLC(每点一点)" : "发送PLC")}: {resolveDiag}");
                         }
 
                         if (string.Equals(splitByBar, "separate_batch", StringComparison.OrdinalIgnoreCase)
@@ -8772,11 +8839,11 @@ namespace CalibOperatorCLI_Example
                                 ", ",
                                 barBatches.Select(b => $"BarId={b.BarId}×{b.Gvars.Length}段"));
                             AppendLog(
-                                $"[send_plc] separate_batch: {barBatches.Count} 批（{batchBarSummary}）| {gvarSource}");
+                                $"[{sendPlcLogTag}] separate_batch: {barBatches.Count} 批（{batchBarSummary}）| {gvarSource}");
                             if (expectedBatches > 0 && barBatches.Count != expectedBatches)
                             {
                                 AppendLog(
-                                    $"[send_plc] 警告: 期望 {expectedBatches} 批，实际 {barBatches.Count} 批。"
+                                    $"[{sendPlcLogTag}] 警告: 期望 {expectedBatches} 批，实际 {barBatches.Count} 批。"
                                     + " 批次数=逐点 BarId 种类数(每条焊道一批)，与找形个数无关；须用 GroupBarIds→OutBarIds。"
                                     + " 若复合内落格为 16/16 仍不足 16 批，说明 BarIds 未传到 send_plc 或条号不是 0～15。");
                                 AppendCompositePipelineHintsForBatchMismatch(
@@ -8956,7 +9023,7 @@ namespace CalibOperatorCLI_Example
                             dispatchStats += $" 下游×{downN}节点/批";
                         }
 
-                        AppendLog($"[send_plc] {dispatchStats} | {SendPlcBatchPlanner.SummarizePlan(plan, hostFlagReg)} | src={gvarSource}");
+                        AppendLog($"[{sendPlcLogTag}] {dispatchStats} | {SendPlcBatchPlanner.SummarizePlan(plan, hostFlagReg)} | src={gvarSource}");
                         if (hostSignaled)
                             resultMsg += $", 全部批次下发完成→{hostFlagReg}=1";
                         resultMsg += $" | {dispatchStats}";
@@ -9569,12 +9636,24 @@ namespace CalibOperatorCLI_Example
                     {
                         double[] rows = inputs.TryGetValue("Row", out var rObj) && rObj is double[] ra ? ra : Array.Empty<double>();
                         double[] cols = inputs.TryGetValue("Column", out var cObj) && cObj is double[] ca ? ca : Array.Empty<double>();
+                        int[]? gridRow = inputs.TryGetValue("GridRow", out var grObj) && grObj is int[] gra ? gra : null;
+                        int[]? gridCol = inputs.TryGetValue("GridCol", out var gcObj) && gcObj is int[] gca ? gca : null;
                         int n = Math.Min(rows.Length, cols.Length);
+                        string sortMode = (node.Params.GetValueOrDefault("sortMode", "yx") ?? "yx").Trim().ToLowerInvariant();
+
+                        var order = SortShapeMatchCenterIndices(n, rows, cols, gridRow, gridCol, sortMode);
+
                         var pts = new Point2D[n];
-                        for (int i = 0; i < n; i++)
-                            pts[i] = new Point2D(cols[i], rows[i]);
+                        for (int k = 0; k < n; k++)
+                        {
+                            int i = order[k];
+                            pts[k] = new Point2D(cols[i], rows[i]);
+                        }
+
                         node.Outputs["Points"] = pts;
-                        node.ResultSummary = n == 0 ? "无匹配中心" : $"匹配中心 {n} 个点";
+                        node.ResultSummary = n == 0
+                            ? "无匹配中心"
+                            : $"匹配中心 {n} 点（排序 {sortMode}）";
                         break;
                     }
 

@@ -136,6 +136,8 @@
                                     <Button x:Name="BtnManual" Content="手动模式" Width="110" Height="32" Margin="0,0,8,8" Click="BtnManual_Click" Foreground="#6A1B9A" FontWeight="SemiBold"/>
                                     <Button x:Name="BtnAuto" Content="自动模式" Width="110" Height="32" Margin="0,0,8,8" Click="BtnAuto_Click" Foreground="#2E7D32" FontWeight="SemiBold"/>
                                     <TextBlock x:Name="TxtModeStatus" Text="---" VerticalAlignment="Center" Margin="4,0,16,8" Foreground="#546E7A" FontFamily="Consolas" FontWeight="Bold"/>
+                                    <Button x:Name="BtnCalibrationMode" Content="标定模式" Width="110" Height="32" Margin="0,0,8,8" Click="BtnCalibrationMode_Click" Foreground="#4527A0" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="TxtCalibrationModeStatus" Text="---" VerticalAlignment="Center" Margin="4,0,16,8" Foreground="#546E7A" FontFamily="Consolas" FontWeight="Bold"/>
                                     <Button x:Name="BtnStart" Content="启动" Width="100" Height="32" Margin="0,0,8,8" Click="BtnStart_Click" Foreground="#E65100" FontWeight="SemiBold"/>
                                     <Button x:Name="BtnStop" Content="停止" Width="100" Height="32" Margin="0,0,8,8" Click="BtnStop_Click" Foreground="#455A64" FontWeight="SemiBold"/>
                                     <TextBlock Text="运行" VerticalAlignment="Center" Foreground="#78909C" Margin="0,0,4,8"/>
@@ -158,9 +160,9 @@
                                                 <TextBlock x:Name="TxtXRotateStatus" Text="---" VerticalAlignment="Center" Margin="4,0,12,0" Foreground="#90A4AE" FontFamily="Consolas"/>
                                                 <Button x:Name="BtnXZero" Content="回零" Width="72" Height="28" Margin="0,0,6,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture" Foreground="#D32F2F" FontWeight="SemiBold"/>
                                                 <TextBlock x:Name="LblXEnable" Text="使能" VerticalAlignment="Center" Foreground="#D32F2F" Margin="8,0,4,0"/>
-                                                <Button x:Name="BtnXEnable" Content="ON" Width="52" Height="26" Margin="0,0,4,0" Click="BtnXEnable_Click"/>
-                                                <Button x:Name="BtnXDisable" Content="OFF" Width="52" Height="26" Margin="0,0,4,0" Click="BtnXDisable_Click" Foreground="#455A64"/>
-                                                <TextBlock x:Name="TxtXEnableStatus" Text="OFF" VerticalAlignment="Center" Margin="4,0,12,0" FontFamily="Consolas" Foreground="#78909C"/>
+                                                <Button x:Name="BtnXEnable" Content="开" Width="52" Height="26" Margin="0,0,4,0" Click="BtnXEnable_Click"/>
+                                                <Button x:Name="BtnXDisable" Content="关" Width="52" Height="26" Margin="0,0,4,0" Click="BtnXDisable_Click" Foreground="#455A64"/>
+                                                <TextBlock x:Name="TxtXEnableStatus" Text="关" VerticalAlignment="Center" Margin="4,0,12,0" FontFamily="Consolas" Foreground="#78909C"/>
                                                 <TextBlock x:Name="LblXAlarm" Text="报警" VerticalAlignment="Center" Foreground="#D32F2F" Margin="0,0,4,0"/>
                                                 <Button x:Name="BtnXAlarmClear" Content="清除" Width="52" Height="26" Click="BtnXAlarmClear_Click" Foreground="#D32F2F" FontWeight="SemiBold"/>
                                             </WrapPanel>
@@ -184,9 +186,9 @@
                                                 <TextBlock x:Name="TxtYRotateStatus" Text="---" VerticalAlignment="Center" Margin="4,0,12,0" Foreground="#90A4AE" FontFamily="Consolas"/>
                                                 <Button x:Name="BtnYZero" Content="回零" Width="72" Height="28" Margin="0,0,6,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture" Foreground="#D32F2F" FontWeight="SemiBold"/>
                                                 <TextBlock x:Name="LblYEnable" Text="使能" VerticalAlignment="Center" Foreground="#1976D2" Margin="8,0,4,0"/>
-                                                <Button x:Name="BtnYEnable" Content="ON" Width="52" Height="26" Margin="0,0,4,0" Click="BtnYEnable_Click"/>
-                                                <Button x:Name="BtnYDisable" Content="OFF" Width="52" Height="26" Margin="0,0,4,0" Click="BtnYDisable_Click" Foreground="#455A64"/>
-                                                <TextBlock x:Name="TxtYEnableStatus" Text="OFF" VerticalAlignment="Center" Margin="4,0,12,0" FontFamily="Consolas" Foreground="#78909C"/>
+                                                <Button x:Name="BtnYEnable" Content="开" Width="52" Height="26" Margin="0,0,4,0" Click="BtnYEnable_Click"/>
+                                                <Button x:Name="BtnYDisable" Content="关" Width="52" Height="26" Margin="0,0,4,0" Click="BtnYDisable_Click" Foreground="#455A64"/>
+                                                <TextBlock x:Name="TxtYEnableStatus" Text="关" VerticalAlignment="Center" Margin="4,0,12,0" FontFamily="Consolas" Foreground="#78909C"/>
                                                 <TextBlock x:Name="LblYAlarm" Text="报警" VerticalAlignment="Center" Foreground="#1976D2" Margin="0,0,4,0"/>
                                                 <Button x:Name="BtnYAlarmClear" Content="清除" Width="52" Height="26" Click="BtnYAlarmClear_Click" Foreground="#D32F2F" FontWeight="SemiBold"/>
                                             </WrapPanel>
@@ -210,9 +212,9 @@
                                                 <TextBlock x:Name="TxtZRotateStatus" Text="---" VerticalAlignment="Center" Margin="4,0,12,0" Foreground="#90A4AE" FontFamily="Consolas"/>
                                                 <Button x:Name="BtnZZero" Content="回零" Width="72" Height="28" Margin="0,0,6,0" PreviewMouseDown="HoldButton_PreviewMouseDown" PreviewMouseUp="HoldButton_PreviewMouseUp" LostMouseCapture="HoldButton_LostMouseCapture" Foreground="#D32F2F" FontWeight="SemiBold"/>
                                                 <TextBlock x:Name="LblZEnable" Text="使能" VerticalAlignment="Center" Foreground="#388E3C" Margin="8,0,4,0"/>
-                                                <Button x:Name="BtnZEnable" Content="ON" Width="52" Height="26" Margin="0,0,4,0" Click="BtnZEnable_Click"/>
-                                                <Button x:Name="BtnZDisable" Content="OFF" Width="52" Height="26" Margin="0,0,4,0" Click="BtnZDisable_Click" Foreground="#455A64"/>
-                                                <TextBlock x:Name="TxtZEnableStatus" Text="OFF" VerticalAlignment="Center" Margin="4,0,12,0" FontFamily="Consolas" Foreground="#78909C"/>
+                                                <Button x:Name="BtnZEnable" Content="开" Width="52" Height="26" Margin="0,0,4,0" Click="BtnZEnable_Click"/>
+                                                <Button x:Name="BtnZDisable" Content="关" Width="52" Height="26" Margin="0,0,4,0" Click="BtnZDisable_Click" Foreground="#455A64"/>
+                                                <TextBlock x:Name="TxtZEnableStatus" Text="关" VerticalAlignment="Center" Margin="4,0,12,0" FontFamily="Consolas" Foreground="#78909C"/>
                                                 <TextBlock x:Name="LblZAlarm" Text="报警" VerticalAlignment="Center" Foreground="#388E3C" Margin="0,0,4,0"/>
                                                 <Button x:Name="BtnZAlarmClear" Content="清除" Width="52" Height="26" Click="BtnZAlarmClear_Click" Foreground="#D32F2F" FontWeight="SemiBold"/>
                                             </WrapPanel>
@@ -232,18 +234,16 @@
                                     <TextBox x:Name="TxtLaserPower" Width="72" Height="26" VerticalContentAlignment="Center" Margin="0,0,4,8"/>
                                     <Button x:Name="BtnReadLaserPower" Content="读" Width="36" Height="26" Margin="0,0,4,8" Click="BtnReadLaserPower_Click"/>
                                     <Button x:Name="BtnWriteLaserPower" Content="写" Width="36" Height="26" Margin="0,0,12,8" Click="BtnWriteLaserPower_Click" Foreground="#E65100" FontWeight="SemiBold"/>
-                                    <TextBlock Text="激光" VerticalAlignment="Center" Foreground="#666" Margin="0,0,4,8"/>
-                                    <Button x:Name="BtnLaserEnable" Content="ON" Width="44" Height="26" Margin="0,0,4,8" Click="BtnLaserEnable_Click" Foreground="#E65100"/>
-                                    <Button x:Name="BtnLaserDisable" Content="OFF" Width="44" Height="26" Margin="0,0,4,8" Click="BtnLaserDisable_Click"/>
-                                    <TextBlock x:Name="TxtLaserEnableStatus" Text="OFF" VerticalAlignment="Center" Margin="0,0,12,8" FontFamily="Consolas"/>
+                                    <Button x:Name="BtnLaserToggle" Content="激光" Width="56" Height="26" Margin="0,0,4,8" Click="BtnLaserToggle_Click" Foreground="#E65100" FontWeight="SemiBold"
+                                            ToolTip="点击切换激光使能开/关"/>
+                                    <TextBlock x:Name="TxtLaserEnableStatus" Text="关" VerticalAlignment="Center" Margin="0,0,12,8" FontFamily="Consolas"/>
                                     <TextBlock Text="红光" VerticalAlignment="Center" Foreground="#C62828" Margin="0,0,4,8"/>
-                                    <Button x:Name="BtnRedLightEnable" Content="ON" Width="44" Height="26" Margin="0,0,4,8" Click="BtnRedLightEnable_Click" Foreground="#C62828"/>
-                                    <Button x:Name="BtnRedLightDisable" Content="OFF" Width="44" Height="26" Margin="0,0,4,8" Click="BtnRedLightDisable_Click"/>
-                                    <TextBlock x:Name="TxtRedLightEnableStatus" Text="OFF" VerticalAlignment="Center" Margin="0,0,12,8" FontFamily="Consolas"/>
-                                    <TextBlock Text="吹气" VerticalAlignment="Center" Foreground="#0277BD" Margin="0,0,4,8"/>
-                                    <Button x:Name="BtnBlowEnable" Content="ON" Width="44" Height="26" Margin="0,0,4,8" Click="BtnBlowEnable_Click" Foreground="#0277BD"/>
-                                    <Button x:Name="BtnBlowDisable" Content="OFF" Width="44" Height="26" Margin="0,0,4,8" Click="BtnBlowDisable_Click"/>
-                                    <TextBlock x:Name="TxtBlowEnableStatus" Text="OFF" VerticalAlignment="Center" Margin="0,0,12,8" FontFamily="Consolas"/>
+                                    <Button x:Name="BtnRedLightEnable" Content="开" Width="44" Height="26" Margin="0,0,4,8" Click="BtnRedLightEnable_Click" Foreground="#C62828"/>
+                                    <Button x:Name="BtnRedLightDisable" Content="关" Width="44" Height="26" Margin="0,0,4,8" Click="BtnRedLightDisable_Click"/>
+                                    <TextBlock x:Name="TxtRedLightEnableStatus" Text="关" VerticalAlignment="Center" Margin="0,0,12,8" FontFamily="Consolas"/>
+                                    <Button x:Name="BtnBlowToggle" Content="吹气" Width="56" Height="26" Margin="0,0,4,8" Click="BtnBlowToggle_Click" Foreground="#0277BD" FontWeight="SemiBold"
+                                            ToolTip="点击切换吹气使能开/关"/>
+                                    <TextBlock x:Name="TxtBlowEnableStatus" Text="关" VerticalAlignment="Center" Margin="0,0,12,8" FontFamily="Consolas"/>
                                     <Button x:Name="BtnCameraCaptureStart" Content="相机拍照" Width="88" Height="28" Margin="0,0,0,8" Click="BtnCameraCaptureStart_Click" Foreground="#5E35B1" FontWeight="SemiBold"/>
                                 </WrapPanel>
 
@@ -338,20 +338,20 @@
                                         <WrapPanel>
                                             <TextBlock x:Name="LblXHomeSpd" Text="复位" VerticalAlignment="Center" Margin="0,0,4,6"/>
                                             <TextBox x:Name="TxtXHomeSpd" Width="64" Height="24" Margin="0,0,2,6"/>
-                                            <Button x:Name="BtnReadXHomeSpd" Content="R" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadXHomeSpd_Click"/>
-                                            <Button x:Name="BtnWriteXHomeSpd" Content="W" Width="26" Height="24" Margin="0,0,12,6" Click="BtnWriteXHomeSpd_Click" Foreground="#1565C0"/>
+                                            <Button x:Name="BtnReadXHomeSpd" Content="读" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadXHomeSpd_Click"/>
+                                            <Button x:Name="BtnWriteXHomeSpd" Content="写" Width="26" Height="24" Margin="0,0,12,6" Click="BtnWriteXHomeSpd_Click" Foreground="#1565C0"/>
                                             <TextBlock x:Name="LblXManualSpd" Text="手动" VerticalAlignment="Center" Margin="0,0,4,6"/>
                                             <TextBox x:Name="TxtXManualSpd" Width="64" Height="24" Margin="0,0,2,6"/>
-                                            <Button x:Name="BtnReadXManualSpd" Content="R" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadXManualSpd_Click"/>
-                                            <Button x:Name="BtnWriteXManualSpd" Content="W" Width="26" Height="24" Margin="0,0,12,6" Click="BtnWriteXManualSpd_Click" Foreground="#1565C0"/>
+                                            <Button x:Name="BtnReadXManualSpd" Content="读" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadXManualSpd_Click"/>
+                                            <Button x:Name="BtnWriteXManualSpd" Content="写" Width="26" Height="24" Margin="0,0,12,6" Click="BtnWriteXManualSpd_Click" Foreground="#1565C0"/>
                                             <TextBlock x:Name="LblXPosLimit" Text="+限" VerticalAlignment="Center" Margin="0,0,4,6"/>
                                             <TextBox x:Name="TxtXPosLimit" Width="64" Height="24" Margin="0,0,2,6"/>
-                                            <Button x:Name="BtnReadXPosLimit" Content="R" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadXPosLimit_Click"/>
-                                            <Button x:Name="BtnWriteXPosLimit" Content="W" Width="26" Height="24" Margin="0,0,12,6" Click="BtnWriteXPosLimit_Click" Foreground="#1565C0"/>
+                                            <Button x:Name="BtnReadXPosLimit" Content="读" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadXPosLimit_Click"/>
+                                            <Button x:Name="BtnWriteXPosLimit" Content="写" Width="26" Height="24" Margin="0,0,12,6" Click="BtnWriteXPosLimit_Click" Foreground="#1565C0"/>
                                             <TextBlock x:Name="LblXNegLimit" Text="-限" VerticalAlignment="Center" Margin="0,0,4,6"/>
                                             <TextBox x:Name="TxtXNegLimit" Width="64" Height="24" Margin="0,0,2,6"/>
-                                            <Button x:Name="BtnReadXNegLimit" Content="R" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadXNegLimit_Click"/>
-                                            <Button x:Name="BtnWriteXNegLimit" Content="W" Width="26" Height="24" Margin="0,0,0,6" Click="BtnWriteXNegLimit_Click" Foreground="#1565C0"/>
+                                            <Button x:Name="BtnReadXNegLimit" Content="读" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadXNegLimit_Click"/>
+                                            <Button x:Name="BtnWriteXNegLimit" Content="写" Width="26" Height="24" Margin="0,0,0,6" Click="BtnWriteXNegLimit_Click" Foreground="#1565C0"/>
                                         </WrapPanel>
                                     </StackPanel>
                                 </Border>
@@ -362,20 +362,20 @@
                                         <WrapPanel>
                                             <TextBlock x:Name="LblYHomeSpd" Text="复位" VerticalAlignment="Center" Margin="0,0,4,6"/>
                                             <TextBox x:Name="TxtYHomeSpd" Width="64" Height="24" Margin="0,0,2,6"/>
-                                            <Button x:Name="BtnReadYHomeSpd" Content="R" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadYHomeSpd_Click"/>
-                                            <Button x:Name="BtnWriteYHomeSpd" Content="W" Width="26" Height="24" Margin="0,0,12,6" Click="BtnWriteYHomeSpd_Click" Foreground="#1565C0"/>
+                                            <Button x:Name="BtnReadYHomeSpd" Content="读" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadYHomeSpd_Click"/>
+                                            <Button x:Name="BtnWriteYHomeSpd" Content="写" Width="26" Height="24" Margin="0,0,12,6" Click="BtnWriteYHomeSpd_Click" Foreground="#1565C0"/>
                                             <TextBlock x:Name="LblYManualSpd" Text="手动" VerticalAlignment="Center" Margin="0,0,4,6"/>
                                             <TextBox x:Name="TxtYManualSpd" Width="64" Height="24" Margin="0,0,2,6"/>
-                                            <Button x:Name="BtnReadYManualSpd" Content="R" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadYManualSpd_Click"/>
-                                            <Button x:Name="BtnWriteYManualSpd" Content="W" Width="26" Height="24" Margin="0,0,12,6" Click="BtnWriteYManualSpd_Click" Foreground="#1565C0"/>
+                                            <Button x:Name="BtnReadYManualSpd" Content="读" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadYManualSpd_Click"/>
+                                            <Button x:Name="BtnWriteYManualSpd" Content="写" Width="26" Height="24" Margin="0,0,12,6" Click="BtnWriteYManualSpd_Click" Foreground="#1565C0"/>
                                             <TextBlock x:Name="LblYPosLimit" Text="+限" VerticalAlignment="Center" Margin="0,0,4,6"/>
                                             <TextBox x:Name="TxtYPosLimit" Width="64" Height="24" Margin="0,0,2,6"/>
-                                            <Button x:Name="BtnReadYPosLimit" Content="R" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadYPosLimit_Click"/>
-                                            <Button x:Name="BtnWriteYPosLimit" Content="W" Width="26" Height="24" Margin="0,0,12,6" Click="BtnWriteYPosLimit_Click" Foreground="#1565C0"/>
+                                            <Button x:Name="BtnReadYPosLimit" Content="读" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadYPosLimit_Click"/>
+                                            <Button x:Name="BtnWriteYPosLimit" Content="写" Width="26" Height="24" Margin="0,0,12,6" Click="BtnWriteYPosLimit_Click" Foreground="#1565C0"/>
                                             <TextBlock x:Name="LblYNegLimit" Text="-限" VerticalAlignment="Center" Margin="0,0,4,6"/>
                                             <TextBox x:Name="TxtYNegLimit" Width="64" Height="24" Margin="0,0,2,6"/>
-                                            <Button x:Name="BtnReadYNegLimit" Content="R" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadYNegLimit_Click"/>
-                                            <Button x:Name="BtnWriteYNegLimit" Content="W" Width="26" Height="24" Margin="0,0,0,6" Click="BtnWriteYNegLimit_Click" Foreground="#1565C0"/>
+                                            <Button x:Name="BtnReadYNegLimit" Content="读" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadYNegLimit_Click"/>
+                                            <Button x:Name="BtnWriteYNegLimit" Content="写" Width="26" Height="24" Margin="0,0,0,6" Click="BtnWriteYNegLimit_Click" Foreground="#1565C0"/>
                                         </WrapPanel>
                                     </StackPanel>
                                 </Border>
@@ -386,20 +386,20 @@
                                         <WrapPanel>
                                             <TextBlock x:Name="LblZHomeSpd" Text="复位" VerticalAlignment="Center" Margin="0,0,4,6"/>
                                             <TextBox x:Name="TxtZHomeSpd" Width="64" Height="24" Margin="0,0,2,6"/>
-                                            <Button x:Name="BtnReadZHomeSpd" Content="R" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadZHomeSpd_Click"/>
-                                            <Button x:Name="BtnWriteZHomeSpd" Content="W" Width="26" Height="24" Margin="0,0,12,6" Click="BtnWriteZHomeSpd_Click" Foreground="#1565C0"/>
+                                            <Button x:Name="BtnReadZHomeSpd" Content="读" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadZHomeSpd_Click"/>
+                                            <Button x:Name="BtnWriteZHomeSpd" Content="写" Width="26" Height="24" Margin="0,0,12,6" Click="BtnWriteZHomeSpd_Click" Foreground="#1565C0"/>
                                             <TextBlock x:Name="LblZManualSpd" Text="手动" VerticalAlignment="Center" Margin="0,0,4,6"/>
                                             <TextBox x:Name="TxtZManualSpd" Width="64" Height="24" Margin="0,0,2,6"/>
-                                            <Button x:Name="BtnReadZManualSpd" Content="R" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadZManualSpd_Click"/>
-                                            <Button x:Name="BtnWriteZManualSpd" Content="W" Width="26" Height="24" Margin="0,0,12,6" Click="BtnWriteZManualSpd_Click" Foreground="#1565C0"/>
+                                            <Button x:Name="BtnReadZManualSpd" Content="读" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadZManualSpd_Click"/>
+                                            <Button x:Name="BtnWriteZManualSpd" Content="写" Width="26" Height="24" Margin="0,0,12,6" Click="BtnWriteZManualSpd_Click" Foreground="#1565C0"/>
                                             <TextBlock x:Name="LblZPosLimit" Text="+限" VerticalAlignment="Center" Margin="0,0,4,6"/>
                                             <TextBox x:Name="TxtZPosLimit" Width="64" Height="24" Margin="0,0,2,6"/>
-                                            <Button x:Name="BtnReadZPosLimit" Content="R" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadZPosLimit_Click"/>
-                                            <Button x:Name="BtnWriteZPosLimit" Content="W" Width="26" Height="24" Margin="0,0,12,6" Click="BtnWriteZPosLimit_Click" Foreground="#1565C0"/>
+                                            <Button x:Name="BtnReadZPosLimit" Content="读" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadZPosLimit_Click"/>
+                                            <Button x:Name="BtnWriteZPosLimit" Content="写" Width="26" Height="24" Margin="0,0,12,6" Click="BtnWriteZPosLimit_Click" Foreground="#1565C0"/>
                                             <TextBlock x:Name="LblZNegLimit" Text="-限" VerticalAlignment="Center" Margin="0,0,4,6"/>
                                             <TextBox x:Name="TxtZNegLimit" Width="64" Height="24" Margin="0,0,2,6"/>
-                                            <Button x:Name="BtnReadZNegLimit" Content="R" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadZNegLimit_Click"/>
-                                            <Button x:Name="BtnWriteZNegLimit" Content="W" Width="26" Height="24" Margin="0,0,0,6" Click="BtnWriteZNegLimit_Click" Foreground="#1565C0"/>
+                                            <Button x:Name="BtnReadZNegLimit" Content="读" Width="26" Height="24" Margin="0,0,2,6" Click="BtnReadZNegLimit_Click"/>
+                                            <Button x:Name="BtnWriteZNegLimit" Content="写" Width="26" Height="24" Margin="0,0,0,6" Click="BtnWriteZNegLimit_Click" Foreground="#1565C0"/>
                                         </WrapPanel>
                                     </StackPanel>
                                 </Border>
@@ -442,20 +442,20 @@
                                   GridLinesVisibility="Horizontal" AlternatingRowBackground="#F5F5F5" RowBackground="White" BorderBrush="#E0E0E0" BorderThickness="1">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="35" IsReadOnly="True"/>
-                                <DataGridTextColumn Header="type1" Binding="{Binding type1}" Width="50"/>
-                                <DataGridTextColumn Header="p0.x" Binding="{Binding p0x, StringFormat=F3}" Width="65"/>
-                                <DataGridTextColumn Header="p0.y" Binding="{Binding p0y, StringFormat=F3}" Width="65"/>
-                                <DataGridTextColumn Header="p0.z" Binding="{Binding p0z, StringFormat=F3}" Width="65"/>
-                                <DataGridTextColumn Header="p1.x" Binding="{Binding p1x, StringFormat=F3}" Width="65"/>
-                                <DataGridTextColumn Header="p1.y" Binding="{Binding p1y, StringFormat=F3}" Width="65"/>
-                                <DataGridTextColumn Header="p1.z" Binding="{Binding p1z, StringFormat=F3}" Width="65"/>
-                                <DataGridTextColumn Header="cx" Binding="{Binding cx, StringFormat=F3}" Width="65"/>
-                                <DataGridTextColumn Header="cy" Binding="{Binding cy, StringFormat=F3}" Width="65"/>
-                                <DataGridTextColumn Header="r" Binding="{Binding r, StringFormat=F3}" Width="55"/>
-                                <DataGridTextColumn Header="start°" Binding="{Binding start_deg, StringFormat=F3}" Width="55"/>
-                                <DataGridTextColumn Header="end°" Binding="{Binding end_deg, StringFormat=F3}" Width="55"/>
-                                <DataGridTextColumn Header="z0" Binding="{Binding z0, StringFormat=F3}" Width="55"/>
-                                <DataGridTextColumn Header="z1" Binding="{Binding z1, StringFormat=F3}" Width="55"/>
+                                <DataGridTextColumn Header="类型" Binding="{Binding type1}" Width="50"/>
+                                <DataGridTextColumn Header="点0.X" Binding="{Binding p0x, StringFormat=F3}" Width="65"/>
+                                <DataGridTextColumn Header="点0.Y" Binding="{Binding p0y, StringFormat=F3}" Width="65"/>
+                                <DataGridTextColumn Header="点0.Z" Binding="{Binding p0z, StringFormat=F3}" Width="65"/>
+                                <DataGridTextColumn Header="点1.X" Binding="{Binding p1x, StringFormat=F3}" Width="65"/>
+                                <DataGridTextColumn Header="点1.Y" Binding="{Binding p1y, StringFormat=F3}" Width="65"/>
+                                <DataGridTextColumn Header="点1.Z" Binding="{Binding p1z, StringFormat=F3}" Width="65"/>
+                                <DataGridTextColumn Header="圆心X" Binding="{Binding cx, StringFormat=F3}" Width="65"/>
+                                <DataGridTextColumn Header="圆心Y" Binding="{Binding cy, StringFormat=F3}" Width="65"/>
+                                <DataGridTextColumn Header="半径" Binding="{Binding r, StringFormat=F3}" Width="55"/>
+                                <DataGridTextColumn Header="起始角°" Binding="{Binding start_deg, StringFormat=F3}" Width="58"/>
+                                <DataGridTextColumn Header="结束角°" Binding="{Binding end_deg, StringFormat=F3}" Width="58"/>
+                                <DataGridTextColumn Header="高度0" Binding="{Binding z0, StringFormat=F3}" Width="55"/>
+                                <DataGridTextColumn Header="高度1" Binding="{Binding z1, StringFormat=F3}" Width="55"/>
                             </DataGrid.Columns>
                         </DataGrid>
                         <Border Grid.Column="1" BorderBrush="#5E35B1" BorderThickness="1" CornerRadius="6" Background="#1C1C20">
@@ -477,7 +477,7 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     <Border Grid.Row="0" Background="#ECEFF1" CornerRadius="8,8,0,0" Padding="12,8">
-                        <TextBlock x:Name="StatusText" Text="Ready" VerticalAlignment="Center" Foreground="#37474F" FontFamily="Consolas"/>
+                        <TextBlock x:Name="StatusText" Text="就绪" VerticalAlignment="Center" Foreground="#37474F" FontFamily="Consolas"/>
                     </Border>
                     <TextBox x:Name="LogTextBox" Grid.Row="1" Height="120" MinHeight="80" IsReadOnly="True"
                              FontFamily="Consolas" FontSize="11" VerticalScrollBarVisibility="Auto"

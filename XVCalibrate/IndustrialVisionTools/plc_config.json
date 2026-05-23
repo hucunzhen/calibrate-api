@@ -67,6 +67,7 @@
     "ZAlarmClear": "D2043L",
 
     "ManualMode": "M509",
+    "CalibrationMode": "M507",
     "RunStartStop": "M500",
     "RunStatus": "M510"
   },

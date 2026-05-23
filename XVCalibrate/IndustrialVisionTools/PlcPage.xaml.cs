@@ -116,6 +116,7 @@ namespace CalibOperatorCLI_Example
             ApplyRegToolTip(BtnManual, "ManualMode", "写 ON → 手动");
             BtnAuto.Content = "自动模式";
             ApplyRegToolTip(BtnAuto, "ManualMode", "写 OFF → 自动");
+            ApplyRegToolTip(BtnCalibrationMode, "CalibrationMode", "写 ON → 进入标定模式");
             BtnStart.Content = "启动";
             ApplyRegToolTip(BtnStart, "RunStartStop", "写 ON");
             BtnStop.Content = "停止";
@@ -168,12 +169,10 @@ namespace CalibOperatorCLI_Example
             ApplyDisableButton(BtnYDisable, "YEnableH", "YEnableL");
             ApplyEnableButton(BtnZEnable, "ZEnableL");
             ApplyDisableButton(BtnZDisable, "ZEnableH", "ZEnableL");
-            ApplyEnableButton(BtnLaserEnable, "LaserEnable");
-            ApplyRegToolTip(BtnLaserDisable, "LaserEnable", "激光使能 OFF");
+            ApplyRegToolTip(BtnLaserToggle, "LaserEnable", "点击切换激光使能（读当前位后取反）");
             ApplyEnableButton(BtnRedLightEnable, "RedLightEnable");
             ApplyRegToolTip(BtnRedLightDisable, "RedLightEnable", "红光使能 OFF");
-            ApplyEnableButton(BtnBlowEnable, "BlowEnable");
-            ApplyRegToolTip(BtnBlowDisable, "BlowEnable", "吹气使能 OFF");
+            ApplyRegToolTip(BtnBlowToggle, "BlowEnable", "点击切换吹气使能（读当前位后取反）");
             ApplyRegToolTip(BtnCameraCaptureStart, "CameraCaptureStart", "相机拍照脉冲");
 
             ApplyRegToolTip(BtnReadWeldDone, "WeldDoneFlag", "读取焊接完成 (PLC→上位机)");
@@ -335,7 +334,29 @@ namespace CalibOperatorCLI_Example
         {
             if (!CheckPlcConnected()) return;
             ReadAxisPositions();
+            UpdateCalibrationModeStatus();
             Log("[PLC] 手动读取位置完成");
+        }
+
+        private void UpdateCalibrationModeStatus()
+        {
+            if (!_plcConnected)
+                return;
+            bool on;
+            try
+            {
+                on = ReadCoil(Reg("CalibrationMode"));
+            }
+            catch
+            {
+                return;
+            }
+
+            Dispatcher.Invoke(() =>
+            {
+                TxtCalibrationModeStatus.Text = on ? "开" : "关";
+                TxtCalibrationModeStatus.Foreground = new SolidColorBrush(on ? Colors.Purple : Colors.Gray);
+            });
         }
 
         /// <summary>写入 PLC 浮点：HD→Modbus；D→XinJETcpNet。</summary>
@@ -751,6 +772,16 @@ namespace CalibOperatorCLI_Example
             Log($"[PLC] 自动模式 {Reg("ManualMode")}=OFF");
         }
 
+        private void BtnCalibrationMode_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            string addr = Reg("CalibrationMode");
+            WriteCoil(addr, true);
+            TxtCalibrationModeStatus.Text = "开";
+            TxtCalibrationModeStatus.Foreground = new SolidColorBrush(Colors.Purple);
+            Log($"[PLC] 标定模式 {addr}=ON");
+        }
+
         private void BtnStart_Click(object sender, RoutedEventArgs e)
         {
             if (!CheckPlcConnected()) return;
@@ -908,29 +939,44 @@ namespace CalibOperatorCLI_Example
         private void BtnWriteLaserPower_Click(object sender, RoutedEventArgs e) =>
             WritePlcFloat(Reg("LaserPower"), "TxtLaserPower", "激光功率");
 
-        private void BtnLaserEnable_Click(object sender, RoutedEventArgs e)
+        private static void SetEnableStatusDisplay(TextBlock status, bool on)
         {
-            if (!CheckPlcConnected()) return;
-            WriteBit(Reg("LaserEnable"), 0, true);
-            TxtLaserEnableStatus.Text = "ON";
-            TxtLaserEnableStatus.Foreground = new SolidColorBrush(Colors.Green);
-            Log($"[PLC] 激光使能 {Reg("LaserEnable")} = ON");
+            status.Text = on ? "开" : "关";
+            status.Foreground = new SolidColorBrush(on ? Colors.Green : Colors.Gray);
         }
 
-        private void BtnLaserDisable_Click(object sender, RoutedEventArgs e)
+        private void ToggleEnableBit(string regKey, TextBlock status, string logLabel)
         {
             if (!CheckPlcConnected()) return;
-            WriteBit(Reg("LaserEnable"), 0, false);
-            TxtLaserEnableStatus.Text = "OFF";
-            TxtLaserEnableStatus.Foreground = new SolidColorBrush(Colors.Gray);
-            Log($"[PLC] 激光使能 {Reg("LaserEnable")} = OFF");
+            string addr = Reg(regKey);
+            bool next = !ReadBit(addr, 0);
+            WriteBit(addr, 0, next);
+            SetEnableStatusDisplay(status, next);
+            Log($"[PLC] {logLabel} {addr} = {(next ? "ON" : "OFF")}");
+        }
+
+        private void BtnLaserToggle_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            string laserAddr = Reg("LaserEnable");
+            bool next = !ReadBit(laserAddr, 0);
+            WriteBit(laserAddr, 0, next);
+            SetEnableStatusDisplay(TxtLaserEnableStatus, next);
+            Log($"[PLC] 激光使能 {laserAddr} = {(next ? "ON" : "OFF")}");
+            if (next)
+            {
+                string blowAddr = Reg("BlowEnable");
+                WriteBit(blowAddr, 0, true);
+                SetEnableStatusDisplay(TxtBlowEnableStatus, true);
+                Log($"[PLC] 吹气使能 {blowAddr} = ON（随激光开启）");
+            }
         }
 
         private void BtnRedLightEnable_Click(object sender, RoutedEventArgs e)
         {
             if (!CheckPlcConnected()) return;
             WriteBit(Reg("RedLightEnable"), 0, true);
-            TxtRedLightEnableStatus.Text = "ON";
+            TxtRedLightEnableStatus.Text = "开";
             TxtRedLightEnableStatus.Foreground = new SolidColorBrush(Colors.Green);
             Log($"[PLC] 红光使能 {Reg("RedLightEnable")} = ON");
         }
@@ -939,28 +985,13 @@ namespace CalibOperatorCLI_Example
         {
             if (!CheckPlcConnected()) return;
             WriteBit(Reg("RedLightEnable"), 0, false);
-            TxtRedLightEnableStatus.Text = "OFF";
+            TxtRedLightEnableStatus.Text = "关";
             TxtRedLightEnableStatus.Foreground = new SolidColorBrush(Colors.Gray);
             Log($"[PLC] 红光使能 {Reg("RedLightEnable")} = OFF");
         }
 
-        private void BtnBlowEnable_Click(object sender, RoutedEventArgs e)
-        {
-            if (!CheckPlcConnected()) return;
-            WriteBit(Reg("BlowEnable"), 0, true);
-            TxtBlowEnableStatus.Text = "ON";
-            TxtBlowEnableStatus.Foreground = new SolidColorBrush(Colors.Green);
-            Log($"[PLC] 吹气使能 {Reg("BlowEnable")} = ON");
-        }
-
-        private void BtnBlowDisable_Click(object sender, RoutedEventArgs e)
-        {
-            if (!CheckPlcConnected()) return;
-            WriteBit(Reg("BlowEnable"), 0, false);
-            TxtBlowEnableStatus.Text = "OFF";
-            TxtBlowEnableStatus.Foreground = new SolidColorBrush(Colors.Gray);
-            Log($"[PLC] 吹气使能 {Reg("BlowEnable")} = OFF");
-        }
+        private void BtnBlowToggle_Click(object sender, RoutedEventArgs e)
+            => ToggleEnableBit("BlowEnable", TxtBlowEnableStatus, "吹气使能");
 
         private void BtnCameraCaptureStart_Click(object sender, RoutedEventArgs e)
         {
@@ -1117,7 +1148,7 @@ namespace CalibOperatorCLI_Example
         {
             if (!CheckPlcConnected()) return;
             WriteBit(Reg("XEnableL"), 0, true);
-            TxtXEnableStatus.Text = "ON";
+            TxtXEnableStatus.Text = "开";
             TxtXEnableStatus.Foreground = new SolidColorBrush(Colors.Green);
             Log("[PLC] X使能 = ON");
         }
@@ -1126,7 +1157,7 @@ namespace CalibOperatorCLI_Example
         {
             if (!CheckPlcConnected()) return;
             WriteBit(Reg("YEnableL"), 0, true);
-            TxtYEnableStatus.Text = "ON";
+            TxtYEnableStatus.Text = "开";
             TxtYEnableStatus.Foreground = new SolidColorBrush(Colors.Green);
             Log("[PLC] Y使能 = ON");
         }
@@ -1135,7 +1166,7 @@ namespace CalibOperatorCLI_Example
         {
             if (!CheckPlcConnected()) return;
             WriteBit(Reg("ZEnableL"), 0, true);
-            TxtZEnableStatus.Text = "ON";
+            TxtZEnableStatus.Text = "开";
             TxtZEnableStatus.Foreground = new SolidColorBrush(Colors.Green);
             Log("[PLC] Z使能 = ON");
         }
@@ -1155,7 +1186,7 @@ namespace CalibOperatorCLI_Example
             if (!CheckPlcConnected()) return;
             WriteBit(enableAddr, 0, false);
             WriteBit(disableAddr, 0, true);
-            statusText.Text = "OFF";
+            statusText.Text = "关";
             statusText.Foreground = new SolidColorBrush(Colors.Gray);
             Log($"[PLC] {axisLabel}轴禁用 {disableAddr}.bit0 脉冲，{enableAddr}.bit0=OFF");
             var timer = new System.Windows.Threading.DispatcherTimer
