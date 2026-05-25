@@ -31,32 +31,21 @@
       }
     },
     {
-      "Id": "94752e1a-d289-4163-b22a-3d98ccd81a5c",
-      "TypeId": "route_true",
-      "X": 896,
-      "Y": 183,
-      "Params": {}
-    },
-    {
-      "Id": "63a77938-8058-44d1-9973-78356d48ce02",
-      "TypeId": "if_gate",
-      "X": 630,
-      "Y": 14,
+      "Id": "681f20b0-a301-4d33-85ba-43543e227dd5",
+      "TypeId": "points_to_text",
+      "X": 1016,
+      "Y": 151,
       "Params": {
-        "op": "\u003E",
-        "threshold": "0",
-        "epsilon": "1e-6"
+        "lineSeparator": "lf"
       }
     },
     {
-      "Id": "75137ab9-223f-4edb-8eda-38e1d8b1bdd3",
-      "TypeId": "plc_connect",
-      "X": 193,
-      "Y": 22,
+      "Id": "4ac64200-ec42-498e-bfc9-b7aaabf40f4d",
+      "TypeId": "save_text",
+      "X": 1256,
+      "Y": 99,
       "Params": {
-        "ip": "192.168.6.6",
-        "port": "502",
-        "station": "0"
+        "filePath": "D:\\work\\calibrate-api\\flows\\halcon\\flow_output.txt"
       }
     }
   ],
@@ -74,34 +63,28 @@
       "ToPort": "Image"
     },
     {
-      "FromNodeId": "63a77938-8058-44d1-9973-78356d48ce02",
-      "FromPort": "True",
-      "ToNodeId": "94752e1a-d289-4163-b22a-3d98ccd81a5c",
-      "ToPort": "Condition"
-    },
-    {
-      "FromNodeId": "07082a97-23d8-4bac-8703-7309e369e5ea",
-      "FromPort": "Out",
-      "ToNodeId": "94752e1a-d289-4163-b22a-3d98ccd81a5c",
-      "ToPort": "In"
-    },
-    {
-      "FromNodeId": "94752e1a-d289-4163-b22a-3d98ccd81a5c",
-      "FromPort": "Out",
-      "ToNodeId": "76570448-bc2d-4410-8853-5a4a2a214478",
-      "ToPort": "Points"
-    },
-    {
       "FromNodeId": "07082a97-23d8-4bac-8703-7309e369e5ea",
       "FromPort": "Out2",
       "ToNodeId": "76570448-bc2d-4410-8853-5a4a2a214478",
       "ToPort": "BarIds"
     },
     {
-      "FromNodeId": "75137ab9-223f-4edb-8eda-38e1d8b1bdd3",
-      "FromPort": "Connected",
-      "ToNodeId": "63a77938-8058-44d1-9973-78356d48ce02",
-      "ToPort": "Value"
+      "FromNodeId": "07082a97-23d8-4bac-8703-7309e369e5ea",
+      "FromPort": "Out",
+      "ToNodeId": "76570448-bc2d-4410-8853-5a4a2a214478",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "07082a97-23d8-4bac-8703-7309e369e5ea",
+      "FromPort": "Out",
+      "ToNodeId": "681f20b0-a301-4d33-85ba-43543e227dd5",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "681f20b0-a301-4d33-85ba-43543e227dd5",
+      "FromPort": "Text",
+      "ToNodeId": "4ac64200-ec42-498e-bfc9-b7aaabf40f4d",
+      "ToPort": "Text"
     }
   ]
 }

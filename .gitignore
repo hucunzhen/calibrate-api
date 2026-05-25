@@ -10,10 +10,22 @@
 
 # DLL (runtime binaries, not source)
 *.dll
-
+_bld*/
+_bld*
+SAM_Inference/
+DIP_Inference/
+Development/
+HalconTrainTest/
+JIT_Inference/
+Swin_Inference/
+YoloSeg_Tools/
+just-image-transformer/
+.vscode/
+yolo_data/
+python_verify/
 # OpenCV prebuilt (large binary)
 opencv/
-
+*.lscache
 # Log/output files
 *.log
 debug_autotest.log

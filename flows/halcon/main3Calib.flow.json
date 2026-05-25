@@ -1,0 +1,201 @@
+{
+  "Nodes": [
+    {
+      "Id": "d5e6f7a8-9b0c-4d1e-8f2a-3b4c5d6e7f8a",
+      "TypeId": "plc_wait_weld_done",
+      "X": 1207,
+      "Y": 346,
+      "Params": {
+        "flagRegister": "",
+        "bit": "0",
+        "timeoutMs": "600000",
+        "pollIntervalMs": "50",
+        "clearAfter": "true"
+      }
+    },
+    {
+      "Id": "190efde3-f5c0-46ba-b0ea-da6b49752bb8",
+      "TypeId": "plc_connect",
+      "X": 0,
+      "Y": 109,
+      "Params": {
+        "ip": "192.168.6.6",
+        "port": "502",
+        "station": "0"
+      }
+    },
+    {
+      "Id": "c89e74f7-8c8d-4cae-bfd9-a24b1c203aa4",
+      "TypeId": "if_gate",
+      "X": 201,
+      "Y": 110,
+      "Params": {
+        "op": "\u003E",
+        "threshold": "0",
+        "epsilon": "1e-6"
+      }
+    },
+    {
+      "Id": "5314bfb3-9dbb-4a46-b022-59ef0ea1f2ec",
+      "TypeId": "route_true",
+      "X": 405,
+      "Y": 109,
+      "Params": {}
+    },
+    {
+      "Id": "78222510-71d2-4938-b91c-e6c39e30aefa",
+      "TypeId": "plc_wait_camera_capture",
+      "X": 199,
+      "Y": 0,
+      "Params": {
+        "signalRegister": "",
+        "bit": "0",
+        "timeoutMs": "60000",
+        "pollIntervalMs": "20",
+        "clearAfter": "true"
+      }
+    },
+    {
+      "Id": "55d4b1c2-be25-439c-8648-abf5d7881038",
+      "TypeId": "if_gate",
+      "X": 614,
+      "Y": 98,
+      "Params": {
+        "op": "\u003E",
+        "threshold": "0",
+        "epsilon": "1e-6"
+      }
+    },
+    {
+      "Id": "ae3ea651-1a1b-47a3-b3ef-0c017aaaba51",
+      "TypeId": "route_true",
+      "X": 625,
+      "Y": 218,
+      "Params": {}
+    },
+    {
+      "Id": "3caa064d-d6b1-4880-a709-518d8ea3213b",
+      "TypeId": "plc_pou_enable",
+      "X": 1088,
+      "Y": 212,
+      "Params": {
+        "enableRegister": "D801L",
+        "enable": "ON"
+      }
+    },
+    {
+      "Id": "9fecd54d-b519-47ca-b7e3-1cd772cd3e18",
+      "TypeId": "display",
+      "X": 581,
+      "Y": 461,
+      "Params": {
+        "dotRadius": "3",
+        "pointLineJoin": "auto"
+      }
+    },
+    {
+      "Id": "5d8887fb-33f4-4ccc-ad82-0aea668c4a95",
+      "TypeId": "weld_trajectory_world",
+      "X": 288.0037748908032,
+      "Y": 291.96705945775983,
+      "Params": {
+        "pattern": "\u4E5D\u5BAB\u683C (3\u00D73)",
+        "centerX": "0",
+        "centerY": "0",
+        "centerZ": "0",
+        "stepMm": "10",
+        "armMm": "50",
+        "legXmm": "50",
+        "legYmm": "50",
+        "angleDeg": "0",
+        "gridCols": "3",
+        "gridRows": "3",
+        "samplesPerSegment": "1"
+      }
+    },
+    {
+      "Id": "dd0a36b7-d7b0-45f2-a08c-3ecc47c5ef96",
+      "TypeId": "send_plc_point",
+      "X": 832,
+      "Y": 426,
+      "Params": {
+        "splitByBar": "none",
+        "expectedBatchCount": "0",
+        "barGvarLayout": "overwrite",
+        "usePlcPageGvar": "false",
+        "gvarStartRegister": "D30000",
+        "baseRegister": "",
+        "gvarType": "1",
+        "maxSegmentCount": "1024",
+        "skipCountWrite": "true",
+        "countRegister": "D800",
+        "weldDoneHostRegister": "D804L",
+        "setWeldDoneHostOnSend": "false",
+        "setWeldDoneHostAfterAllBatches": "true",
+        "runDownstreamPerBatch": "true"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "190efde3-f5c0-46ba-b0ea-da6b49752bb8",
+      "FromPort": "Connected",
+      "ToNodeId": "c89e74f7-8c8d-4cae-bfd9-a24b1c203aa4",
+      "ToPort": "Value"
+    },
+    {
+      "FromNodeId": "c89e74f7-8c8d-4cae-bfd9-a24b1c203aa4",
+      "FromPort": "True",
+      "ToNodeId": "5314bfb3-9dbb-4a46-b022-59ef0ea1f2ec",
+      "ToPort": "Condition"
+    },
+    {
+      "FromNodeId": "78222510-71d2-4938-b91c-e6c39e30aefa",
+      "FromPort": "Triggered",
+      "ToNodeId": "5314bfb3-9dbb-4a46-b022-59ef0ea1f2ec",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "5314bfb3-9dbb-4a46-b022-59ef0ea1f2ec",
+      "FromPort": "Out",
+      "ToNodeId": "55d4b1c2-be25-439c-8648-abf5d7881038",
+      "ToPort": "Value"
+    },
+    {
+      "FromNodeId": "55d4b1c2-be25-439c-8648-abf5d7881038",
+      "FromPort": "True",
+      "ToNodeId": "ae3ea651-1a1b-47a3-b3ef-0c017aaaba51",
+      "ToPort": "Condition"
+    },
+    {
+      "FromNodeId": "3caa064d-d6b1-4880-a709-518d8ea3213b",
+      "FromPort": "Enabled",
+      "ToNodeId": "d5e6f7a8-9b0c-4d1e-8f2a-3b4c5d6e7f8a",
+      "ToPort": "After"
+    },
+    {
+      "FromNodeId": "ae3ea651-1a1b-47a3-b3ef-0c017aaaba51",
+      "FromPort": "Out",
+      "ToNodeId": "9fecd54d-b519-47ca-b7e3-1cd772cd3e18",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "5d8887fb-33f4-4ccc-ad82-0aea668c4a95",
+      "FromPort": "Points3D",
+      "ToNodeId": "ae3ea651-1a1b-47a3-b3ef-0c017aaaba51",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "dd0a36b7-d7b0-45f2-a08c-3ecc47c5ef96",
+      "FromPort": "GvarSent",
+      "ToNodeId": "3caa064d-d6b1-4880-a709-518d8ea3213b",
+      "ToPort": "Enable"
+    },
+    {
+      "FromNodeId": "ae3ea651-1a1b-47a3-b3ef-0c017aaaba51",
+      "FromPort": "Out",
+      "ToNodeId": "dd0a36b7-d7b0-45f2-a08c-3ecc47c5ef96",
+      "ToPort": "Points3D"
+    }
+  ]
+}
