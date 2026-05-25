@@ -1321,12 +1321,30 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "calibrate",
                 DisplayName = "九点标定",
-                Description = "标定像素坐标→世界坐标",
+                Description = "标定像素→世界坐标。世界点在参数 worldPoints 中配置；运行时在图像上点击检测点确认与各行世界坐标的对应关系。",
                 Category = "标定",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "worldPoints",
+                        DisplayName = "世界坐标点",
+                        DefaultValue = "100,100;400,100;700,100;100,300;400,300;700,300;100,500;400,500;700,500",
+                        Description = "格式 x,y;x,y;...（建议 9 点，行优先）。至少 4 点。"
+                    },
+                    new OperatorParam
+                    {
+                        Name = "confirmCorrespondence",
+                        DisplayName = "图像确认对应",
+                        DefaultValue = "true",
+                        Description = "true=弹窗在图像上点选对应；false=按 ImagePts 与 worldPoints 顺序一一对应",
+                        Options = new List<string> { "true", "false" }
+                    }
+                },
                 Ports =
                 {
+                    new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "ImagePts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
-                    new PortDef { Name = "WorldPts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "Transform", Direction = PortDirection.Output, DataType = typeof(AffineTransform), ColorHex = "#E91E63" }
                 }
             },

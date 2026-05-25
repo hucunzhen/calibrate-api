@@ -38,7 +38,10 @@
       "TypeId": "calibrate",
       "X": 983,
       "Y": 315,
-      "Params": {}
+      "Params": {
+        "worldPoints": "100,100;400,100;700,100;100,300;400,300;700,300;100,500;400,500;700,500",
+        "confirmCorrespondence": "true"
+      }
     },
     {
       "Id": "7dfbfdea-4f7d-43b5-ad61-bff9e794a95a",
@@ -89,16 +92,16 @@
       "ToPort": "Image"
     },
     {
+      "FromNodeId": "2e6c1302-183e-46b3-a638-238a2ba21e7f",
+      "FromPort": "Image",
+      "ToNodeId": "8428d378-e4de-4707-9db2-2b1f1ef871ab",
+      "ToPort": "Image"
+    },
+    {
       "FromNodeId": "5894e9b5-42cd-4cd4-857d-350fbc559c15",
       "FromPort": "Points",
       "ToNodeId": "8428d378-e4de-4707-9db2-2b1f1ef871ab",
       "ToPort": "ImagePts"
-    },
-    {
-      "FromNodeId": "7dfbfdea-4f7d-43b5-ad61-bff9e794a95a",
-      "FromPort": "Points",
-      "ToNodeId": "8428d378-e4de-4707-9db2-2b1f1ef871ab",
-      "ToPort": "WorldPts"
     },
     {
       "FromNodeId": "5894e9b5-42cd-4cd4-857d-350fbc559c15",

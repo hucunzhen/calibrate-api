@@ -21,20 +21,14 @@
       }
     },
     {
-      "Id": "c30381e4-6c50-4273-b852-7ea312f7f4f7",
-      "TypeId": "world_coords",
-      "X": 320,
-      "Y": 300,
-      "Params": {
-        "points": "452.682,62.785;472.682,62.785;492.682,62.785;452.682,82.785;472.682,82.785;492.682,82.785;452.682,102.785;472.682,102.785;492.682,102.785"
-      }
-    },
-    {
       "Id": "62879182-0f97-45ea-800c-48cf296b72f1",
       "TypeId": "calibrate",
       "X": 640,
       "Y": 180,
-      "Params": {}
+      "Params": {
+        "worldPoints": "452.682,62.785;472.682,62.785;492.682,62.785;452.682,82.785;472.682,82.785;492.682,82.785;452.682,102.785;472.682,102.785;492.682,102.785",
+        "confirmCorrespondence": "true"
+      }
     },
     {
       "Id": "91090304-28ba-437e-b090-e4c52c2e6dee",
@@ -64,16 +58,16 @@
       "ToPort": "In"
     },
     {
+      "FromNodeId": "307a2dfa-6cc1-4e0e-a515-51c0504d79fc",
+      "FromPort": "Image",
+      "ToNodeId": "62879182-0f97-45ea-800c-48cf296b72f1",
+      "ToPort": "Image"
+    },
+    {
       "FromNodeId": "d15062f2-ac61-49ec-9a1a-8475a91e2745",
       "FromPort": "Out",
       "ToNodeId": "62879182-0f97-45ea-800c-48cf296b72f1",
       "ToPort": "ImagePts"
-    },
-    {
-      "FromNodeId": "c30381e4-6c50-4273-b852-7ea312f7f4f7",
-      "FromPort": "Points",
-      "ToNodeId": "62879182-0f97-45ea-800c-48cf296b72f1",
-      "ToPort": "WorldPts"
     },
     {
       "FromNodeId": "62879182-0f97-45ea-800c-48cf296b72f1",

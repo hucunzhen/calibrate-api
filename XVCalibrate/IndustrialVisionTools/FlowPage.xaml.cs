@@ -291,7 +291,16 @@ namespace CalibOperatorCLI_Example
                 return string.IsNullOrWhiteSpace(configuredDir);
             }
 
+            if (node.Def.TypeId == "calibrate")
+                return CalibrateRequiresCorrespondenceDialog(node);
+
             return false;
+        }
+
+        private static bool CalibrateRequiresCorrespondenceDialog(FlowNode node)
+        {
+            string v = node.Params.GetValueOrDefault("confirmCorrespondence", "true")?.Trim() ?? "true";
+            return !string.Equals(v, "false", StringComparison.OrdinalIgnoreCase) && v != "0";
         }
 
         private async System.Threading.Tasks.Task ExecuteNodeForRunAsync(FlowNode node, string? timingScope = null)
@@ -7967,15 +7976,37 @@ namespace CalibOperatorCLI_Example
                     case "calibrate":
                     {
                         var imagePts = inputs["ImagePts"] as Point2D[];
-                        var worldPts = inputs["WorldPts"] as Point2D[];
-                        if (imagePts == null || worldPts == null)
-                            throw new InvalidOperationException("标定: 缺少图像点或世界坐标点");
+                        if (imagePts == null)
+                            throw new InvalidOperationException("标定: 缺少 ImagePts（检测到的图像点）");
+
+                        string worldRaw = node.Params.GetValueOrDefault("worldPoints", "")
+                            ?? node.Params.GetValueOrDefault("points", "");
+                        var worldPts = ParseWorldPointsParam(worldRaw);
                         if (imagePts.Length != worldPts.Length)
-                            throw new InvalidOperationException("标定: 图像点和世界点数量不一致");
-                        var calResult = CalibAPI.CalibrateNinePoint(imagePts, worldPts);
+                            throw new InvalidOperationException(
+                                $"标定: 图像点 {imagePts.Length} 个，世界点 {worldPts.Length} 个，数量须一致（请调整 worldPoints 或检测数量）");
+
+                        Point2D[] alignedImagePts = imagePts;
+                        if (CalibrateRequiresCorrespondenceDialog(node))
+                        {
+                            var calibImage = inputs.TryGetValue("Image", out var imgObj) ? imgObj as CalibImage : null;
+                            if (calibImage == null)
+                                throw new InvalidOperationException("标定: 图像确认对应需要连接 Image 端口（与取图/加载图像同源）");
+
+                            var owner = Window.GetWindow(this);
+                            var dlg = new NinePointCorrespondenceDialog(calibImage, imagePts, worldPts, owner);
+                            if (dlg.ShowDialog() != true || dlg.ResultImagePoints == null)
+                                throw new OperationCanceledException("标定已取消：未确认点对应关系");
+                            alignedImagePts = dlg.ResultImagePoints;
+                        }
+
+                        var calResult = CalibAPI.CalibrateNinePoint(alignedImagePts, worldPts);
                         if (!calResult.Success)
                             throw new InvalidOperationException($"标定失败: {calResult.ErrorMessage}");
                         node.Outputs["Transform"] = calResult.Transform;
+                        node.ResultSummary = CalibrateRequiresCorrespondenceDialog(node)
+                            ? $"标定 OK（{alignedImagePts.Length} 对点，图像确认）"
+                            : $"标定 OK（{alignedImagePts.Length} 对点）";
                         break;
                     }
 
@@ -10652,6 +10683,21 @@ namespace CalibOperatorCLI_Example
                     cb.SelectedItem = param.Options.Contains(currentValue) ? currentValue : param.DefaultValue;
                     input = cb;
                 }
+                else if (param.Name == "worldPoints" && node.Def.TypeId == "calibrate")
+                {
+                    input = new TextBox
+                    {
+                        Width = 460,
+                        MinHeight = 72,
+                        Text = currentValue,
+                        TextWrapping = TextWrapping.Wrap,
+                        AcceptsReturn = false,
+                        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                        VerticalAlignment = VerticalAlignment.Top,
+                        FontFamily = new FontFamily("Consolas"),
+                        FontSize = 11
+                    };
+                }
                 else if (compositeUi && (param.Name == "innerFlowJson" || param.Name == "bindingsJson"))
                 {
                     input = new TextBox
@@ -10862,6 +10908,7 @@ namespace CalibOperatorCLI_Example
             node.ResultSummary = summary;
             ApplyResultSummaryTextToNodeVisual(node, summary);
         }
+
 
         /// <summary>
         /// 弹窗输入九点世界坐标（X,Y 两个 TextBox × 9行）
