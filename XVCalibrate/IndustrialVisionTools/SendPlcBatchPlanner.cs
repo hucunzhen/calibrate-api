@@ -36,8 +36,9 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>
-        /// 是否在全部批次写完后置位上位机下发完成标志（D804L 等）。
-        /// separate_batch 默认 true；单次下发默认跟随 setWeldDoneHostOnSend。
+        /// 是否在下发流程末尾置位上位机完成标志（D804L 等）。
+        /// setWeldDoneHostOnSend 或 setWeldDoneHostAfterAllBatches=true 时生效（单次/分批均可）。
+        /// 实际置位在 send_plc 内于 GvarSent 下游算子执行完毕之后。
         /// </summary>
         public static bool ShouldSignalHostAfterAllBatches(
             bool separateBatchMode,
@@ -50,8 +51,8 @@ namespace CalibOperatorCLI_Example
                 return false;
             if (setWeldDoneHostOnSend)
                 return true;
-            if (separateBatchMode && batchCount > 0)
-                return setWeldDoneHostAfterAllBatchesParam;
+            if (setWeldDoneHostAfterAllBatchesParam)
+                return true;
             return false;
         }
 

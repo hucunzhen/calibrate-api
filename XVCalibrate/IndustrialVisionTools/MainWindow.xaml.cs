@@ -12,6 +12,7 @@ namespace CalibOperatorCLI_Example
     {
         private const string LastFlowFileName = "last_flow_path.txt";
         private PlcPage _plcPage;
+        private ControllerLightPage _controllerLightPage;
         private HistogramPage _histogramPage;
         private FlowHostPage _flowHostPage;
         private YoloSegTrainPage _yoloSegTrainPage;
@@ -34,6 +35,7 @@ namespace CalibOperatorCLI_Example
             }
 
             _plcPage = new PlcPage();
+            _controllerLightPage = new ControllerLightPage();
             _histogramPage = new HistogramPage();
             _flowHostPage = new FlowHostPage();
             _flowHostPage.FlowLoaded += SaveLastFlowPath;
@@ -63,6 +65,7 @@ namespace CalibOperatorCLI_Example
             var dim = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
             var accent = new SolidColorBrush(Color.FromRgb(0x00, 0x7A, 0xCC));
             NavPlc.Background = dim;
+            NavController.Background = dim;
             NavFlow.Background = dim;
             NavAdvanced.Background = dim;
 
@@ -70,6 +73,9 @@ namespace CalibOperatorCLI_Example
             {
                 case "Plc":
                     NavPlc.Background = accent;
+                    break;
+                case "Controller":
+                    NavController.Background = accent;
                     break;
                 case "Flow":
                     NavFlow.Background = accent;
@@ -99,6 +105,12 @@ namespace CalibOperatorCLI_Example
         {
             NavigateTo(_plcPage);
             HighlightTab("Plc");
+        }
+
+        private void NavController_Click(object sender, RoutedEventArgs e)
+        {
+            NavigateTo(_controllerLightPage);
+            HighlightTab("Controller");
         }
 
         private void NavHistogram_Click(object sender, RoutedEventArgs e)

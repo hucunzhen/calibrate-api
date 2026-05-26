@@ -60,11 +60,21 @@ namespace CalibOperatorCLI_Example
         /// <summary>
         /// 根据 pattern 与参数生成世界 XY 点列（单位与 center/step 一致，通常为 mm）。
         /// </summary>
+        private static (double StepX, double StepY) ResolveWeldTrajectorySteps(double stepMm, double stepXmm, double stepYmm)
+        {
+            double fb = Math.Max(1e-6, stepMm);
+            double sx = stepXmm > 0 ? Math.Max(1e-6, stepXmm) : fb;
+            double sy = stepYmm > 0 ? Math.Max(1e-6, stepYmm) : fb;
+            return (sx, sy);
+        }
+
         private static Point2D[] GenerateWeldTrajectoryWorld(
             string patternRaw,
             double centerX,
             double centerY,
             double stepMm,
+            double stepXmm,
+            double stepYmm,
             double armMm,
             double legXmm,
             double legYmm,
@@ -78,18 +88,18 @@ namespace CalibOperatorCLI_Example
             samplesPerSegment = Math.Max(1, samplesPerSegment);
             gridCols = Math.Max(1, gridCols);
             gridRows = Math.Max(1, gridRows);
-            stepMm = Math.Max(1e-6, stepMm);
             armMm = Math.Max(1e-6, armMm);
+            var (stepX, stepY) = ResolveWeldTrajectorySteps(stepMm, stepXmm, stepYmm);
 
             return key switch
             {
-                "nine_3x3" => BuildNineGrid(centerX, centerY, stepMm, 3, 3),
+                "nine_3x3" => BuildNineGrid(centerX, centerY, stepX, stepY, 3, 3),
                 "cross_lines" => BuildCrossLines(centerX, centerY, armMm, samplesPerSegment),
                 "cross_5" => BuildCrossFive(centerX, centerY, armMm),
-                "l_shape" => BuildLShape(centerX, centerY, legXmm, legYmm, stepMm),
+                "l_shape" => BuildLShape(centerX, centerY, legXmm, legYmm, stepX, stepY),
                 "line" => BuildLine(centerX, centerY, armMm * 2.0, angleDeg, samplesPerSegment),
-                "rect" => BuildRect(centerX, centerY, armMm * 2.0, armMm * 2.0, stepMm),
-                "grid_snake" => BuildGridSnake(centerX, centerY, stepMm, gridCols, gridRows),
+                "rect" => BuildRect(centerX, centerY, armMm * 2.0, armMm * 2.0, stepX, stepY),
+                "grid_snake" => BuildGridSnake(centerX, centerY, stepX, stepY, gridCols, gridRows),
                 _ => throw new InvalidOperationException($"焊接轨迹: 未识别的 pattern 键「{key}」")
             };
         }
@@ -101,6 +111,8 @@ namespace CalibOperatorCLI_Example
             double centerY,
             double centerZ,
             double stepMm,
+            double stepXmm,
+            double stepYmm,
             double armMm,
             double legXmm,
             double legYmm,
@@ -110,20 +122,20 @@ namespace CalibOperatorCLI_Example
             int samplesPerSegment)
         {
             Point2D[] xy = GenerateWeldTrajectoryWorld(
-                patternRaw, centerX, centerY, stepMm, armMm, legXmm, legYmm, angleDeg, gridCols, gridRows, samplesPerSegment);
+                patternRaw, centerX, centerY, stepMm, stepXmm, stepYmm, armMm, legXmm, legYmm, angleDeg, gridCols, gridRows, samplesPerSegment);
             return xy.Select(p => new CalibPoint3D(p.X, p.Y, centerZ)).ToArray();
         }
 
-        private static Point2D[] BuildNineGrid(double cx, double cy, double step, int cols, int rows)
+        private static Point2D[] BuildNineGrid(double cx, double cy, double stepX, double stepY, int cols, int rows)
         {
             if (cols < 1 || rows < 1) return Array.Empty<Point2D>();
             var list = new List<Point2D>(cols * rows);
-            double ox = -((cols - 1) * 0.5) * step;
-            double oy = -((rows - 1) * 0.5) * step;
+            double ox = -((cols - 1) * 0.5) * stepX;
+            double oy = -((rows - 1) * 0.5) * stepY;
             for (int r = 0; r < rows; r++)
             {
                 for (int c = 0; c < cols; c++)
-                    list.Add(new Point2D(cx + ox + c * step, cy + oy + r * step));
+                    list.Add(new Point2D(cx + ox + c * stepX, cy + oy + r * stepY));
             }
             return list.ToArray();
         }
@@ -178,20 +190,22 @@ namespace CalibOperatorCLI_Example
             return list;
         }
 
-        private static Point2D[] BuildLShape(double cx, double cy, double legX, double legY, double step)
+        private static Point2D[] BuildLShape(double cx, double cy, double legX, double legY, double stepX, double stepY)
         {
             legX = Math.Max(1e-6, legX);
             legY = Math.Max(1e-6, legY);
+            stepX = Math.Max(1e-6, stepX);
+            stepY = Math.Max(1e-6, stepY);
             var list = new List<Point2D>();
             // 水平段 (cx,cy) -> (cx+legX, cy)
-            int nx = Math.Max(2, (int)Math.Ceiling(legX / step) + 1);
+            int nx = Math.Max(2, (int)Math.Ceiling(legX / stepX) + 1);
             for (int i = 0; i < nx; i++)
             {
                 double t = Math.Min(1.0, i / (double)(nx - 1));
                 list.Add(new Point2D(cx + legX * t, cy));
             }
             // 竖直段 (cx+legX, cy) -> (cx+legX, cy+legY)，跳过与上段重复的末点
-            int ny = Math.Max(2, (int)Math.Ceiling(legY / step) + 1);
+            int ny = Math.Max(2, (int)Math.Ceiling(legY / stepY) + 1);
             for (int j = 1; j < ny; j++)
             {
                 double t = j / (double)(ny - 1);
@@ -209,10 +223,12 @@ namespace CalibOperatorCLI_Example
             return seg.ToArray();
         }
 
-        private static Point2D[] BuildRect(double cx, double cy, double width, double height, double step)
+        private static Point2D[] BuildRect(double cx, double cy, double width, double height, double stepX, double stepY)
         {
             width = Math.Max(1e-6, width);
             height = Math.Max(1e-6, height);
+            stepX = Math.Max(1e-6, stepX);
+            stepY = Math.Max(1e-6, stepY);
             double x0 = cx - width * 0.5;
             double y0 = cy - height * 0.5;
             double x1 = cx + width * 0.5;
@@ -222,7 +238,9 @@ namespace CalibOperatorCLI_Example
             void AddEdge(double ax, double ay, double bx, double by)
             {
                 double len = Math.Sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay));
-                int n = Math.Max(2, (int)Math.Ceiling(len / step) + 1);
+                bool horizontal = Math.Abs(by - ay) < Math.Abs(bx - ax);
+                double edgeStep = horizontal ? stepX : stepY;
+                int n = Math.Max(2, (int)Math.Ceiling(len / edgeStep) + 1);
                 for (int i = 0; i < n; i++)
                 {
                     double t = i / (double)(n - 1);
@@ -245,9 +263,9 @@ namespace CalibOperatorCLI_Example
             return list.ToArray();
         }
 
-        private static Point2D[] BuildGridSnake(double cx, double cy, double step, int cols, int rows)
+        private static Point2D[] BuildGridSnake(double cx, double cy, double stepX, double stepY, int cols, int rows)
         {
-            var pts = BuildNineGrid(cx, cy, step, cols, rows);
+            var pts = BuildNineGrid(cx, cy, stepX, stepY, cols, rows);
             if (pts.Length == 0) return pts;
             // BuildNineGrid is row-major (r inner); reorder to snake by physical row in grid
             var byRow = new List<Point2D>[rows];

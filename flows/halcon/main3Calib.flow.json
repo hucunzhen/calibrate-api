@@ -103,6 +103,8 @@
         "centerX": "0",
         "centerY": "0",
         "centerZ": "0",
+        "stepXmm": "10",
+        "stepYmm": "10",
         "stepMm": "10",
         "armMm": "50",
         "legXmm": "50",
@@ -132,7 +134,9 @@
         "weldDoneHostRegister": "D804L",
         "setWeldDoneHostOnSend": "false",
         "setWeldDoneHostAfterAllBatches": "true",
-        "runDownstreamPerBatch": "true"
+        "runDownstreamPerBatch": "true",
+        "asPolylineSegments": "false",
+        "closePolyline": "false"
       }
     }
   ],

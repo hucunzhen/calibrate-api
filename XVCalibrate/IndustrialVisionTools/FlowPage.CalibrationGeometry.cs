@@ -42,6 +42,7 @@ namespace CalibOperatorCLI_Example
         private static readonly JsonSerializerOptions CalibrationResultFileJsonOptions = new()
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true,
             WriteIndented = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         };

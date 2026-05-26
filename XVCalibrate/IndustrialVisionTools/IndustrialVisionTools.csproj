@@ -115,6 +115,19 @@
     </None>
   </ItemGroup>
 
+  <!-- 光源控制器 Controller_SDK-V4.0.0.1（与 demo 相同 C#_DLL\x64） -->
+  <PropertyGroup>
+    <ControllerSdkDir>$(MSBuildThisFileDirectory)..\..\Controller_SDK-V4.0.0.1(demo)\SDK\C#_DLL\x64</ControllerSdkDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="Exists('$(ControllerSdkDir)\ControllerDllCSharp.dll')">
+    <DefineConstants>$(DefineConstants);CONTROLLER_SDK_ENABLED</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="Exists('$(ControllerSdkDir)\ControllerDllCSharp.dll')">
+    <Reference Include="ControllerDllCSharp">
+      <HintPath>$(ControllerSdkDir)\ControllerDllCSharp.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
   <!-- 信捷 PLC（XinJETcpNet）依赖：强制复制到输出，避免 exe 被占用时 NuGet 拷贝被跳过导致运行期 FileNotFound -->
   <Target Name="CopyHslCommunicationToOutput" AfterTargets="Build">
     <PropertyGroup>
@@ -128,6 +141,21 @@
           DestinationFolder="$(OutputPath)"
           SkipUnchangedFiles="true"
           Condition="Exists('$(PkgHslCommunication)\lib\netstandard2.1\HslCommunication.xml')" />
+  </Target>
+
+  <!-- 光源控制器原生 DLL 必须与 exe 同目录（ControllerDllCSharp 通过 DllImport 加载 CommonToolDll 等） -->
+  <Target Name="CopyControllerSdkNative" AfterTargets="Build" Condition="Exists('$(ControllerSdkDir)\ControllerDllCSharp.dll')">
+    <Copy SourceFiles="$(ControllerSdkDir)\CommonToolDll.dll" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="false" />
+    <Copy SourceFiles="$(ControllerSdkDir)\ControllerDll.dll" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="false" />
+    <Copy SourceFiles="$(ControllerSdkDir)\sControllerDll.dll" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="false" />
+    <Copy SourceFiles="$(ControllerSdkDir)\ControllerDllCSharp.dll" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="false" />
+    <Message Text="[ControllerSDK] 已复制原生 DLL 到 $(OutputPath)" Importance="normal" />
+  </Target>
+  <Target Name="CopyControllerSdkNativeToPublish" BeforeTargets="CopyFilesToPublishDirectory" Condition="Exists('$(ControllerSdkDir)\ControllerDllCSharp.dll')">
+    <Copy SourceFiles="$(ControllerSdkDir)\CommonToolDll.dll" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="false" />
+    <Copy SourceFiles="$(ControllerSdkDir)\ControllerDll.dll" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="false" />
+    <Copy SourceFiles="$(ControllerSdkDir)\sControllerDll.dll" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="false" />
+    <Copy SourceFiles="$(ControllerSdkDir)\ControllerDllCSharp.dll" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="false" />
   </Target>
 
   <!-- 海康威视相机 SDK（Private 确保 publish 带上托管 DLL；原生 MvCameraControl.dll 来自 MVS Runtime 复制） -->

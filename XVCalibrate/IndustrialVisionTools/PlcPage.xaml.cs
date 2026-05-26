@@ -114,9 +114,9 @@ namespace CalibOperatorCLI_Example
 
             BtnManual.Content = "手动模式";
             ApplyRegToolTip(BtnManual, "ManualMode", "写 ON → 手动");
-            BtnAuto.Content = "自动模式";
-            ApplyRegToolTip(BtnAuto, "ManualMode", "写 OFF → 自动");
-            ApplyRegToolTip(BtnCalibrationMode, "CalibrationMode", "写 ON → 进入标定模式");
+            BtnAuto.Content = "关闭手动模式";
+            ApplyRegToolTip(BtnAuto, "ManualMode", "写 OFF → 关闭手动");
+            ApplyRegToolTip(BtnCalibrationMode, "CalibrationMode", "点一下开，再点一下关");
             BtnStart.Content = "启动";
             ApplyRegToolTip(BtnStart, "RunStartStop", "写 ON");
             BtnStop.Content = "停止";
@@ -144,6 +144,8 @@ namespace CalibOperatorCLI_Example
             ApplyRegToolTip(TxtStopSafeY, "StopSafePosY", "停机安全位 Y");
             ApplyRegToolTip(TxtStopSafeZ, "StopSafePosZ", "停机安全位 Z");
             ApplyRegToolTip(BtnReadStopSafePos, "StopSafePosX", "读取停机安全位 XYZ");
+            ApplyRegToolTip(BtnManualStopSafePos, "ManualStopSafePos", "脉冲触发：手动运动到停机安全位");
+            ApplyRegToolTip(BtnManualPhotoPos, "ManualPhotoPos", "脉冲触发：手动运动到拍照位");
             ApplyRegToolTip(TxtPhotoPosX, "PhotoPosX", "拍照位 X");
             ApplyRegToolTip(TxtPhotoPosY, "PhotoPosY", "拍照位 Y");
             ApplyRegToolTip(TxtPhotoPosZ, "PhotoPosZ", "拍照位 Z");
@@ -412,6 +414,18 @@ namespace CalibOperatorCLI_Example
             var result = _plcHd.Write(coilAddr.ToString(), value);
             if (!result.IsSuccess)
                 Log($"[PLC] Write {mAddr}={(value ? "ON" : "OFF")} failed: {result.Message}");
+        }
+
+        /// <summary>M 线圈上升沿脉冲（ON 后延时复位 OFF），用于 PLC 手动点位等触发。</summary>
+        private void PulseCoil(string regKey, string logLabel, int holdMs = 200)
+        {
+            if (!CheckPlcConnected()) return;
+            string addr = Reg(regKey);
+            WriteCoil(addr, true);
+            Log($"[PLC] {logLabel} {addr} 触发");
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(holdMs) };
+            timer.Tick += (_, _) => { WriteCoil(addr, false); timer.Stop(); };
+            timer.Start();
         }
 
         private bool ReadCoil(string mAddr)
@@ -767,19 +781,20 @@ namespace CalibOperatorCLI_Example
         {
             if (!CheckPlcConnected()) return;
             WriteCoil(Reg("ManualMode"), false);
-            TxtModeStatus.Text = "Auto";
+            TxtModeStatus.Text = "手动关";
             TxtModeStatus.Foreground = new SolidColorBrush(Colors.Green);
-            Log($"[PLC] 自动模式 {Reg("ManualMode")}=OFF");
+            Log($"[PLC] 关闭手动模式 {Reg("ManualMode")}=OFF");
         }
 
         private void BtnCalibrationMode_Click(object sender, RoutedEventArgs e)
         {
             if (!CheckPlcConnected()) return;
             string addr = Reg("CalibrationMode");
-            WriteCoil(addr, true);
-            TxtCalibrationModeStatus.Text = "开";
-            TxtCalibrationModeStatus.Foreground = new SolidColorBrush(Colors.Purple);
-            Log($"[PLC] 标定模式 {addr}=ON");
+            bool next = !ReadCoil(addr);
+            WriteCoil(addr, next);
+            TxtCalibrationModeStatus.Text = next ? "开" : "关";
+            TxtCalibrationModeStatus.Foreground = new SolidColorBrush(next ? Colors.Purple : Colors.Gray);
+            Log($"[PLC] 标定模式 {addr}={(next ? "ON" : "OFF")}");
         }
 
         private void BtnStart_Click(object sender, RoutedEventArgs e)
@@ -1047,6 +1062,12 @@ namespace CalibOperatorCLI_Example
             TxtWeldDoneHostStatus.Foreground = new SolidColorBrush(Colors.Gray);
             Log($"[PLC] 轨迹下发完成 {addr} 已清零");
         }
+
+        private void BtnManualStopSafePos_Click(object sender, RoutedEventArgs e)
+            => PulseCoil("ManualStopSafePos", "手动→停机安全位");
+
+        private void BtnManualPhotoPos_Click(object sender, RoutedEventArgs e)
+            => PulseCoil("ManualPhotoPos", "手动→拍照位");
 
         private void BtnReadStopSafePos_Click(object sender, RoutedEventArgs e)
         {

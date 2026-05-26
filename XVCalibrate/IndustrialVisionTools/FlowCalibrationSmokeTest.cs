@@ -53,7 +53,11 @@ namespace CalibOperatorCLI_Example
             fails += Check("相对路径解析到 halcon/calibration_result.json",
                 () => string.Equals(resolved, Path.GetFullPath(calJson), StringComparison.OrdinalIgnoreCase));
 
-            var jOpts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var jOpts = new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                PropertyNameCaseInsensitive = true
+            };
             var dto = JsonSerializer.Deserialize<CalibFileDto>(File.ReadAllText(calJson), jOpts);
             fails += Check("JSON 含 schemaVersion>=1", () => dto != null && dto.SchemaVersion >= 1);
             fails += Check("JSON 含 affine", () => dto?.Affine != null);
@@ -262,6 +266,14 @@ namespace CalibOperatorCLI_Example
             fails += Check("setWeldDoneHostAfterAllBatches=false 时无 SignalHost",
                 () => !planNoD804.Any(s => s.Kind == PlcSendStepKind.SignalHostComplete));
 
+            fails += Check("ShouldSignalHost: 单次+setWeldDoneHostAfterAllBatches=true 置 D804",
+                () => SendPlcBatchPlanner.ShouldSignalHostAfterAllBatches(
+                    false, 0, false, true, true));
+            var planSingle = SendPlcBatchPlanner.BuildSteps(
+                false, null, 12, false, true, signalHostAfterAllBatches: true);
+            fails += Check("单次下发 setWeldDoneHostAfterAllBatches=true 计划含 SignalHost",
+                () => planSingle.Any(s => s.Kind == PlcSendStepKind.SignalHostComplete));
+
             // BarIds 不等长 → separate_batch 应失败（不再静默整批 744）
             var inputs = new Dictionary<string, object?>
             {
@@ -274,6 +286,25 @@ namespace CalibOperatorCLI_Example
                     out _, out _, out _, out var diag)
                     && diag != null
                     && diag.Contains("等长"));
+
+            var grid9 = new CalibPoint3D[9];
+            for (int i = 0; i < 9; i++)
+                grid9[i] = new CalibPoint3D(100 + i, 200 + i, 0);
+            var pointGvars = PlcGvarBuilder.BuildPointGvarsFromPolyline(grid9, 1);
+            fails += Check("每点一点: 9 点 → 9 条 GVAR",
+                () => pointGvars.Length == 9);
+            fails += Check("每点一点: 每条 p0 与 p1 相同",
+                () => pointGvars.All(g =>
+                    g.spVec3_p0.x == g.spVec3_p1.x
+                    && g.spVec3_p0.y == g.spVec3_p1.y
+                    && g.spVec3_p0.z == g.spVec3_p1.z));
+
+            var segGvars = PlcGvarBuilder.BuildSegmentGvarsFromPolyline(grid9, 1, closePolyline: true);
+            fails += Check("连成线段: 9 点闭合 → 9 段（非点模式）",
+                () => segGvars.Length == 9);
+            fails += Check("连成线段: 至少一条 p0≠p1",
+                () => segGvars.Any(g =>
+                    g.spVec3_p0.x != g.spVec3_p1.x || g.spVec3_p0.y != g.spVec3_p1.y));
 
             return fails;
         }

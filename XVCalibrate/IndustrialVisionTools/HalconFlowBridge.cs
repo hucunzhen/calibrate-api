@@ -1793,7 +1793,12 @@ namespace CalibOperatorCLI_Example
         /// 对应 apply_mask：Mask 像素落在 [maskMin,maskMax] 时保留 Image 灰度，否则为 0。
         /// （部分 HalconDotNet 无 GrayMask，用语义等价的单通道像素运算实现。）
         /// </summary>
-        public static CalibImage GrayMaskApply(CalibImage image, CalibImage mask, double maskMin, double maskMax)
+        public static CalibImage GrayMaskApply(
+            CalibImage image,
+            CalibImage mask,
+            double maskMin,
+            double maskMax,
+            bool keepInsideMask = true)
         {
             if (image == null) throw new ArgumentNullException(nameof(image));
             if (mask == null) throw new ArgumentNullException(nameof(mask));
@@ -1819,7 +1824,10 @@ namespace CalibOperatorCLI_Example
                 for (int i = 0; i < nPix; i++)
                 {
                     int m = bufM[i];
-                    outb[i] = (m >= mmn && m <= mmx) ? bufI[i] : (byte)0;
+                    bool inside = m >= mmn && m <= mmx;
+                    outb[i] = keepInsideMask
+                        ? (inside ? bufI[i] : (byte)0)
+                        : (inside ? (byte)0 : bufI[i]);
                 }
 
                 var dst = new CalibImage(ni.width, ni.height, 1);
@@ -2859,11 +2867,57 @@ namespace CalibOperatorCLI_Example
         {
             public CalibImage MaskedImage { get; init; } = null!;
             public CalibImage Mask { get; init; } = null!;
+            /// <summary>参与生成 Mask 的匹配个数（经 maxMatchCount 截取后）。</summary>
             public int MatchCount { get; init; }
+            /// <summary>输入 Row/Column 总数（截取前）。</summary>
+            public int InputMatchCount { get; init; }
             public int ValidRegionCount { get; init; }
+            public bool KeepInsideMask { get; init; } = true;
         }
 
-        /// <summary>用 FindShapeModel 位姿 + 模板轮廓生成区域，对原图做 Mask（区域外置 0）。</summary>
+        /// <summary>解析 maskRegionMode：保留/keep → true；去掉/remove → false。</summary>
+        public static bool ParseMaskRegionKeepInside(string? maskRegionMode)
+        {
+            string m = (maskRegionMode ?? "保留mask区域").Trim();
+            if (m.Length == 0)
+                return true;
+            string lower = m.ToLowerInvariant();
+            return lower is "remove" or "exclude" or "cut" or "挖空" or "去掉" or "去掉mask区域" or "排除"
+                ? false
+                : true;
+        }
+
+        /// <summary>截取前 <paramref name="maxMatchCount"/> 个匹配（0=全部）。</summary>
+        public static (double[] Rows, double[] Cols, double[]? Angles, int UsedCount, int TotalCount) SliceShapeMatchPoseArrays(
+            double[] rows,
+            double[] cols,
+            double[]? angles,
+            int maxMatchCount)
+        {
+            int total = Math.Min(rows?.Length ?? 0, cols?.Length ?? 0);
+            if (total == 0)
+                return (Array.Empty<double>(), Array.Empty<double>(), angles, 0, 0);
+
+            int used = maxMatchCount > 0 ? Math.Min(maxMatchCount, total) : total;
+            double[] r = new double[used];
+            double[] c = new double[used];
+            Array.Copy(rows!, 0, r, 0, used);
+            Array.Copy(cols!, 0, c, 0, used);
+            double[]? a = null;
+            if (angles != null && angles.Length > 0)
+            {
+                int alen = Math.Min(angles.Length, used);
+                a = new double[used];
+                Array.Copy(angles, 0, a, 0, alen);
+            }
+
+            return (r, c, a, used, total);
+        }
+
+        /// <summary>
+        /// 用 FindShapeModel 位姿 + 模板轮廓生成区域，对原图做 Mask。
+        /// keepInsideMask=true：区域内保留原图、区域外置 0；false：挖空匹配区域、区域外保留。
+        /// </summary>
         public static ShapeMatchImageMaskResult MaskCalibImageByShapeMatch(
             CalibImage image,
             long modelId,
@@ -2874,14 +2928,20 @@ namespace CalibOperatorCLI_Example
             double erosionInsetPx,
             double maskMin,
             double maskMax,
-            bool preserveColor)
+            bool preserveColor,
+            bool keepInsideMask = true,
+            int maxMatchCount = 0)
         {
             if (image == null)
                 throw new ArgumentNullException(nameof(image));
             if (modelId < 0)
                 throw new ArgumentException("ModelId 无效", nameof(modelId));
 
-            int n = Math.Min(rows?.Length ?? 0, cols?.Length ?? 0);
+            var sliced = SliceShapeMatchPoseArrays(rows, cols, angles, maxMatchCount);
+            rows = sliced.Rows;
+            cols = sliced.Cols;
+            angles = sliced.Angles;
+            int n = sliced.UsedCount;
             if (n == 0)
                 throw new InvalidOperationException("形状匹配 Mask: Row/Column 为空，请先连接 Find 结果");
 
@@ -2902,7 +2962,7 @@ namespace CalibOperatorCLI_Example
 
                 if (valid == 0)
                     throw new InvalidOperationException(
-                        $"形状匹配 Mask: 无法从 {n} 个匹配生成有效区域，请检查 ModelId/contourLevel={contourLevel}");
+                        $"形状匹配 Mask: 无法从 {n} 个匹配生成有效区域（输入共{sliced.TotalCount}个），请检查 ModelId/contourLevel={contourLevel}");
 
                 using HRegion? union = UnionShapeMatchRegions(masks);
                 if (union == null || !union.IsInitialized())
@@ -2911,13 +2971,15 @@ namespace CalibOperatorCLI_Example
                 CalibImage mask = RegionToMaskCalibImage(union, w, h);
                 try
                 {
-                    CalibImage masked = ApplyMaskToCalibImage(image, mask, maskMin, maskMax, preserveColor);
+                    CalibImage masked = ApplyMaskToCalibImage(image, mask, maskMin, maskMax, preserveColor, keepInsideMask);
                     return new ShapeMatchImageMaskResult
                     {
                         MaskedImage = masked,
                         Mask = mask,
                         MatchCount = n,
-                        ValidRegionCount = valid
+                        InputMatchCount = sliced.TotalCount,
+                        ValidRegionCount = valid,
+                        KeepInsideMask = keepInsideMask
                     };
                 }
                 catch
@@ -2933,13 +2995,17 @@ namespace CalibOperatorCLI_Example
             }
         }
 
-        /// <summary>Mask 在 [maskMin,maskMax] 内保留原图像素，否则为 0；支持 1/3 通道。</summary>
+        /// <summary>
+        /// keepInsideMask=true：Mask 在 [maskMin,maskMax] 内保留原图像素，否则为 0；
+        /// false：该范围内置 0、范围外保留。支持 1/3 通道。
+        /// </summary>
         public static CalibImage ApplyMaskToCalibImage(
             CalibImage image,
             CalibImage mask,
             double maskMin,
             double maskMax,
-            bool preserveColor)
+            bool preserveColor,
+            bool keepInsideMask = true)
         {
             if (image == null)
                 throw new ArgumentNullException(nameof(image));
@@ -2952,7 +3018,7 @@ namespace CalibOperatorCLI_Example
                 CalibImage gray = ToSingleChannelGray(image);
                 try
                 {
-                    return GrayMaskApply(gray, mask, maskMin, maskMax);
+                    return GrayMaskApply(gray, mask, maskMin, maskMax, keepInsideMask);
                 }
                 finally
                 {
@@ -2982,7 +3048,9 @@ namespace CalibOperatorCLI_Example
                 int mmx = (int)Math.Clamp(Math.Round(maskMax), 0, 255);
                 for (int p = 0; p < nPix; p++)
                 {
-                    if (bufM[p] < mmn || bufM[p] > mmx)
+                    bool inside = bufM[p] >= mmn && bufM[p] <= mmx;
+                    bool zero = keepInsideMask ? !inside : inside;
+                    if (zero)
                     {
                         bgr[p * 3] = 0;
                         bgr[p * 3 + 1] = 0;

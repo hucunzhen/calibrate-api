@@ -239,6 +239,53 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "image_flip",
+                DisplayName = "图像翻转",
+                Description = "水平/垂直/双向翻转 CalibImage（灰度或 BGR）",
+                Category = "预处理",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "flipMode",
+                        DisplayName = "翻转方式",
+                        DefaultValue = "horizontal",
+                        Description = "horizontal=左右；vertical=上下；both=水平+垂直",
+                        Options = new List<string> { "horizontal", "vertical", "both", "水平", "垂直", "双向" }
+                    }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "image_rotate",
+                DisplayName = "图像旋转",
+                Description = "顺时针旋转。90/180/270 为快速直角旋转；其它角度用双线性插值。expandCanvas=true 时扩大画布容纳整图。",
+                Category = "预处理",
+                Params =
+                {
+                    new OperatorParam { Name = "angleDeg", DisplayName = "角度(°)", DefaultValue = "90", Description = "顺时针角度，如 90、180、270 或任意小数" },
+                    new OperatorParam
+                    {
+                        Name = "expandCanvas",
+                        DisplayName = "扩大画布",
+                        DefaultValue = "true",
+                        Description = "仅非 90/180/270° 时有效：true=不裁切；false=保持原宽高",
+                        Options = new List<string> { "true", "false" }
+                    }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "clahe",
                 DisplayName = "CLAHE",
                 Description = "对比度受限自适应直方图均衡化",
@@ -1302,7 +1349,9 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "centerX", DisplayName = "中心X(mm)", DefaultValue = "0", Description = "世界坐标中心 X" },
                     new OperatorParam { Name = "centerY", DisplayName = "中心Y(mm)", DefaultValue = "0", Description = "世界坐标中心 Y" },
                     new OperatorParam { Name = "centerZ", DisplayName = "中心Z(mm)", DefaultValue = "0", Description = "所有轨迹点的 Z 高度（基座/world mm）" },
-                    new OperatorParam { Name = "stepMm", DisplayName = "步距(mm)", DefaultValue = "10", Description = "九宫/蛇形/矩形边插补、L 形沿边步长" },
+                    new OperatorParam { Name = "stepXmm", DisplayName = "X步距(mm)", DefaultValue = "10", Description = "九宫格/网格蛇形：列方向(世界X)点间距；L形水平段、矩形水平边插补步长" },
+                    new OperatorParam { Name = "stepYmm", DisplayName = "Y步距(mm)", DefaultValue = "10", Description = "九宫格/网格蛇形：行方向(世界Y)点间距；L形垂直段、矩形垂直边插补步长" },
+                    new OperatorParam { Name = "stepMm", DisplayName = "步距(mm,兼容)", DefaultValue = "10", Description = "旧参数：未填 stepXmm/stepYmm 或填 0 时，X、Y 均用本值" },
                     new OperatorParam { Name = "armMm", DisplayName = "臂长/半长(mm)", DefaultValue = "50", Description = "十字/直线：半边长；矩形：半边宽=armMm、半边高=armMm（与 line 总长=2×armMm）" },
                     new OperatorParam { Name = "legXmm", DisplayName = "L水平腿长(mm)", DefaultValue = "50", Description = "l_shape 水平段总长" },
                     new OperatorParam { Name = "legYmm", DisplayName = "L垂直腿长(mm)", DefaultValue = "50", Description = "l_shape 垂直段总长" },
@@ -1321,7 +1370,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "calibrate",
                 DisplayName = "九点标定",
-                Description = "标定像素→世界坐标。世界点在参数 worldPoints 中配置；运行时在图像上点击检测点确认与各行世界坐标的对应关系。",
+                Description = "标定像素→世界坐标。worldPoints 配置世界坐标(mm)；默认 pixelPickMode=手选：仅需 Image，在弹窗中按世界点列表左键手选像素。也可连接 ImagePts 作参考或匹配检测点。",
                 Category = "标定",
                 Params =
                 {
@@ -1334,17 +1383,25 @@ namespace CalibOperatorCLI_Example
                     },
                     new OperatorParam
                     {
+                        Name = "pixelPickMode",
+                        DisplayName = "像素取点方式",
+                        DefaultValue = "manual",
+                        Description = "manual/手选=在图像任意位置手选像素；detected/匹配检测点=点击 ImagePts 附近；auto=数量一致时按顺序标定否则弹窗",
+                        Options = new List<string> { "manual", "detected", "auto", "手选", "匹配检测点" }
+                    },
+                    new OperatorParam
+                    {
                         Name = "confirmCorrespondence",
                         DisplayName = "图像确认对应",
                         DefaultValue = "true",
-                        Description = "true=弹窗在图像上点选对应；false=按 ImagePts 与 worldPoints 顺序一一对应",
+                        Description = "true=弹窗确认；false=仅 auto 且 ImagePts 数量一致时按顺序标定（手选模式仍会弹窗）",
                         Options = new List<string> { "true", "false" }
                     }
                 },
                 Ports =
                 {
                     new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
-                    new PortDef { Name = "ImagePts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "ImagePts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3", IsOptional = true },
                     new PortDef { Name = "Transform", Direction = PortDirection.Output, DataType = typeof(AffineTransform), ColorHex = "#E91E63" }
                 }
             },
@@ -1582,7 +1639,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "load_calibration_result",
                 DisplayName = "读取标定结果",
-                Description = "从 JSON 文件恢复标定数据（由「保存标定结果」生成）。仅连接需要的输出端口；若某输出已连线但文件中无对应数据将报错。",
+                Description = "从 JSON 恢复标定（由「保存标定结果」生成）。同一次运行中会在「保存标定结果」之后执行（先落盘再读取）。坐标转换可直连「标定」的 Transform，不必经本节点。仅连接需要的输出端口。",
                 Category = "标定",
                 Params =
                 {
@@ -1789,7 +1846,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "send_plc",
                 DisplayName = "发送PLC",
-                Description = "与 PLC 页 Write All 相同：优先 GvarList；否则 Points3D/Points 生成 GVAR。separate_batch=按条分批写 D800+GVAR，每批可触发 GvarSent 连线下游子节点，全部批次完成后置 D804L。",
+                Description = "与 PLC 页 Write All 相同：优先 GvarList；否则 Points3D/Points 生成 GVAR（相邻点→线段，closePolyline 默认补末点→首点闭合）。separate_batch=按条分批写 D800+GVAR；GvarSent 下游（POU/等待等）全部执行完后才置 D804L（setWeldDoneHostOnSend 或 setWeldDoneHostAfterAllBatches）。",
                 Category = "输出",
                 Params =
                 {
@@ -1827,6 +1884,15 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "gvarStartRegister", DisplayName = "GVAR起始地址", DefaultValue = "D30000", Description = "第 i 条从 gvarStart + i×28 起；与 GvarList.StartAddress 一致" },
                     new OperatorParam { Name = "baseRegister", DisplayName = "起始地址(兼容)", DefaultValue = "", Description = "已废弃：仅当未填 gvarStartRegister 时作为 GVAR 起始地址" },
                     new OperatorParam { Name = "gvarType", DisplayName = "GVAR类型", DefaultValue = "1", Description = "类型值（1=线段，与 PLC 程序约定一致）" },
+                    new OperatorParam { Name = "zDefault", DisplayName = "默认Z(mm)", DefaultValue = "0", Description = "仅对 Points(Point2D[]) 生效：写入 GVAR 的 p0.z/p1.z/z0/z1；Points3D 仍用各点 Z。单位与轨迹世界坐标一致（mm）。" },
+                    new OperatorParam
+                    {
+                        Name = "closePolyline",
+                        DisplayName = "闭合折线",
+                        DefaultValue = "true",
+                        Description = "true=相邻点连成线段，并补最后一点→第一点闭合段（n 点闭合轮廓得 n 段）；false=开折线仅 n-1 段。首尾已重合(≤0.01mm)时不重复补段",
+                        Options = new List<string> { "true", "false" }
+                    },
                     new OperatorParam { Name = "maxSegmentCount", DisplayName = "最大线段数", DefaultValue = "1024", Description = "超过则中止，防止越界写 PLC" },
                     new OperatorParam
                     {
@@ -1837,21 +1903,21 @@ namespace CalibOperatorCLI_Example
                         Options = new List<string> { "true", "false" }
                     },
                     new OperatorParam { Name = "countRegister", DisplayName = "线段数量寄存器", DefaultValue = "D800", Description = "单次下发且 skipCountWrite=false 时写入；separate_batch 时每批写入当批段数" },
-                    new OperatorParam { Name = "weldDoneHostRegister", DisplayName = "下发完成标志", DefaultValue = "D804L", Description = "发完 GVAR 后自动置 1；留空则不置位" },
+                    new OperatorParam { Name = "weldDoneHostRegister", DisplayName = "下发完成标志", DefaultValue = "D804L", Description = "GvarSent 下游执行完后置 1；留空则不置位" },
                     new OperatorParam
                     {
                         Name = "setWeldDoneHostOnSend",
                         DisplayName = "发完自动置位",
                         DefaultValue = "false",
-                        Description = "true=单次下发结束后置 weldDoneHostRegister=1",
+                        Description = "true=启用 D804 置位（在下游算子之后）",
                         Options = new List<string> { "true", "false" }
                     },
                     new OperatorParam
                     {
                         Name = "setWeldDoneHostAfterAllBatches",
-                        DisplayName = "分批全部完成后置位",
+                        DisplayName = "全部完成后置位",
                         DefaultValue = "true",
-                        Description = "仅 separate_batch：全部批次 D800+GVAR 写完后才置 D804L（默认 true）；置位前会先清 0，避免 PLC 误判首批完成",
+                        Description = "true=GVAR 与 GvarSent 下游完成后置 D804L（单次/分批均可；默认 true）；置位前会先清 0",
                         Options = new List<string> { "true", "false" }
                     },
                     new OperatorParam
@@ -1881,7 +1947,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "send_plc_point",
                 DisplayName = "发送PLC(每点一点)",
-                Description = "与「发送PLC」相同下发逻辑，但从点列生成 GVAR 时：每个输入点写一条 GVAR，p0 与 p1 坐标相同（退化线段/点标记）。n 点 → n 条。",
+                Description = "与「发送PLC」相同下发逻辑。默认每点一条退化 GVAR(p0=p1)。asPolylineSegments=true 时改为相邻点连成线段并可闭合。GvarSent 下游全部执行完后才置 D804L。",
                 Category = "输出",
                 Params =
                 {
@@ -1913,6 +1979,23 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "gvarStartRegister", DisplayName = "GVAR起始地址", DefaultValue = "D30000", Description = "与 GvarList.StartAddress 一致" },
                     new OperatorParam { Name = "baseRegister", DisplayName = "起始地址(兼容)", DefaultValue = "", Description = "未填 gvarStartRegister 时使用" },
                     new OperatorParam { Name = "gvarType", DisplayName = "GVAR类型", DefaultValue = "1", Description = "与 PLC 程序约定一致" },
+                    new OperatorParam { Name = "zDefault", DisplayName = "默认Z(mm)", DefaultValue = "0", Description = "仅对 Points(Point2D[]) 生效：每点 GVAR 的 Z；Points3D 仍用各点 Z（mm）。" },
+                    new OperatorParam
+                    {
+                        Name = "asPolylineSegments",
+                        DisplayName = "连成线段",
+                        DefaultValue = "false",
+                        Description = "false=每点一条退化 GVAR(p0=p1，与算子名一致)；true=按折线生成 p0→p1 线段（闭合轮廓可开 closePolyline）",
+                        Options = new List<string> { "true", "false" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "closePolyline",
+                        DisplayName = "闭合折线",
+                        DefaultValue = "true",
+                        Description = "仅 asPolylineSegments=true 时有效：补末点→首点闭合段",
+                        Options = new List<string> { "true", "false" }
+                    },
                     new OperatorParam { Name = "maxSegmentCount", DisplayName = "最大线段数", DefaultValue = "1024", Description = "超过则中止" },
                     new OperatorParam
                     {
@@ -1940,6 +2023,25 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "BatchCount", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FFC107", IsOptional = true },
                     new PortDef { Name = "BatchBarId", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FFC107", IsOptional = true },
                     new PortDef { Name = "BatchSegmentCount", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FFC107", IsOptional = true }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "flow_loop",
+                DisplayName = "循环",
+                Description = "按次数或无限重复执行本算子下游连线上的全部算子（前置只执行一次）。count≤0、inf、无限=一直循环直到点「停止」。须用「运行」托管执行。",
+                Category = "流程",
+                Params =
+                {
+                    new OperatorParam { Name = "count", DisplayName = "重复次数", DefaultValue = "3", Description = "正整数=固定次数；0/inf/无限=无限循环（点「停止」结束）" },
+                    new OperatorParam { Name = "intervalMs", DisplayName = "轮次间隔(ms)", DefaultValue = "0", Description = "每轮下游执行完后的等待时间，0=不等待" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "After", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Index", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#607D8B" },
+                    new PortDef { Name = "Count", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#607D8B" }
                 }
             },
             new OperatorDef
@@ -3207,14 +3309,29 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "halcon_mask_image_by_shape_match",
                 DisplayName = "HALCON 形状匹配区域 Mask",
-                Description = "输入原图 + FindShapeModel 结果 + ModelId：由模板轮廓变换得到填充区域，生成 Mask 并对原图做掩膜（区域外置 0）。",
+                Description = "输入原图 + FindShapeModel 结果 + ModelId：由模板轮廓变换得到填充区域，生成 Mask 并对原图掩膜。可保留或挖空匹配区域；可限制参与合并的匹配个数。",
                 Category = "HALCON",
                 Params =
                 {
                     new OperatorParam { Name = "contourLevel", DisplayName = "轮廓层", DefaultValue = "1", Description = "GetShapeModelContours 金字塔层" },
                     new OperatorParam { Name = "insetPx", DisplayName = "区域内缩(px)", DefaultValue = "0", Description = "生成区域前腐蚀半径，缩小有效区" },
-                    new OperatorParam { Name = "maskMin", DisplayName = "Mask有效下界", DefaultValue = "1", Description = "Mask 灰度在此区间内保留原图" },
-                    new OperatorParam { Name = "maskMax", DisplayName = "Mask有效上界", DefaultValue = "255", Description = "Mask 灰度在此区间内保留原图" },
+                    new OperatorParam
+                    {
+                        Name = "maskRegionMode",
+                        DisplayName = "Mask区域处理",
+                        DefaultValue = "保留mask区域",
+                        Description = "保留=匹配区域内保留原图、区域外置0；去掉=挖空匹配区域、区域外保留",
+                        Options = new List<string> { "保留mask区域", "去掉mask区域", "keep", "remove" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "maxMatchCount",
+                        DisplayName = "参与匹配数",
+                        DefaultValue = "0",
+                        Description = "用于生成 Mask 的 Find 匹配个数：0=全部；N=仅取 Row/Column 前 N 个（与 Find 输出顺序一致）"
+                    },
+                    new OperatorParam { Name = "maskMin", DisplayName = "Mask有效下界", DefaultValue = "1", Description = "Mask 灰度在此区间内视为有效区域" },
+                    new OperatorParam { Name = "maskMax", DisplayName = "Mask有效上界", DefaultValue = "255", Description = "Mask 灰度在此区间内视为有效区域" },
                     new OperatorParam { Name = "preserveColor", DisplayName = "保留彩色", DefaultValue = "true", Description = "true=原图为 BGR 时输出彩色；false=转灰度后掩膜" }
                 },
                 Ports =

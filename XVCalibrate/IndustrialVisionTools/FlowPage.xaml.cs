@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Globalization;
 using System.Diagnostics;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -15,7 +16,6 @@ using System.Runtime.InteropServices;
 using System.Numerics;
 using Microsoft.Win32;
 using CalibOperatorPInvoke;
-using HslCommunication;
 using HslCommunication;
 using HslCommunication.ModBus;
 using HslCommunication.Profinet.XINJE;
@@ -292,7 +292,7 @@ namespace CalibOperatorCLI_Example
             }
 
             if (node.Def.TypeId == "calibrate")
-                return CalibrateRequiresCorrespondenceDialog(node);
+                return CalibrateRequiresCorrespondenceDialog(node) || CalibrateUsesManualPixelPick(node);
 
             return false;
         }
@@ -301,6 +301,65 @@ namespace CalibOperatorCLI_Example
         {
             string v = node.Params.GetValueOrDefault("confirmCorrespondence", "true")?.Trim() ?? "true";
             return !string.Equals(v, "false", StringComparison.OrdinalIgnoreCase) && v != "0";
+        }
+
+        private static bool CalibrateUsesManualPixelPick(FlowNode node)
+        {
+            string mode = node.Params.GetValueOrDefault("pixelPickMode", "manual")?.Trim() ?? "manual";
+            if (string.Equals(mode, "manual", StringComparison.OrdinalIgnoreCase)
+                || mode == "手选" || mode == "手选像素")
+                return true;
+            if (string.Equals(mode, "detected", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(mode, "detect", StringComparison.OrdinalIgnoreCase)
+                || mode == "匹配检测点")
+                return false;
+            return false;
+        }
+
+        private static bool CalibrateNeedsCorrespondenceDialog(FlowNode node, Point2D[]? imagePts, int worldCount)
+        {
+            if (CalibrateUsesManualPixelPick(node) || CalibrateRequiresCorrespondenceDialog(node))
+                return true;
+
+            string mode = node.Params.GetValueOrDefault("pixelPickMode", "manual")?.Trim() ?? "manual";
+            if (string.Equals(mode, "auto", StringComparison.OrdinalIgnoreCase))
+                return imagePts == null || imagePts.Length != worldCount;
+
+            return false;
+        }
+
+        /// <summary>解析循环次数：≤0 / inf / 无限 → 无限循环；否则为有限次数（至少 1）。</summary>
+        private static void ParseFlowLoopCountParam(string? raw, out int repeatCount, out bool infinite)
+        {
+            string s = (raw ?? "").Trim();
+            infinite = false;
+            if (string.IsNullOrEmpty(s))
+            {
+                repeatCount = 3;
+                return;
+            }
+
+            if (string.Equals(s, "inf", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(s, "infinite", StringComparison.OrdinalIgnoreCase)
+                || s == "∞" || s == "无限")
+            {
+                infinite = true;
+                repeatCount = 0;
+                return;
+            }
+
+            if (!int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out repeatCount))
+            {
+                repeatCount = 3;
+                return;
+            }
+
+            if (repeatCount <= 0)
+            {
+                infinite = true;
+                repeatCount = 0;
+                return;
+            }
         }
 
         private async System.Threading.Tasks.Task ExecuteNodeForRunAsync(FlowNode node, string? timingScope = null)
@@ -1951,9 +2010,19 @@ namespace CalibOperatorCLI_Example
             var visited = new HashSet<Guid>();
             var result = new List<FlowNode>();
             var inDegree = new Dictionary<Guid, int>();
+            var nodeById = _nodes.ToDictionary(n => n.Id);
+
+            var saveBeforeLoad = new List<(Guid SaveId, Guid LoadId)>();
+            foreach (var save in _nodes.Where(n => n.Def.TypeId == "save_calibration_result"))
+            {
+                foreach (var load in _nodes.Where(n => n.Def.TypeId == "load_calibration_result"))
+                    saveBeforeLoad.Add((save.Id, load.Id));
+            }
 
             foreach (var n in _nodes) inDegree[n.Id] = 0;
             foreach (var c in _connections) inDegree[c.ToPort.Owner.Id]++;
+            foreach (var (_, loadId) in saveBeforeLoad)
+                inDegree[loadId]++;
 
             var queue = new Queue<FlowNode>();
             foreach (var n in _nodes)
@@ -1977,6 +2046,15 @@ namespace CalibOperatorCLI_Example
                         if (inDegree[c.ToPort.Owner.Id] == 0)
                             queue.Enqueue(c.ToPort.Owner);
                     }
+                }
+
+                foreach (var (saveId, loadId) in saveBeforeLoad)
+                {
+                    if (current.Id != saveId)
+                        continue;
+                    inDegree[loadId]--;
+                    if (inDegree[loadId] == 0 && nodeById.TryGetValue(loadId, out var loadNode))
+                        queue.Enqueue(loadNode);
                 }
             }
 
@@ -6081,6 +6159,19 @@ namespace CalibOperatorCLI_Example
                         break;
                     }
 
+                    case "flow_loop":
+                    {
+                        ParseFlowLoopCountParam(node.Params.GetValueOrDefault("count"), out var repeatCount, out var infinite);
+                        if (inputs.TryGetValue("After", out var afterObj))
+                            node.Outputs["Out"] = afterObj;
+                        node.Outputs["Index"] = 0;
+                        node.Outputs["Count"] = infinite ? -1 : repeatCount;
+                        node.ResultSummary = infinite
+                            ? "Loop ∞（单节点试跑；全流程「运行」将无限重复下游，点「停止」结束）"
+                            : $"Loop x{repeatCount}（单节点试跑；全流程「运行」才会重复执行下游 {repeatCount} 次）";
+                        break;
+                    }
+
                     case "world_coords":
                     {
                         string raw = node.Params.GetValueOrDefault("points", "") ?? "";
@@ -6097,6 +6188,8 @@ namespace CalibOperatorCLI_Example
                         double cy = double.TryParse(node.Params.GetValueOrDefault("centerY"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var tcy) ? tcy : 0.0;
                         double cz = double.TryParse(node.Params.GetValueOrDefault("centerZ"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var tcz) ? tcz : 0.0;
                         double step = double.TryParse(node.Params.GetValueOrDefault("stepMm"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ts) ? ts : 10.0;
+                        double stepX = double.TryParse(node.Params.GetValueOrDefault("stepXmm"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var tsx) ? tsx : 0.0;
+                        double stepY = double.TryParse(node.Params.GetValueOrDefault("stepYmm"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var tsy) ? tsy : 0.0;
                         double arm = double.TryParse(node.Params.GetValueOrDefault("armMm"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ta) ? ta : 50.0;
                         double legX = double.TryParse(node.Params.GetValueOrDefault("legXmm"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var lx) ? lx : 50.0;
                         double legY = double.TryParse(node.Params.GetValueOrDefault("legYmm"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ly) ? ly : 50.0;
@@ -6105,11 +6198,12 @@ namespace CalibOperatorCLI_Example
                         int grows = int.TryParse(node.Params.GetValueOrDefault("gridRows"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var gr) ? gr : 3;
                         int samp = int.TryParse(node.Params.GetValueOrDefault("samplesPerSegment"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var sp) ? sp : 1;
 
-                        var coords = GenerateWeldTrajectoryWorld(pattern, cx, cy, step, arm, legX, legY, ang, gcols, grows, samp);
-                        var coords3 = GenerateWeldTrajectoryWorld3D(pattern, cx, cy, cz, step, arm, legX, legY, ang, gcols, grows, samp);
+                        var coords = GenerateWeldTrajectoryWorld(pattern, cx, cy, step, stepX, stepY, arm, legX, legY, ang, gcols, grows, samp);
+                        var coords3 = GenerateWeldTrajectoryWorld3D(pattern, cx, cy, cz, step, stepX, stepY, arm, legX, legY, ang, gcols, grows, samp);
                         node.Outputs["Points"] = coords;
                         node.Outputs["Points3D"] = coords3;
-                        node.ResultSummary = $"{pattern.Trim()}: {coords.Length} pts (center {cx:G},{cy:G},{cz:G} mm)";
+                        var (effSx, effSy) = ResolveWeldTrajectorySteps(step, stepX, stepY);
+                        node.ResultSummary = $"{pattern.Trim()}: {coords.Length} pts (center {cx:G},{cy:G},{cz:G} mm, ΔX={effSx:G} ΔY={effSy:G})";
                         break;
                     }
 
@@ -6121,6 +6215,30 @@ namespace CalibOperatorCLI_Example
                         detector.ConvertToGrayscale(srcImg);
                         var gray = detector.GetStepImage(1);
                         node.Outputs["Out"] = gray;
+                        break;
+                    }
+
+                    case "image_flip":
+                    {
+                        var srcImg = inputs["In"] as CalibImage;
+                        if (srcImg == null) throw new InvalidOperationException("图像翻转: 缺少输入图像");
+                        string flipMode = node.Params.GetValueOrDefault("flipMode", "horizontal") ?? "horizontal";
+                        var flipped = CalibImageTransform.Flip(srcImg, flipMode);
+                        node.Outputs["Out"] = flipped;
+                        node.ResultSummary = $"flip {flipMode.Trim()} → {flipped.Width}x{flipped.Height}";
+                        break;
+                    }
+
+                    case "image_rotate":
+                    {
+                        var srcImg = inputs["In"] as CalibImage;
+                        if (srcImg == null) throw new InvalidOperationException("图像旋转: 缺少输入图像");
+                        double angleDeg = CalibImageTransform.ParseAngleDegrees(node.Params.GetValueOrDefault("angleDeg"), 90);
+                        string expandRaw = node.Params.GetValueOrDefault("expandCanvas", "true") ?? "true";
+                        bool expand = !string.Equals(expandRaw.Trim(), "false", StringComparison.OrdinalIgnoreCase) && expandRaw.Trim() != "0";
+                        var rotated = CalibImageTransform.Rotate(srcImg, angleDeg, expand);
+                        node.Outputs["Out"] = rotated;
+                        node.ResultSummary = $"rotate CW {angleDeg:G}° → {rotated.Width}x{rotated.Height}";
                         break;
                     }
 
@@ -7975,37 +8093,49 @@ namespace CalibOperatorCLI_Example
 
                     case "calibrate":
                     {
-                        var imagePts = inputs["ImagePts"] as Point2D[];
-                        if (imagePts == null)
-                            throw new InvalidOperationException("标定: 缺少 ImagePts（检测到的图像点）");
+                        var imagePts = inputs.TryGetValue("ImagePts", out var ipObj) ? ipObj as Point2D[] : null;
 
                         string worldRaw = node.Params.GetValueOrDefault("worldPoints", "")
                             ?? node.Params.GetValueOrDefault("points", "");
                         var worldPts = ParseWorldPointsParam(worldRaw);
-                        if (imagePts.Length != worldPts.Length)
-                            throw new InvalidOperationException(
-                                $"标定: 图像点 {imagePts.Length} 个，世界点 {worldPts.Length} 个，数量须一致（请调整 worldPoints 或检测数量）");
 
-                        Point2D[] alignedImagePts = imagePts;
-                        if (CalibrateRequiresCorrespondenceDialog(node))
+                        bool manualPick = CalibrateUsesManualPixelPick(node);
+                        bool needDialog = CalibrateNeedsCorrespondenceDialog(node, imagePts, worldPts.Length);
+
+                        Point2D[] alignedImagePts;
+                        if (needDialog)
                         {
                             var calibImage = inputs.TryGetValue("Image", out var imgObj) ? imgObj as CalibImage : null;
                             if (calibImage == null)
-                                throw new InvalidOperationException("标定: 图像确认对应需要连接 Image 端口（与取图/加载图像同源）");
+                                throw new InvalidOperationException(
+                                    "标定: 手选像素或图像确认对应需要连接 Image 端口（与取图/加载图像同源）");
 
+                            bool dialogManual = manualPick || imagePts == null || imagePts.Length == 0;
                             var owner = Window.GetWindow(this);
-                            var dlg = new NinePointCorrespondenceDialog(calibImage, imagePts, worldPts, owner);
+                            var dlg = new NinePointCorrespondenceDialog(
+                                calibImage, imagePts, worldPts, owner, dialogManual);
                             if (dlg.ShowDialog() != true || dlg.ResultImagePoints == null)
                                 throw new OperationCanceledException("标定已取消：未确认点对应关系");
                             alignedImagePts = dlg.ResultImagePoints;
+                        }
+                        else
+                        {
+                            if (imagePts == null)
+                                throw new InvalidOperationException("标定: 缺少 ImagePts（检测到的图像点）");
+                            if (imagePts.Length != worldPts.Length)
+                                throw new InvalidOperationException(
+                                    $"标定: 图像点 {imagePts.Length} 个，世界点 {worldPts.Length} 个，数量须一致（请调整 worldPoints 或检测数量）");
+                            alignedImagePts = imagePts;
                         }
 
                         var calResult = CalibAPI.CalibrateNinePoint(alignedImagePts, worldPts);
                         if (!calResult.Success)
                             throw new InvalidOperationException($"标定失败: {calResult.ErrorMessage}");
                         node.Outputs["Transform"] = calResult.Transform;
-                        node.ResultSummary = CalibrateRequiresCorrespondenceDialog(node)
-                            ? $"标定 OK（{alignedImagePts.Length} 对点，图像确认）"
+                        node.ResultSummary = needDialog
+                            ? (manualPick
+                                ? $"标定 OK（{alignedImagePts.Length} 对点，手选像素）"
+                                : $"标定 OK（{alignedImagePts.Length} 对点，图像确认）")
                             : $"标定 OK（{alignedImagePts.Length} 对点）";
                         break;
                     }
@@ -8837,7 +8967,19 @@ namespace CalibOperatorCLI_Example
                             ? gt : (short)1; // 默认 1=线段
 
                         string splitByBar = (node.Params.GetValueOrDefault("splitByBar", "none") ?? "none").Trim();
-                        var segmentMode = sendAsPoint
+                        double zDefault = double.TryParse(
+                            node.Params.GetValueOrDefault("zDefault", "0"),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var zDefVal)
+                            ? zDefVal
+                            : 0.0;
+                        bool closePolyline = SendPlcBatchPlanner.ParseBoolParam(
+                            node.Params.GetValueOrDefault("closePolyline", "true"), true);
+                        bool asPolylineSegments = sendAsPoint
+                            && SendPlcBatchPlanner.ParseBoolParam(
+                                node.Params.GetValueOrDefault("asPolylineSegments", "false"), false);
+                        var segmentMode = sendAsPoint && !asPolylineSegments
                             ? PlcGvarSegmentMode.PointDegenerate
                             : PlcGvarSegmentMode.Line;
                         if (!PlcGvarBuilder.TryResolveSendPlcGvar(
@@ -8849,7 +8991,10 @@ namespace CalibOperatorCLI_Example
                                 out List<(int BarId, GVAR[] Gvars)>? barBatches,
                                 out string gvarSource,
                                 out string? resolveDiag,
-                                segmentMode))
+                                segmentMode,
+                                pointAt: "mid",
+                                zDefault: zDefault,
+                                closePolyline: closePolyline))
                         {
                             throw new InvalidOperationException(
                                 $"{(sendAsPoint ? "发送PLC(每点一点)" : "发送PLC")}: {resolveDiag}");
@@ -8959,8 +9104,12 @@ namespace CalibOperatorCLI_Example
                         int execD804Set = 0;
                         int execGvarBatch = 0;
 
+                        bool downstreamRanInsideBatchLoop = false;
                         foreach (var step in plan)
                         {
+                            if (step.Kind == PlcSendStepKind.SignalHostComplete)
+                                continue;
+
                             switch (step.Kind)
                             {
                                 case PlcSendStepKind.ClearHostFlag:
@@ -8995,8 +9144,11 @@ namespace CalibOperatorCLI_Example
                                         parts.Add($"bar{barId}:{nb}@{addr}");
                                         execGvarBatch++;
                                         if (runDownstreamPerBatch)
+                                        {
                                             ExecuteSendPlcDownstreamChain(
                                                 node, step.BatchIndex, barBatches.Count, barId, nb);
+                                            downstreamRanInsideBatchLoop = true;
+                                        }
                                     }
                                     else
                                     {
@@ -9012,21 +9164,38 @@ namespace CalibOperatorCLI_Example
                                     }
 
                                     break;
+                            }
+                        }
 
-                                case PlcSendStepKind.SignalHostComplete:
-                                    try
-                                    {
-                                        FlowWritePlcBit(hostFlagReg, 0, true);
-                                        hostSignaled = true;
-                                        execD804Set++;
-                                    }
-                                    catch (Exception exBit)
-                                    {
-                                        throw new InvalidOperationException(
-                                            $"发送PLC: 全部批次已写入，但置位 {hostFlagReg} 失败: {exBit.Message}");
-                                    }
+                        int downstreamBatchCount = barBatches?.Count ?? 1;
+                        int downstreamSegmentTotal = barBatches != null && barBatches.Count > 0
+                            ? barBatches.Sum(b => b.Gvars.Length)
+                            : gvarItems.Length;
+                        if (!downstreamRanInsideBatchLoop)
+                        {
+                            var downChain = ResolveSendPlcDownstreamChain(node);
+                            if (downChain.Count > 0)
+                            {
+                                int downBarId = barBatches != null && barBatches.Count > 0
+                                    ? barBatches[0].BarId
+                                    : 0;
+                                ExecuteSendPlcDownstreamChain(
+                                    node, 0, downstreamBatchCount, downBarId, downstreamSegmentTotal);
+                            }
+                        }
 
-                                    break;
+                        if (signalHostAfterAll)
+                        {
+                            try
+                            {
+                                FlowWritePlcBit(hostFlagReg, 0, true);
+                                hostSignaled = true;
+                                execD804Set++;
+                            }
+                            catch (Exception exBit)
+                            {
+                                throw new InvalidOperationException(
+                                    $"发送PLC: GVAR 与下游已执行，但置位 {hostFlagReg} 失败: {exBit.Message}");
                             }
                         }
 
@@ -9048,15 +9217,21 @@ namespace CalibOperatorCLI_Example
                         int reportedBatches = execGvarBatch > 0 ? execGvarBatch : (gvarItems.Length > 0 ? 1 : 0);
                         string dispatchStats =
                             $"批{reportedBatches} D800×{execD800} {hostFlagReg}清0×{execD804Clear} 置1×{execD804Set}";
-                        if (runDownstreamPerBatch && execGvarBatch > 0)
+                        int downChainN = ResolveSendPlcDownstreamChain(node).Count;
+                        if (downChainN > 0)
                         {
-                            int downN = ResolveSendPlcDownstreamChain(node).Count;
-                            dispatchStats += $" 下游×{downN}节点/批";
+                            dispatchStats += downstreamRanInsideBatchLoop
+                                ? $" 下游×{downChainN}节点/批→后{hostFlagReg}"
+                                : $" 下游×{downChainN}节点→后{hostFlagReg}";
+                        }
+                        else if (hostSignaled)
+                        {
+                            dispatchStats += $" →{hostFlagReg}";
                         }
 
                         AppendLog($"[{sendPlcLogTag}] {dispatchStats} | {SendPlcBatchPlanner.SummarizePlan(plan, hostFlagReg)} | src={gvarSource}");
                         if (hostSignaled)
-                            resultMsg += $", 全部批次下发完成→{hostFlagReg}=1";
+                            resultMsg += $", 下游完成后→{hostFlagReg}=1";
                         resultMsg += $" | {dispatchStats}";
 
                         node.Outputs["GvarSent"] = true;
@@ -10387,6 +10562,15 @@ namespace CalibOperatorCLI_Example
                             node.Params.GetValueOrDefault("preserveColor"),
                             "false",
                             StringComparison.OrdinalIgnoreCase);
+                        bool keepInsideMask = HalconFlowBridge.ParseMaskRegionKeepInside(
+                            node.Params.GetValueOrDefault("maskRegionMode", "保留mask区域"));
+                        int maxMatchCount = int.TryParse(
+                            node.Params.GetValueOrDefault("maxMatchCount", "0"),
+                            System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out int mmc)
+                            ? Math.Max(0, mmc)
+                            : 0;
 
                         var masked = HalconFlowBridge.MaskCalibImageByShapeMatch(
                             srcImg,
@@ -10398,12 +10582,18 @@ namespace CalibOperatorCLI_Example
                             insetPx,
                             maskMin,
                             maskMax,
-                            preserveColor);
+                            preserveColor,
+                            keepInsideMask,
+                            maxMatchCount);
 
                         node.Outputs["Out"] = masked.MaskedImage;
                         node.Outputs["Mask"] = masked.Mask;
+                        string modeLabel = keepInsideMask ? "保留区域" : "去掉区域";
+                        string countLabel = maxMatchCount > 0
+                            ? $"用{masked.MatchCount}/{masked.InputMatchCount}匹配"
+                            : $"匹配{masked.MatchCount}";
                         node.ResultSummary =
-                            $"形状匹配 Mask 匹配{masked.MatchCount} 有效区域{masked.ValidRegionCount} " +
+                            $"形状匹配 Mask {modeLabel} {countLabel} 有效区域{masked.ValidRegionCount} " +
                             $"→ {masked.MaskedImage.Width}×{masked.MaskedImage.Height}";
                         break;
 #else
@@ -12052,6 +12242,8 @@ namespace CalibOperatorCLI_Example
                                     "each", StringComparison.OrdinalIgnoreCase))
                     .ToList();
 
+                var flowLoops = sorted.Where(n => n.Def.TypeId == "flow_loop").ToList();
+
                 if (perFrameLoops.Count > 1)
                 {
                     StatusText.Text = "执行失败: 当前仅支持一个 per_frame camera_loop 节点";
@@ -12073,6 +12265,22 @@ namespace CalibOperatorCLI_Example
                     StatusText.Text = "执行失败: load_image_dir(遍历) 不可与 per_frame camera_loop 同时使用";
                     StatusText.Foreground = new SolidColorBrush(Colors.Red);
                     AppendLog("[ERROR] 不能同时使用 load_image_dir(mode=each) 与 camera_loop(per_frame)", true);
+                    return false;
+                }
+
+                if (flowLoops.Count > 1)
+                {
+                    StatusText.Text = "执行失败: 当前仅支持一个「循环」算子";
+                    StatusText.Foreground = new SolidColorBrush(Colors.Red);
+                    AppendLog("[ERROR] 检测到多个 flow_loop，当前版本仅支持一个", true);
+                    return false;
+                }
+
+                if (flowLoops.Count == 1 && (perFrameLoops.Count == 1 || dirEachLoops.Count == 1))
+                {
+                    StatusText.Text = "执行失败: 「循环」不可与相机循环(per_frame)或目录遍历同时使用";
+                    StatusText.Foreground = new SolidColorBrush(Colors.Red);
+                    AppendLog("[ERROR] flow_loop 与 camera_loop(per_frame)/load_image_dir(each) 互斥", true);
                     return false;
                 }
 
@@ -12285,6 +12493,115 @@ namespace CalibOperatorCLI_Example
                     StatusText.Text = $"per_frame 执行完成: 前置 {successCountPre}/{preNodes.Count}, 有效帧 {okFrames}/{frameCount}";
                     StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
                     AppendLog($"========== per_frame 执行完成: frames={okFrames}/{frameCount} ==========");
+                    return true;
+                }
+
+                if (flowLoops.Count == 1)
+                {
+                    var loopNode = flowLoops[0];
+                    var downstream = GetDownstreamNodes(loopNode);
+                    var preNodes = sorted.Where(n => !downstream.Contains(n)).ToList();
+                    var postNodes = GetOrderedDownstreamOfNode(loopNode);
+
+                    ParseFlowLoopCountParam(loopNode.Params.GetValueOrDefault("count"), out var repeatCount, out var infiniteLoop);
+                    int intervalMs = int.TryParse(loopNode.Params.GetValueOrDefault("intervalMs"), out var im) ? im : 0;
+                    intervalMs = Math.Max(0, intervalMs);
+
+                    string loopLabel = infiniteLoop ? "∞" : repeatCount.ToString(CultureInfo.InvariantCulture);
+                    AppendLog($"检测到 flow_loop: {loopNode.Def.DisplayName} x{loopLabel}，前置 {preNodes.Count} 节点，下游 {postNodes.Count} 节点");
+                    if (infiniteLoop)
+                        AppendLog("[LOOP] 无限循环：点击「停止」结束");
+
+                    int successCountPre = 0;
+                    for (int i = 0; i < preNodes.Count; i++)
+                    {
+                        ThrowIfExecutionCancelled();
+                        var node = preNodes[i];
+                        StatusText.Text = $"循环-前置 [{i + 1}/{preNodes.Count}] {node.Def.DisplayName}...";
+                        AppendLog($"[LOOP-PRE {i + 1}/{preNodes.Count}] 执行: {node.Def.DisplayName}");
+                        await System.Threading.Tasks.Task.Yield();
+                        try
+                        {
+                            await ExecuteNodeForRunAsync(node, "LOOP-PRE");
+                            successCountPre++;
+                        }
+                        catch (FlowExecutionGracefulStopException ex)
+                        {
+                            AppendLog($"[LOOP-PRE][STOP] {node.Def.DisplayName}: {ex.Message}", true);
+                            if (ex.InnerException != null)
+                                AppendLog($"  {ex.InnerException.Message}", true);
+                            StatusText.Text = ex.Message;
+                            StatusText.Foreground = new SolidColorBrush(Colors.Orange);
+                            AppendLog("========== 执行中止 ==========");
+                            return false;
+                        }
+                    }
+
+                    long li = 0;
+                    long completedRounds = 0;
+                    while (infiniteLoop || li < repeatCount)
+                    {
+                        ThrowIfExecutionCancelled();
+                        loopNode.Outputs.Clear();
+                        loopNode.Outputs["Index"] = li > int.MaxValue ? int.MaxValue : (int)li;
+                        loopNode.Outputs["Count"] = infiniteLoop ? -1 : repeatCount;
+                        if (GetInputData(loopNode, "After") is { } afterVal)
+                            loopNode.Outputs["Out"] = afterVal;
+                        loopNode.Executed = true;
+                        loopNode.ErrorMessage = null;
+                        SetNodeStatus(loopNode, false);
+                        string roundTag = infiniteLoop
+                            ? $"loop {li + 1}/∞"
+                            : $"loop {li + 1}/{repeatCount}";
+                        loopNode.ResultSummary = roundTag;
+                        UpdateNodeSummary(loopNode);
+
+                        AppendLog($"[LOOP {roundTag}] 开始下游 {postNodes.Count} 节点");
+                        for (int j = 0; j < postNodes.Count; j++)
+                        {
+                            ThrowIfExecutionCancelled();
+                            var node = postNodes[j];
+                            node.Outputs.Clear();
+                            node.ErrorMessage = null;
+                            node.Executed = false;
+                            StatusText.Text = $"循环[{roundTag}] [{j + 1}/{postNodes.Count}] {node.Def.DisplayName}...";
+                            await System.Threading.Tasks.Task.Yield();
+                            try
+                            {
+                                await ExecuteNodeForRunAsync(node, $"L{li + 1}");
+                            }
+                            catch (FlowExecutionGracefulStopException ex)
+                            {
+                                AppendLog($"[LOOP][STOP] {node.Def.DisplayName}: {ex.Message}", true);
+                                if (ex.InnerException != null)
+                                    AppendLog($"  {ex.InnerException.Message}", true);
+                                StatusText.Text = ex.Message;
+                                StatusText.Foreground = new SolidColorBrush(Colors.Orange);
+                                AppendLog("========== 执行中止 ==========");
+                                return false;
+                            }
+                            catch (Exception ex)
+                            {
+                                AppendLog($"[LOOP][ERROR] {node.Def.DisplayName}: {ex.Message}", true);
+                                StatusText.Text = $"循环失败: {node.Def.DisplayName} - {ex.Message}";
+                                StatusText.Foreground = new SolidColorBrush(Colors.Red);
+                                AppendLog("========== 执行中止 ==========");
+                                return false;
+                            }
+                        }
+
+                        completedRounds++;
+                        li++;
+                        if (intervalMs > 0 && (infiniteLoop || li < repeatCount))
+                            await System.Threading.Tasks.Task.Delay(intervalMs, _runCts?.Token ?? System.Threading.CancellationToken.None);
+                    }
+
+                    string doneRounds = infiniteLoop
+                        ? $"{completedRounds} 轮（已停止）"
+                        : $"{completedRounds} 轮";
+                    StatusText.Text = $"循环完成: 前置 {successCountPre}/{preNodes.Count}，{doneRounds} × 下游 {postNodes.Count} 节点";
+                    StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
+                    AppendLog($"========== flow_loop 完成: {doneRounds}，下游 {postNodes.Count} 节点/轮 ==========");
                     return true;
                 }
 

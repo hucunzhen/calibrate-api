@@ -134,7 +134,7 @@
                             <StackPanel>
                                 <WrapPanel Margin="0,0,0,12">
                                     <Button x:Name="BtnManual" Content="手动模式" Width="110" Height="32" Margin="0,0,8,8" Click="BtnManual_Click" Foreground="#6A1B9A" FontWeight="SemiBold"/>
-                                    <Button x:Name="BtnAuto" Content="自动模式" Width="110" Height="32" Margin="0,0,8,8" Click="BtnAuto_Click" Foreground="#2E7D32" FontWeight="SemiBold"/>
+                                    <Button x:Name="BtnAuto" Content="关闭手动模式" Width="130" Height="32" Margin="0,0,8,8" Click="BtnAuto_Click" Foreground="#2E7D32" FontWeight="SemiBold"/>
                                     <TextBlock x:Name="TxtModeStatus" Text="---" VerticalAlignment="Center" Margin="4,0,16,8" Foreground="#546E7A" FontFamily="Consolas" FontWeight="Bold"/>
                                     <Button x:Name="BtnCalibrationMode" Content="标定模式" Width="110" Height="32" Margin="0,0,8,8" Click="BtnCalibrationMode_Click" Foreground="#4527A0" FontWeight="SemiBold"/>
                                     <TextBlock x:Name="TxtCalibrationModeStatus" Text="---" VerticalAlignment="Center" Margin="4,0,16,8" Foreground="#546E7A" FontFamily="Consolas" FontWeight="Bold"/>
@@ -278,6 +278,10 @@
                                 </Grid>
 
                                 <TextBlock Style="{StaticResource PlcSubTitle}" Text="位置与速度"/>
+                                <WrapPanel Margin="0,0,0,8">
+                                    <Button x:Name="BtnManualStopSafePos" Content="手动→安全位" Width="108" Height="28" Margin="0,0,8,8" Click="BtnManualStopSafePos_Click" Foreground="#455A64" FontWeight="SemiBold"/>
+                                    <Button x:Name="BtnManualPhotoPos" Content="手动→拍照位" Width="108" Height="28" Margin="0,0,16,8" Click="BtnManualPhotoPos_Click" Foreground="#5E35B1" FontWeight="SemiBold"/>
+                                </WrapPanel>
                                 <WrapPanel Margin="0,0,0,8">
                                     <TextBlock Text="停机安全" FontWeight="SemiBold" Foreground="#455A64" VerticalAlignment="Center" Margin="0,0,8,8"/>
                                     <TextBlock x:Name="LblStopSafeX" Text="X" Foreground="#D32F2F" VerticalAlignment="Center" Margin="0,0,2,8"/>

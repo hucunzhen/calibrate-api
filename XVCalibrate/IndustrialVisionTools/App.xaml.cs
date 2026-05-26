@@ -24,6 +24,7 @@ namespace CalibOperatorCLI_Example
                 string baseDir = Path.GetFullPath(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar);
                 Directory.SetCurrentDirectory(baseDir);
                 SetDllDirectory(baseDir);
+                ControllerSdkNativeLoader.EnsureLoaded();
             }
             catch { /* ignore */ }
 

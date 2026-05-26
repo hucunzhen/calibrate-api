@@ -69,7 +69,9 @@
     "ManualMode": "M509",
     "CalibrationMode": "M507",
     "RunStartStop": "M500",
-    "RunStatus": "M510"
+    "RunStatus": "M510",
+    "ManualStopSafePos": "M300",
+    "ManualPhotoPos": "M301"
   },
 
   "GvarList": {

@@ -12,6 +12,9 @@
                 <Button x:Name="NavPlc" Content="PLC" Style="{StaticResource NavTabButtonStyle}"
                         Click="NavPlc_Click"
                         AutomationProperties.Name="PLC"/>
+                <Button x:Name="NavController" Content="光源控制器" Style="{StaticResource NavTabButtonStyle}"
+                        Click="NavController_Click"
+                        AutomationProperties.Name="光源控制器"/>
                 <Button x:Name="NavFlow" Content="流程编排" Style="{StaticResource NavTabButtonStyle}"
                         Click="NavFlow_Click"
                         AutomationProperties.Name="流程编排"/>
