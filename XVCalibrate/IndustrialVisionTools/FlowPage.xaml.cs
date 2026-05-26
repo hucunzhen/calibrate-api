@@ -31,6 +31,11 @@ namespace CalibOperatorCLI_Example
     public partial class FlowPage : UserControl
     {
         public string? CurrentFlowFilePath { get; private set; }
+
+        /// <summary>无文件路径且无节点/连线，用于启动时是否可自动恢复 last_flow。</summary>
+        public bool IsPristineEmptyDocument =>
+            string.IsNullOrWhiteSpace(CurrentFlowFilePath) && _nodes.Count == 0 && _connections.Count == 0;
+
         public event Action<string?>? FlowLoaded;
 
         /// <summary>若宿主支持多标签，返回 true 表示已在其它标签打开路径；否则走当前页加载。</summary>
@@ -316,6 +321,38 @@ namespace CalibOperatorCLI_Example
             return false;
         }
 
+        /// <summary>解析 channels 参数，格式 ch:value;ch:value，如 1:200;2:150。action=multi 时使用。</summary>
+        private static int ApplyLightChannelSpec(ControllerSdkSession light, string spec)
+        {
+            if (string.IsNullOrWhiteSpace(spec))
+                throw new InvalidOperationException("光源控制(multi): channels 为空，示例 1:200;2:150");
+
+            int count = 0;
+            foreach (var part in spec.Split(new[] { ';', ',', '|' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string p = part.Trim();
+                int sep = p.IndexOf(':');
+                if (sep < 0)
+                    sep = p.IndexOf('=');
+                if (sep < 0)
+                    throw new InvalidOperationException($"光源控制(multi): 无效段 '{p}'，应为 通道:亮度");
+
+                string chStr = p[..sep].Trim();
+                string valStr = p[(sep + 1)..].Trim();
+                if (!int.TryParse(chStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out int ch))
+                    throw new InvalidOperationException($"光源控制(multi): 无效通道 '{chStr}'");
+                if (!int.TryParse(valStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out int val))
+                    throw new InvalidOperationException($"光源控制(multi): 无效亮度 '{valStr}'");
+
+                light.SetDigitalValue(Math.Clamp(ch, 1, 64), val);
+                count++;
+            }
+
+            if (count == 0)
+                throw new InvalidOperationException("光源控制(multi): 未解析到任何通道");
+            return count;
+        }
+
         private static bool CalibrateNeedsCorrespondenceDialog(FlowNode node, Point2D[]? imagePts, int worldCount)
         {
             if (CalibrateUsesManualPixelPick(node) || CalibrateRequiresCorrespondenceDialog(node))
@@ -418,6 +455,7 @@ namespace CalibOperatorCLI_Example
                 "检测",
                 "流程",
                 "标定",
+                "光源",
                 "输出",
                 "可视化",
                 "HALCON"
@@ -635,14 +673,15 @@ namespace CalibOperatorCLI_Example
 
             border.ContextMenu = ctx;
 
-            var panel = new StackPanel();
+            var panel = new StackPanel { Tag = node };
 
             // 标题栏
             var titleBorder = new Border
             {
                 Background = new SolidColorBrush(Color.FromRgb(0x37, 0x37, 0x3D)),
                 CornerRadius = new CornerRadius(6, 6, 0, 0),
-                Padding = new Thickness(8, 4, 8, 4)
+                Padding = new Thickness(8, 4, 8, 4),
+                Tag = node
             };
             var titleText = new TextBlock
             {
@@ -834,28 +873,44 @@ namespace CalibOperatorCLI_Example
         // 节点拖拽
         // ================================================================
 
+        private static FlowNode? FindFlowNodeFromElement(object? sender)
+        {
+            if (sender is not DependencyObject dep)
+                return null;
+            while (dep != null)
+            {
+                if (dep is FrameworkElement fe && fe.Tag is FlowNode node)
+                    return node;
+                dep = VisualTreeHelper.GetParent(dep);
+            }
+
+            return null;
+        }
+
         private void Node_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             if (e.ClickCount == 2)
             {
-                if (sender is FrameworkElement fe2 && fe2.Tag is FlowNode node2)
+                var flowNode = FindFlowNodeFromElement(sender);
+                if (flowNode != null)
                 {
-                    if (node2.Def.TypeId == "composite")
-                        ShowCompositeVariablesWindow(node2);
-                    else if (node2.Def.Params.Count > 0)
-                        EditNodeParams(node2);
+                    if (flowNode.Def.TypeId == "composite")
+                        ShowCompositeVariablesWindow(flowNode);
+                    else if (flowNode.Def.Params.Count > 0)
+                        EditNodeParams(flowNode);
+                    e.Handled = true;
                 }
                 return;
             }
 
-            if (sender is FrameworkElement fe && fe.Tag is FlowNode node)
+            if (FindFlowNodeFromElement(sender) is FlowNode node && node.Visual != null)
             {
                 _isDraggingNode = true;
                 _dragNode = node;
                 _dragStart = e.GetPosition(FlowCanvas);
                 _nodeStartPos = new Point(Canvas.GetLeft(node.Visual), Canvas.GetTop(node.Visual));
                 _pendingDragUndoSnapshotJson = _suppressFlowUndoRecording ? null : SerializeFlowSnapshotCompact();
-                fe.CaptureMouse();
+                node.Visual.CaptureMouse();
                 e.Handled = true;
             }
         }
@@ -5739,21 +5794,40 @@ namespace CalibOperatorCLI_Example
         private static Point2D[] ParseWorldPointsParam(string? raw)
         {
             if (string.IsNullOrWhiteSpace(raw))
-                throw new InvalidOperationException("世界坐标参数为空，请填写 points");
+                throw new InvalidOperationException("世界坐标为空，请填写 worldPoints 或 worldPointsFile");
             var parts = raw.Split(new[] { ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
             var points = new List<Point2D>(parts.Length);
             foreach (var p in parts)
             {
                 var xy = p.Trim().Split(',', StringSplitOptions.RemoveEmptyEntries);
                 if (xy.Length != 2 ||
-                    !double.TryParse(xy[0].Trim(), out var x) ||
-                    !double.TryParse(xy[1].Trim(), out var y))
-                    throw new InvalidOperationException($"世界坐标格式错误: '{p}'，应为 x,y");
+                    !double.TryParse(xy[0].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var x) ||
+                    !double.TryParse(xy[1].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+                    throw new InvalidOperationException($"世界坐标格式错误: '{p}'，应为 x,y（与点列转文本输出一致）");
                 points.Add(new Point2D(x, y));
             }
             if (points.Count < 4)
                 throw new InvalidOperationException("世界坐标点数量不足，至少需要4个点");
             return points.ToArray();
+        }
+
+        /// <summary>九点标定：worldPointsFile 优先（点列转文本落盘），否则解析 worldPoints 参数字符串。</summary>
+        private Point2D[] ResolveCalibrateWorldPoints(FlowNode node, string? flowBaseDir = null)
+        {
+            string? fileParam = node.Params.GetValueOrDefault("worldPointsFile", "")?.Trim();
+            if (!string.IsNullOrWhiteSpace(fileParam))
+            {
+                string path = ResolveCompositeFlowPath(fileParam, flowBaseDir);
+                if (!System.IO.File.Exists(path))
+                    throw new System.IO.FileNotFoundException($"标定: 世界坐标文件不存在: {path}");
+                string content = System.IO.File.ReadAllText(path, Encoding.UTF8);
+                var fromFile = ParseWorldPointsParam(content);
+                return fromFile;
+            }
+
+            string worldRaw = node.Params.GetValueOrDefault("worldPoints", "")
+                ?? node.Params.GetValueOrDefault("points", "");
+            return ParseWorldPointsParam(worldRaw);
         }
 
         private static CalibImage GrabOneCameraFrameOrThrow(int deviceIndex, int targetWidth, int targetHeight)
@@ -8094,10 +8168,9 @@ namespace CalibOperatorCLI_Example
                     case "calibrate":
                     {
                         var imagePts = inputs.TryGetValue("ImagePts", out var ipObj) ? ipObj as Point2D[] : null;
+                        var calibImage = inputs.TryGetValue("Image", out var imgObj) ? imgObj as CalibImage : null;
 
-                        string worldRaw = node.Params.GetValueOrDefault("worldPoints", "")
-                            ?? node.Params.GetValueOrDefault("points", "");
-                        var worldPts = ParseWorldPointsParam(worldRaw);
+                        var worldPts = ResolveCalibrateWorldPoints(node, compositeInnerFlowBaseDir);
 
                         bool manualPick = CalibrateUsesManualPixelPick(node);
                         bool needDialog = CalibrateNeedsCorrespondenceDialog(node, imagePts, worldPts.Length);
@@ -8105,7 +8178,6 @@ namespace CalibOperatorCLI_Example
                         Point2D[] alignedImagePts;
                         if (needDialog)
                         {
-                            var calibImage = inputs.TryGetValue("Image", out var imgObj) ? imgObj as CalibImage : null;
                             if (calibImage == null)
                                 throw new InvalidOperationException(
                                     "标定: 手选像素或图像确认对应需要连接 Image 端口（与取图/加载图像同源）");
@@ -8124,19 +8196,43 @@ namespace CalibOperatorCLI_Example
                                 throw new InvalidOperationException("标定: 缺少 ImagePts（检测到的图像点）");
                             if (imagePts.Length != worldPts.Length)
                                 throw new InvalidOperationException(
-                                    $"标定: 图像点 {imagePts.Length} 个，世界点 {worldPts.Length} 个，数量须一致（请调整 worldPoints 或检测数量）");
+                                    $"标定: 图像点 {imagePts.Length} 个，世界点 {worldPts.Length} 个，数量须一致（请调整 worldPoints/worldPointsFile 或检测数量）");
                             alignedImagePts = imagePts;
                         }
 
+                        // 标定计算与下游输出均使用配对后的像素（手选或确认后的 alignedImagePts[i] ↔ worldPts[i]）
                         var calResult = CalibAPI.CalibrateNinePoint(alignedImagePts, worldPts);
                         if (!calResult.Success)
                             throw new InvalidOperationException($"标定失败: {calResult.ErrorMessage}");
                         node.Outputs["Transform"] = calResult.Transform;
+                        node.Outputs["ImagePts"] = alignedImagePts.ToArray();
+
+                        string verifyRaw = node.Params.GetValueOrDefault("showVerifyPreview", "true") ?? "true";
+                        bool showVerify = !string.Equals(verifyRaw.Trim(), "false", StringComparison.OrdinalIgnoreCase)
+                            && verifyRaw.Trim() != "0";
+                        if (showVerify && calibImage != null)
+                        {
+                            var (gridRows, gridCols) = CalibrationPointGrid.InferLayout(alignedImagePts.Length, worldPts);
+                            ShowImagePreview(
+                                calibImage,
+                                alignedImagePts,
+                                6,
+                                null,
+                                node.Id.ToString("D"),
+                                $"九点标定验证 · {node.Def.DisplayName}",
+                                null,
+                                "grid",
+                                null);
+                        }
+
+                        string errNote = calResult.AverageError > 0
+                            ? $" avgErr={calResult.AverageError:F3}mm max={calResult.MaxError:F3}mm"
+                            : "";
                         node.ResultSummary = needDialog
                             ? (manualPick
-                                ? $"标定 OK（{alignedImagePts.Length} 对点，手选像素）"
-                                : $"标定 OK（{alignedImagePts.Length} 对点，图像确认）")
-                            : $"标定 OK（{alignedImagePts.Length} 对点）";
+                                ? $"标定 OK（{alignedImagePts.Length} 对点，手选像素{errNote}）"
+                                : $"标定 OK（{alignedImagePts.Length} 对点，图像确认{errNote}）")
+                            : $"标定 OK（{alignedImagePts.Length} 对点{errNote}）";
                         break;
                     }
 
@@ -9282,6 +9378,105 @@ namespace CalibOperatorCLI_Example
                         _flowPlcConnected = false;
                         node.Outputs["Disconnected"] = true;
                         node.ResultSummary = "PLC disconnected";
+                        break;
+                    }
+
+                    case "light_connect":
+                    {
+                        ControllerLightFlowSession.ConnectFromNodeParams(node.Params);
+                        node.Outputs["Connected"] = true;
+                        var s = ControllerLightFlowSession.Session;
+                        string detail = s.LastIp ?? (s.LastComPort.HasValue ? $"COM{s.LastComPort}" : "");
+                        node.ResultSummary = $"光源已连接 {detail}";
+                        break;
+                    }
+
+                    case "light_disconnect":
+                    {
+                        ControllerLightFlowSession.Disconnect();
+                        node.Outputs["Disconnected"] = true;
+                        node.ResultSummary = "光源已断开";
+                        break;
+                    }
+
+                    case "light_set":
+                    {
+                        bool autoConnect = !string.Equals(
+                            node.Params.GetValueOrDefault("autoConnect", "true")?.Trim(),
+                            "false",
+                            StringComparison.OrdinalIgnoreCase)
+                            && node.Params.GetValueOrDefault("autoConnect", "true")?.Trim() != "0";
+
+                        if (autoConnect)
+                            ControllerLightFlowSession.EnsureConnected(node.Params);
+                        else if (!ControllerLightFlowSession.IsConnected)
+                            throw new InvalidOperationException("光源控制: 未连接。请先执行「光源连接」或开启 autoConnect。");
+
+                        var light = ControllerLightFlowSession.Session;
+                        string action = (node.Params.GetValueOrDefault("action", "brightness") ?? "brightness")
+                            .Trim().ToLowerInvariant();
+                        int channel = Math.Clamp(
+                            int.TryParse(node.Params.GetValueOrDefault("channel"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var ch)
+                                ? ch
+                                : 1,
+                            1,
+                            64);
+                        int value = int.TryParse(node.Params.GetValueOrDefault("value"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var v)
+                            ? v
+                            : 0;
+
+                        string summary;
+                        switch (action)
+                        {
+                            case "brightness":
+                            case "intensity":
+                            case "亮度":
+                                light.SetDigitalValue(channel, value);
+                                summary = $"CH{channel} 亮度={value}";
+                                break;
+                            case "strobe":
+                            case "脉宽":
+                                light.SetStrobeValue(channel, value);
+                                summary = $"CH{channel} 脉宽={value}";
+                                break;
+                            case "intcycle":
+                            case "内触发":
+                                light.SetIntCycle(value);
+                                summary = $"内触发周期={value}";
+                                break;
+                            case "trimode":
+                            case "触发模式":
+                                light.SetLightTriMode(value);
+                                summary = $"触发模式={value}";
+                                break;
+                            case "lightstate":
+                            case "常亮":
+                                light.SetLightState(value);
+                                summary = $"常亮/长灭={value}";
+                                break;
+                            case "keepalive":
+                            case "心跳":
+                                light.KeepAlive();
+                                summary = "心跳 OK";
+                                break;
+                            case "multi":
+                            case "channels":
+                            case "多通道":
+                            {
+                                string spec = node.Params.GetValueOrDefault("channels", "") ?? "";
+                                int n = ApplyLightChannelSpec(light, spec);
+                                summary = $"多通道 x{n}";
+                                break;
+                            }
+                            default:
+                                throw new InvalidOperationException(
+                                    $"光源控制: 未知 action='{action}'（brightness/strobe/intCycle/triMode/lightState/keepalive/multi）");
+                        }
+
+                        if (inputs.TryGetValue("After", out var afterLight))
+                            node.Outputs["Out"] = afterLight;
+                        node.Outputs["Ok"] = true;
+                        node.ResultSummary = summary + (inputs.ContainsKey("After") ? "（After 已透传）" : "");
                         break;
                     }
 
@@ -10978,6 +11173,26 @@ namespace CalibOperatorCLI_Example
                             pathBox.Text = ofd.FileName;
                     };
                 }
+                else if (param.Name == "worldPointsFile" && node.Def.TypeId == "calibrate")
+                {
+                    browseBtn = new Button
+                    {
+                        Content = "...",
+                        Width = 28,
+                        Margin = new Thickness(6, 0, 0, 0),
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    browseBtn.Click += (_, _) =>
+                    {
+                        var ofd = new OpenFileDialog
+                        {
+                            Title = "选择世界坐标文本（点列转文本）",
+                            Filter = "文本|*.txt;*.csv|所有文件|*.*"
+                        };
+                        if (ofd.ShowDialog() == true && input is TextBox pathBox)
+                            pathBox.Text = ofd.FileName;
+                    };
+                }
 
                 var tip = new TextBlock
                 {
@@ -12171,6 +12386,8 @@ namespace CalibOperatorCLI_Example
                             TryTraceEnginePathToConsole($"[FlowRunner] 全程由 NativeFlowEngine 完成（{run.ExecutedNodes}/{run.TotalNodes} 节点），未回退托管。");
                         if (!string.IsNullOrWhiteSpace(run.ReportJson))
                             AppendLog($"[NATIVE] Report: {run.ReportJson}");
+                        if (_nodes.Any(n => n.Def.TypeId == "composite"))
+                            await RefreshCompositeSnapshotsAfterNativeAsync();
                         AppendLog(
                             "[NATIVE] 说明: C++ 引擎一次性调度，此日志区不会出现「每个算子一行」的逐步输出；逐算子耗时在控制台 stderr 的 [FlowNative][Timing]。若需要界面里逐步日志，请点「运行」（托管）或对节点右键「执行到此节点（含上游）」。");
                         AppendLog("========== 执行完成 ==========");
@@ -12210,6 +12427,46 @@ namespace CalibOperatorCLI_Example
             {
                 _isRunInProgress = false;
                 if (StopRunButton != null) StopRunButton.IsEnabled = false;
+            }
+        }
+
+        /// <summary>Native 不展开组合子图；补跑各组合算子及其上游托管链，生成 LastCompositeRun 供双击查看变量。</summary>
+        private async System.Threading.Tasks.Task RefreshCompositeSnapshotsAfterNativeAsync()
+        {
+            var composites = _nodes.Where(n => n.Def.TypeId == "composite").ToList();
+            if (composites.Count == 0)
+                return;
+
+            AppendLog($"[NATIVE→composite] 为 {composites.Count} 个组合算子补跑托管链以生成子流程变量快照…");
+            var sorted = TopologicalSort();
+            if (sorted.Count != _nodes.Count)
+            {
+                AppendLog("[NATIVE→composite] 跳过：主流程存在循环依赖", true);
+                return;
+            }
+
+            foreach (var comp in composites)
+            {
+                ThrowIfExecutionCancelled();
+                var chain = sorted.Where(n => CollectPredecessorsIncludingSelf(comp).Contains(n)).ToList();
+                try
+                {
+                    foreach (var n in chain)
+                    {
+                        ThrowIfExecutionCancelled();
+                        await ExecuteNodeForRunAsync(n, "COMP-SNAP");
+                    }
+
+                    AppendLog($"  -> {comp.Def.DisplayName} 子流程变量快照已更新");
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    AppendLog($"  -> {comp.Def.DisplayName} 快照失败: {ex.Message}", true);
+                }
             }
         }
 

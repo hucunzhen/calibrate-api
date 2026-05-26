@@ -191,6 +191,7 @@ namespace CalibOperatorCLI_Example
                 ? $"{compositeNode.Def.DisplayName} · 子流程变量"
                 : $"{compositeNode.Def.DisplayName} · {sub}";
 
+            var owner = Window.GetWindow(this);
             var win = new Window
             {
                 Title = title,
@@ -198,10 +199,13 @@ namespace CalibOperatorCLI_Example
                 Height = 560,
                 MinWidth = 720,
                 MinHeight = 400,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Owner = Window.GetWindow(this),
+                WindowStartupLocation = owner != null
+                    ? WindowStartupLocation.CenterOwner
+                    : WindowStartupLocation.CenterScreen,
                 Background = new SolidColorBrush(Color.FromRgb(0x25, 0x25, 0x26))
             };
+            if (owner != null)
+                win.Owner = owner;
 
             var root = new Grid { Margin = new Thickness(10) };
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -216,7 +220,8 @@ namespace CalibOperatorCLI_Example
                 Margin = new Thickness(0, 0, 0, 8)
             };
             if (snap == null)
-                hint.Text = "尚未运行或本次未执行到该组合算子。运行 Flow 后双击组合算子可查看子节点端口变量。";
+                hint.Text = "尚无子流程变量快照。请先点工具栏「运行」(托管) 或「Native」(会自动补跑组合子图)；"
+                    + "也可右键「查看子流程变量」。双击标题/正文区域均可打开本窗口。";
             else
                 hint.Text = $"快照时间: {snap.CapturedAt:yyyy-MM-dd HH:mm:ss}  |  子节点 {snap.InnerNodes.Count} 个"
                     + (string.IsNullOrWhiteSpace(snap.InnerFlowLabel) ? "" : $"  |  {snap.InnerFlowLabel}");

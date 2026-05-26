@@ -123,7 +123,7 @@ namespace CalibOperatorCLI_Example
         {
             NavigateTo(_flowHostPage);
             HighlightTab("Flow");
-            TryAutoLoadLastFlowOnFlowPageSwitch();
+            // 不在此处自动加载 last_flow：流程页实例常驻内存，切回时应保留当前编辑内容。
         }
 
         private void NavYoloSeg_Click(object sender, RoutedEventArgs e)

@@ -1370,16 +1370,23 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "calibrate",
                 DisplayName = "九点标定",
-                Description = "标定像素→世界坐标。worldPoints 配置世界坐标(mm)；默认 pixelPickMode=手选：仅需 Image，在弹窗中按世界点列表左键手选像素。也可连接 ImagePts 作参考或匹配检测点。",
+                Description = "标定像素→世界坐标。世界点可填参数 worldPoints，或由 worldPointsFile 读取「点列转文本」保存的 txt（每行 x,y）。默认 pixelPickMode=手选：仅需 Image，在弹窗中按世界点列表左键手选像素。也可连接 ImagePts 作参考或匹配检测点。",
                 Category = "标定",
                 Params =
                 {
                     new OperatorParam
                     {
+                        Name = "worldPointsFile",
+                        DisplayName = "世界坐标文件",
+                        DefaultValue = "",
+                        Description = "可选；「点列转文本」+「保存文本」生成的 txt（每行 x,y，与 points_to_text 一致）。填写后优先于下方 worldPoints；相对路径相对当前 .flow.json 目录。"
+                    },
+                    new OperatorParam
+                    {
                         Name = "worldPoints",
                         DisplayName = "世界坐标点",
                         DefaultValue = "100,100;400,100;700,100;100,300;400,300;700,300;100,500;400,500;700,500",
-                        Description = "格式 x,y;x,y;...（建议 9 点，行优先）。至少 4 点。"
+                        Description = "未填 worldPointsFile 时使用。格式 x,y 每行或 x,y;x,y;...（建议 9 点行优先）。至少 4 点。"
                     },
                     new OperatorParam
                     {
@@ -1652,6 +1659,87 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "H", Direction = PortDirection.Output, DataType = typeof(HomographyTransform), ColorHex = "#E91E63" },
                     new PortDef { Name = "Poly", Direction = PortDirection.Output, DataType = typeof(Poly2DTransform), ColorHex = "#E91E63" },
                     new PortDef { Name = "Intrinsics", Direction = PortDirection.Output, DataType = typeof(CameraIntrinsics), ColorHex = "#E91E63" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "light_connect",
+                DisplayName = "光源连接",
+                Description = "连接光源控制器（以太网 IP 或串口）。流程内保持连接直至「光源断开」。",
+                Category = "光源",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "connectMode",
+                        DisplayName = "连接方式",
+                        DefaultValue = "ip",
+                        Description = "ip=以太网；serial=串口",
+                        Options = new List<string> { "ip", "serial" }
+                    },
+                    new OperatorParam { Name = "ip", DisplayName = "IP", DefaultValue = "192.168.0.100", Description = "connectMode=ip 时有效" },
+                    new OperatorParam { Name = "comPort", DisplayName = "串口号", DefaultValue = "1", Description = "connectMode=serial 时 COM 口编号" },
+                    new OperatorParam { Name = "timeoutSec", DisplayName = "超时(秒)", DefaultValue = "1", Description = "IP 连接超时 1~30" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Connected", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#FFC107" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "light_disconnect",
+                DisplayName = "光源断开",
+                Description = "断开流程内光源控制器连接。",
+                Category = "光源",
+                Ports =
+                {
+                    new PortDef { Name = "Disconnected", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#607D8B" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "light_set",
+                DisplayName = "光源控制",
+                Description = "设置亮度/脉宽等。上游 Out→After 可排在任意算子之后；本算子 Out 透传 After。autoConnect=true 时未连接则按参数自动连接。",
+                Category = "光源",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "action",
+                        DisplayName = "动作",
+                        DefaultValue = "brightness",
+                        Description = "brightness=通道亮度；strobe=脉宽；multi=多通道(channels)；keepalive=心跳",
+                        Options = new List<string> { "brightness", "strobe", "intCycle", "triMode", "lightState", "keepalive", "multi" }
+                    },
+                    new OperatorParam { Name = "channel", DisplayName = "通道", DefaultValue = "1", Description = "1 起，单通道动作时使用" },
+                    new OperatorParam { Name = "value", DisplayName = "数值", DefaultValue = "200", Description = "亮度/脉宽/模式等（依 action）" },
+                    new OperatorParam { Name = "channels", DisplayName = "多通道", DefaultValue = "", Description = "action=multi 时，如 1:200;2:150;3:180" },
+                    new OperatorParam
+                    {
+                        Name = "autoConnect",
+                        DisplayName = "自动连接",
+                        DefaultValue = "true",
+                        Description = "未连接时按下方 IP/串口参数连接",
+                        Options = new List<string> { "true", "false" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "connectMode",
+                        DisplayName = "连接方式",
+                        DefaultValue = "ip",
+                        Options = new List<string> { "ip", "serial" }
+                    },
+                    new OperatorParam { Name = "ip", DisplayName = "IP", DefaultValue = "192.168.0.100", Description = "autoConnect 用" },
+                    new OperatorParam { Name = "comPort", DisplayName = "串口号", DefaultValue = "1", Description = "autoConnect 用" },
+                    new OperatorParam { Name = "timeoutSec", DisplayName = "超时(秒)", DefaultValue = "1", Description = "IP 连接超时" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "After", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Ok", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#FFC107" }
                 }
             },
             new OperatorDef

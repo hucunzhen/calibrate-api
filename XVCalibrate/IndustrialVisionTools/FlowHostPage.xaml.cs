@@ -40,7 +40,7 @@ namespace CalibOperatorCLI_Example
                 fp.LoadFlowFromFile(filePath, showErrorDialog: true);
         }
 
-        /// <summary>与原先单页逻辑一致：磁盘上有上次路径且当前活动页不是该文件时，加载到活动标签。</summary>
+        /// <summary>启动时：仅当当前活动标签为空白画布时，恢复上次打开的 .flow.json。</summary>
         public void TryAutoLoadLastFlowIfApplicable(string? lastPathCandidate)
         {
             if (string.IsNullOrWhiteSpace(lastPathCandidate) || !File.Exists(lastPathCandidate))
@@ -49,8 +49,9 @@ namespace CalibOperatorCLI_Example
             var fp = ActiveFlowPage;
             if (fp == null)
                 return;
-            string current = fp.CurrentFlowFilePath ?? string.Empty;
-            if (string.Equals(full, current, StringComparison.OrdinalIgnoreCase))
+            if (!fp.IsPristineEmptyDocument)
+                return;
+            if (string.Equals(full, fp.CurrentFlowFilePath ?? string.Empty, StringComparison.OrdinalIgnoreCase))
                 return;
             fp.LoadFlowFromFile(full, showErrorDialog: false);
         }
@@ -72,8 +73,10 @@ namespace CalibOperatorCLI_Example
             var fp = new FlowPage();
             fp.FlowLoaded += path =>
             {
-                FlowLoaded?.Invoke(path);
                 SetTabHeader(ownerTab, path);
+                // 仅活动标签变更才写入 last_flow_path，避免后台标签加载覆盖全局记录
+                if (ReferenceEquals(FlowTabs.SelectedItem, ownerTab))
+                    FlowLoaded?.Invoke(path);
             };
             fp.TryLoadFlowInNewTab = path =>
             {
