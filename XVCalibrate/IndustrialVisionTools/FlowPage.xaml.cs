@@ -114,6 +114,8 @@ namespace CalibOperatorCLI_Example
         private HashSet<Guid>? _skipFlowRunNodeIds;
         private Guid _sendPlcDownstreamChainSourceId;
         private List<FlowNode>? _sendPlcDownstreamChainCache;
+        /// <summary>flow_loop 多轮执行时为 true，flow_sink 跨轮累积而不每轮清空。</summary>
+        private bool _flowLoopSinkAccumulateActive;
 
         private static PlcConfig LoadFlowPlcConfig()
         {
@@ -296,7 +298,7 @@ namespace CalibOperatorCLI_Example
                 return string.IsNullOrWhiteSpace(configuredDir);
             }
 
-            if (node.Def.TypeId == "calibrate")
+            if (node.Def.TypeId is "calibrate" or "calibrate_homography")
                 return CalibrateRequiresCorrespondenceDialog(node) || CalibrateUsesManualPixelPick(node);
 
             return false;
@@ -397,6 +399,77 @@ namespace CalibOperatorCLI_Example
                 repeatCount = 0;
                 return;
             }
+        }
+
+        private static double[]? TryParseFlowLoopStepValues(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return null;
+
+            var list = new List<double>();
+            foreach (var part in raw.Split(new[] { ';', ',', '\n', '\r', '|' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string p = part.Trim();
+                if (string.IsNullOrEmpty(p))
+                    continue;
+                if (double.TryParse(p, NumberStyles.Float, CultureInfo.InvariantCulture, out double d)
+                    || double.TryParse(p, NumberStyles.Float, CultureInfo.CurrentCulture, out d))
+                    list.Add(d);
+                else if (int.TryParse(p, NumberStyles.Integer, CultureInfo.InvariantCulture, out int iv))
+                    list.Add(iv);
+                else
+                    throw new InvalidOperationException($"循环 stepValues: 无效数值 '{p}'");
+            }
+
+            return list.Count > 0 ? list.ToArray() : null;
+        }
+
+        /// <summary>解析循环计划：若 stepValues 非空则固定次数=列表长度，且不可为无限循环。</summary>
+        private static void ResolveFlowLoopSchedule(
+            string? countRaw,
+            string? stepValuesRaw,
+            out int repeatCount,
+            out bool infinite,
+            out double[]? stepValues)
+        {
+            ParseFlowLoopCountParam(countRaw, out repeatCount, out infinite);
+            stepValues = TryParseFlowLoopStepValues(stepValuesRaw);
+            if (stepValues == null || stepValues.Length == 0)
+                return;
+
+            if (infinite)
+                throw new InvalidOperationException("循环: 已填写 stepValues 时不能使用无限循环，请将 count 设为正整数或留空 stepValues");
+
+            repeatCount = stepValues.Length;
+            infinite = false;
+        }
+
+        private static int ResolveLightControlValue(Dictionary<string, object?> inputs, IReadOnlyDictionary<string, string> parameters)
+        {
+            if (inputs.TryGetValue("Value", out var valObj) && valObj != null)
+            {
+                switch (valObj)
+                {
+                    case int vi:
+                        return vi;
+                    case long vl:
+                        return (int)Math.Clamp(vl, int.MinValue, int.MaxValue);
+                    case float vf:
+                        return (int)Math.Round(vf);
+                    case double vd:
+                        return (int)Math.Round(vd);
+                    default:
+                        if (int.TryParse(valObj.ToString()?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed))
+                            return parsed;
+                        if (double.TryParse(valObj.ToString()?.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double pd))
+                            return (int)Math.Round(pd);
+                        throw new InvalidOperationException($"光源控制: Value 输入无法解析为整数: {valObj}");
+                }
+            }
+
+            return int.TryParse(parameters.GetValueOrDefault("value"), NumberStyles.Integer, CultureInfo.InvariantCulture, out int v)
+                ? v
+                : 0;
         }
 
         private async System.Threading.Tasks.Task ExecuteNodeForRunAsync(FlowNode node, string? timingScope = null)
@@ -2781,6 +2854,9 @@ namespace CalibOperatorCLI_Example
             if (hasH)
             {
                 var hom = (HomographyTransform)hObj!;
+                if (!HomographyMapsToWorld(hom))
+                    throw new InvalidOperationException(
+                        "轮廓像素→世界: 所接 H 为图像坐标系标定(px→px)，请改用 world 模式 H 或仅在图像系下处理轮廓");
                 return pt => ApplyHomography(pt, hom);
             }
 
@@ -5811,7 +5887,10 @@ namespace CalibOperatorCLI_Example
             return points.ToArray();
         }
 
-        /// <summary>九点标定：worldPointsFile 优先（点列转文本落盘），否则解析 worldPoints 参数字符串。</summary>
+        private static bool NodeUsesCalibrateWorldPointParams(FlowNode node) =>
+            node.Def.TypeId is "calibrate" or "calibrate_homography";
+
+        /// <summary>九点/透视标定：worldPointsFile 优先（点列转文本落盘），否则解析 worldPoints 参数字符串。</summary>
         private Point2D[] ResolveCalibrateWorldPoints(FlowNode node, string? flowBaseDir = null)
         {
             string? fileParam = node.Params.GetValueOrDefault("worldPointsFile", "")?.Trim();
@@ -5828,6 +5907,97 @@ namespace CalibOperatorCLI_Example
             string worldRaw = node.Params.GetValueOrDefault("worldPoints", "")
                 ?? node.Params.GetValueOrDefault("points", "");
             return ParseWorldPointsParam(worldRaw);
+        }
+
+        private Point2D[] ResolveCalibrateWorldPointsForNode(
+            FlowNode node,
+            Dictionary<string, object?> inputs,
+            string? flowBaseDir)
+        {
+            if (inputs.TryGetValue("WorldPts", out var wpObj) && wpObj is Point2D[] fromPort && fromPort.Length > 0)
+                return fromPort;
+            return ResolveCalibrateWorldPoints(node, flowBaseDir);
+        }
+
+        private Point2D[] ResolveCalibrateAlignedImagePoints(
+            FlowNode node,
+            Dictionary<string, object?> inputs,
+            Point2D[] worldPts,
+            CalibImage? calibImage,
+            string contextLabel)
+        {
+            var imagePts = inputs.TryGetValue("ImagePts", out var ipObj) ? ipObj as Point2D[] : null;
+            bool manualPick = CalibrateUsesManualPixelPick(node);
+            bool needDialog = CalibrateNeedsCorrespondenceDialog(node, imagePts, worldPts.Length);
+
+            if (needDialog)
+            {
+                if (calibImage == null)
+                    throw new InvalidOperationException(
+                        $"{contextLabel}: 手选像素或图像确认对应需要连接 Image 端口（与取图/加载图像同源）");
+
+                bool dialogManual = manualPick || imagePts == null || imagePts.Length == 0;
+                var owner = Window.GetWindow(this);
+                var dlg = new NinePointCorrespondenceDialog(
+                    calibImage, imagePts, worldPts, owner, dialogManual);
+                if (dlg.ShowDialog() != true || dlg.ResultImagePoints == null)
+                    throw new OperationCanceledException($"{contextLabel}已取消：未确认点对应关系");
+                return dlg.ResultImagePoints;
+            }
+
+            if (imagePts == null)
+                throw new InvalidOperationException($"{contextLabel}: 缺少 ImagePts（检测到的图像点）");
+            if (imagePts.Length != worldPts.Length)
+                throw new InvalidOperationException(
+                    $"{contextLabel}: 图像点 {imagePts.Length} 个，世界点 {worldPts.Length} 个，数量须一致（请调整 worldPoints/worldPointsFile 或检测数量）");
+            return imagePts;
+        }
+
+        private static bool HomographyTargetSpaceIsImage(string? targetSpace) =>
+            string.Equals(targetSpace?.Trim(), "image", StringComparison.OrdinalIgnoreCase)
+            || targetSpace?.Trim() == "图像";
+
+        /// <summary>空 TargetSpace 视为旧版 world 标定。</summary>
+        private static bool HomographyMapsToWorld(HomographyTransform h) =>
+            !HomographyTargetSpaceIsImage(h.TargetSpace);
+
+        private static bool ParseHomographyTargetSpaceParam(FlowNode node, bool defaultImage)
+        {
+            string raw = node.Params.GetValueOrDefault("targetSpace", defaultImage ? "image" : "world")?.Trim() ?? "";
+            if (string.IsNullOrEmpty(raw))
+                return !defaultImage;
+            if (HomographyTargetSpaceIsImage(raw))
+                return false;
+            if (string.Equals(raw, "world", StringComparison.OrdinalIgnoreCase) || raw == "世界")
+                return true;
+            if (string.Equals(raw, "auto", StringComparison.OrdinalIgnoreCase))
+                return !defaultImage;
+            throw new InvalidOperationException($"未知 targetSpace='{raw}'（image/world）");
+        }
+
+        private static bool ResolveHomographyApplyMapsToWorld(FlowNode node, HomographyTransform h)
+        {
+            string raw = node.Params.GetValueOrDefault("targetSpace", "auto")?.Trim() ?? "auto";
+            if (string.Equals(raw, "auto", StringComparison.OrdinalIgnoreCase) || raw == "自动")
+                return HomographyMapsToWorld(h);
+            return ParseHomographyTargetSpaceParam(node, defaultImage: false);
+        }
+
+        private static (double Avg, double Max) MeasureHomographyReprojection(
+            Point2D[] imagePts, Point2D[] targetPts, HomographyTransform h)
+        {
+            double sum = 0, max = 0;
+            for (int i = 0; i < imagePts.Length; i++)
+            {
+                var mapped = ApplyHomography(imagePts[i], h);
+                double dx = mapped.X - targetPts[i].X;
+                double dy = mapped.Y - targetPts[i].Y;
+                double e = Math.Sqrt(dx * dx + dy * dy);
+                sum += e;
+                if (e > max) max = e;
+            }
+
+            return (sum / imagePts.Length, max);
         }
 
         private static CalibImage GrabOneCameraFrameOrThrow(int deviceIndex, int targetWidth, int targetHeight)
@@ -5921,6 +6091,243 @@ namespace CalibOperatorCLI_Example
             downstream.Remove(source);
             var sorted = TopologicalSort();
             return sorted.Where(downstream.Contains).ToList();
+        }
+
+        /// <summary>循环结束后才执行的节点：exposure_fusion，以及仅由 flow_sink / 已延后节点供数的下游。</summary>
+        private HashSet<FlowNode> ComputePostLoopDeferredNodes(IReadOnlyList<FlowNode> postNodes)
+        {
+            var deferred = new HashSet<FlowNode>(postNodes.Where(n => n.Def.TypeId == "exposure_fusion"));
+            bool changed = true;
+            while (changed)
+            {
+                changed = false;
+                foreach (var n in postNodes)
+                {
+                    if (deferred.Contains(n))
+                        continue;
+
+                    var inConns = _connections.Where(c =>
+                        c.ToPort.Owner == n && postNodes.Contains(c.FromPort.Owner)).ToList();
+                    if (inConns.Count == 0)
+                        continue;
+
+                    if (inConns.All(c =>
+                            deferred.Contains(c.FromPort.Owner)
+                            || c.FromPort.Owner.Def.TypeId == "flow_sink"))
+                    {
+                        deferred.Add(n);
+                        changed = true;
+                    }
+                }
+            }
+
+            return deferred;
+        }
+
+        private static void ResetFlowSinkAccumulators(IEnumerable<FlowNode> nodes)
+        {
+            foreach (var n in nodes)
+            {
+                if (n.Def.TypeId == "flow_sink")
+                    n.SinkAccumulator = new List<object?>();
+            }
+        }
+
+        private static List<CalibImage> CoerceToCalibImageList(object? src, string context)
+        {
+            if (src == null)
+                return new List<CalibImage>();
+
+            if (src is List<CalibImage> typed)
+                return typed;
+
+            if (src is CalibImage single)
+                return new List<CalibImage> { single };
+
+            if (src is System.Collections.IList list)
+            {
+                var result = new List<CalibImage>(list.Count);
+                foreach (var item in list)
+                {
+                    if (item is CalibImage ci)
+                        result.Add(ci);
+                    else if (item != null)
+                        throw new InvalidOperationException($"{context}: 列表项类型须为 CalibImage，当前为 {item.GetType().Name}");
+                }
+
+                return result;
+            }
+
+            throw new InvalidOperationException($"{context}: Images 须为 ImageList 或 CalibImage 列表");
+        }
+
+        private static CalibImage FuseExposureCalibImages(IReadOnlyList<CalibImage> images, string mode)
+        {
+            if (images == null || images.Count == 0)
+                throw new InvalidOperationException("Exposure Fusion: 图像列表为空");
+
+            if (images.Count == 1)
+                return CalibAPI.DuplicateImage(images[0]);
+
+            string m = (mode ?? "mertens").Trim().ToLowerInvariant();
+            if (m is "mertens" or "exposure" or "exposure_fusion" or "hdr")
+                return FuseExposureMertensManaged(images);
+
+#if HALCON_ENABLED
+            if (m == "max")
+                return FuseExposureChainHalcon(images, useMax: true);
+            if (m == "min")
+                return FuseExposureChainHalcon(images, useMax: false);
+#endif
+            if (m == "max")
+                return FuseExposureMaxMinManaged(images, useMax: true);
+            if (m == "min")
+                return FuseExposureMaxMinManaged(images, useMax: false);
+            if (m == "mean" || m == "average" || m == "avg")
+                return FuseExposureMeanManaged(images);
+
+            throw new InvalidOperationException($"Exposure Fusion: 未知 mode='{mode}'（mertens/max/min/mean）");
+        }
+
+#if HALCON_ENABLED
+        private static CalibImage FuseExposureChainHalcon(IReadOnlyList<CalibImage> images, bool useMax)
+        {
+            CalibImage acc = images[0];
+            for (int i = 1; i < images.Count; i++)
+            {
+                var merged = useMax
+                    ? HalconFlowBridge.MaxImageToCalib(acc, images[i])
+                    : HalconFlowBridge.MinImageToCalib(acc, images[i]);
+                if (i > 1)
+                    acc.Dispose();
+                acc = merged;
+            }
+
+            return acc;
+        }
+#endif
+
+        private static CalibImage FuseExposureMaxMinManaged(IReadOnlyList<CalibImage> images, bool useMax)
+        {
+            var n0 = images[0].GetNativeStruct();
+            int nPix = n0.width * n0.height;
+            foreach (var img in images.Skip(1))
+            {
+                var ni = img.GetNativeStruct();
+                if (ni.width != n0.width || ni.height != n0.height)
+                    throw new InvalidOperationException($"Exposure Fusion: 尺寸须一致，{n0.width}x{n0.height} 与 {ni.width}x{ni.height}");
+            }
+
+            var acc = new byte[nPix];
+            FillGrayBytesFromCalib(images[0], acc);
+            var buf = new byte[nPix];
+            for (int i = 1; i < images.Count; i++)
+            {
+                FillGrayBytesFromCalib(images[i], buf);
+                for (int p = 0; p < nPix; p++)
+                    acc[p] = useMax
+                        ? (byte)Math.Max(acc[p], buf[p])
+                        : (byte)Math.Min(acc[p], buf[p]);
+            }
+
+            var outImg = new CalibImage(n0.width, n0.height, 1);
+            Marshal.Copy(acc, 0, outImg.GetNativeStruct().data, nPix);
+            return outImg;
+        }
+
+        private static CalibImage FuseExposureMeanManaged(IReadOnlyList<CalibImage> images)
+        {
+            var n0 = images[0].GetNativeStruct();
+            int nPix = n0.width * n0.height;
+            foreach (var img in images.Skip(1))
+            {
+                var ni = img.GetNativeStruct();
+                if (ni.width != n0.width || ni.height != n0.height)
+                    throw new InvalidOperationException($"Exposure Fusion: 尺寸须一致，{n0.width}x{n0.height} 与 {ni.width}x{ni.height}");
+            }
+
+            var sum = new double[nPix];
+            var buf = new byte[nPix];
+            foreach (var img in images)
+            {
+                FillGrayBytesFromCalib(img, buf);
+                for (int p = 0; p < nPix; p++)
+                    sum[p] += buf[p];
+            }
+
+            double inv = 1.0 / images.Count;
+            var dst = new byte[nPix];
+            for (int p = 0; p < nPix; p++)
+                dst[p] = (byte)Math.Clamp(Math.Round(sum[p] * inv), 0.0, 255.0);
+
+            var outImg = new CalibImage(n0.width, n0.height, 1);
+            Marshal.Copy(dst, 0, outImg.GetNativeStruct().data, nPix);
+            return outImg;
+        }
+
+        /// <summary>Mertens 风格：按局部梯度与曝光良好度加权平均（多曝光融合常用）。</summary>
+        private static CalibImage FuseExposureMertensManaged(IReadOnlyList<CalibImage> images)
+        {
+            var n0 = images[0].GetNativeStruct();
+            int w = n0.width, h = n0.height, nPix = w * h;
+            foreach (var img in images.Skip(1))
+            {
+                var ni = img.GetNativeStruct();
+                if (ni.width != w || ni.height != h)
+                    throw new InvalidOperationException($"Exposure Fusion: 尺寸须一致，{w}x{h} 与 {ni.width}x{ni.height}");
+            }
+
+            var weights = new double[nPix];
+            var gray = new byte[nPix];
+            var acc = new double[nPix];
+            var norm = new double[nPix];
+            const double eps = 1e-6;
+
+            foreach (var img in images)
+            {
+                FillGrayBytesFromCalib(img, gray);
+                ComputeMertensWeights(gray, w, h, weights);
+                for (int p = 0; p < nPix; p++)
+                {
+                    acc[p] += gray[p] * weights[p];
+                    norm[p] += weights[p];
+                }
+            }
+
+            var dst = new byte[nPix];
+            for (int p = 0; p < nPix; p++)
+            {
+                double d = norm[p] > eps ? acc[p] / norm[p] : 0;
+                dst[p] = (byte)Math.Clamp(Math.Round(d), 0.0, 255.0);
+            }
+
+            var outImg = new CalibImage(w, h, 1);
+            Marshal.Copy(dst, 0, outImg.GetNativeStruct().data, nPix);
+            return outImg;
+        }
+
+        private static void ComputeMertensWeights(byte[] gray, int w, int h, double[] weights)
+        {
+            for (int y = 1; y < h - 1; y++)
+            {
+                int row = y * w;
+                for (int x = 1; x < w - 1; x++)
+                {
+                    int i = row + x;
+                    double gx = gray[i + 1] - gray[i - 1];
+                    double gy = gray[i + w] - gray[i - w];
+                    double c = Math.Abs(gx) + Math.Abs(gy);
+                    double well = 1.0 - Math.Abs((gray[i] - 128.0) / 128.0);
+                    well = Math.Max(0.05, well);
+                    weights[i] = (c + 1.0) * well;
+                }
+            }
+
+            for (int i = 0; i < w * h; i++)
+            {
+                if (weights[i] <= 0)
+                    weights[i] = 0.05;
+            }
         }
 
         private List<FlowNode> ResolveSendPlcDownstreamChain(FlowNode sendPlc)
@@ -6233,16 +6640,77 @@ namespace CalibOperatorCLI_Example
                         break;
                     }
 
+                    case "flow_sink":
+                    {
+                        bool acceptNull = string.Equals(
+                            node.Params.GetValueOrDefault("acceptNull", "false")?.Trim(),
+                            "true",
+                            StringComparison.OrdinalIgnoreCase)
+                            || node.Params.GetValueOrDefault("acceptNull", "false")?.Trim() == "1";
+
+                        if (!_flowLoopSinkAccumulateActive)
+                            node.SinkAccumulator = new List<object?>();
+                        else
+                            node.SinkAccumulator ??= new List<object?>();
+
+                        var acc = node.SinkAccumulator!;
+                        inputs.TryGetValue("In", out var inVal);
+                        if (inVal != null || acceptNull)
+                            acc.Add(inVal);
+
+                        var imageList = new List<CalibImage>();
+                        foreach (var item in acc)
+                        {
+                            if (item is CalibImage ci)
+                                imageList.Add(ci);
+                        }
+
+                        node.Outputs["List"] = imageList;
+                        node.Outputs["Count"] = acc.Count;
+                        if (inputs.TryGetValue("After", out var afterSink))
+                            node.Outputs["Out"] = afterSink;
+                        else if (acc.Count > 0)
+                            node.Outputs["Out"] = acc[^1];
+
+                        node.ResultSummary = _flowLoopSinkAccumulateActive
+                            ? $"收集 {acc.Count} 项（图 {imageList.Count}）"
+                            : $"收集 {acc.Count} 项（单轮试跑）";
+                        break;
+                    }
+
+                    case "exposure_fusion":
+                    {
+                        inputs.TryGetValue("Images", out var imagesObj);
+                        var images = CoerceToCalibImageList(imagesObj, "Exposure Fusion");
+                        if (images.Count == 0)
+                            throw new InvalidOperationException("Exposure Fusion: 缺少 Images 或列表为空");
+
+                        string mode = node.Params.GetValueOrDefault("mode", "mertens") ?? "mertens";
+                        var fused = FuseExposureCalibImages(images, mode);
+                        node.Outputs["Image"] = fused;
+                        node.ResultSummary = $"{mode} x{images.Count} → {fused.GetNativeStruct().width}x{fused.GetNativeStruct().height}";
+                        break;
+                    }
+
                     case "flow_loop":
                     {
-                        ParseFlowLoopCountParam(node.Params.GetValueOrDefault("count"), out var repeatCount, out var infinite);
+                        ResolveFlowLoopSchedule(
+                            node.Params.GetValueOrDefault("count"),
+                            node.Params.GetValueOrDefault("stepValues"),
+                            out var repeatCount,
+                            out var infinite,
+                            out var stepValues);
                         if (inputs.TryGetValue("After", out var afterObj))
                             node.Outputs["Out"] = afterObj;
                         node.Outputs["Index"] = 0;
                         node.Outputs["Count"] = infinite ? -1 : repeatCount;
+                        if (stepValues != null && stepValues.Length > 0)
+                            node.Outputs["StepValue"] = stepValues[0];
                         node.ResultSummary = infinite
                             ? "Loop ∞（单节点试跑；全流程「运行」将无限重复下游，点「停止」结束）"
-                            : $"Loop x{repeatCount}（单节点试跑；全流程「运行」才会重复执行下游 {repeatCount} 次）";
+                            : stepValues != null && stepValues.Length > 0
+                                ? $"Loop x{repeatCount}（StepValue 列表，试跑输出第 1 项={stepValues[0]:G}）"
+                                : $"Loop x{repeatCount}（单节点试跑；全流程「运行」才会重复执行下游 {repeatCount} 次）";
                         break;
                     }
 
@@ -8167,38 +8635,15 @@ namespace CalibOperatorCLI_Example
 
                     case "calibrate":
                     {
-                        var imagePts = inputs.TryGetValue("ImagePts", out var ipObj) ? ipObj as Point2D[] : null;
                         var calibImage = inputs.TryGetValue("Image", out var imgObj) ? imgObj as CalibImage : null;
-
                         var worldPts = ResolveCalibrateWorldPoints(node, compositeInnerFlowBaseDir);
-
                         bool manualPick = CalibrateUsesManualPixelPick(node);
-                        bool needDialog = CalibrateNeedsCorrespondenceDialog(node, imagePts, worldPts.Length);
-
-                        Point2D[] alignedImagePts;
-                        if (needDialog)
-                        {
-                            if (calibImage == null)
-                                throw new InvalidOperationException(
-                                    "标定: 手选像素或图像确认对应需要连接 Image 端口（与取图/加载图像同源）");
-
-                            bool dialogManual = manualPick || imagePts == null || imagePts.Length == 0;
-                            var owner = Window.GetWindow(this);
-                            var dlg = new NinePointCorrespondenceDialog(
-                                calibImage, imagePts, worldPts, owner, dialogManual);
-                            if (dlg.ShowDialog() != true || dlg.ResultImagePoints == null)
-                                throw new OperationCanceledException("标定已取消：未确认点对应关系");
-                            alignedImagePts = dlg.ResultImagePoints;
-                        }
-                        else
-                        {
-                            if (imagePts == null)
-                                throw new InvalidOperationException("标定: 缺少 ImagePts（检测到的图像点）");
-                            if (imagePts.Length != worldPts.Length)
-                                throw new InvalidOperationException(
-                                    $"标定: 图像点 {imagePts.Length} 个，世界点 {worldPts.Length} 个，数量须一致（请调整 worldPoints/worldPointsFile 或检测数量）");
-                            alignedImagePts = imagePts;
-                        }
+                        bool needDialog = CalibrateNeedsCorrespondenceDialog(
+                            node,
+                            inputs.TryGetValue("ImagePts", out var ipObj) ? ipObj as Point2D[] : null,
+                            worldPts.Length);
+                        Point2D[] alignedImagePts = ResolveCalibrateAlignedImagePoints(
+                            node, inputs, worldPts, calibImage, "标定");
 
                         // 标定计算与下游输出均使用配对后的像素（手选或确认后的 alignedImagePts[i] ↔ worldPts[i]）
                         var calResult = CalibAPI.CalibrateNinePoint(alignedImagePts, worldPts);
@@ -8260,16 +8705,52 @@ namespace CalibOperatorCLI_Example
 
                     case "calibrate_homography":
                     {
-                        var imagePts = inputs["ImagePts"] as Point2D[];
-                        var worldPts = inputs["WorldPts"] as Point2D[];
-                        if (imagePts == null || worldPts == null)
-                            throw new InvalidOperationException("透视标定: 缺少图像点或世界坐标点");
-                        if (imagePts.Length != worldPts.Length)
-                            throw new InvalidOperationException("透视标定: 图像点和世界点数量不一致");
-                        if (imagePts.Length < 4)
-                            throw new InvalidOperationException("透视标定: 至少需要4个点");
-                        var h = FitHomography(imagePts, worldPts);
+                        var calibImageH = inputs.TryGetValue("Image", out var imgHObj) ? imgHObj as CalibImage : null;
+                        bool mapsToWorldH = ParseHomographyTargetSpaceParam(node, defaultImage: true);
+                        var targetPtsH = ResolveCalibrateWorldPointsForNode(node, inputs, compositeInnerFlowBaseDir);
+                        if (targetPtsH.Length < 4)
+                            throw new InvalidOperationException("透视标定: 至少需要4个目标坐标点");
+
+                        bool manualPickH = CalibrateUsesManualPixelPick(node);
+                        bool needDialogH = CalibrateNeedsCorrespondenceDialog(
+                            node,
+                            inputs.TryGetValue("ImagePts", out var ipHObj) ? ipHObj as Point2D[] : null,
+                            targetPtsH.Length);
+                        Point2D[] alignedImagePtsH = ResolveCalibrateAlignedImagePoints(
+                            node, inputs, targetPtsH, calibImageH, "透视标定");
+
+                        var h = FitHomography(alignedImagePtsH, targetPtsH);
+                        h.TargetSpace = mapsToWorldH ? "world" : "image";
                         node.Outputs["H"] = h;
+                        node.Outputs["ImagePts"] = alignedImagePtsH.ToArray();
+
+                        var (avgErrH, maxErrH) = MeasureHomographyReprojection(alignedImagePtsH, targetPtsH, h);
+                        string errUnitH = mapsToWorldH ? "mm" : "px";
+                        string errNoteH = $" avgErr={avgErrH:F3}{errUnitH} max={maxErrH:F3}{errUnitH}";
+                        string spaceNoteH = mapsToWorldH ? "world" : "image";
+
+                        string verifyRawH = node.Params.GetValueOrDefault("showVerifyPreview", "true") ?? "true";
+                        bool showVerifyH = !string.Equals(verifyRawH.Trim(), "false", StringComparison.OrdinalIgnoreCase)
+                            && verifyRawH.Trim() != "0";
+                        if (showVerifyH && calibImageH != null)
+                        {
+                            ShowImagePreview(
+                                calibImageH,
+                                alignedImagePtsH,
+                                6,
+                                null,
+                                node.Id.ToString("D"),
+                                $"透视标定验证 · {node.Def.DisplayName}",
+                                null,
+                                "grid",
+                                null);
+                        }
+
+                        node.ResultSummary = needDialogH
+                            ? (manualPickH
+                                ? $"透视标定 OK [{spaceNoteH}]（{alignedImagePtsH.Length} 对，手选{errNoteH}）"
+                                : $"透视标定 OK [{spaceNoteH}]（{alignedImagePtsH.Length} 对，确认{errNoteH}）")
+                            : $"透视标定 OK [{spaceNoteH}]（{alignedImagePtsH.Length} 对{errNoteH}）";
                         break;
                     }
 
@@ -8282,12 +8763,25 @@ namespace CalibOperatorCLI_Example
                             throw new InvalidOperationException("坐标转换(H): 缺少输入点");
                         if (pixelPts.Length == 0)
                         {
+                            node.Outputs["Mapped"] = Array.Empty<Point2D>();
                             node.Outputs["World"] = Array.Empty<Point2D>();
-                            node.ResultSummary = "skip: 0 pts → empty World";
+                            node.ResultSummary = "skip: 0 pts";
                             break;
                         }
 
-                        node.Outputs["World"] = pixelPts.Select(p => ApplyHomography(p, h)).ToArray();
+                        bool mapsToWorldApply = ResolveHomographyApplyMapsToWorld(node, h);
+                        var mapped = pixelPts.Select(p => ApplyHomography(p, h)).ToArray();
+                        node.Outputs["Mapped"] = mapped;
+                        if (mapsToWorldApply)
+                        {
+                            node.Outputs["World"] = mapped;
+                            node.ResultSummary = $"world x{mapped.Length}";
+                        }
+                        else
+                        {
+                            node.Outputs["World"] = Array.Empty<Point2D>();
+                            node.ResultSummary = $"image(px) x{mapped.Length} → 请接 Mapped 端口";
+                        }
                         break;
                     }
 
@@ -9421,9 +9915,8 @@ namespace CalibOperatorCLI_Example
                                 : 1,
                             1,
                             64);
-                        int value = int.TryParse(node.Params.GetValueOrDefault("value"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var v)
-                            ? v
-                            : 0;
+                        int value = ResolveLightControlValue(inputs, node.Params);
+                        bool valueFromPort = inputs.ContainsKey("Value") && inputs["Value"] != null;
 
                         string summary;
                         switch (action)
@@ -9432,7 +9925,7 @@ namespace CalibOperatorCLI_Example
                             case "intensity":
                             case "亮度":
                                 light.SetDigitalValue(channel, value);
-                                summary = $"CH{channel} 亮度={value}";
+                                summary = $"CH{channel} 亮度={value}" + (valueFromPort ? " (Value输入)" : "");
                                 break;
                             case "strobe":
                             case "脉宽":
@@ -11068,7 +11561,7 @@ namespace CalibOperatorCLI_Example
                     cb.SelectedItem = param.Options.Contains(currentValue) ? currentValue : param.DefaultValue;
                     input = cb;
                 }
-                else if (param.Name == "worldPoints" && node.Def.TypeId == "calibrate")
+                else if (param.Name == "worldPoints" && NodeUsesCalibrateWorldPointParams(node))
                 {
                     input = new TextBox
                     {
@@ -11077,6 +11570,21 @@ namespace CalibOperatorCLI_Example
                         Text = currentValue,
                         TextWrapping = TextWrapping.Wrap,
                         AcceptsReturn = false,
+                        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                        VerticalAlignment = VerticalAlignment.Top,
+                        FontFamily = new FontFamily("Consolas"),
+                        FontSize = 11
+                    };
+                }
+                else if (param.Name == "stepValues" && node.Def.TypeId == "flow_loop")
+                {
+                    input = new TextBox
+                    {
+                        Width = 460,
+                        MinHeight = 56,
+                        Text = currentValue,
+                        TextWrapping = TextWrapping.Wrap,
+                        AcceptsReturn = true,
                         VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                         VerticalAlignment = VerticalAlignment.Top,
                         FontFamily = new FontFamily("Consolas"),
@@ -11173,7 +11681,7 @@ namespace CalibOperatorCLI_Example
                             pathBox.Text = ofd.FileName;
                     };
                 }
-                else if (param.Name == "worldPointsFile" && node.Def.TypeId == "calibrate")
+                else if (param.Name == "worldPointsFile" && NodeUsesCalibrateWorldPointParams(node))
                 {
                     browseBtn = new Button
                     {
@@ -12760,14 +13268,30 @@ namespace CalibOperatorCLI_Example
                     var preNodes = sorted.Where(n => !downstream.Contains(n)).ToList();
                     var postNodes = GetOrderedDownstreamOfNode(loopNode);
 
-                    ParseFlowLoopCountParam(loopNode.Params.GetValueOrDefault("count"), out var repeatCount, out var infiniteLoop);
+                    ResolveFlowLoopSchedule(
+                        loopNode.Params.GetValueOrDefault("count"),
+                        loopNode.Params.GetValueOrDefault("stepValues"),
+                        out var repeatCount,
+                        out var infiniteLoop,
+                        out var stepValues);
                     int intervalMs = int.TryParse(loopNode.Params.GetValueOrDefault("intervalMs"), out var im) ? im : 0;
                     intervalMs = Math.Max(0, intervalMs);
 
                     string loopLabel = infiniteLoop ? "∞" : repeatCount.ToString(CultureInfo.InvariantCulture);
-                    AppendLog($"检测到 flow_loop: {loopNode.Def.DisplayName} x{loopLabel}，前置 {preNodes.Count} 节点，下游 {postNodes.Count} 节点");
+                    if (stepValues != null && stepValues.Length > 0)
+                        AppendLog($"检测到 flow_loop: {loopNode.Def.DisplayName} x{loopLabel}，StepValue=[{string.Join("; ", stepValues.Select(v => v.ToString("G", CultureInfo.InvariantCulture)))}]");
+                    else
+                        AppendLog($"检测到 flow_loop: {loopNode.Def.DisplayName} x{loopLabel}，前置 {preNodes.Count} 节点，下游 {postNodes.Count} 节点");
                     if (infiniteLoop)
                         AppendLog("[LOOP] 无限循环：点击「停止」结束");
+
+                    var postLoopDeferred = ComputePostLoopDeferredNodes(postNodes);
+                    var perRoundNodes = postNodes.Where(n => !postLoopDeferred.Contains(n)).ToList();
+                    if (postLoopDeferred.Count > 0)
+                        AppendLog($"循环延后执行: {postLoopDeferred.Count} 个节点（如 Exposure Fusion）");
+
+                    _flowLoopSinkAccumulateActive = true;
+                    ResetFlowSinkAccumulators(perRoundNodes);
 
                     int successCountPre = 0;
                     for (int i = 0; i < preNodes.Count; i++)
@@ -12802,6 +13326,8 @@ namespace CalibOperatorCLI_Example
                         loopNode.Outputs.Clear();
                         loopNode.Outputs["Index"] = li > int.MaxValue ? int.MaxValue : (int)li;
                         loopNode.Outputs["Count"] = infiniteLoop ? -1 : repeatCount;
+                        if (stepValues != null && li < stepValues.Length)
+                            loopNode.Outputs["StepValue"] = stepValues[li];
                         if (GetInputData(loopNode, "After") is { } afterVal)
                             loopNode.Outputs["Out"] = afterVal;
                         loopNode.Executed = true;
@@ -12810,18 +13336,20 @@ namespace CalibOperatorCLI_Example
                         string roundTag = infiniteLoop
                             ? $"loop {li + 1}/∞"
                             : $"loop {li + 1}/{repeatCount}";
+                        if (stepValues != null && li < stepValues.Length)
+                            roundTag += $" v={stepValues[li]:G}";
                         loopNode.ResultSummary = roundTag;
                         UpdateNodeSummary(loopNode);
 
-                        AppendLog($"[LOOP {roundTag}] 开始下游 {postNodes.Count} 节点");
-                        for (int j = 0; j < postNodes.Count; j++)
+                        AppendLog($"[LOOP {roundTag}] 开始下游 {perRoundNodes.Count} 节点");
+                        for (int j = 0; j < perRoundNodes.Count; j++)
                         {
                             ThrowIfExecutionCancelled();
-                            var node = postNodes[j];
+                            var node = perRoundNodes[j];
                             node.Outputs.Clear();
                             node.ErrorMessage = null;
                             node.Executed = false;
-                            StatusText.Text = $"循环[{roundTag}] [{j + 1}/{postNodes.Count}] {node.Def.DisplayName}...";
+                            StatusText.Text = $"循环[{roundTag}] [{j + 1}/{perRoundNodes.Count}] {node.Def.DisplayName}...";
                             await System.Threading.Tasks.Task.Yield();
                             try
                             {
@@ -12853,12 +13381,51 @@ namespace CalibOperatorCLI_Example
                             await System.Threading.Tasks.Task.Delay(intervalMs, _runCts?.Token ?? System.Threading.CancellationToken.None);
                     }
 
+                    _flowLoopSinkAccumulateActive = false;
+
+                    var orderedDeferred = postNodes.Where(postLoopDeferred.Contains).ToList();
+                    if (orderedDeferred.Count > 0)
+                    {
+                        AppendLog($"[LOOP] 循环后执行 {orderedDeferred.Count} 个节点");
+                        for (int j = 0; j < orderedDeferred.Count; j++)
+                        {
+                            ThrowIfExecutionCancelled();
+                            var node = orderedDeferred[j];
+                            node.Outputs.Clear();
+                            node.ErrorMessage = null;
+                            node.Executed = false;
+                            StatusText.Text = $"循环后 [{j + 1}/{orderedDeferred.Count}] {node.Def.DisplayName}...";
+                            await System.Threading.Tasks.Task.Yield();
+                            try
+                            {
+                                await ExecuteNodeForRunAsync(node, "LOOP-POST");
+                            }
+                            catch (FlowExecutionGracefulStopException ex)
+                            {
+                                AppendLog($"[LOOP-POST][STOP] {node.Def.DisplayName}: {ex.Message}", true);
+                                StatusText.Text = ex.Message;
+                                StatusText.Foreground = new SolidColorBrush(Colors.Orange);
+                                AppendLog("========== 执行中止 ==========");
+                                return false;
+                            }
+                            catch (Exception ex)
+                            {
+                                AppendLog($"[LOOP-POST][ERROR] {node.Def.DisplayName}: {ex.Message}", true);
+                                StatusText.Text = $"循环后失败: {node.Def.DisplayName} - {ex.Message}";
+                                StatusText.Foreground = new SolidColorBrush(Colors.Red);
+                                AppendLog("========== 执行中止 ==========");
+                                return false;
+                            }
+                        }
+                    }
+
                     string doneRounds = infiniteLoop
                         ? $"{completedRounds} 轮（已停止）"
                         : $"{completedRounds} 轮";
-                    StatusText.Text = $"循环完成: 前置 {successCountPre}/{preNodes.Count}，{doneRounds} × 下游 {postNodes.Count} 节点";
+                    StatusText.Text = $"循环完成: 前置 {successCountPre}/{preNodes.Count}，{doneRounds} × 下游 {perRoundNodes.Count} 节点/轮"
+                        + (orderedDeferred.Count > 0 ? $"，延后 {orderedDeferred.Count}" : "");
                     StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
-                    AppendLog($"========== flow_loop 完成: {doneRounds}，下游 {postNodes.Count} 节点/轮 ==========");
+                    AppendLog($"========== flow_loop 完成: {doneRounds}，下游 {perRoundNodes.Count} 节点/轮 ==========");
                     return true;
                 }
 

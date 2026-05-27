@@ -61,6 +61,9 @@ namespace CalibOperatorCLI_Example
             /// <summary>最近一次执行子流程时各子节点的端口变量（仅组合算子）</summary>
             public CompositeRunSnapshot? LastCompositeRun { get; set; }
 
+            /// <summary>flow_sink 在 flow_loop 多轮执行时累积的输入（不参与流程 JSON 序列化）。</summary>
+            public List<object?>? SinkAccumulator { get; set; }
+
             public FlowNode(OperatorDef def, double x, double y, Guid? fixedId = null)
             {
                 Id = fixedId ?? Guid.NewGuid();

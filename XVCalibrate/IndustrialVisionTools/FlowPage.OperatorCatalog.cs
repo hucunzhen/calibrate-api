@@ -227,6 +227,29 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "exposure_fusion",
+                DisplayName = "Exposure Fusion",
+                Description = "多曝光/多帧图像融合为单张灰度图。接收 ImageList（如循环收集输出）。max=亮部保留；min=暗部；mean=平均；mertens=按梯度权重软融合。循环场景下在全部轮次结束后执行一次。",
+                Category = "图像",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "mode",
+                        DisplayName = "融合模式",
+                        DefaultValue = "mertens",
+                        Description = "max | min | mean | mertens",
+                        Options = new List<string> { "mertens", "max", "min", "mean" }
+                    }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Images", Direction = PortDirection.Input, DataType = typeof(List<CalibImage>), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Image", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "grayscale",
                 DisplayName = "灰度化",
                 Description = "Step1: 图像转灰度",
@@ -1429,12 +1452,62 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "calibrate_homography",
                 DisplayName = "透视标定(H)",
-                Description = "基于单应矩阵(Homography)进行标定（适合存在透视畸变）",
+                Description = "单应矩阵透视标定。默认 targetSpace=image：像素→校正后图像坐标(px)，后续检测/量测仍在图像系。targetSpace=world 时为像素→世界(mm)。目标点可填 worldPoints/worldPointsFile（与九点相同格式）。至少 4 对点。",
                 Category = "标定",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "targetSpace",
+                        DisplayName = "目标坐标系",
+                        DefaultValue = "image",
+                        Description = "image/图像=输出仍为图像像素坐标；world/世界=输出为世界 mm（与九点标定一致）",
+                        Options = new List<string> { "image", "world", "图像", "世界" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "worldPointsFile",
+                        DisplayName = "目标坐标文件",
+                        DefaultValue = "",
+                        Description = "可选；每行 x,y。image 模式为校正后图像坐标(px)；world 模式为世界 mm。相对路径相对 .flow.json 目录。"
+                    },
+                    new OperatorParam
+                    {
+                        Name = "worldPoints",
+                        DisplayName = "目标坐标点",
+                        DefaultValue = "0,0;1000,0;1000,800;0,800",
+                        Description = "未填文件时使用。image 模式填校正平面四角/网格(px)；world 模式填世界 mm。至少 4 点。"
+                    },
+                    new OperatorParam
+                    {
+                        Name = "pixelPickMode",
+                        DisplayName = "像素取点方式",
+                        DefaultValue = "manual",
+                        Description = "manual/手选=在图像上按世界点列表手选像素；detected/匹配检测点=在 ImagePts 附近点选；auto=数量一致时按顺序标定否则弹窗",
+                        Options = new List<string> { "manual", "detected", "auto", "手选", "匹配检测点" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "confirmCorrespondence",
+                        DisplayName = "图像确认对应",
+                        DefaultValue = "true",
+                        Description = "true=弹窗确认；false=仅 auto 且 ImagePts 数量一致时按顺序标定（手选模式仍会弹窗）",
+                        Options = new List<string> { "true", "false" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "showVerifyPreview",
+                        DisplayName = "标定验证预览",
+                        DefaultValue = "true",
+                        Description = "标定成功后叠加显示像素点网格",
+                        Options = new List<string> { "true", "false" }
+                    }
+                },
                 Ports =
                 {
-                    new PortDef { Name = "ImagePts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
-                    new PortDef { Name = "WorldPts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "ImagePts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3", IsOptional = true },
+                    new PortDef { Name = "WorldPts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3", IsOptional = true },
                     new PortDef { Name = "H", Direction = PortDirection.Output, DataType = typeof(HomographyTransform), ColorHex = "#E91E63" }
                 }
             },
@@ -1442,13 +1515,25 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "img_to_world_homography",
                 DisplayName = "坐标转换(H)",
-                Description = "使用单应矩阵进行像素->世界坐标转换。0 个点时跳过（空 World）。",
+                Description = "应用单应 H。H 为 image 标定时输出 Mapped(校正后图像 px)；为 world 标定时输出 World(mm)。targetSpace=auto 时跟随 H。",
                 Category = "标定",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "targetSpace",
+                        DisplayName = "目标坐标系",
+                        DefaultValue = "auto",
+                        Description = "auto=跟随 H；image=强制输出 Mapped(px)；world=强制输出 World(mm)",
+                        Options = new List<string> { "auto", "image", "world", "图像", "世界" }
+                    }
+                },
                 Ports =
                 {
                     new PortDef { Name = "Pixel", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "H", Direction = PortDirection.Input, DataType = typeof(HomographyTransform), ColorHex = "#E91E63" },
-                    new PortDef { Name = "World", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
+                    new PortDef { Name = "Mapped", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "World", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3", IsOptional = true }
                 }
             },
             new OperatorDef
@@ -1701,7 +1786,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "light_set",
                 DisplayName = "光源控制",
-                Description = "设置亮度/脉宽等。上游 Out→After 可排在任意算子之后；本算子 Out 透传 After。autoConnect=true 时未连接则按参数自动连接。",
+                Description = "设置亮度/脉宽等。上游 Out→After 可排在任意算子之后；Value 输入可接循环 StepValue 覆盖参数 value。autoConnect=true 时未连接则按参数自动连接。",
                 Category = "光源",
                 Params =
                 {
@@ -1714,7 +1799,7 @@ namespace CalibOperatorCLI_Example
                         Options = new List<string> { "brightness", "strobe", "intCycle", "triMode", "lightState", "keepalive", "multi" }
                     },
                     new OperatorParam { Name = "channel", DisplayName = "通道", DefaultValue = "1", Description = "1 起，单通道动作时使用" },
-                    new OperatorParam { Name = "value", DisplayName = "数值", DefaultValue = "200", Description = "亮度/脉宽/模式等（依 action）" },
+                    new OperatorParam { Name = "value", DisplayName = "数值(默认)", DefaultValue = "200", Description = "未连接 Value 输入时使用；亮度/脉宽/模式等（依 action）" },
                     new OperatorParam { Name = "channels", DisplayName = "多通道", DefaultValue = "", Description = "action=multi 时，如 1:200;2:150;3:180" },
                     new OperatorParam
                     {
@@ -1738,6 +1823,7 @@ namespace CalibOperatorCLI_Example
                 Ports =
                 {
                     new PortDef { Name = "After", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Value", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#FFC107", IsOptional = true },
                     new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
                     new PortDef { Name = "Ok", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#FFC107" }
                 }
@@ -2117,11 +2203,12 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "flow_loop",
                 DisplayName = "循环",
-                Description = "按次数或无限重复执行本算子下游连线上的全部算子（前置只执行一次）。count≤0、inf、无限=一直循环直到点「停止」。须用「运行」托管执行。",
+                Description = "按次数或无限重复执行本算子下游连线上的全部算子（前置只执行一次）。填写 stepValues 时按列表长度固定循环，每轮输出 StepValue 一个值（可接光源控制 Value）。count≤0/inf/无限=无限循环。须用「运行」托管执行。",
                 Category = "流程",
                 Params =
                 {
-                    new OperatorParam { Name = "count", DisplayName = "重复次数", DefaultValue = "3", Description = "正整数=固定次数；0/inf/无限=无限循环（点「停止」结束）" },
+                    new OperatorParam { Name = "count", DisplayName = "重复次数", DefaultValue = "3", Description = "正整数=固定次数；0/inf/无限=无限循环。填写 stepValues 时以列表长度为准，忽略 count" },
+                    new OperatorParam { Name = "stepValues", DisplayName = "每轮数值列表", DefaultValue = "", Description = "固定次数时可选；分号/逗号/换行分隔，如 100;200;150。每轮输出 StepValue 一个值，长度=循环次数" },
                     new OperatorParam { Name = "intervalMs", DisplayName = "轮次间隔(ms)", DefaultValue = "0", Description = "每轮下游执行完后的等待时间，0=不等待" }
                 },
                 Ports =
@@ -2129,6 +2216,26 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "After", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
                     new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
                     new PortDef { Name = "Index", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#607D8B" },
+                    new PortDef { Name = "Count", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#607D8B" },
+                    new PortDef { Name = "StepValue", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FFC107" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "flow_sink",
+                DisplayName = "循环收集",
+                Description = "接在循环下游：每轮将 In 追加到列表（如多曝光采图）。输出 ImageList 供 Exposure Fusion 等使用。循环结束后才执行仅依赖收集结果的算子（如曝光融合）。须用「运行」托管执行。",
+                Category = "流程",
+                Params =
+                {
+                    new OperatorParam { Name = "acceptNull", DisplayName = "接受空输入", DefaultValue = "false", Description = "true=In 为空也占一轮；false=跳过空输入" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B" },
+                    new PortDef { Name = "After", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "List", Direction = PortDirection.Output, DataType = typeof(List<CalibImage>), ColorHex = "#FF9800" },
                     new PortDef { Name = "Count", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#607D8B" }
                 }
             },

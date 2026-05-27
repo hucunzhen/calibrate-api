@@ -31,6 +31,8 @@ namespace CalibOperatorCLI_Example
             public double H11, H12, H13;
             public double H21, H22, H23;
             public double H31, H32, H33;
+            /// <summary>image=像素→校正后图像坐标(px)；world=像素→世界(mm)。空=旧数据，按 world 处理。</summary>
+            public string? TargetSpace;
         }
 
         private struct Poly2DTransform
@@ -84,13 +86,15 @@ namespace CalibOperatorCLI_Example
             public double H31 { get; set; }
             public double H32 { get; set; }
             public double H33 { get; set; }
+            public string? TargetSpace { get; set; }
 
             public static HomographyCalibrationSaveV1 From(HomographyTransform h) =>
                 new HomographyCalibrationSaveV1
                 {
                     H11 = h.H11, H12 = h.H12, H13 = h.H13,
                     H21 = h.H21, H22 = h.H22, H23 = h.H23,
-                    H31 = h.H31, H32 = h.H32, H33 = h.H33
+                    H31 = h.H31, H32 = h.H32, H33 = h.H33,
+                    TargetSpace = h.TargetSpace
                 };
 
             public HomographyTransform ToHomography() =>
@@ -98,7 +102,8 @@ namespace CalibOperatorCLI_Example
                 {
                     H11 = H11, H12 = H12, H13 = H13,
                     H21 = H21, H22 = H22, H23 = H23,
-                    H31 = H31, H32 = H32, H33 = H33
+                    H31 = H31, H32 = H32, H33 = H33,
+                    TargetSpace = TargetSpace
                 };
         }
 
