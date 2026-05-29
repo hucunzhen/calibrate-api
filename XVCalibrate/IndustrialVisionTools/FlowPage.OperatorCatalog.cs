@@ -3061,7 +3061,9 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "maxOverlap", DisplayName = "MaxOverlap", DefaultValue = "0.5", Description = "最大重叠度" },
                     new OperatorParam { Name = "subPixel", DisplayName = "SubPixel", DefaultValue = "interpolation", Description = "亚像素：none / interpolation / least_squares / least_squares_high" },
                     new OperatorParam { Name = "numLevels", DisplayName = "NumLevels", DefaultValue = "0", Description = "金字塔层数，0=创建模型时使用" },
-                    new OperatorParam { Name = "greediness", DisplayName = "Greediness", DefaultValue = "0.75", Description = "贪心系数 0-1；漏检时降到 0.65~0.7" }
+                    new OperatorParam { Name = "greediness", DisplayName = "Greediness", DefaultValue = "0.75", Description = "贪心系数 0-1；漏检时降到 0.65~0.7" },
+                    new OperatorParam { Name = "endScoreWeight", DisplayName = "端部得分权重", DefaultValue = "0.8", Description = "端部边缘对齐在分数中的权重，0=不修正" },
+                    new OperatorParam { Name = "endArcFraction", DisplayName = "端部弧长占比", DefaultValue = "0.12", Description = "轮廓端部分段占比" }
                 },
                 Ports =
                 {
@@ -3144,7 +3146,9 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "subPixel", DisplayName = "SubPixel", DefaultValue = "none", Description = "none 最快；interpolation 更准" },
                     new OperatorParam { Name = "numLevels", DisplayName = "NumLevels", DefaultValue = "0", Description = "金字塔层数，0=模型默认" },
                     new OperatorParam { Name = "greediness", DisplayName = "Greediness", DefaultValue = "0.85", Description = "贪心系数" },
-                    new OperatorParam { Name = "allowRetry", DisplayName = "失败重试", DefaultValue = "false", Description = "无结果时降分再搜" }
+                    new OperatorParam { Name = "allowRetry", DisplayName = "失败重试", DefaultValue = "false", Description = "无结果时降分再搜" },
+                    new OperatorParam { Name = "endScoreWeight", DisplayName = "端部得分权重", DefaultValue = "0.8", Description = "端部边缘对齐在分数中的权重，0=不修正；1=完全由端部决定。修正公式：score×(1-w+w×端部因子)" },
+                    new OperatorParam { Name = "endArcFraction", DisplayName = "端部弧长占比", DefaultValue = "0.12", Description = "轮廓总长中两端各取的比例，用于端部边缘采样" }
                 },
                 Ports =
                 {
@@ -3166,7 +3170,7 @@ namespace CalibOperatorCLI_Example
                 {
                     new OperatorParam { Name = "loopEmit", DisplayName = "循环输出Mask", DefaultValue = "true", Description = "true=每张粗候选循环输出 Mask 并驱动下游；false=仅输出 candidateIndex 指定的一张" },
                     new OperatorParam { Name = "candidateIndex", DisplayName = "单张索引", DefaultValue = "0", Description = "loopEmit=false 时输出的粗候选下标" },
-                    new OperatorParam { Name = "maskErosionPx", DisplayName = "Mask内缩(px)", DefaultValue = "2", Description = "填充区域腐蚀半径" },
+                    new OperatorParam { Name = "maskErosionPx", DisplayName = "Mask内缩(px)", DefaultValue = "2", Description = "沿模板轮廓法向内缩（gen_parallel_contour_xld），非全向腐蚀；0=不内缩" },
                     new OperatorParam { Name = "maskFillDilatePx", DisplayName = "Mask填充膨胀(px)", DefaultValue = "0", Description = "0=凸包实心填充；>0=改用手动膨胀（凹形工件可试 30~80）" },
                     new OperatorParam { Name = "contourLevel", DisplayName = "模板层", DefaultValue = "1", Description = "生成填充区域用的形状模型层（输出为填充 Mask，不是轮廓 XLD）" },
                     new OperatorParam { Name = "maxCandidates", DisplayName = "最多Mask数", DefaultValue = "0", Description = "0=全部粗候选；N=仅前 N 个" }
@@ -3218,12 +3222,16 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "deformedContourMode", DisplayName = "变形轮廓", DefaultValue = "first", Description = "none=不输出(最快)；first=输出变形轮廓" },
                     new OperatorParam { Name = "fineAllowFallback", DisplayName = "精失败放宽重试", DefaultValue = "false", Description = "精匹配失败时降分/扩角再搜" },
                     new OperatorParam { Name = "roiMarginPx", DisplayName = "ROI边距(px)", DefaultValue = "12", Description = "粗位姿周围 CropRectangle2 的额外边距（透视 .dfm 必用）" },
-                    new OperatorParam { Name = "maxRoiHalfPx", DisplayName = "ROI半长上限(px)", DefaultValue = "120", Description = "限制精匹配裁剪区半长，0=不限制" }
+                    new OperatorParam { Name = "maxRoiHalfPx", DisplayName = "ROI半长上限(px)", DefaultValue = "120", Description = "限制精匹配裁剪区半长，0=不限制" },
+                    new OperatorParam { Name = "fineEndScoreWeight", DisplayName = "精端部得分权重", DefaultValue = "0.8", Description = "精匹配 Score 端部修正，0=关闭；优先用变形轮廓，否则 RigidModelId/ModelId 或 .dfm 模板" },
+                    new OperatorParam { Name = "fineEndArcFraction", DisplayName = "精端部弧长占比", DefaultValue = "0.12", Description = "刚性模板轮廓端部分段占比" }
                 },
                 Ports =
                 {
                     new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
                     new PortDef { Name = "DeformableModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#7B1FA2" },
+                    new PortDef { Name = "RigidModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#9C27B0", IsOptional = true },
+                    new PortDef { Name = "FullImage", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800", IsOptional = true },
                     new PortDef { Name = "CoarseRow", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#8BC34A", IsOptional = true },
                     new PortDef { Name = "CoarseColumn", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#03A9F4", IsOptional = true },
                     new PortDef { Name = "CoarseAngle", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#FF9800", IsOptional = true },
@@ -3250,6 +3258,10 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "coarseSubPixel", DisplayName = "粗 SubPixel", DefaultValue = "none", Description = "粗定位亚像素：none 最快，interpolation 更准" },
                     new OperatorParam { Name = "coarseNumLevels", DisplayName = "粗 NumLevels", DefaultValue = "0", Description = "粗金字塔层数，0=用模型默认" },
                     new OperatorParam { Name = "coarseAllowRetry", DisplayName = "粗失败重试", DefaultValue = "false", Description = "无结果时是否降分再搜一次（会拖慢）" },
+                    new OperatorParam { Name = "endScoreWeight", DisplayName = "粗端部得分权重", DefaultValue = "0.8", Description = "粗定位 CoarseScore 端部修正权重，0=不修正" },
+                    new OperatorParam { Name = "endArcFraction", DisplayName = "粗端部弧长占比", DefaultValue = "0.12", Description = "粗定位轮廓端部分段占比" },
+                    new OperatorParam { Name = "fineEndScoreWeight", DisplayName = "精端部得分权重", DefaultValue = "0.8", Description = "精匹配 Score 端部修正权重，0=不修正；留空则与粗相同" },
+                    new OperatorParam { Name = "fineEndArcFraction", DisplayName = "精端部弧长占比", DefaultValue = "0.12", Description = "精匹配端部分段占比；留空则与粗相同" },
                     new OperatorParam { Name = "fineAngleMargin", DisplayName = "精角度余量(°)", DefaultValue = "5", Description = "以粗角度为中心 ± 该值(度)；粗 SubPixel=none 时建议 ≥5" },
                     new OperatorParam { Name = "fineMinScore", DisplayName = "精 MinScore", DefaultValue = "0.45", Description = "可变形最低分" },
                     new OperatorParam { Name = "fineNumLevels", DisplayName = "精 NumLevels", DefaultValue = "0", Description = "可变形金字塔层数，0=与建模一致" },

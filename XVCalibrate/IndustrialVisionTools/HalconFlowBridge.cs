@@ -2268,7 +2268,11 @@ namespace CalibOperatorCLI_Example
             int numLevels,
             double greediness)
         {
-            HShapeModel shapeModel = HalconShapeModelRegistry.Get(modelId);
+            long shapeId = ResolveRegisteredShapeModelId(modelId);
+            if (shapeId < 0)
+                throw new InvalidOperationException(
+                    $"形状模板 ModelId={modelId} 无效：须为 create/load_shape_model 的 .shm，勿接可变形模型或已释放的 ID");
+            HShapeModel shapeModel = HalconShapeModelRegistry.Get(shapeId);
             HObject hoImage = CalibToHObject(inImg);
             HImage hImg = new HImage(hoImage);
             try
@@ -2401,7 +2405,8 @@ namespace CalibOperatorCLI_Example
         /// <summary>获取形状模型轮廓点（模型坐标系：X=列, Y=行），用于叠加显示。</summary>
         public static Point2D[][] GetShapeModelContourPoints(long modelId, int level = 1)
         {
-            HShapeModel shapeModel = HalconShapeModelRegistry.Get(modelId);
+            if (!HalconShapeModelRegistry.TryGet(modelId, out HShapeModel shapeModel))
+                return Array.Empty<Point2D[]>();
             using HXLDCont xld = shapeModel.GetShapeModelContours(level);
             int n = xld.CountObj();
             if (n <= 0)

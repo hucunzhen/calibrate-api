@@ -12,18 +12,20 @@
     {
       "Id": "b2000001-0001-4001-8001-000000000010",
       "TypeId": "halcon_coarse_shape_match",
-      "X": 748,
-      "Y": 96,
+      "X": 718.88,
+      "Y": 56.80000000000001,
       "Params": {
         "angleStart": "-5",
         "angleExtent": "10",
-        "minScore": "0.8",
-        "numMatches": "5",
+        "minScore": "0.6",
+        "numMatches": "0",
         "maxOverlap": "0.5",
         "subPixel": "none",
         "numLevels": "0",
-        "greediness": "0.85",
-        "allowRetry": "false"
+        "greediness": "0.01",
+        "allowRetry": "false",
+        "endScoreWeight": "0.9",
+        "endArcFraction": "0.7"
       }
     },
     {
@@ -34,7 +36,7 @@
       "Params": {
         "loopEmit": "true",
         "candidateIndex": "0",
-        "maskErosionPx": "2",
+        "maskErosionPx": "10",
         "maskFillDilatePx": "0",
         "contourLevel": "1",
         "maxCandidates": "0"
@@ -60,14 +62,18 @@
         "fineScaleMin": "0.97",
         "fineScaleMax": "1.03",
         "deformedContourMode": "first",
-        "fineAllowFallback": "false"
+        "fineAllowFallback": "false",
+        "roiMarginPx": "12",
+        "maxRoiHalfPx": "120",
+        "fineEndScoreWeight": "0.9",
+        "fineEndArcFraction": "0.07"
       }
     },
     {
       "Id": "b2000001-0001-4001-8001-00000000000a",
       "TypeId": "halcon_display_shape_match",
-      "X": 1508,
-      "Y": 5,
+      "X": 1489.16,
+      "Y": 15.800000000000011,
       "Params": {
         "contourLevel": "1",
         "crossHalf": "14",
@@ -78,8 +84,8 @@
     {
       "Id": "b2000001-0001-4001-8001-00000000000b",
       "TypeId": "display",
-      "X": 1576,
-      "Y": 365,
+      "X": 1629,
+      "Y": 264,
       "Params": {
         "dotRadius": "2",
         "pointLineJoin": "auto"
@@ -97,8 +103,8 @@
     {
       "Id": "b2000001-0001-4001-8001-00000000000d",
       "TypeId": "halcon_load_deformable_model",
-      "X": 490.0511999999999,
-      "Y": 432.0608,
+      "X": 302.3711999999997,
+      "Y": 501.9807999999999,
       "Params": {
         "filePath": "D:\\work\\calibrate-api\\flows\\deformable_model.dfm"
       }
@@ -106,23 +112,13 @@
     {
       "Id": "7d44141a-44cc-40b3-a07d-144c44622e0e",
       "TypeId": "halcon_display_shape_match",
-      "X": 1085,
-      "Y": 31,
+      "X": 1137.2800000000002,
+      "Y": 31.560000000000002,
       "Params": {
         "contourLevel": "1",
         "crossHalf": "14",
         "strokeWidth": "2.5",
         "drawScores": "true"
-      }
-    },
-    {
-      "Id": "e1000001-0001-4001-8001-000000000013",
-      "TypeId": "display",
-      "X": 1085,
-      "Y": 520,
-      "Params": {
-        "dotRadius": "2",
-        "pointLineJoin": "auto"
       }
     }
   ],
@@ -164,18 +160,6 @@
       "ToPort": "ModelId"
     },
     {
-      "FromNodeId": "b2000001-0001-4001-8001-00000000000c",
-      "FromPort": "ModelId",
-      "ToNodeId": "e1000001-0001-4001-8001-000000000011",
-      "ToPort": "ModelId"
-    },
-    {
-      "FromNodeId": "b2000001-0001-4001-8001-00000000000c",
-      "FromPort": "ModelId",
-      "ToNodeId": "b2000001-0001-4001-8001-00000000000a",
-      "ToPort": "ModelId"
-    },
-    {
       "FromNodeId": "b2000001-0001-4001-8001-00000000000d",
       "FromPort": "ModelId",
       "ToNodeId": "b2000001-0001-4001-8001-000000000009",
@@ -198,12 +182,6 @@
       "FromPort": "Image",
       "ToNodeId": "b2000001-0001-4001-8001-00000000000a",
       "ToPort": "In"
-    },
-    {
-      "FromNodeId": "b2000001-0001-4001-8001-000000000001",
-      "FromPort": "Image",
-      "ToNodeId": "b2000001-0001-4001-8001-00000000000b",
-      "ToPort": "Image"
     },
     {
       "FromNodeId": "b2000001-0001-4001-8001-000000000001",
@@ -302,10 +280,22 @@
       "ToPort": "CoarseAngle"
     },
     {
-      "FromNodeId": "e1000001-0001-4001-8001-000000000011",
-      "FromPort": "Mask",
-      "ToNodeId": "e1000001-0001-4001-8001-000000000013",
+      "FromNodeId": "e1000001-0001-4001-8001-000000000016",
+      "FromPort": "Out",
+      "ToNodeId": "b2000001-0001-4001-8001-00000000000b",
       "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-00000000000c",
+      "FromPort": "ModelId",
+      "ToNodeId": "b2000001-0001-4001-8001-00000000000a",
+      "ToPort": "ModelId"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-00000000000c",
+      "FromPort": "ModelId",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000011",
+      "ToPort": "ModelId"
     }
   ]
 }

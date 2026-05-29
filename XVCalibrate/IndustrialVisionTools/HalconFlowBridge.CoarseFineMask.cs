@@ -39,6 +39,12 @@ namespace CalibOperatorCLI_Example
                 }
             }
 
+            public static bool TryGet(long id, out HShapeModel model)
+            {
+                lock (Lock)
+                    return Models.TryGetValue(id, out model!);
+            }
+
             public static HShapeModel Get(long id)
             {
                 lock (Lock)
@@ -114,6 +120,12 @@ namespace CalibOperatorCLI_Example
                     // 旧版 HALCON 可能无 model_type
                 }
                 return HalconDeformableModelSubtype.Local;
+            }
+
+            public static bool TryGet(long id, out HDeformableModel model)
+            {
+                lock (Lock)
+                    return Models.TryGetValue(id, out model!);
             }
 
             public static HDeformableModel Get(long id)
@@ -503,6 +515,26 @@ namespace CalibOperatorCLI_Example
             if (HalconShapeModelRegistry.TryGetKind(modelId, out HalconFlowModelKind shape))
                 return shape;
             throw new InvalidOperationException($"ModelId={modelId} 不存在或已释放");
+        }
+
+        /// <summary>若 id 在形状模型注册表中则返回该 id，否则 -1。</summary>
+        public static long ResolveRegisteredShapeModelId(long modelId)
+        {
+            if (modelId < 0)
+                return -1;
+            return HalconShapeModelRegistry.TryGetKind(modelId, out _)
+                ? modelId
+                : -1;
+        }
+
+        /// <summary>若 id 在可变形模型注册表中则返回该 id，否则 -1。</summary>
+        public static long ResolveRegisteredDeformableModelId(long modelId)
+        {
+            if (modelId < 0)
+                return -1;
+            return HalconDeformableModelRegistry.TryGetKind(modelId, out _)
+                ? modelId
+                : -1;
         }
 
         public static void ClearModel(long modelId)
@@ -1202,7 +1234,8 @@ namespace CalibOperatorCLI_Example
 
         public static Point2D[][] GetDeformableModelContourPoints(long modelId, int level = 1)
         {
-            HDeformableModel model = HalconDeformableModelRegistry.Get(modelId);
+            if (!HalconDeformableModelRegistry.TryGet(modelId, out HDeformableModel model))
+                return Array.Empty<Point2D[]>();
             using HXLDCont xld = model.GetDeformableModelContours(level);
             int n = xld.CountObj();
             if (n <= 0)
@@ -1245,6 +1278,374 @@ namespace CalibOperatorCLI_Example
             return shifted;
         }
 
+        private const int DefaultShapeMatchContourLevel = 1;
+        public const double DefaultEndScoreWeight = 0.8;
+        public const double DefaultEndArcFraction = 0.12;
+
+        /// <summary>
+        /// HALCON 分数只反映模板点命中比例，长条工件中段对齐、端部未对齐时仍可能很高。
+        /// 用模板端部相对中段的边缘响应比压低分数；endScoreWeight=0 时不修正。
+        /// </summary>
+        private static double AdjustShapeMatchScoreForEndAlignment(
+            HImage hGray,
+            long rigidModelId,
+            double matchRow,
+            double matchCol,
+            double matchAngleDeg,
+            double halconScore,
+            double endScoreWeight,
+            double endArcFraction,
+            int contourLevel = DefaultShapeMatchContourLevel)
+        {
+            if (halconScore <= 1e-9 || endScoreWeight <= 0)
+                return halconScore;
+            if (ResolveRegisteredShapeModelId(rigidModelId) < 0)
+                return halconScore;
+
+            double weight = Math.Clamp(endScoreWeight, 0, 1);
+            double arcFraction = Math.Clamp(endArcFraction, 0.02, 0.45);
+            double endFactor = ComputeShapeEndEdgeSupportFactor(
+                hGray, rigidModelId, matchRow, matchCol, matchAngleDeg, contourLevel, arcFraction);
+            return halconScore * (1.0 - weight + weight * endFactor);
+        }
+
+        private static double ComputeShapeEndEdgeSupportFactor(
+            HImage hGray,
+            long rigidModelId,
+            double matchRow,
+            double matchCol,
+            double matchAngleDeg,
+            int contourLevel,
+            double endArcFraction)
+        {
+            Point2D[][] modelContours = GetShapeModelContourPoints(rigidModelId, contourLevel);
+            if (modelContours.Length == 0)
+                return 1.0;
+
+            HOperatorSet.SobelAmp(hGray, out HObject ampHo, "sum_abs", 3);
+            try
+            {
+                using var hAmp = new HImage(ampHo);
+                double minFactor = 1.0;
+                foreach (Point2D[]? modelContour in modelContours)
+                {
+                    if (modelContour == null || modelContour.Length < 4)
+                        continue;
+                    Point2D[] imgContour = TransformShapeModelContourToImage(
+                        modelContour, matchRow, matchCol, matchAngleDeg);
+                    if (imgContour.Length < 4)
+                        continue;
+                    double f = ComputeContourEndEdgeSupportFactor(hAmp, imgContour, endArcFraction);
+                    minFactor = Math.Min(minFactor, f);
+                }
+
+                return minFactor;
+            }
+            finally
+            {
+                ampHo.Dispose();
+            }
+        }
+
+        private static double ComputeContourEndEdgeSupportFactor(HImage hAmp, Point2D[] pts, double endArcFraction)
+        {
+            int n = pts.Length;
+            if (n < 4)
+                return 1.0;
+
+            endArcFraction = Math.Clamp(endArcFraction, 0.05, 0.35);
+            var cum = new double[n];
+            for (int i = 1; i < n; i++)
+            {
+                double dr = pts[i].Y - pts[i - 1].Y;
+                double dc = pts[i].X - pts[i - 1].X;
+                cum[i] = cum[i - 1] + Math.Sqrt(dr * dr + dc * dc);
+            }
+
+            double total = cum[n - 1];
+            if (total < 8)
+                return 1.0;
+
+            double endLen = total * endArcFraction;
+            var endIdx = new List<int>();
+            var midIdx = new List<int>();
+            for (int i = 0; i < n; i++)
+            {
+                double s = cum[i];
+                if (s <= endLen || s >= total - endLen)
+                    endIdx.Add(i);
+                else if (s >= total * 0.38 && s <= total * 0.62)
+                    midIdx.Add(i);
+            }
+
+            if (endIdx.Count < 2 || midIdx.Count < 2)
+                return 1.0;
+
+            double endAmp = MeanNormalPeakAmpAtIndices(hAmp, pts, endIdx, out double endAlign);
+            double midAmp = MeanNormalPeakAmpAtIndices(hAmp, pts, midIdx, out _);
+            if (midAmp < 1e-6)
+                return endAmp > 1e-6 ? endAlign : 0.25 * endAlign;
+
+            double ampRatio = Math.Clamp(endAmp / midAmp, 0, 1);
+            return Math.Clamp(ampRatio * endAlign, 0, 1);
+        }
+
+        /// <summary>沿轮廓法向搜索梯度峰；峰偏离轮廓越远，对齐因子越低。</summary>
+        private static double MeanNormalPeakAmpAtIndices(
+            HImage hAmp, Point2D[] pts, List<int> indices, out double meanAlignFactor)
+        {
+            hAmp.GetImageSize(out int width, out int height);
+            double ampSum = 0;
+            double alignSum = 0;
+            int cnt = 0;
+            const int normalHalfSpan = 5;
+            foreach (int i in indices)
+            {
+                GetContourNormalAt(pts, i, out double nr, out double nc);
+                double row = pts[i].Y;
+                double col = pts[i].X;
+                double peakAmp = 0;
+                int peakOffset = 0;
+                for (int d = -normalHalfSpan; d <= normalHalfSpan; d++)
+                {
+                    int r = (int)Math.Round(row + d * nr);
+                    int c = (int)Math.Round(col + d * nc);
+                    if (r < 0 || r >= height || c < 0 || c >= width)
+                        continue;
+                    HTuple v = hAmp.GetGrayval(r, c);
+                    double a = v.Length > 0 ? v[0].D : 0;
+                    if (a > peakAmp)
+                    {
+                        peakAmp = a;
+                        peakOffset = Math.Abs(d);
+                    }
+                }
+
+                if (peakAmp <= 0)
+                    continue;
+
+                ampSum += peakAmp;
+                alignSum += 1.0 - peakOffset / (double)normalHalfSpan;
+                cnt++;
+            }
+
+            meanAlignFactor = cnt > 0 ? Math.Clamp(alignSum / cnt, 0, 1) : 1.0;
+            return cnt > 0 ? ampSum / cnt : 0;
+        }
+
+        private static void GetContourNormalAt(Point2D[] pts, int i, out double nr, out double nc)
+        {
+            int n = pts.Length;
+            int im = i > 0 ? i - 1 : 0;
+            int ip = i < n - 1 ? i + 1 : n - 1;
+            double tr = pts[ip].Y - pts[im].Y;
+            double tc = pts[ip].X - pts[im].X;
+            double len = Math.Sqrt(tr * tr + tc * tc);
+            if (len < 1e-6)
+            {
+                nr = 1;
+                nc = 0;
+                return;
+            }
+
+            nr = tc / len;
+            nc = -tr / len;
+        }
+
+        /// <summary>对已有 FindShapeModel 结果按端部对齐修正分数（流程算子可调用）。</summary>
+        public static (double[] rows, double[] cols, double[] angles, double[] scores) ApplyShapeMatchEndScoreWeight(
+            CalibImage inImg,
+            long rigidModelId,
+            double[] rows,
+            double[] cols,
+            double[] angles,
+            double[] scores,
+            double endScoreWeight,
+            double endArcFraction = DefaultEndArcFraction) =>
+            AdjustCoarseShapeMatchScores(
+                inImg, rigidModelId, rows, cols, angles, scores,
+                endScoreWeight, endArcFraction, DefaultShapeMatchContourLevel);
+
+        /// <summary>对单次匹配结果按刚性模板端部对齐修正分数（粗/精匹配均可调用）。</summary>
+        public static double ApplyEndScoreWeightAtPose(
+            CalibImage scoreImage,
+            long rigidModelId,
+            double matchRow,
+            double matchCol,
+            double matchAngleDeg,
+            double halconScore,
+            double endScoreWeight,
+            double endArcFraction = DefaultEndArcFraction) =>
+            ApplyFineMatchEndScoreWeight(
+                scoreImage, rigidModelId, -1, null, matchRow, matchCol, matchAngleDeg,
+                halconScore, endScoreWeight, endArcFraction);
+
+        /// <summary>
+        /// 精匹配分数端部修正：优先用变形轮廓；否则刚性 .shm；再否则 .dfm 模板轮廓。
+        /// </summary>
+        public static double ApplyFineMatchEndScoreWeight(
+            CalibImage scoreImage,
+            long rigidModelId,
+            long deformableModelId,
+            Point2D[]? matchedContour,
+            double matchRow,
+            double matchCol,
+            double matchAngleDeg,
+            double halconScore,
+            double endScoreWeight,
+            double endArcFraction = DefaultEndArcFraction)
+        {
+            if (scoreImage == null || halconScore <= 1e-9 || endScoreWeight <= 0)
+                return halconScore;
+
+            bool haveContour = matchedContour != null && matchedContour.Length >= 4;
+            bool haveShape = ResolveRegisteredShapeModelId(rigidModelId) >= 0;
+            bool haveDeform = ResolveRegisteredDeformableModelId(deformableModelId) >= 0;
+            if (!haveContour && !haveShape && !haveDeform)
+                return halconScore;
+
+            try
+            {
+                HObject ho = CalibToHObject(scoreImage);
+                try
+                {
+                    using var hGray = new HImage(EnsureGray(ho));
+                    return AdjustFineMatchScoreForEndAlignment(
+                        hGray, rigidModelId, deformableModelId, matchedContour,
+                        matchRow, matchCol, matchAngleDeg, halconScore, endScoreWeight, endArcFraction);
+                }
+                finally
+                {
+                    ho.Dispose();
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                return halconScore;
+            }
+        }
+
+        private static double AdjustFineMatchScoreForEndAlignment(
+            HImage hGray,
+            long rigidModelId,
+            long deformableModelId,
+            Point2D[]? matchedContour,
+            double matchRow,
+            double matchCol,
+            double matchAngleDeg,
+            double halconScore,
+            double endScoreWeight,
+            double endArcFraction)
+        {
+            double weight = Math.Clamp(endScoreWeight, 0, 1);
+            double arcFraction = Math.Clamp(endArcFraction, 0.02, 0.45);
+            double endFactor;
+
+            if (matchedContour != null && matchedContour.Length >= 4)
+            {
+                HOperatorSet.SobelAmp(hGray, out HObject ampHo, "sum_abs", 3);
+                try
+                {
+                    using var hAmp = new HImage(ampHo);
+                    endFactor = ComputeContourEndEdgeSupportFactor(hAmp, matchedContour, arcFraction);
+                }
+                finally
+                {
+                    ampHo.Dispose();
+                }
+            }
+            else if (ResolveRegisteredShapeModelId(rigidModelId) >= 0)
+            {
+                endFactor = ComputeShapeEndEdgeSupportFactor(
+                    hGray, rigidModelId, matchRow, matchCol, matchAngleDeg,
+                    DefaultShapeMatchContourLevel, arcFraction);
+            }
+            else if (ResolveRegisteredDeformableModelId(deformableModelId) >= 0)
+            {
+                endFactor = ComputeDeformableEndEdgeSupportFactor(
+                    hGray, deformableModelId, matchRow, matchCol, matchAngleDeg,
+                    DefaultShapeMatchContourLevel, arcFraction);
+            }
+            else
+            {
+                return halconScore;
+            }
+
+            return halconScore * (1.0 - weight + weight * endFactor);
+        }
+
+        private static double ComputeDeformableEndEdgeSupportFactor(
+            HImage hGray,
+            long deformableModelId,
+            double matchRow,
+            double matchCol,
+            double matchAngleDeg,
+            int contourLevel,
+            double endArcFraction)
+        {
+            Point2D[][] modelContours = GetDeformableModelContourPoints(deformableModelId, contourLevel);
+            if (modelContours.Length == 0)
+                return 1.0;
+
+            HOperatorSet.SobelAmp(hGray, out HObject ampHo, "sum_abs", 3);
+            try
+            {
+                using var hAmp = new HImage(ampHo);
+                double minFactor = 1.0;
+                foreach (Point2D[]? modelContour in modelContours)
+                {
+                    if (modelContour == null || modelContour.Length < 4)
+                        continue;
+                    Point2D[] imgContour = TransformShapeModelContourToImage(
+                        modelContour, matchRow, matchCol, matchAngleDeg);
+                    if (imgContour.Length < 4)
+                        continue;
+                    double f = ComputeContourEndEdgeSupportFactor(hAmp, imgContour, endArcFraction);
+                    minFactor = Math.Min(minFactor, f);
+                }
+
+                return minFactor;
+            }
+            finally
+            {
+                ampHo.Dispose();
+            }
+        }
+
+        private static (double[] rows, double[] cols, double[] angles, double[] scores) AdjustCoarseShapeMatchScores(
+            CalibImage inImg,
+            long rigidModelId,
+            double[] rows,
+            double[] cols,
+            double[] angles,
+            double[] scores,
+            double endScoreWeight,
+            double endArcFraction,
+            int contourLevel)
+        {
+            if (rows.Length == 0 || endScoreWeight <= 0)
+                return (rows, cols, angles, scores);
+
+            HObject ho = CalibToHObject(inImg);
+            try
+            {
+                using var hGray = new HImage(EnsureGray(ho));
+                var adjusted = new double[scores.Length];
+                for (int i = 0; i < scores.Length; i++)
+                {
+                    adjusted[i] = AdjustShapeMatchScoreForEndAlignment(
+                        hGray, rigidModelId, rows[i], cols[i], angles[i], scores[i],
+                        endScoreWeight, endArcFraction, contourLevel);
+                }
+
+                return (rows, cols, angles, adjusted);
+            }
+            finally
+            {
+                ho.Dispose();
+            }
+        }
+
         public static (double[] rows, double[] cols, double[] angles, double[] scores) CoarseShapeMatch(
             CalibImage inImg,
             long rigidModelId,
@@ -1256,11 +1657,20 @@ namespace CalibOperatorCLI_Example
             string subPixel,
             int numLevels,
             double greediness,
-            bool allowRetry)
+            bool allowRetry,
+            double endScoreWeight = DefaultEndScoreWeight,
+            double endArcFraction = DefaultEndArcFraction)
         {
-            return allowRetry
+            var raw = allowRetry
                 ? FindShapeModelWithFallback(inImg, rigidModelId, angleStartDeg, angleExtentDeg, minScore, numMatches, maxOverlap, subPixel, numLevels, greediness)
                 : FindShapeModel(inImg, rigidModelId, angleStartDeg, angleExtentDeg, minScore, numMatches, maxOverlap, subPixel, numLevels, greediness);
+
+            if (inImg == null || raw.scores.Length == 0)
+                return raw;
+
+            return AdjustCoarseShapeMatchScores(
+                inImg, rigidModelId, raw.rows, raw.cols, raw.angles, raw.scores,
+                endScoreWeight, endArcFraction, DefaultShapeMatchContourLevel);
         }
 
         private const double DomainFineAngleExtentDeg = 60;
@@ -1347,7 +1757,10 @@ namespace CalibOperatorCLI_Example
             bool fineAllowFallback = false,
             double roiMarginPx = 12,
             double maxRoiHalfPx = 120,
-            CalibImage? fullImage = null)
+            CalibImage? fullImage = null,
+            long rigidModelId = -1,
+            double fineEndScoreWeight = 0,
+            double fineEndArcFraction = DefaultEndArcFraction)
         {
             if (domainImg == null)
                 throw new ArgumentNullException(nameof(domainImg));
@@ -1372,6 +1785,11 @@ namespace CalibOperatorCLI_Example
                     wantDeformed, fineAllowFallback, roiMarginPx, maxRoiHalfPx, fullImage,
                     out double row, out double col, out double ang, out double score, out Point2D[]? contour))
                 return HalconCoarseFineMatchResult.Empty;
+
+            CalibImage scoreImg = fullImage ?? domainImg;
+            score = ApplyFineMatchEndScoreWeight(
+                scoreImg, rigidModelId, deformableModelId, contour, row, col, ang, score,
+                fineEndScoreWeight, fineEndArcFraction);
 
             int xldW = fullImage?.Width ?? domainImg.Width;
             int xldH = fullImage?.Height ?? domainImg.Height;
@@ -1890,7 +2308,9 @@ namespace CalibOperatorCLI_Example
             bool rigidContourFallback = true,
             bool fineUseCoarseMask = true,
             double fineMaskErosionPx = 2,
-            HalconCoarseMaskBatch? preReducedMasks = null)
+            HalconCoarseMaskBatch? preReducedMasks = null,
+            double endScoreWeight = DefaultEndScoreWeight,
+            double endArcFraction = DefaultEndArcFraction)
         {
             if (coarseRows == null || coarseCols == null || coarseAngles == null
                 || coarseRows.Length == 0 || coarseRows.Length != coarseCols.Length || coarseRows.Length != coarseAngles.Length)
@@ -1987,6 +2407,7 @@ namespace CalibOperatorCLI_Example
                         if (TryRigidShapeFineInRoi(
                                 hFull, rigidModelId, cRow, cCol, cAng,
                                 halfLenRow, halfLenCol, fineAngleMarginDeg, fineMinScore, fineNumLevels, fineGreediness,
+                                endScoreWeight, endArcFraction,
                                 out fRow, out fCol, out fAng, out fScore))
                         {
                             matched = true;
@@ -2020,6 +2441,13 @@ namespace CalibOperatorCLI_Example
 
                     if (deformed != null)
                         deformedEmitted = true;
+
+                    if (endScoreWeight > 0)
+                    {
+                        fScore = ApplyFineMatchEndScoreWeight(
+                            inImg, rigidModelId, deformableModelId, deformed,
+                            fRow, fCol, fAng, fScore, endScoreWeight, endArcFraction);
+                    }
 
                     fineRows.Add(fRow);
                     fineCols.Add(fCol);
@@ -2085,11 +2513,19 @@ namespace CalibOperatorCLI_Example
             int maxFineMatches,
             string deformedContourMode,
             bool fineAllowFallback = false,
-            bool rigidContourFallback = true)
+            bool rigidContourFallback = true,
+            double endScoreWeight = DefaultEndScoreWeight,
+            double endArcFraction = DefaultEndArcFraction,
+            double fineEndScoreWeight = double.NaN,
+            double fineEndArcFraction = double.NaN)
         {
+            double fineWeight = double.IsNaN(fineEndScoreWeight) ? endScoreWeight : fineEndScoreWeight;
+            double fineArc = double.IsNaN(fineEndArcFraction) ? endArcFraction : fineEndArcFraction;
+
             var coarse = CoarseShapeMatch(
                 inImg, rigidModelId, coarseAngleStartDeg, coarseAngleExtentDeg,
-                coarseMinScore, coarseNumMatches, coarseMaxOverlap, subPixel, coarseNumLevels, coarseGreediness, coarseAllowRetry);
+                coarseMinScore, coarseNumMatches, coarseMaxOverlap, subPixel, coarseNumLevels, coarseGreediness, coarseAllowRetry,
+                endScoreWeight, endArcFraction);
 
             if (coarse.rows.Length == 0)
                 return HalconCoarseFineMatchResult.Empty;
@@ -2098,7 +2534,9 @@ namespace CalibOperatorCLI_Example
                 inImg, rigidModelId, deformableModelId,
                 coarse.rows, coarse.cols, coarse.angles, coarse.scores,
                 fineAngleMarginDeg, fineMinScore, fineNumLevels, fineGreediness,
-                fineScaleMin, fineScaleMax, roiMarginPx, maxRoiHalfPx, maxFineMatches, deformedContourMode, fineAllowFallback, rigidContourFallback);
+                fineScaleMin, fineScaleMax, roiMarginPx, maxRoiHalfPx, maxFineMatches, deformedContourMode,
+                fineAllowFallback, rigidContourFallback,
+                endScoreWeight: fineWeight, endArcFraction: fineArc);
         }
 
         /// <summary>由粗位姿与刚性模板估计精匹配旋转矩形 ROI 半长（行/列方向，像素）。</summary>
@@ -2416,8 +2854,11 @@ namespace CalibOperatorCLI_Example
             out double fineScore)
         {
             fineRow = fineCol = fineAngleDeg = fineScore = 0;
+            if (ResolveRegisteredShapeModelId(rigidModelId) < 0
+                || !HalconShapeModelRegistry.TryGet(rigidModelId, out HShapeModel shapeModel))
+                return false;
+
             double marginDeg = Math.Max(3.0, angleMarginDeg);
-            HShapeModel shapeModel = HalconShapeModelRegistry.Get(rigidModelId);
             int levels = numLevels > 0 ? Math.Min(numLevels, FineRoiMaxPyramidLevels) : FineRoiMaxPyramidLevels;
             double angleStartRad = (coarseAngleDeg - marginDeg) * Math.PI / 180.0;
             double angleExtentRad = 2 * marginDeg * Math.PI / 180.0;
@@ -2537,12 +2978,18 @@ namespace CalibOperatorCLI_Example
             double minScore,
             int numLevels,
             double greediness,
+            double endScoreWeight,
+            double endArcFraction,
             out double fineRow,
             out double fineCol,
             out double fineAngleDeg,
             out double fineScore)
         {
             fineRow = fineCol = fineAngleDeg = fineScore = 0;
+            if (ResolveRegisteredShapeModelId(rigidModelId) < 0
+                || !HalconShapeModelRegistry.TryGet(rigidModelId, out HShapeModel shapeModel))
+                return false;
+
             double halfSq = Math.Max(halfLenRow, halfLenCol);
             double marginDeg = Math.Max(3.0, angleMarginDeg);
             double phi = coarseAngleDeg * Math.PI / 180.0;
@@ -2557,7 +3004,6 @@ namespace CalibOperatorCLI_Example
                     return false;
 
                 using var hRoi = new HImage(cropped);
-                HShapeModel shapeModel = HalconShapeModelRegistry.Get(rigidModelId);
                 int levels = numLevels > 0 ? Math.Min(numLevels, FineRoiMaxPyramidLevels) : FineRoiMaxPyramidLevels;
                 double angleStartRad = (coarseAngleDeg - marginDeg) * Math.PI / 180.0;
                 double angleExtentRad = 2 * marginDeg * Math.PI / 180.0;
@@ -2585,6 +3031,10 @@ namespace CalibOperatorCLI_Example
                         out fineRow, out fineCol, out fineAngleDeg, out fineScore))
                     return false;
 
+                fineScore = AdjustShapeMatchScoreForEndAlignment(
+                    hFullGray, rigidModelId, fineRow, fineCol, fineAngleDeg, fineScore,
+                    endScoreWeight, endArcFraction);
+
                 return true;
             }
             catch (HOperatorException)
@@ -2598,7 +3048,7 @@ namespace CalibOperatorCLI_Example
             }
         }
 
-        /// <summary>在 ROI 内多个形状匹配中，选取全图坐标距粗中心最近且落在锚定半径内的候选。</summary>
+        /// <summary>在 ROI 内、锚定半径内取 HALCON 分数最高的候选（不再单纯取距粗中心最近）。</summary>
         private static bool SelectShapeMatchNearestCoarse(
             HTuple hvRow,
             HTuple hvCol,
@@ -2620,7 +3070,7 @@ namespace CalibOperatorCLI_Example
 
             double maxAnchorDist = Math.Max(24, roiHalfLen * 0.85);
             int best = -1;
-            double bestDist = double.MaxValue;
+            double bestScore = double.NegativeInfinity;
             for (int i = 0; i < hvScore.Length; i++)
             {
                 double row = hvRow[i].D + cropRow1;
@@ -2628,9 +3078,13 @@ namespace CalibOperatorCLI_Example
                 double dr = row - coarseRow;
                 double dc = col - coarseCol;
                 double dist = Math.Sqrt(dr * dr + dc * dc);
-                if (dist > maxAnchorDist || dist >= bestDist)
+                if (dist > maxAnchorDist)
                     continue;
-                bestDist = dist;
+
+                double sc = hvScore[i].D;
+                if (sc <= bestScore)
+                    continue;
+                bestScore = sc;
                 best = i;
             }
 
@@ -3102,15 +3556,17 @@ namespace CalibOperatorCLI_Example
             double erosionInsetPx,
             double maskFillDilatePx = 0)
         {
-            if (modelId < 0)
-                throw new ArgumentException("ModelId 无效", nameof(modelId));
+            long shapeId = ResolveRegisteredShapeModelId(modelId);
+            if (shapeId < 0)
+                throw new InvalidOperationException(
+                    $"形状模板 ModelId={modelId} 无效：请接 halcon_create/load_shape_model 的 ModelId（.shm），勿接可变形模型或已释放的 ID");
 
             int n = Math.Min(rows?.Length ?? 0, cols?.Length ?? 0);
             var masks = new ShapeMatchRegionMask[n];
             if (n == 0)
                 return masks;
 
-            HShapeModel shapeModel = HalconShapeModelRegistry.Get(modelId);
+            HShapeModel shapeModel = HalconShapeModelRegistry.Get(shapeId);
             using HXLDCont modelXld = shapeModel.GetShapeModelContours(contourLevel);
             int objCount = modelXld.CountObj();
             if (objCount <= 0)
@@ -3129,23 +3585,28 @@ namespace CalibOperatorCLI_Example
                 HOperatorSet.HomMat2dTranslate(hom, matchRow, matchCol, out hom);
                 HOperatorSet.AffineTransContourXld(modelXld, out HObject transXld, hom);
 
+                HObject fillXld = transXld;
+                bool disposeFillXld = false;
                 try
                 {
-                    HRegion? filled = BuildFilledRegionFromTransformedXld(transXld, maskFillDilatePx);
-                    if (filled == null || !filled.IsInitialized())
-                        continue;
-
                     if (erosionInsetPx > 0.5)
                     {
-                        HRegion eroded = filled.ErosionCircle(erosionInsetPx);
-                        filled.Dispose();
-                        filled = eroded;
+                        if (!TryInsetTransformedContourXldNormal(transXld, erosionInsetPx, out HObject insetXld))
+                            continue;
+                        fillXld = insetXld;
+                        disposeFillXld = true;
                     }
+
+                    HRegion? filled = BuildFilledRegionFromTransformedXld(fillXld, maskFillDilatePx);
+                    if (filled == null || !filled.IsInitialized())
+                        continue;
 
                     masks[m].Region = filled;
                 }
                 finally
                 {
+                    if (disposeFillXld)
+                        fillXld.Dispose();
                     transXld.Dispose();
                 }
             }
@@ -3393,13 +3854,47 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>
-        /// 形状模型为边缘折线：默认对 margin 做凸包实心化；<paramref name="maskFillDilatePx"/>&gt;0 时改用手动膨胀（凹形工件）。
+        /// 沿轮廓法向内缩变换后的模板 XLD（<c>gen_parallel_contour_xld</c>，非 <c>erosion_circle</c> 全向腐蚀）。
+        /// </summary>
+        private static bool TryInsetTransformedContourXldNormal(HObject transXld, double insetPx, out HObject insetXld)
+        {
+            if (insetPx <= 0.5)
+            {
+                HOperatorSet.CopyObj(transXld, out insetXld, 1, -1);
+                return true;
+            }
+
+            try
+            {
+                HOperatorSet.GenParallelContourXld(
+                    transXld,
+                    out insetXld,
+                    new HTuple("regression_normal"),
+                    -insetPx);
+                HOperatorSet.CountObj(insetXld, out HTuple n);
+                return n.I > 0;
+            }
+            catch (HOperatorException)
+            {
+                HOperatorSet.GenEmptyObj(out insetXld);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 形状模型为边缘折线：默认用最小外接矩形实心化（避免凸包把长条两端撑长）；
+        /// <paramref name="maskFillDilatePx"/>&gt;0 时改用手动膨胀（凹形工件）。
+        /// 多条轮廓且非嵌套（如 C 形/开口环的两段弧）时，用包含全部轮廓的最小外接矩形，避免只保留最大连通域。
         /// </summary>
         private static HRegion? BuildFilledRegionFromTransformedXld(HObject transXld, double maskFillDilatePx)
         {
             HOperatorSet.CountObj(transXld, out HTuple count);
             if (count.I <= 0)
                 return null;
+
+            List<Point2D[]> contourPts = ContourXldToPointArrays(transXld);
+            if (contourPts.Count >= 2 && !AreShapeModelContoursNested(contourPts))
+                return BuildFilledRegionMinRectEnclosingContours(transXld, maskFillDilatePx);
 
             HOperatorSet.GenRegionContourXld(transXld, out HObject marginObj, new HTuple("margin"));
             HRegion work;
@@ -3425,17 +3920,9 @@ namespace CalibOperatorCLI_Example
             }
             else
             {
-                HOperatorSet.ShapeTrans(work, out HObject convexHo, new HTuple("convex"));
-                try
-                {
-                    HRegion convex = new HRegion(convexHo);
-                    work.Dispose();
-                    work = convex;
-                }
-                finally
-                {
-                    convexHo.Dispose();
-                }
+                work = ReplaceRegionWithSmallestRectangle2(work);
+                if (work == null || !work.IsInitialized())
+                    return null;
             }
 
             HOperatorSet.FillUp(work, out HObject fillHo);
@@ -3481,6 +3968,182 @@ namespace CalibOperatorCLI_Example
             finally
             {
                 connHo.Dispose();
+            }
+        }
+
+        /// <summary>两条及以上轮廓互不包含（非嵌套环）时判定为 false。</summary>
+        private static bool AreShapeModelContoursNested(IReadOnlyList<Point2D[]> contours)
+        {
+            if (contours.Count < 2)
+                return false;
+
+            if (contours.Count == 2)
+            {
+                return IsContourMostlyInsideOther(contours[0], contours[1])
+                    || IsContourMostlyInsideOther(contours[1], contours[0]);
+            }
+
+            int outerIdx = FindLargestContourIndex(contours);
+            Point2D[] outer = contours[outerIdx];
+            for (int i = 0; i < contours.Count; i++)
+            {
+                if (i == outerIdx)
+                    continue;
+                if (!IsContourMostlyInsideOther(contours[i], outer))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static int FindLargestContourIndex(IReadOnlyList<Point2D[]> contours)
+        {
+            int best = 0;
+            double bestArea = 0;
+            for (int i = 0; i < contours.Count; i++)
+            {
+                double area = EstimateContourBoundingArea(contours[i]);
+                if (area > bestArea)
+                {
+                    bestArea = area;
+                    best = i;
+                }
+            }
+
+            return best;
+        }
+
+        private static double EstimateContourBoundingArea(Point2D[] pts)
+        {
+            if (pts.Length == 0)
+                return 0;
+            double minR = pts[0].Y, maxR = pts[0].Y, minC = pts[0].X, maxC = pts[0].X;
+            foreach (Point2D p in pts)
+            {
+                minR = Math.Min(minR, p.Y);
+                maxR = Math.Max(maxR, p.Y);
+                minC = Math.Min(minC, p.X);
+                maxC = Math.Max(maxC, p.X);
+            }
+
+            return Math.Max(1, (maxR - minR) * (maxC - minC));
+        }
+
+        private static bool IsContourMostlyInsideOther(Point2D[] inner, Point2D[] outer)
+        {
+            if (inner.Length < 3 || outer.Length < 3)
+                return false;
+
+            int inside = 0;
+            foreach (Point2D p in inner)
+            {
+                if (IsPointInsideClosedPoly(p.X, p.Y, outer))
+                    inside++;
+            }
+
+            return inside >= Math.Max(3, (int)(inner.Length * 0.5));
+        }
+
+        /// <summary>非嵌套多轮廓：并集后取最小外接矩形实心填充。</summary>
+        private static HRegion? BuildFilledRegionMinRectEnclosingContours(HObject transXld, double maskFillDilatePx)
+        {
+            HRegion? union = UnionMarginRegionsFromContourXld(transXld);
+            if (union == null || !union.IsInitialized())
+                return null;
+
+            try
+            {
+                if (maskFillDilatePx > 0.5)
+                {
+                    HRegion dilated = union.DilationCircle(maskFillDilatePx);
+                    union.Dispose();
+                    union = dilated;
+                }
+
+                HRegion? rect = ReplaceRegionWithSmallestRectangle2(union);
+                union.Dispose();
+                if (rect == null || !rect.IsInitialized())
+                    return null;
+
+                HOperatorSet.AreaCenter(rect, out HTuple areaT, out HTuple _, out HTuple _);
+                double area = areaT.Length > 0 ? areaT[0].D : 0;
+                if (area < 64)
+                {
+                    rect.Dispose();
+                    return null;
+                }
+
+                return rect;
+            }
+            catch
+            {
+                union?.Dispose();
+                throw;
+            }
+        }
+
+        private static HRegion? UnionMarginRegionsFromContourXld(HObject transXld)
+        {
+            HOperatorSet.CountObj(transXld, out HTuple nObj);
+            int n = nObj.I;
+            if (n <= 0)
+                return null;
+
+            HRegion? union = null;
+            for (int i = 1; i <= n; i++)
+            {
+                HObject one = n == 1 ? transXld : transXld.SelectObj(i);
+                try
+                {
+                    HOperatorSet.GenRegionContourXld(one, out HObject marginHo, "margin");
+                    try
+                    {
+                        using var part = new HRegion(marginHo);
+                        if (!part.IsInitialized())
+                            continue;
+                        if (union == null)
+                            union = part.CopyObj(1, -1);
+                        else
+                        {
+                            HRegion merged = union.Union2(part);
+                            union.Dispose();
+                            union = merged;
+                        }
+                    }
+                    finally
+                    {
+                        marginHo.Dispose();
+                    }
+                }
+                finally
+                {
+                    if (n > 1)
+                        one.Dispose();
+                }
+            }
+
+            return union;
+        }
+
+        private static HRegion? ReplaceRegionWithSmallestRectangle2(HRegion source)
+        {
+            if (source == null || !source.IsInitialized())
+                return null;
+
+            HOperatorSet.SmallestRectangle2(
+                source, out HTuple rectRow, out HTuple rectCol, out HTuple rectPhi, out HTuple len1, out HTuple len2);
+            if (rectRow.Length == 0)
+                return null;
+
+            HOperatorSet.GenRectangle2(
+                out HObject rectHo, rectRow[0], rectCol[0], rectPhi[0], len1[0], len2[0]);
+            try
+            {
+                return new HRegion(rectHo);
+            }
+            finally
+            {
+                rectHo.Dispose();
             }
         }
         public static double ComputeMaskFillRatio(CalibImage mask)

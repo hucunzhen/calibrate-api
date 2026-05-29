@@ -472,7 +472,10 @@ namespace CalibOperatorCLI_Example
                 : 0;
         }
 
-        private async System.Threading.Tasks.Task ExecuteNodeForRunAsync(FlowNode node, string? timingScope = null)
+        private async System.Threading.Tasks.Task ExecuteNodeForRunAsync(
+            FlowNode node,
+            string? timingScope = null,
+            Dictionary<string, object?>? explicitInputs = null)
         {
             ThrowIfExecutionCancelled();
             var sw = Stopwatch.StartNew();
@@ -481,7 +484,7 @@ namespace CalibOperatorCLI_Example
                 if (ExecuteNodeRequiresUiDispatcher(node))
                 {
                     await System.Threading.Tasks.Task.Yield();
-                    ExecuteNode(node);
+                    ExecuteNode(node, explicitInputs);
                     return;
                 }
 
@@ -489,7 +492,7 @@ namespace CalibOperatorCLI_Example
                     () =>
                     {
                         ThrowIfExecutionCancelled();
-                        ExecuteNode(node);
+                        ExecuteNode(node, explicitInputs);
                     },
                     _runCts?.Token ?? System.Threading.CancellationToken.None,
                     System.Threading.Tasks.TaskCreationOptions.None,
@@ -6100,7 +6103,10 @@ namespace CalibOperatorCLI_Example
         {
             var rdImg = inputs["In"] as CalibImage
                         ?? throw new InvalidOperationException("HALCON 粗形状Mask: 缺少 In");
-            long rdModelId = Convert.ToInt64(inputs["ModelId"]);
+            long rdModelId = HalconFlowBridge.ResolveRegisteredShapeModelId(Convert.ToInt64(inputs["ModelId"]));
+            if (rdModelId < 0)
+                throw new InvalidOperationException(
+                    "HALCON 粗形状Mask: ModelId 须为有效的形状模板(.shm)，请接 create/load_shape_model");
             if (inputs["CoarseRow"] is not double[] rdRows || inputs["CoarseColumn"] is not double[] rdCols)
                 throw new InvalidOperationException("HALCON 粗形状Mask: 请连接粗定位 CoarseRow/CoarseColumn");
             inputs.TryGetValue("CoarseAngle", out var rdAngObj);
@@ -6149,6 +6155,41 @@ namespace CalibOperatorCLI_Example
                 contourLevel,
                 maxCandidates,
                 maskFillDilatePx);
+        }
+
+        private Dictionary<string, object?> BuildFineDeformableMaskLoopInputs(
+            FlowNode fineNode,
+            IReadOnlyDictionary<string, object?> maskNodeInputs,
+            HalconCoarseMaskBatch batch)
+        {
+            var inputs = GetNodeInputs(fineNode);
+            if (!inputs.ContainsKey("FullImage") && batch.SourceImage != null)
+                inputs["FullImage"] = batch.SourceImage;
+            if (!inputs.ContainsKey("RigidModelId") && maskNodeInputs.TryGetValue("ModelId", out var modelId))
+            {
+                long shapeId = HalconFlowBridge.ResolveRegisteredShapeModelId(Convert.ToInt64(modelId));
+                if (shapeId >= 0)
+                    inputs["RigidModelId"] = shapeId;
+            }
+
+            return inputs;
+        }
+
+        private static long ResolveFineMatchRigidModelId(IReadOnlyDictionary<string, object?> inputs)
+        {
+            if (inputs.TryGetValue("RigidModelId", out var rigidObj) && rigidObj != null)
+            {
+                long id = Convert.ToInt64(rigidObj);
+                return HalconFlowBridge.ResolveRegisteredShapeModelId(id);
+            }
+
+            if (inputs.TryGetValue("ModelId", out var modelObj) && modelObj != null)
+            {
+                long id = Convert.ToInt64(modelObj);
+                return HalconFlowBridge.ResolveRegisteredShapeModelId(id);
+            }
+
+            return -1;
         }
 
         private static void SetCoarseShapeMaskRoundOutputs(FlowNode maskNode, HalconCoarseMaskBatch batch, int index)
@@ -6274,7 +6315,8 @@ namespace CalibOperatorCLI_Example
                 }
             }
 
-            var batch = BuildCoarseShapeMaskBatchForNode(maskNode, GetNodeInputs(maskNode));
+            var maskInputs = GetNodeInputs(maskNode);
+            var batch = BuildCoarseShapeMaskBatchForNode(maskNode, maskInputs);
             if (batch.Count == 0)
                 throw new InvalidOperationException("HALCON 粗形状Mask: 无粗候选，无法生成 Mask");
 
@@ -6302,7 +6344,10 @@ namespace CalibOperatorCLI_Example
                     await System.Threading.Tasks.Task.Yield();
                     try
                     {
-                        await ExecuteNodeForRunAsync(node, $"M{mi + 1}");
+                        Dictionary<string, object?>? loopInputs = node.Def.TypeId == "halcon_fine_deformable_match"
+                            ? BuildFineDeformableMaskLoopInputs(node, maskInputs, batch)
+                            : null;
+                        await ExecuteNodeForRunAsync(node, $"M{mi + 1}", loopInputs);
                     }
                     catch (FlowExecutionGracefulStopException ex)
                     {
@@ -10740,7 +10785,10 @@ namespace CalibOperatorCLI_Example
                     {
                         var findImg = inputs["In"] as CalibImage;
                         if (findImg == null) throw new InvalidOperationException("HALCON FindShapeModel: 缺少 In");
-                        long modelId = Convert.ToInt64(inputs["ModelId"]);
+                        long modelId = HalconFlowBridge.ResolveRegisteredShapeModelId(Convert.ToInt64(inputs["ModelId"]));
+                        if (modelId < 0)
+                            throw new InvalidOperationException(
+                                "HALCON FindShapeModel: ModelId 须为有效的形状模板(.shm)，勿接可变形模型或已释放的 ID");
                         double angleStart = double.TryParse(node.Params.GetValueOrDefault("angleStart"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var asv) ? asv : -30.0;
                         double angleExtent = double.TryParse(node.Params.GetValueOrDefault("angleExtent"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var aev) ? aev : 60.0;
                         double minScore = double.TryParse(node.Params.GetValueOrDefault("minScore"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ms) ? ms : 0.5;
@@ -10749,8 +10797,17 @@ namespace CalibOperatorCLI_Example
                         string subPixel = node.Params.GetValueOrDefault("subPixel") ?? "interpolation";
                         int numLevels = int.TryParse(node.Params.GetValueOrDefault("numLevels"), out var nl) ? nl : 0;
                         double greediness = double.TryParse(node.Params.GetValueOrDefault("greediness"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var g) ? g : 0.9;
+                        static double Pfind(IReadOnlyDictionary<string, string> p, string key, double def) =>
+                            double.TryParse(p.GetValueOrDefault(key), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : def;
                         var (rows, cols, angles, scores) = HalconFlowBridge.FindShapeModelWithFallback(
                             findImg, modelId, angleStart, angleExtent, minScore, numMatches, maxOverlap, subPixel, numLevels, greediness);
+                        double endW = Pfind(node.Params, "endScoreWeight", HalconFlowBridge.DefaultEndScoreWeight);
+                        if (endW > 0 && rows.Length > 0)
+                        {
+                            (_, _, _, scores) = HalconFlowBridge.ApplyShapeMatchEndScoreWeight(
+                                findImg, modelId, rows, cols, angles, scores, endW,
+                                Pfind(node.Params, "endArcFraction", HalconFlowBridge.DefaultEndArcFraction));
+                        }
                         node.Outputs["Row"] = rows;
                         node.Outputs["Column"] = cols;
                         node.Outputs["Angle"] = angles;
@@ -10825,7 +10882,10 @@ namespace CalibOperatorCLI_Example
                         var coarseImg = inputs["In"] as CalibImage;
                         if (coarseImg == null)
                             throw new InvalidOperationException("HALCON 粗定位: 缺少 In");
-                        long modelId = Convert.ToInt64(inputs["ModelId"]);
+                        long modelId = HalconFlowBridge.ResolveRegisteredShapeModelId(Convert.ToInt64(inputs["ModelId"]));
+                        if (modelId < 0)
+                            throw new InvalidOperationException(
+                                "HALCON 粗定位: ModelId 须为有效的形状模板(.shm)，请接 create/load_shape_model，勿接可变形模型或已释放的 ID");
                         static double Pc(IReadOnlyDictionary<string, string> p, string key, double def) =>
                             double.TryParse(p.GetValueOrDefault(key), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : def;
                         static int Pic(IReadOnlyDictionary<string, string> p, string key, int def) =>
@@ -10845,7 +10905,9 @@ namespace CalibOperatorCLI_Example
                             Psc(node.Params, "subPixel", "none"),
                             Pic(node.Params, "numLevels", 0),
                             Pc(node.Params, "greediness", 0.85),
-                            Pbc(node.Params, "allowRetry", false));
+                            Pbc(node.Params, "allowRetry", false),
+                            Pc(node.Params, "endScoreWeight", HalconFlowBridge.DefaultEndScoreWeight),
+                            Pc(node.Params, "endArcFraction", HalconFlowBridge.DefaultEndArcFraction));
                         node.Outputs["Row"] = rows;
                         node.Outputs["Column"] = cols;
                         node.Outputs["Angle"] = angles;
@@ -10903,7 +10965,12 @@ namespace CalibOperatorCLI_Example
 #if HALCON_ENABLED
                         if (inputs["In"] is not CalibImage domainImg)
                             throw new InvalidOperationException("HALCON 可变形精匹配: 缺少 In（接 halcon_reduce_domain_by_mask 的 Out）");
-                        long deformId = Convert.ToInt64(inputs["DeformableModelId"]);
+                        long deformId = HalconFlowBridge.ResolveRegisteredDeformableModelId(
+                            Convert.ToInt64(inputs["DeformableModelId"]));
+                        if (deformId < 0)
+                            throw new InvalidOperationException("HALCON 可变形精匹配: DeformableModelId 无效或已释放");
+                        long rigidId = ResolveFineMatchRigidModelId(inputs);
+                        CalibImage? fullImg = inputs.TryGetValue("FullImage", out var fiObj) ? fiObj as CalibImage : null;
                         inputs.TryGetValue("CoarseRow", out var crObj);
                         inputs.TryGetValue("CoarseColumn", out var ccObj);
                         inputs.TryGetValue("CoarseAngle", out var caObj);
@@ -10938,7 +11005,11 @@ namespace CalibOperatorCLI_Example
                             wantDeformed,
                             Pfb(node.Params, "fineAllowFallback", false),
                             Pf(node.Params, "roiMarginPx", 12),
-                            Pf(node.Params, "maxRoiHalfPx", 120));
+                            Pf(node.Params, "maxRoiHalfPx", 120),
+                            fullImg,
+                            rigidId,
+                            Pf(node.Params, "fineEndScoreWeight", HalconFlowBridge.DefaultEndScoreWeight),
+                            Pf(node.Params, "fineEndArcFraction", HalconFlowBridge.DefaultEndArcFraction));
 
                         node.Outputs["Row"] = fineResult.FineRows;
                         node.Outputs["Column"] = fineResult.FineCols;
@@ -10961,8 +11032,12 @@ namespace CalibOperatorCLI_Example
                         var matchImg = inputs["In"] as CalibImage;
                         if (matchImg == null)
                             throw new InvalidOperationException("HALCON 粗精匹配: 缺少 In");
-                        long rigidId = Convert.ToInt64(inputs["RigidModelId"]);
-                        long deformId = Convert.ToInt64(inputs["DeformableModelId"]);
+                        long rigidId = HalconFlowBridge.ResolveRegisteredShapeModelId(Convert.ToInt64(inputs["RigidModelId"]));
+                        if (rigidId < 0)
+                            throw new InvalidOperationException("HALCON 粗精匹配: RigidModelId 须为有效的形状模板(.shm)");
+                        long deformId = HalconFlowBridge.ResolveRegisteredDeformableModelId(Convert.ToInt64(inputs["DeformableModelId"]));
+                        if (deformId < 0)
+                            throw new InvalidOperationException("HALCON 粗精匹配: DeformableModelId 须为有效的可变形模型(.dfm)");
 
                         static double P(IReadOnlyDictionary<string, string> p, string key, double def) =>
                             double.TryParse(p.GetValueOrDefault(key), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : def;
@@ -10973,6 +11048,13 @@ namespace CalibOperatorCLI_Example
                             bool.TryParse(p.GetValueOrDefault(key), out var v) ? v : def;
                         static string Ps(IReadOnlyDictionary<string, string> p, string key, string def) =>
                             string.IsNullOrWhiteSpace(p.GetValueOrDefault(key)) ? def : p[key]!.Trim();
+                        static double Popt(IReadOnlyDictionary<string, string> p, string key, double fallback) =>
+                            string.IsNullOrWhiteSpace(p.GetValueOrDefault(key))
+                                ? fallback
+                                : (double.TryParse(p[key], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : fallback);
+
+                        double coarseEndW = P(node.Params, "endScoreWeight", HalconFlowBridge.DefaultEndScoreWeight);
+                        double coarseEndArc = P(node.Params, "endArcFraction", HalconFlowBridge.DefaultEndArcFraction);
 
                         var result = HalconFlowBridge.CoarseFineShapeMatch(
                             matchImg,
@@ -10997,7 +11079,12 @@ namespace CalibOperatorCLI_Example
                             P(node.Params, "maxRoiHalfPx", 0),
                             Pi(node.Params, "maxFineMatches", 2),
                             Ps(node.Params, "deformedContourMode", "first"),
-                            Pb(node.Params, "fineAllowFallback", false));
+                            Pb(node.Params, "fineAllowFallback", false),
+                            rigidContourFallback: true,
+                            endScoreWeight: coarseEndW,
+                            endArcFraction: coarseEndArc,
+                            fineEndScoreWeight: Popt(node.Params, "fineEndScoreWeight", coarseEndW),
+                            fineEndArcFraction: Popt(node.Params, "fineEndArcFraction", coarseEndArc));
 
                         node.Outputs["Row"] = result.FineRows;
                         node.Outputs["Column"] = result.FineCols;
