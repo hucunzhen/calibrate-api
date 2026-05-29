@@ -345,6 +345,23 @@ namespace CalibOperatorPInvoke
             [Out] NativePoint2D[] worldXYOut,
             int count);
 
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_UndistortImageWithIntrinsics(IntPtr src, IntPtr dst,
+            double fx, double fy, double cx, double cy,
+            double k1, double k2, double p1, double p2, double k3,
+            double alpha);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_UndistortImageFromCalibrationJson(IntPtr src, IntPtr dst,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string calibrationJsonUtf8,
+            double alpha);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_WarpImageToChessboardPlaneFromCalibrationJson(IntPtr src, IntPtr dst,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string calibrationJsonUtf8,
+            int viewIndex, int boardCols, int boardRows, double squareSizeMm, double pxPerMm,
+            int perspectiveOutputMode, int assumeUndistortedInput, int outputSizeMode);
+
         // Calibration
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int CALIB_CalibrateNinePoint(IntPtr imagePts, IntPtr worldPts, int n, ref NativeAffineTransform trans);

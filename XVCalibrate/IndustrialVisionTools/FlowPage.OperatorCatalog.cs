@@ -85,17 +85,19 @@ namespace CalibOperatorCLI_Example
                 DisplayName = "加载图像",
                 Description = "从文件或相机加载图像",
                 Category = "输入",
-                Params =
-                {
+                Params = FlowCameraCorrectionOperatorParams.With(
                     new OperatorParam
                     {
                         Name = "filePath",
                         DisplayName = "图像路径",
                         DefaultValue = "",
                         Description = "可选；填写后自动加载，留空则弹窗选择"
-                    }
-                },
-                Ports = { new PortDef { Name = "Image", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" } }
+                    }),
+                Ports =
+                {
+                    new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Image", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" }
+                }
             },
             new OperatorDef
             {
@@ -103,8 +105,7 @@ namespace CalibOperatorCLI_Example
                 DisplayName = "加载图像目录",
                 Description = "扫描目录下图像（非递归），按文件名排序；each=运行流程时对每张图各驱动下游执行一遍；single=始终只加载序号所指的一张",
                 Category = "输入",
-                Params =
-                {
+                Params = FlowCameraCorrectionOperatorParams.With(
                     new OperatorParam
                     {
                         Name = "mode",
@@ -133,10 +134,10 @@ namespace CalibOperatorCLI_Example
                         DisplayName = "序号",
                         DefaultValue = "0",
                         Description = "single 模式或单节点调试时：排序后的文件索引（从 0 起）；each 模式下「运行」时忽略此项"
-                    }
-                },
+                    }),
                 Ports =
                 {
+                    new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
                     new PortDef { Name = "Image", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Count", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#607D8B" },
                     new PortDef { Name = "Path", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#9CCC65" }
@@ -184,15 +185,14 @@ namespace CalibOperatorCLI_Example
                 DisplayName = "相机取一帧",
                 Description = "从相机抓取单帧图像。上游算子 Out → After 可排在任意算子之后取图；Out 透传 After 供下游继续。",
                 Category = "输入",
-                Params =
-                {
+                Params = FlowCameraCorrectionOperatorParams.With(
                     new OperatorParam { Name = "deviceIndex", DisplayName = "设备索引", DefaultValue = "0", Description = "相机枚举索引，从0开始" },
                     new OperatorParam { Name = "targetWidth", DisplayName = "目标宽度", DefaultValue = "0", Description = "预留参数，当前未缩放（填0即可）" },
-                    new OperatorParam { Name = "targetHeight", DisplayName = "目标高度", DefaultValue = "0", Description = "预留参数，当前未缩放（填0即可）" }
-                },
+                    new OperatorParam { Name = "targetHeight", DisplayName = "目标高度", DefaultValue = "0", Description = "预留参数，当前未缩放（填0即可）" }),
                 Ports =
                 {
                     new PortDef { Name = "After", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
                     new PortDef { Name = "Image", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true }
                 }
@@ -2368,7 +2368,10 @@ namespace CalibOperatorCLI_Example
                 Category = "标定",
                 Params =
                 {
-                    new OperatorParam { Name = "imagePaths", DisplayName = "图像路径列表", DefaultValue = "", Description = "分号分隔；相对路径相对程序目录；用于标定求解（bmp/png 等 OpenCV 可读格式）" },
+                    new OperatorParam { Name = "imageDirectory", DisplayName = "图像目录", DefaultValue = "", Description = "批量标定：扫描目录内图像（默认 Image_ 前缀 + .bmp）；与 imagePaths 可同时使用（合并去重）" },
+                    new OperatorParam { Name = "extensions", DisplayName = "目录扩展名", DefaultValue = ".bmp", Description = "目录模式下匹配扩展名，分号分隔，如 .bmp 或 .bmp;.png" },
+                    new OperatorParam { Name = "namePrefix", DisplayName = "文件名前缀", DefaultValue = "Image_", Description = "目录模式下仅保留文件名此前缀的图像；留空则不过滤" },
+                    new OperatorParam { Name = "imagePaths", DisplayName = "图像路径列表", DefaultValue = "", Description = "可选：分号分隔单张路径；相对路径相对流程文件目录" },
                     new OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "9", Description = "与检测算子一致，用于构造已知三维棋盘角点" },
                     new OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "6", Description = "与检测算子一致，用于构造已知三维棋盘角点" },
                     new OperatorParam { Name = "squareSizeMm", DisplayName = "方格边长(mm)", DefaultValue = "25", Description = "棋盘方格物理边长(mm)，与世界坐标尺度一致，参与内参求解" }
@@ -2395,6 +2398,71 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B" },
                     new PortDef { Name = "World", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "intrinsics_undistort_image",
+                DisplayName = "内参畸变矫正",
+                Description = "使用棋盘格标定得到的针孔内参 fx/fy/cx/cy 与畸变系数 k1..k3/p1/p2，对输入图像做 OpenCV cv::undistort 去畸变。连接 Intrinsics 或 CalibrationJson（来自「棋盘格内参标定」）。",
+                Category = "标定",
+                Params =
+                {
+                    new OperatorParam { Name = "alpha", DisplayName = "裁剪系数", DefaultValue = "-1", Description = "-1=保持原分辨率与 K；0..1= getOptimalNewCameraMatrix 裁剪黑边（0 裁最多，1 保留全部像素）" },
+                    new OperatorParam { Name = "calibrationJsonFile", DisplayName = "标定 JSON 文件", DefaultValue = "", Description = "可选；未接 CalibrationJson 端口时从文件读取（完整包，含 extrinsicsPerView）" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Intrinsics", Direction = PortDirection.Input, DataType = typeof(CameraIntrinsics), ColorHex = "#E91E63", IsOptional = true },
+                    new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "chessboard_perspective_warp_image",
+                DisplayName = "棋盘透视展开",
+                Description = "整图透视展开到标定棋盘平面（鸟瞰）：使用 CalibrationJson 内参 + extrinsicsPerView[viewIndex]，按棋盘列/行/方格尺寸做单应 warp。常与「内参畸变矫正」串联（先去畸变再展开）。viewIndex 与标定成功图像顺序一致。",
+                Category = "标定",
+                Params =
+                {
+                    new OperatorParam { Name = "calibrationJsonFile", DisplayName = "标定 JSON 文件", DefaultValue = "", Description = "可选；未接端口时读取完整标定 JSON（须含 extrinsicsPerView，如 chessboard_calibration_from_dir.json）" },
+                    new OperatorParam { Name = "viewIndex", DisplayName = "外参视图序号", DefaultValue = "0", Description = "extrinsicsPerView 下标，从 0 开始；须与当前图像位姿接近" },
+                    new OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "9", Description = "与棋盘格标定一致" },
+                    new OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "6", Description = "与棋盘格标定一致" },
+                    new OperatorParam { Name = "squareSizeMm", DisplayName = "方格边长(mm)", DefaultValue = "25", Description = "与标定 squareSizeMm 一致" },
+                    new OperatorParam { Name = "pxPerMm", DisplayName = "mm/像素", DefaultValue = "1", Description = "输出鸟瞰图尺度，1=1像素1mm" },
+                    new OperatorParam
+                    {
+                        Name = "perspectiveOutputFrame",
+                        DisplayName = "透视输出范围",
+                        DefaultValue = "board",
+                        Description = "board=仅标定板；local=原图仅板内；plane=整图平面透视(共面)",
+                        Options = new List<string> { "board", "local", "plane" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "perspectiveOutputScale",
+                        DisplayName = "输出尺度",
+                        DefaultValue = "board_pixels",
+                        Description = "board_pixels=按棋盘边长；metric=按 mm/pxPerMm",
+                        Options = new List<string> { "board_pixels", "metric" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "assumeUndistorted",
+                        DisplayName = "输入已去畸变",
+                        DefaultValue = "false",
+                        Description = "上游已 undistort 时选 true，避免角点错位",
+                        Options = new List<string> { "true", "false" }
+                    }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" }
                 }
             },
             new OperatorDef
@@ -3887,5 +3955,74 @@ namespace CalibOperatorCLI_Example
                 }
             },
         };
+    }
+
+    /// <summary>加载图像/相机取图共用的内参+透视矫正参数。</summary>
+    internal static class FlowCameraCorrectionOperatorParams
+    {
+        public static readonly FlowPage.OperatorParam[] Core =
+        {
+            new FlowPage.OperatorParam
+            {
+                Name = "enableUndistort",
+                DisplayName = "内参畸变矫正",
+                DefaultValue = "false",
+                Description = "取图后自动 cv::undistort；需 calibrationJsonFile 或 CalibrationJson 端口",
+                Options = new List<string> { "false", "true" }
+            },
+            new FlowPage.OperatorParam
+            {
+                Name = "enablePerspective",
+                DisplayName = "透视展开",
+                DefaultValue = "false",
+                Description = "取图后再做棋盘平面鸟瞰 warp；须完整标定 JSON（含 extrinsicsPerView）",
+                Options = new List<string> { "false", "true" }
+            },
+            new FlowPage.OperatorParam
+            {
+                Name = "calibrationJsonFile",
+                DisplayName = "标定 JSON 文件",
+                DefaultValue = "",
+                Description = "可选；未接 CalibrationJson 端口时使用；须为完整 CalibrationJson"
+            },
+            new FlowPage.OperatorParam { Name = "undistortAlpha", DisplayName = "去畸变裁剪α", DefaultValue = "-1", Description = "-1=保持原尺寸；0..1 裁剪黑边" },
+            new FlowPage.OperatorParam { Name = "viewIndex", DisplayName = "外参视图序号", DefaultValue = "0", Description = "透视用 extrinsicsPerView 下标" },
+            new FlowPage.OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "9", Description = "与棋盘标定一致" },
+            new FlowPage.OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "6", Description = "与棋盘标定一致" },
+            new FlowPage.OperatorParam { Name = "squareSizeMm", DisplayName = "方格边长(mm)", DefaultValue = "25", Description = "与标定一致" },
+            new FlowPage.OperatorParam { Name = "pxPerMm", DisplayName = "mm/像素", DefaultValue = "1", Description = "透视输出缩放，1≈1像素1mm" },
+            new FlowPage.OperatorParam
+            {
+                Name = "perspectiveOutputFrame",
+                DisplayName = "透视输出范围",
+                DefaultValue = "board",
+                Description = "board=仅标定板；local=原图仅板内；plane=整图共面鸟瞰(原图尺寸、均匀缩放，须共面)",
+                Options = new List<string> { "board", "local", "plane" }
+            },
+            new FlowPage.OperatorParam
+            {
+                Name = "perspectiveOutputScale",
+                DisplayName = "输出尺度",
+                DefaultValue = "board_pixels",
+                Description = "board_pixels=按图像边长+方格比例定尺寸(推荐)；metric=按 mm 与 pxPerMm",
+                Options = new List<string> { "board_pixels", "metric" }
+            },
+            new FlowPage.OperatorParam
+            {
+                Name = "assumeUndistorted",
+                DisplayName = "输入已去畸变",
+                DefaultValue = "auto",
+                Description = "透视角点投影：auto=与同节点「内参畸变矫正」一致；true/false 手动",
+                Options = new List<string> { "auto", "true", "false" }
+            }
+        };
+
+        public static List<FlowPage.OperatorParam> With(params FlowPage.OperatorParam[] leading)
+        {
+            var list = new List<FlowPage.OperatorParam>(leading.Length + Core.Length);
+            list.AddRange(leading);
+            list.AddRange(Core);
+            return list;
+        }
     }
 }

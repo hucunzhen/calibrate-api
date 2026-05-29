@@ -21,6 +21,9 @@ namespace CalibOperatorCLI_Example
     public partial class HalconShapeModelPage : Page
     {
         private CalibImage? _currentImage;
+        /// <summary>加载后未矫正的灰度图副本，用于重复应用矫正参数。</summary>
+        private CalibImage? _rawCalibImage;
+        private string? _loadedImagePath;
         private byte[]? _grayPixels;
         private WriteableBitmap? _thresholdOverlay;
         private int _imgWidth;
@@ -101,6 +104,15 @@ namespace CalibOperatorCLI_Example
             Loaded += (_, _) =>
             {
                 UpdateCreatePanelsVisibility();
+                if (string.IsNullOrWhiteSpace(TxtCalibrationJsonPath.Text))
+                {
+                    string guess = IoPath.GetFullPath(IoPath.Combine(
+                        AppDomain.CurrentDomain.BaseDirectory,
+                        "..", "..", "..", "test_images", "chessboard_calibration_from_dir.json"));
+                    if (System.IO.File.Exists(guess))
+                        TxtCalibrationJsonPath.Text = guess;
+                }
+
                 if (_imgWidth > 0)
                     FitImageToView();
             };
@@ -108,6 +120,8 @@ namespace CalibOperatorCLI_Example
             {
                 DisposeNativeXldForCreate();
                 DisposeCurrentModel();
+                _rawCalibImage?.Dispose();
+                _rawCalibImage = null;
             };
         }
 
@@ -193,24 +207,197 @@ namespace CalibOperatorCLI_Example
             _imgWidth = w;
             _imgHeight = h;
 
-            // 创建 CalibImage
+            _loadedImagePath = path;
             _currentImage?.Dispose();
             _currentImage = new CalibImage(w, h, 1);
             var n = _currentImage.GetNativeStruct();
             System.Runtime.InteropServices.Marshal.Copy(_grayPixels, 0, n.data, w * h);
 
-            // 显示
-            DisplayImage.Source = bitmap;
-            DisplayImage.Width = w;
-            DisplayImage.Height = h;
-            ImageCanvas.Width = w;
-            ImageCanvas.Height = h;
+            _rawCalibImage?.Dispose();
+            _rawCalibImage = CalibAPI.DuplicateImage(_currentImage);
 
-            // 重置 ROI，再自适应显示
+            TryApplyCameraCorrections(logSuccess: true);
+
             ClearRoiState();
             _workingContours = null;
             UpdateContourStats();
             FitImageToView();
+        }
+
+        private void BtnBrowseCalibrationJson_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new OpenFileDialog
+            {
+                Filter = "JSON|*.json|所有文件|*.*",
+                Title = "选择棋盘标定 JSON",
+                FileName = string.IsNullOrWhiteSpace(TxtCalibrationJsonPath.Text)
+                    ? "chessboard_calibration_from_dir.json"
+                    : IoPath.GetFileName(TxtCalibrationJsonPath.Text)
+            };
+            if (!string.IsNullOrWhiteSpace(TxtCalibrationJsonPath.Text))
+            {
+                try
+                {
+                    string dir = IoPath.GetDirectoryName(TxtCalibrationJsonPath.Text) ?? "";
+                    if (System.IO.Directory.Exists(dir))
+                        dlg.InitialDirectory = dir;
+                }
+                catch { /* ignore */ }
+            }
+
+            if (dlg.ShowDialog() != true)
+                return;
+            TxtCalibrationJsonPath.Text = dlg.FileName;
+        }
+
+        private void BtnApplyCameraCorrection_Click(object sender, RoutedEventArgs e)
+        {
+            if (_rawCalibImage == null)
+            {
+                MessageBox.Show("请先加载图像", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            try
+            {
+                if (TryApplyCameraCorrections(logSuccess: true))
+                    FitImageToView();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"相机矫正失败:\n{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private static int GetPerspectiveOutputModeFromTag(string? tag)
+        {
+            if (string.Equals(tag, "plane", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(tag, "full_plane", StringComparison.OrdinalIgnoreCase))
+                return 2;
+            if (string.Equals(tag, "local", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(tag, "full", StringComparison.OrdinalIgnoreCase))
+                return 1;
+            return 0;
+        }
+
+        private int GetPerspectiveOutputMode()
+        {
+            if (CmbPerspectiveOutputFrame.SelectedItem is System.Windows.Controls.ComboBoxItem item)
+                return GetPerspectiveOutputModeFromTag(item.Tag as string);
+            return 0;
+        }
+
+        private string LoadCalibrationJsonText(bool requireExtrinsics)
+        {
+            string path = TxtCalibrationJsonPath.Text?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(path))
+                throw new InvalidOperationException("请指定标定 JSON 文件路径");
+            return requireExtrinsics
+                ? CalibAPI.NormalizeChessboardCalibrationJson(path)
+                : CalibAPI.NormalizeIntrinsicsCalibrationJson(path);
+        }
+
+        /// <summary>从 _rawCalibImage 应用内参/透视矫正并刷新显示与 _currentImage。</summary>
+        private bool TryApplyCameraCorrections(bool logSuccess)
+        {
+            if (_rawCalibImage == null)
+                return false;
+
+            bool undistort = ChkEnableUndistort.IsChecked == true;
+            bool perspective = ChkEnablePerspective.IsChecked == true;
+            if (!undistort && !perspective)
+            {
+                CommitCalibImageToUi(_rawCalibImage, disposeIncoming: false);
+                if (logSuccess)
+                    AppendLog("相机矫正: 未启用，使用原图");
+                return true;
+            }
+
+            string calJsonIntr = LoadCalibrationJsonText(requireExtrinsics: false);
+            string? calJsonPersp = ChkEnablePerspective.IsChecked == true ? LoadCalibrationJsonText(requireExtrinsics: true) : null;
+            CalibImage? work = CalibAPI.DuplicateImage(_rawCalibImage);
+            CalibImage? owned = work;
+
+            try
+            {
+                if (undistort)
+                {
+                    double alpha = double.TryParse(TxtUndistortAlpha.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double av)
+                        ? av : -1.0;
+                    var next = CalibAPI.UndistortImage(work, calJsonIntr, alpha);
+                    if (!ReferenceEquals(next, work))
+                    {
+                        owned?.Dispose();
+                        owned = next;
+                        work = next;
+                    }
+                    if (logSuccess)
+                        AppendLog($"内参矫正: α={alpha}");
+                }
+
+                if (perspective)
+                {
+                    int viewIdx = int.TryParse(TxtCalibViewIndex.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int vi) ? vi : 0;
+                    int cols = int.TryParse(TxtCalibBoardCols.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int c) ? c : 9;
+                    int rows = int.TryParse(TxtCalibBoardRows.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int r) ? r : 6;
+                    double sq = double.TryParse(TxtCalibSquareSizeMm.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double s) ? s : 25.0;
+                    double pxPerMm = double.TryParse(TxtCalibPxPerMm.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double ppm) ? ppm : 1.0;
+                    int perspMode = GetPerspectiveOutputMode();
+                    bool assumeUnd = ChkEnableUndistort.IsChecked == true;
+                    var next = CalibAPI.WarpToChessboardPlane(work, calJsonPersp!, viewIdx, cols, rows, sq, pxPerMm, perspMode,
+                        assumeUndistortedInput: assumeUnd, outputSizeMode: 1);
+                    if (!ReferenceEquals(next, work))
+                    {
+                        owned?.Dispose();
+                        owned = next;
+                        work = next;
+                    }
+                    if (logSuccess)
+                    {
+                        string frame = perspMode switch { 2 => "plane", 1 => "local", _ => "board" };
+                        AppendLog($"透视矫正: view={viewIdx} {cols}x{rows} 格, 输出={frame}, {work.Width}x{work.Height}px");
+                    }
+                }
+
+                CommitCalibImageToUi(work, disposeIncoming: true);
+                owned = null;
+                if (logSuccess)
+                    AppendLog($"相机矫正完成 → {_imgWidth}x{_imgHeight}");
+                return true;
+            }
+            finally
+            {
+                owned?.Dispose();
+            }
+        }
+
+        private void CommitCalibImageToUi(CalibImage source, bool disposeIncoming)
+        {
+            int w = source.Width;
+            int h = source.Height;
+            if (w <= 0 || h <= 0)
+                throw new InvalidOperationException("无效图像尺寸");
+
+            var sn = source.GetNativeStruct();
+            _grayPixels = new byte[w * h];
+            System.Runtime.InteropServices.Marshal.Copy(sn.data, _grayPixels, 0, w * h);
+            _imgWidth = w;
+            _imgHeight = h;
+
+            _currentImage?.Dispose();
+            if (disposeIncoming)
+                _currentImage = source;
+            else
+                _currentImage = CalibAPI.DuplicateImage(source);
+
+            var bmp = BitmapSource.Create(w, h, 96, 96, PixelFormats.Gray8, null, _grayPixels, w);
+            bmp.Freeze();
+            DisplayImage.Source = bmp;
+            DisplayImage.Width = w;
+            DisplayImage.Height = h;
+            ImageCanvas.Width = w;
+            ImageCanvas.Height = h;
+            ClearFindResultOverlay();
         }
 
         /// <summary>鼠标在画布上的位置即图像像素坐标（画布与图像 1:1，变换只施加在 ImageCanvas 整体）。</summary>

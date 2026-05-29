@@ -510,6 +510,37 @@ static Value MakeImage(const cv::Mat& m) {
     return v;
 }
 
+static bool FlowCvMatToContiguousImage(const cv::Mat& m, Image& img, std::vector<unsigned char>& backing) {
+    if (m.empty()) return false;
+    cv::Mat cont = m.isContinuous() ? m : m.clone();
+    int w = cont.cols, h = cont.rows, ch = cont.channels();
+    if (ch != 1 && ch != 3) return false;
+    int rowBytes = w * ch;
+    int stride = ((rowBytes + 3) / 4) * 4;
+    backing.assign((size_t)stride * (size_t)h, 0);
+    if (cont.isContinuous() && stride == rowBytes) {
+        memcpy(backing.data(), cont.data, (size_t)rowBytes * (size_t)h);
+    } else {
+        for (int y = 0; y < h; ++y)
+            memcpy(backing.data() + (size_t)y * stride, cont.ptr(y), (size_t)rowBytes);
+    }
+    img.width = w;
+    img.height = h;
+    img.channels = ch;
+    img.data = backing.data();
+    return true;
+}
+
+static cv::Mat FlowCalibImageToMat(const Image& img) {
+    if (!img.data || img.width <= 0 || img.height <= 0) return cv::Mat();
+    int stride = ((img.width * img.channels + 3) / 4) * 4;
+    if (img.channels == 1)
+        return cv::Mat(img.height, img.width, CV_8UC1, (void*)img.data, (size_t)stride).clone();
+    if (img.channels == 3)
+        return cv::Mat(img.height, img.width, CV_8UC3, (void*)img.data, (size_t)stride).clone();
+    return cv::Mat();
+}
+
 static Value MakeContours(const std::vector<std::vector<cv::Point>>& contours) {
     Value v;
     v.kind = Value::Kind::Contours;
@@ -944,6 +975,64 @@ static void CollectImagePathsFromDir(const std::string& dir, const std::string& 
     }
     std::sort(paths.begin(), paths.end(), PathLessInsensitive);
     paths.erase(std::unique(paths.begin(), paths.end(), PathEqInsensitive), paths.end());
+}
+
+static bool FileNameStartsWithInsensitive(const std::string& path, const std::string& prefix) {
+    if (prefix.empty()) return true;
+    size_t pos = path.find_last_of("\\/");
+    std::string name = (pos == std::string::npos) ? path : path.substr(pos + 1);
+#if defined(_WIN32)
+    return name.size() >= prefix.size() && _strnicmp(name.c_str(), prefix.c_str(), (unsigned)prefix.size()) == 0;
+#else
+    return name.size() >= prefix.size() && name.compare(0, prefix.size(), prefix) == 0;
+#endif
+}
+
+static std::string ResolveFlowRelativePath(NativeFlowEngineImpl* e, const std::string& path) {
+    std::string p = TrimFlowToken(path);
+    if (p.empty()) return p;
+    if (!FlowPathIsAbsolute(p) && e && !e->flowRootDir.empty())
+        p = FlowJoinPath(e->flowRootDir, p);
+    return FlowCanonicalPathA(p);
+}
+
+static void AppendUniquePath(std::vector<std::string>& paths, const std::string& path) {
+    if (path.empty()) return;
+    for (const auto& existing : paths) {
+        if (PathEqInsensitive(existing, path)) return;
+    }
+    paths.push_back(path);
+}
+
+static bool ResolveChessboardCalibrationImagePaths(NativeFlowEngineImpl* e, const NodeDef& n, std::vector<std::string>& paths, std::string& err) {
+    paths.clear();
+    std::string rawPaths = NodeParam(n, "imagePaths", "");
+    std::stringstream ss(rawPaths);
+    std::string seg;
+    while (std::getline(ss, seg, ';')) {
+        seg = TrimFlowToken(seg);
+        if (seg.empty()) continue;
+        AppendUniquePath(paths, ResolveFlowRelativePath(e, seg));
+    }
+
+    std::string dirParam = TrimFlowToken(NodeParam(n, "imageDirectory", ""));
+    if (!dirParam.empty()) {
+        std::string dir = ResolveFlowRelativePath(e, dirParam);
+        std::vector<std::string> fromDir;
+        CollectImagePathsFromDir(dir, NodeParam(n, "extensions", ".bmp"), fromDir);
+        std::string prefix = NodeParam(n, "namePrefix", "Image_");
+        for (const auto& p : fromDir) {
+            if (FileNameStartsWithInsensitive(p, prefix))
+                AppendUniquePath(paths, p);
+        }
+    }
+
+    if (paths.empty()) {
+        err = "chessboard_calibrate_intrinsics: set imageDirectory (e.g. folder with Image_*.bmp) or imagePaths";
+        return false;
+    }
+    std::sort(paths.begin(), paths.end(), PathLessInsensitive);
+    return true;
 }
 
 static bool FillLoadImageDirOutputsForPath(NativeFlowEngineImpl* e, const NodeDef& n, const std::string& path, int totalCount,
@@ -1888,7 +1977,15 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         return true;
     }
     if (n.type == "chessboard_calibrate_intrinsics") {
-        std::string paths = NodeParam(n, "imagePaths", "");
+        std::vector<std::string> pathList;
+        if (!ResolveChessboardCalibrationImagePaths(e, n, pathList, err))
+            return false;
+        std::ostringstream pathsJoined;
+        for (size_t i = 0; i < pathList.size(); ++i) {
+            if (i) pathsJoined << ';';
+            pathsJoined << pathList[i];
+        }
+        std::string paths = pathsJoined.str();
         int cols = ToInt(NodeParam(n, "cols", "9"), 9);
         int rows = ToInt(NodeParam(n, "rows", "6"), 6);
         double sq = ToDouble(NodeParam(n, "squareSizeMm", "25"), 25.0);
@@ -1919,6 +2016,107 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         if (rc != 0) { err = "chessboard_pixels_to_world failed (code " + std::to_string(rc) + ")"; return false; }
         Value vout; vout.kind = Value::Kind::Points; vout.points = std::move(outw);
         out["World"] = vout;
+        return true;
+    }
+    if (n.type == "intrinsics_undistort_image") {
+        Value vin = InputOf(e, n.id, "Image");
+        if (vin.kind != Value::Kind::Image) { err = "intrinsics_undistort_image: missing Image"; return false; }
+        Value cal = InputOf(e, n.id, "CalibrationJson");
+        if (cal.kind != Value::Kind::String || cal.str.empty()) {
+            err = "intrinsics_undistort_image: missing CalibrationJson (native engine)";
+            return false;
+        }
+        double alpha = ToDouble(NodeParam(n, "alpha", "-1"), -1.0);
+        cv::Mat src = vin.img;
+        if (src.empty()) { err = "intrinsics_undistort_image: empty image"; return false; }
+
+        Image srcImg{}, dstImg{};
+        std::vector<unsigned char> srcBuf;
+        if (!FlowCvMatToContiguousImage(src, srcImg, srcBuf)) {
+            err = "intrinsics_undistort_image: image convert failed";
+            return false;
+        }
+        int rc = UndistortImageFromCalibrationJson(&srcImg, &dstImg, cal.str.c_str(), alpha);
+        if (rc != 0) {
+            err = "intrinsics_undistort_image failed (code " + std::to_string(rc) + ")";
+            if (dstImg.data) free(dstImg.data);
+            return false;
+        }
+        cv::Mat outMat = FlowCalibImageToMat(dstImg);
+        if (dstImg.data) free(dstImg.data);
+        if (outMat.empty()) { err = "intrinsics_undistort_image: empty output"; return false; }
+        out["Out"] = MakeImage(outMat);
+        return true;
+    }
+    if (n.type == "chessboard_perspective_warp_image") {
+        Value vin = InputOf(e, n.id, "Image");
+        if (vin.kind != Value::Kind::Image) { err = "chessboard_perspective_warp_image: missing Image"; return false; }
+        Value cal = InputOf(e, n.id, "CalibrationJson");
+        if (cal.kind != Value::Kind::String || cal.str.empty()) {
+            err = "chessboard_perspective_warp_image: missing CalibrationJson";
+            return false;
+        }
+        int viewIdx = ToInt(NodeParam(n, "viewIndex", "0"), 0);
+        int cols = ToInt(NodeParam(n, "cols", "9"), 9);
+        int rows = ToInt(NodeParam(n, "rows", "6"), 6);
+        double sq = ToDouble(NodeParam(n, "squareSizeMm", "25"), 25.0);
+        double pxPerMm = ToDouble(NodeParam(n, "pxPerMm", "1"), 1.0);
+        if (cols < 2 || rows < 2 || sq <= 0.0 || pxPerMm <= 0.0) {
+            err = "chessboard_perspective_warp_image: invalid cols/rows/squareSizeMm/pxPerMm";
+            return false;
+        }
+        cv::Mat src = vin.img;
+        if (src.empty()) { err = "chessboard_perspective_warp_image: empty image"; return false; }
+
+        Image srcImg{}, dstImg{};
+        std::vector<unsigned char> srcBuf;
+        if (!FlowCvMatToContiguousImage(src, srcImg, srcBuf)) {
+            err = "chessboard_perspective_warp_image: image convert failed";
+            return false;
+        }
+        int perspMode = 0;
+        {
+            auto it = n.params.find("perspectiveOutputFrame");
+            if (it != n.params.end()) {
+                std::string v = it->second;
+                for (auto& c : v) c = (char)tolower((unsigned char)c);
+                if (v == "full" || v == "local" || v == "board_local")
+                    perspMode = 1;
+                else if (v == "plane" || v == "full_plane" || v == "all" || v == "homography")
+                    perspMode = 2;
+            }
+        }
+        int assumeUnd = 0;
+        {
+            auto it = n.params.find("assumeUndistorted");
+            if (it != n.params.end()) {
+                std::string v = it->second;
+                for (auto& c : v) c = (char)tolower((unsigned char)c);
+                if (v == "1" || v == "true" || v == "yes")
+                    assumeUnd = 1;
+            }
+        }
+        int outScale = 0;
+        {
+            auto it = n.params.find("perspectiveOutputScale");
+            if (it != n.params.end()) {
+                std::string v = it->second;
+                for (auto& c : v) c = (char)tolower((unsigned char)c);
+                if (v == "board_pixels" || v == "pixels" || v == "image")
+                    outScale = 1;
+            }
+        }
+        int rc = WarpImageToChessboardPlaneFromCalibrationJson(&srcImg, &dstImg, cal.str.c_str(), viewIdx,
+            cols, rows, sq, pxPerMm, perspMode, assumeUnd, outScale);
+        if (rc != 0) {
+            err = "chessboard_perspective_warp_image failed (code " + std::to_string(rc) + ")";
+            if (dstImg.data) free(dstImg.data);
+            return false;
+        }
+        cv::Mat outMat = FlowCalibImageToMat(dstImg);
+        if (dstImg.data) free(dstImg.data);
+        if (outMat.empty()) { err = "chessboard_perspective_warp_image: empty output"; return false; }
+        out["Out"] = MakeImage(outMat);
         return true;
     }
     if (n.type == "polyline_simplify_dp") {

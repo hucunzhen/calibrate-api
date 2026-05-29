@@ -111,6 +111,90 @@
                     </StackPanel>
                 </Border>
 
+                <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}"
+                        BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                    <StackPanel>
+                        <TextBlock FontWeight="Bold" Text="相机矫正" Margin="0,0,0,6"/>
+                        <TextBlock Text="加载图像后按棋盘标定 JSON 做内参去畸变与/或平面透视展开；创建/匹配均使用矫正后图像。"
+                                   FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="72"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="28"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="标定 JSON" VerticalAlignment="Center"/>
+                            <TextBox x:Name="TxtCalibrationJsonPath" Grid.Column="1" Height="24" VerticalContentAlignment="Center"
+                                     ToolTip="棋盘格内参标定输出的 CalibrationJson 文件"/>
+                            <Button Grid.Column="2" Content="..." Height="24" Margin="4,0,0,0" Click="BtnBrowseCalibrationJson_Click"/>
+                        </Grid>
+                        <CheckBox x:Name="ChkEnableUndistort" Content="内参畸变矫正 (undistort)" Foreground="#CCC" Margin="0,4,0,2"/>
+                        <Grid Margin="16,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="72"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="裁剪 α" VerticalAlignment="Center"
+                                       ToolTip="-1=原尺寸；0..1 裁剪黑边"/>
+                            <TextBox x:Name="TxtUndistortAlpha" Grid.Column="1" Text="-1" Height="24" VerticalContentAlignment="Center"/>
+                        </Grid>
+                        <CheckBox x:Name="ChkEnablePerspective" Content="透视矫正 (棋盘平面鸟瞰)" Foreground="#CCC" Margin="0,6,0,4"/>
+                        <Grid Margin="16,0,0,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="72"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="视图序号" VerticalAlignment="Center"
+                                       ToolTip="extrinsicsPerView 下标，与标定成功图像顺序一致"/>
+                            <TextBox x:Name="TxtCalibViewIndex" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
+                        </Grid>
+                        <Grid Margin="16,0,0,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="36"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="36"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="列" VerticalAlignment="Center"/>
+                            <TextBox x:Name="TxtCalibBoardCols" Grid.Column="1" Text="9" Height="24" Margin="0,0,4,0" VerticalContentAlignment="Center"/>
+                            <TextBlock Grid.Column="2" Text="行" VerticalAlignment="Center"/>
+                            <TextBox x:Name="TxtCalibBoardRows" Grid.Column="3" Text="6" Height="24" VerticalContentAlignment="Center"/>
+                        </Grid>
+                        <Grid Margin="16,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="72"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="方格 mm" VerticalAlignment="Center"/>
+                            <TextBox x:Name="TxtCalibSquareSizeMm" Grid.Column="1" Text="25" Height="24" VerticalContentAlignment="Center"/>
+                        </Grid>
+                        <Grid Margin="16,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="72"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="mm/像素" VerticalAlignment="Center"
+                                       ToolTip="输出鸟瞰图尺度：1=1像素1mm"/>
+                            <TextBox x:Name="TxtCalibPxPerMm" Grid.Column="1" Text="1" Height="24" VerticalContentAlignment="Center"/>
+                        </Grid>
+                        <Grid Margin="16,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="72"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="输出范围" VerticalAlignment="Center"
+                                       ToolTip="board=仅标定板；local=原图仅板内；plane=整图共面鸟瞰(原图大小、均匀缩放)"/>
+                            <ComboBox x:Name="CmbPerspectiveOutputFrame" Grid.Column="1" Height="26">
+                                <ComboBoxItem Content="仅标定板 (board)" Tag="board" IsSelected="True"/>
+                                <ComboBoxItem Content="原图+板内 (local)" Tag="local"/>
+                                <ComboBoxItem Content="整图共面 (plane)" Tag="plane"/>
+                            </ComboBox>
+                        </Grid>
+                        <Button x:Name="BtnApplyCameraCorrection" Content="应用相机矫正" Height="28"
+                                Click="BtnApplyCameraCorrection_Click"/>
+                    </StackPanel>
+                </Border>
+
                 <!-- 轮廓 / 边缘提取 -->
                 <Border x:Name="PnlContourExtract" Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" 
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">

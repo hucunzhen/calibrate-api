@@ -6730,6 +6730,170 @@ namespace CalibOperatorCLI_Example
             return list;
         }
 
+        /// <summary>解析棋盘格内参标定用的图像路径：分号列表 + 可选目录扫描（默认 Image_ 前缀 .bmp）。</summary>
+        private List<string> ResolveChessboardCalibrationImagePaths(FlowNode node, string? compositeInnerFlowBaseDir)
+        {
+            var resolved = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            void AddPath(string full)
+            {
+                full = System.IO.Path.GetFullPath(full);
+                if (seen.Add(full))
+                    resolved.Add(full);
+            }
+
+            var rawPaths = node.Params.GetValueOrDefault("imagePaths", "") ?? "";
+            foreach (var seg in rawPaths.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var p = seg.Trim();
+                if (string.IsNullOrEmpty(p))
+                    continue;
+                AddPath(System.IO.Path.IsPathRooted(p)
+                    ? p
+                    : ResolveCompositeFlowPath(p, compositeInnerFlowBaseDir));
+            }
+
+            var dirParam = node.Params.GetValueOrDefault("imageDirectory", "")?.Trim();
+            if (!string.IsNullOrEmpty(dirParam))
+            {
+                var resolvedDir = ResolveCompositeFlowPath(dirParam, compositeInnerFlowBaseDir);
+                var extSpec = node.Params.GetValueOrDefault("extensions", ".bmp") ?? ".bmp";
+                var prefix = node.Params.GetValueOrDefault("namePrefix", "Image_") ?? "";
+                var fromDir = CollectSortedImagePathsFromDirectory(resolvedDir, extSpec);
+                if (!string.IsNullOrEmpty(prefix))
+                {
+                    fromDir = fromDir
+                        .Where(p => System.IO.Path.GetFileName(p).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                }
+
+                foreach (var p in fromDir)
+                    AddPath(p);
+            }
+
+            return resolved;
+        }
+
+        /// <summary>解析棋盘标定 JSON：端口优先，否则 calibrationJsonFile 参数；规范为含 extrinsicsPerView 的整包。</summary>
+        private string ResolveChessboardCalibrationJson(FlowNode node, Dictionary<string, object?> inputs, string? compositeInnerFlowBaseDir, bool requireExtrinsics)
+        {
+            string? raw = null;
+            if (inputs.TryGetValue("CalibrationJson", out var cjObj) && cjObj is string cjs && !string.IsNullOrWhiteSpace(cjs))
+                raw = cjs;
+            else
+            {
+                var path = node.Params.GetValueOrDefault("calibrationJsonFile", "")?.Trim();
+                if (!string.IsNullOrEmpty(path))
+                {
+                    var resolved = ResolveCompositeFlowPath(path, compositeInnerFlowBaseDir);
+                    if (!System.IO.File.Exists(resolved))
+                        throw new System.IO.FileNotFoundException($"标定 JSON 文件不存在: {resolved}");
+                    raw = System.IO.File.ReadAllText(resolved, Encoding.UTF8);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(raw))
+                throw new InvalidOperationException(
+                    "缺少 CalibrationJson：请连接「棋盘格内参标定」的 CalibrationJson 端口（勿接 IntrinsicsJson），或填写参数 calibrationJsonFile。");
+
+            return requireExtrinsics
+                ? CalibAPI.NormalizeChessboardCalibrationJson(raw)
+                : CalibAPI.NormalizeIntrinsicsCalibrationJson(raw);
+        }
+
+        /// <summary>0=board 裁剪；1=local 原图仅板内；2=plane 整图按标定板平面单应。</summary>
+        private static int ParsePerspectiveOutputMode(IReadOnlyDictionary<string, string?> paramBag)
+        {
+            if (!paramBag.TryGetValue("perspectiveOutputFrame", out var raw) || string.IsNullOrWhiteSpace(raw))
+                return 0;
+            var t = raw.Trim();
+            if (string.Equals(t, "plane", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(t, "full_plane", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(t, "all", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(t, "homography", StringComparison.OrdinalIgnoreCase))
+                return 2;
+            if (string.Equals(t, "full", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(t, "local", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(t, "board_local", StringComparison.OrdinalIgnoreCase)
+                || t == "1"
+                || string.Equals(t, "true", StringComparison.OrdinalIgnoreCase))
+                return 1;
+            return 0;
+        }
+
+        private static int ParsePerspectiveOutputScale(IReadOnlyDictionary<string, string?> paramBag)
+        {
+            if (!paramBag.TryGetValue("perspectiveOutputScale", out var raw) || string.IsNullOrWhiteSpace(raw))
+                return 1;
+            var t = raw.Trim();
+            return string.Equals(t, "metric", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(t, "mm", StringComparison.OrdinalIgnoreCase)
+                ? 0
+                : 1;
+        }
+
+        private static bool ParseAssumeUndistortedForWarp(IReadOnlyDictionary<string, string?> paramBag, bool undistortEnabledInSameNode)
+        {
+            if (!paramBag.TryGetValue("assumeUndistorted", out var raw) || string.IsNullOrWhiteSpace(raw))
+                return undistortEnabledInSameNode;
+            var t = raw.Trim();
+            if (string.Equals(t, "auto", StringComparison.OrdinalIgnoreCase))
+                return undistortEnabledInSameNode;
+            return string.Equals(t, "true", StringComparison.OrdinalIgnoreCase)
+                || t == "1"
+                || string.Equals(t, "yes", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool ParseFlowBoolParam(IReadOnlyDictionary<string, string?> paramBag, string key, bool defaultValue = false)
+        {
+            if (!paramBag.TryGetValue(key, out var raw) || string.IsNullOrWhiteSpace(raw))
+                return defaultValue;
+            var t = raw.Trim();
+            return string.Equals(t, "true", StringComparison.OrdinalIgnoreCase)
+                || t == "1"
+                || string.Equals(t, "yes", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>加载图/相机取图：按参数对图像做内参去畸变与棋盘透视展开。</summary>
+        private CalibImage ApplyOptionalCameraCorrection(
+            FlowNode node,
+            Dictionary<string, object?> inputs,
+            CalibImage image,
+            string? compositeInnerFlowBaseDir)
+        {
+            bool undistort = ParseFlowBoolParam(node.Params, "enableUndistort");
+            bool perspective = ParseFlowBoolParam(node.Params, "enablePerspective");
+            if (!undistort && !perspective)
+                return image;
+
+            double alpha = double.TryParse(node.Params.GetValueOrDefault("undistortAlpha"), out double av) ? av : -1.0;
+            CalibImage current = image;
+            if (undistort)
+            {
+                string calJsonU = ResolveChessboardCalibrationJson(node, inputs, compositeInnerFlowBaseDir, requireExtrinsics: false);
+                current = CalibAPI.UndistortImage(current, calJsonU, alpha);
+                CalibAPI.EnsureNativeImageChannels(current);
+            }
+
+            if (perspective)
+            {
+                string calJsonP = ResolveChessboardCalibrationJson(node, inputs, compositeInnerFlowBaseDir, requireExtrinsics: true);
+                int viewIdx = int.TryParse(node.Params.GetValueOrDefault("viewIndex"), out int vi) ? vi : 0;
+                int cols = int.TryParse(node.Params.GetValueOrDefault("cols"), out int cc) ? cc : 9;
+                int rows = int.TryParse(node.Params.GetValueOrDefault("rows"), out int rr) ? rr : 6;
+                double sqMm = double.TryParse(node.Params.GetValueOrDefault("squareSizeMm"), out double sqv) ? sqv : 25.0;
+                double pxPerMm = double.TryParse(node.Params.GetValueOrDefault("pxPerMm"), out double ppm) ? ppm : 1.0;
+                int perspMode = ParsePerspectiveOutputMode(node.Params);
+                int outScale = ParsePerspectiveOutputScale(node.Params);
+                bool assumeUnd = ParseAssumeUndistortedForWarp(node.Params, undistort);
+                current = CalibAPI.WarpToChessboardPlane(current, calJsonP, viewIdx, cols, rows, sqMm, pxPerMm, perspMode, assumeUnd, outScale);
+                CalibAPI.EnsureNativeImageChannels(current);
+            }
+
+            return current;
+        }
+
         /// <summary>解析「加载图像目录」的根路径；相对路径相对 exe。目录为空时弹出选文件夹；取消则返回 false。</summary>
         private static bool TryResolveLoadImageDirectory(FlowNode node, out string resolvedDir)
         {
@@ -6776,7 +6940,7 @@ namespace CalibOperatorCLI_Example
                         {
                             if (!System.IO.File.Exists(resolvedPath))
                                 throw new System.IO.FileNotFoundException($"加载图像失败，文件不存在: {resolvedPath}");
-                            var img = CalibAPI.LoadImage(resolvedPath);
+                            var img = ApplyOptionalCameraCorrection(node, inputs, CalibAPI.LoadImage(resolvedPath), compositeInnerFlowBaseDir);
                             node.Outputs["Image"] = img;
                             break;
                         }
@@ -6788,7 +6952,7 @@ namespace CalibOperatorCLI_Example
                         };
                         if (dlg.ShowDialog() == true)
                         {
-                            var img = CalibAPI.LoadImage(dlg.FileName);
+                            var img = ApplyOptionalCameraCorrection(node, inputs, CalibAPI.LoadImage(dlg.FileName), compositeInnerFlowBaseDir);
                             node.Outputs["Image"] = img;
                         }
                         else
@@ -6827,7 +6991,7 @@ namespace CalibOperatorCLI_Example
                         else if (idx >= paths.Count)
                             idx = paths.Count - 1;
 
-                        var img = CalibAPI.LoadImage(paths[idx]);
+                        var img = ApplyOptionalCameraCorrection(node, inputs, CalibAPI.LoadImage(paths[idx]), compositeInnerFlowBaseDir);
                         node.Outputs["Image"] = img;
                         node.Outputs["Count"] = paths.Count;
                         node.Outputs["Path"] = paths[idx];
@@ -6904,7 +7068,11 @@ namespace CalibOperatorCLI_Example
                         int deviceIndex = int.TryParse(node.Params.GetValueOrDefault("deviceIndex"), out var di) ? di : 0;
                         int targetWidth = int.TryParse(node.Params.GetValueOrDefault("targetWidth"), out var tw) ? tw : 0;
                         int targetHeight = int.TryParse(node.Params.GetValueOrDefault("targetHeight"), out var th) ? th : 0;
-                        var img = GrabOneCameraFrameOrThrow(deviceIndex, targetWidth, targetHeight);
+                        var img = ApplyOptionalCameraCorrection(
+                            node,
+                            inputs,
+                            GrabOneCameraFrameOrThrow(deviceIndex, targetWidth, targetHeight),
+                            compositeInnerFlowBaseDir);
                         node.Outputs["Image"] = img;
                         if (inputs.TryGetValue("After", out var afterSnap))
                             node.Outputs["Out"] = afterSnap;
@@ -8879,23 +9047,12 @@ namespace CalibOperatorCLI_Example
 
                     case "chessboard_calibrate_intrinsics":
                     {
-                        var rawPaths = node.Params.GetValueOrDefault("imagePaths", "");
                         int colsI = int.TryParse(node.Params.GetValueOrDefault("cols"), out int ci) ? ci : 9;
                         int rowsI = int.TryParse(node.Params.GetValueOrDefault("rows"), out int ri) ? ri : 6;
                         double sqMm = double.TryParse(node.Params.GetValueOrDefault("squareSizeMm"), out double sqv) ? sqv : 25.0;
-                        var segments = rawPaths.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
-                        var resolved = new List<string>();
-                        foreach (var seg in segments)
-                        {
-                            var p = seg.Trim();
-                            if (string.IsNullOrEmpty(p)) continue;
-                            var full = System.IO.Path.IsPathRooted(p)
-                                ? System.IO.Path.GetFullPath(p)
-                                : System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, p));
-                            resolved.Add(full);
-                        }
+                        var resolved = ResolveChessboardCalibrationImagePaths(node, compositeInnerFlowBaseDir);
                         if (resolved.Count == 0)
-                            throw new InvalidOperationException("棋盘格内参: imagePaths 为空（使用分号分隔多张图路径）");
+                            throw new InvalidOperationException("棋盘格内参: 请设置 imageDirectory（如含 Image_*.bmp 的文件夹）或 imagePaths（分号分隔路径）");
                         string pathsJoined = string.Join(";", resolved);
                         var (intr, calJson) = CalibAPI.CalibrateCameraChessboard(pathsJoined, colsI, rowsI, sqMm);
                         node.Outputs["Intrinsics"] = intr;
@@ -8921,6 +9078,51 @@ namespace CalibOperatorCLI_Example
                         int viewIdx = int.TryParse(node.Params.GetValueOrDefault("viewIndex"), out int vi) ? vi : 0;
                         var world = CalibAPI.PixelsToChessboardWorld(calJson, viewIdx, pts);
                         node.Outputs["World"] = world;
+                        break;
+                    }
+
+                    case "intrinsics_undistort_image":
+                    {
+                        var srcImg = inputs["Image"] as CalibImage;
+                        if (srcImg == null)
+                            throw new InvalidOperationException("内参畸变矫正: 缺少输入图像 Image");
+                        double alpha = double.TryParse(node.Params.GetValueOrDefault("alpha"), out double av) ? av : -1.0;
+
+                        CalibImage outImg;
+                        if (inputs.TryGetValue("Intrinsics", out var intrObj) && intrObj is CameraIntrinsics intr)
+                            outImg = CalibAPI.UndistortImage(srcImg, intr, alpha);
+                        else
+                        {
+                            string calJson = ResolveChessboardCalibrationJson(node, inputs, compositeInnerFlowBaseDir, requireExtrinsics: false);
+                            outImg = CalibAPI.UndistortImage(srcImg, calJson, alpha);
+                        }
+                        CalibAPI.EnsureNativeImageChannels(outImg);
+
+                        node.Outputs["Out"] = outImg;
+                        node.ResultSummary = $"undistort {srcImg.Width}x{srcImg.Height} alpha={alpha}";
+                        break;
+                    }
+
+                    case "chessboard_perspective_warp_image":
+                    {
+                        var srcImg = inputs["Image"] as CalibImage;
+                        if (srcImg == null)
+                            throw new InvalidOperationException("棋盘透视展开: 缺少输入图像 Image");
+                        string calJson = ResolveChessboardCalibrationJson(node, inputs, compositeInnerFlowBaseDir, requireExtrinsics: true);
+
+                        int viewIdx = int.TryParse(node.Params.GetValueOrDefault("viewIndex"), out int vi) ? vi : 0;
+                        int cols = int.TryParse(node.Params.GetValueOrDefault("cols"), out int cc) ? cc : 9;
+                        int rows = int.TryParse(node.Params.GetValueOrDefault("rows"), out int rr) ? rr : 6;
+                        double sqMm = double.TryParse(node.Params.GetValueOrDefault("squareSizeMm"), out double sqv) ? sqv : 25.0;
+                        double pxPerMm = double.TryParse(node.Params.GetValueOrDefault("pxPerMm"), out double ppm) ? ppm : 1.0;
+                        int perspMode = ParsePerspectiveOutputMode(node.Params);
+                        int outScale = ParsePerspectiveOutputScale(node.Params);
+                        bool assumeUnd = ParseAssumeUndistortedForWarp(node.Params, undistortEnabledInSameNode: false);
+
+                        var outImg = CalibAPI.WarpToChessboardPlane(srcImg, calJson, viewIdx, cols, rows, sqMm, pxPerMm, perspMode, assumeUnd, outScale);
+                        CalibAPI.EnsureNativeImageChannels(outImg);
+                        node.Outputs["Out"] = outImg;
+                        node.ResultSummary = $"perspective warp view={viewIdx} {srcImg.Width}x{srcImg.Height} → {outImg.Width}x{outImg.Height}";
                         break;
                     }
 
@@ -9286,6 +9488,19 @@ namespace CalibOperatorCLI_Example
                                     : $"（相对路径基准: {compositeInnerFlowBaseDir}）"));
 
                         string raw = System.IO.File.ReadAllText(resolvedPath, Encoding.UTF8);
+                        if (raw.Length > 0 && raw[0] == '\uFEFF')
+                            raw = raw[1..];
+
+                        // 棋盘格标定直接落盘的 OpenCV 整包 JSON（无 schemaVersion 包装）
+                        if (raw.Contains("\"extrinsicsPerView\"", StringComparison.Ordinal)
+                            && !raw.Contains("\"schemaVersion\"", StringComparison.Ordinal))
+                        {
+                            if (ShouldEmitCalibrationOutput(node, "CalibrationJson", compositeInnerFlowBaseDir))
+                                node.Outputs["CalibrationJson"] = CalibAPI.NormalizeChessboardCalibrationJson(raw);
+                            node.ResultSummary = $"棋盘标定 JSON: {System.IO.Path.GetFileName(resolvedPath)}";
+                            break;
+                        }
+
                         CalibrationResultFileV1? dto;
                         try
                         {
@@ -9302,7 +9517,7 @@ namespace CalibOperatorCLI_Example
                         {
                             if (string.IsNullOrWhiteSpace(dto.CalibrationJson))
                                 throw new InvalidOperationException("读取标定结果: 文件不含 calibrationJson，请去掉该输出的连线或更换文件");
-                            node.Outputs["CalibrationJson"] = dto.CalibrationJson;
+                            node.Outputs["CalibrationJson"] = CalibAPI.NormalizeChessboardCalibrationJson(dto.CalibrationJson);
                         }
                         if (ShouldEmitCalibrationOutput(node, "Transform", compositeInnerFlowBaseDir))
                         {
@@ -12226,7 +12441,30 @@ namespace CalibOperatorCLI_Example
                             pathBox.Text = ofd.FileName;
                     };
                 }
-                else if (param.Name == "directory" && node.Def.TypeId == "load_image_dir")
+                else if (param.Name == "calibrationJsonFile"
+                    && node.Def.TypeId is "load_image" or "load_image_dir" or "camera_snap"
+                        or "intrinsics_undistort_image" or "chessboard_perspective_warp_image")
+                {
+                    browseBtn = new Button
+                    {
+                        Content = "...",
+                        Width = 28,
+                        Margin = new Thickness(6, 0, 0, 0),
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    browseBtn.Click += (_, _) =>
+                    {
+                        var ofd = new OpenFileDialog
+                        {
+                            Title = "选择标定 JSON",
+                            Filter = "JSON|*.json|所有文件|*.*"
+                        };
+                        if (ofd.ShowDialog() == true && input is TextBox jsonBox)
+                            jsonBox.Text = ofd.FileName;
+                    };
+                }
+                else if ((param.Name == "directory" && node.Def.TypeId == "load_image_dir")
+                    || (param.Name == "imageDirectory" && node.Def.TypeId == "chessboard_calibrate_intrinsics"))
                 {
                     browseBtn = new Button
                     {
@@ -13727,7 +13965,8 @@ namespace CalibOperatorCLI_Example
                         CalibImage? frame = null;
                         try
                         {
-                            frame = CalibAPI.LoadImage(path);
+                            var loopInputs = GetNodeInputs(loopNode);
+                            frame = ApplyOptionalCameraCorrection(loopNode, loopInputs, CalibAPI.LoadImage(path), compositeInnerFlowBaseDir: null);
                         }
                         catch (Exception ex)
                         {

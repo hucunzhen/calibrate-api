@@ -207,6 +207,28 @@ int PixelsToChessboardPlaneXY(double fx, double fy, double cx, double cy,
 int PixelsToChessboardPlaneXYFromCalibrationJson(const char* calibrationJsonUtf8, int viewIndex,
     const Point2D* pixels, Point2D* worldXYOut, int count);
 
+// 使用针孔内参与畸变系数对图像做 lens undistort；alpha<0 保持原 K 与尺寸，0..1 使用 getOptimalNewCameraMatrix 裁剪黑边
+int UndistortImageWithIntrinsics(const Image* src, Image* dst,
+    double fx, double fy, double cx, double cy,
+    double k1, double k2, double p1, double p2, double k3,
+    double alpha);
+
+// 从 CalibrationJson 读取 intrinsics 后调用 UndistortImageWithIntrinsics
+int UndistortImageFromCalibrationJson(const Image* src, Image* dst, const char* calibrationJsonUtf8, double alpha);
+
+// 将图像透视展开到棋盘平面（鸟瞰）：用 extrinsicsPerView[viewIndex] + 棋盘尺寸；pxPerMm 为输出 mm→像素比例
+int WarpImageToChessboardPlane(const Image* src, Image* dst,
+    double fx, double fy, double cx, double cy,
+    double k1, double k2, double p1, double p2, double k3,
+    const double rvec[3], const double tvec[3],
+    int boardCols, int boardRows, double squareSizeMm, double pxPerMm,
+    int perspectiveOutputMode, int assumeUndistortedInput, int outputSizeMode);
+
+int WarpImageToChessboardPlaneFromCalibrationJson(const Image* src, Image* dst,
+    const char* calibrationJsonUtf8, int viewIndex,
+    int boardCols, int boardRows, double squareSizeMm, double pxPerMm,
+    int perspectiveOutputMode, int assumeUndistortedInput, int outputSizeMode);
+
 // ========== 标定 ==========
 
 // 9 点仿射标定（cv::solve SVD 求解超定方程组）

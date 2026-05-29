@@ -27,7 +27,8 @@ CALIB_API Image* CALIB_CreateImage() {
 CALIB_API void CALIB_FreeImage(Image* img) {
     if (img) {
         if (img->data) {
-            delete[] img->data;
+            free(img->data);
+            img->data = nullptr;
         }
         delete img;
     }
@@ -46,11 +47,11 @@ CALIB_API int CALIB_CreateBlankImage(Image* img, int width, int height, int chan
     int rowSize = width * channels;
     if (rowSize % 4 != 0) rowSize = ((rowSize / 4) + 1) * 4;  // Align to 4 bytes
 
-    if (img->data) delete[] img->data;
+    if (img->data) free(img->data);
     img->width = width;
     img->height = height;
     img->channels = channels;
-    img->data = (unsigned char*)malloc(rowSize * height);
+    img->data = (unsigned char*)malloc((size_t)rowSize * (size_t)height);
     if (!img->data) return -1;
 
     memset(img->data, 0, rowSize * height);
@@ -169,6 +170,26 @@ CALIB_API int CALIB_PixelsToChessboardPlaneFromCalibrationJson(
     Point2D* worldXYOut,
     int count) {
     return ::PixelsToChessboardPlaneXYFromCalibrationJson(calibrationJsonUtf8, viewIndex, pixels, worldXYOut, count);
+}
+
+CALIB_API int CALIB_UndistortImageWithIntrinsics(Image* src, Image* dst,
+    double fx, double fy, double cx, double cy,
+    double k1, double k2, double p1, double p2, double k3,
+    double alpha) {
+    return ::UndistortImageWithIntrinsics(src, dst, fx, fy, cx, cy, k1, k2, p1, p2, k3, alpha);
+}
+
+CALIB_API int CALIB_UndistortImageFromCalibrationJson(Image* src, Image* dst,
+    const char* calibrationJsonUtf8, double alpha) {
+    return ::UndistortImageFromCalibrationJson(src, dst, calibrationJsonUtf8, alpha);
+}
+
+CALIB_API int CALIB_WarpImageToChessboardPlaneFromCalibrationJson(Image* src, Image* dst,
+    const char* calibrationJsonUtf8, int viewIndex,
+    int boardCols, int boardRows, double squareSizeMm, double pxPerMm,
+    int perspectiveOutputMode, int assumeUndistortedInput, int outputSizeMode) {
+    return ::WarpImageToChessboardPlaneFromCalibrationJson(src, dst, calibrationJsonUtf8, viewIndex,
+        boardCols, boardRows, squareSizeMm, pxPerMm, perspectiveOutputMode, assumeUndistortedInput, outputSizeMode);
 }
 
 // ================================================================

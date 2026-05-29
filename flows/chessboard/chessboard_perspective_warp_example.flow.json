@@ -1,0 +1,90 @@
+{
+  "Nodes": [
+    {
+      "Id": "cba52004-1000-4000-8000-000000000001",
+      "TypeId": "chessboard_calibrate_intrinsics",
+      "X": 60,
+      "Y": 80,
+      "Params": {
+        "imageDirectory": "D:/work/data/chessboard",
+        "extensions": ".bmp",
+        "namePrefix": "Image_",
+        "cols": "9",
+        "rows": "6",
+        "squareSizeMm": "25"
+      }
+    },
+    {
+      "Id": "cba52004-1000-4000-8000-000000000002",
+      "TypeId": "load_image",
+      "X": 60,
+      "Y": 240,
+      "Params": {
+        "filePath": "D:/work/data/chessboard/Image_20260529133906040.bmp"
+      }
+    },
+    {
+      "Id": "cba52004-1000-4000-8000-000000000003",
+      "TypeId": "intrinsics_undistort_image",
+      "X": 320,
+      "Y": 240,
+      "Params": {
+        "alpha": "-1"
+      }
+    },
+    {
+      "Id": "cba52004-1000-4000-8000-000000000004",
+      "TypeId": "chessboard_perspective_warp_image",
+      "X": 580,
+      "Y": 240,
+      "Params": {
+        "viewIndex": "8",
+        "cols": "9",
+        "rows": "6",
+        "squareSizeMm": "25",
+        "pxPerMm": "1"
+      }
+    },
+    {
+      "Id": "cba52004-1000-4000-8000-000000000005",
+      "TypeId": "save_image",
+      "X": 860,
+      "Y": 240,
+      "Params": {
+        "filePath": "../../../../../test_images/perspective_warp_sample.bmp"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "cba52004-1000-4000-8000-000000000001",
+      "FromPort": "CalibrationJson",
+      "ToNodeId": "cba52004-1000-4000-8000-000000000003",
+      "ToPort": "CalibrationJson"
+    },
+    {
+      "FromNodeId": "cba52004-1000-4000-8000-000000000001",
+      "FromPort": "CalibrationJson",
+      "ToNodeId": "cba52004-1000-4000-8000-000000000004",
+      "ToPort": "CalibrationJson"
+    },
+    {
+      "FromNodeId": "cba52004-1000-4000-8000-000000000002",
+      "FromPort": "Image",
+      "ToNodeId": "cba52004-1000-4000-8000-000000000003",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "cba52004-1000-4000-8000-000000000003",
+      "FromPort": "Out",
+      "ToNodeId": "cba52004-1000-4000-8000-000000000004",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "cba52004-1000-4000-8000-000000000004",
+      "FromPort": "Out",
+      "ToNodeId": "cba52004-1000-4000-8000-000000000005",
+      "ToPort": "Image"
+    }
+  ]
+}

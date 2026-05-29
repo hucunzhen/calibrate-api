@@ -1,0 +1,70 @@
+{
+  "Nodes": [
+    {
+      "Id": "cba52002-1000-4000-8000-000000000001",
+      "TypeId": "chessboard_calibrate_intrinsics",
+      "X": 80,
+      "Y": 120,
+      "Params": {
+        "imageDirectory": "D:\\work\\data\\chessboard",
+        "extensions": ".bmp",
+        "namePrefix": "Image_",
+        "imagePaths": "",
+        "cols": "11",
+        "rows": "8",
+        "squareSizeMm": "5"
+      }
+    },
+    {
+      "Id": "cba52002-1000-4000-8000-000000000002",
+      "TypeId": "display_calibration",
+      "X": 383,
+      "Y": 294,
+      "Params": {}
+    },
+    {
+      "Id": "cba52002-1000-4000-8000-000000000003",
+      "TypeId": "save_text",
+      "X": 720,
+      "Y": 120,
+      "Params": {
+        "filePath": "../../../../../test_images/chessboard_calibration_from_dir.json"
+      }
+    },
+    {
+      "Id": "6e4afabe-ca7b-4ae7-b55d-ff80ce91a4bc",
+      "TypeId": "save_calibration_result",
+      "X": 715,
+      "Y": 266,
+      "Params": {
+        "filePath": "calibration_result.json"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "cba52002-1000-4000-8000-000000000001",
+      "FromPort": "CalibrationJson",
+      "ToNodeId": "cba52002-1000-4000-8000-000000000002",
+      "ToPort": "CalibrationJson"
+    },
+    {
+      "FromNodeId": "cba52002-1000-4000-8000-000000000001",
+      "FromPort": "CalibrationJson",
+      "ToNodeId": "cba52002-1000-4000-8000-000000000003",
+      "ToPort": "Text"
+    },
+    {
+      "FromNodeId": "cba52002-1000-4000-8000-000000000001",
+      "FromPort": "CalibrationJson",
+      "ToNodeId": "6e4afabe-ca7b-4ae7-b55d-ff80ce91a4bc",
+      "ToPort": "CalibrationJson"
+    },
+    {
+      "FromNodeId": "cba52002-1000-4000-8000-000000000001",
+      "FromPort": "Intrinsics",
+      "ToNodeId": "6e4afabe-ca7b-4ae7-b55d-ff80ce91a4bc",
+      "ToPort": "Intrinsics"
+    }
+  ]
+}

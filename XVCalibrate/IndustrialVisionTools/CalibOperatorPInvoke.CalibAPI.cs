@@ -3,6 +3,7 @@
 using System;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Runtime.InteropServices;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -294,6 +295,104 @@ namespace CalibOperatorPInvoke
         }
 
         /// <summary>
+        /// 规范为透视/去畸变可用的完整棋盘标定 JSON（须含 intrinsics + extrinsicsPerView）。
+        /// 支持：标定算子输出的整包、save 包装格式内的 calibrationJson 字段、磁盘路径。
+        /// </summary>
+        public static string NormalizeChessboardCalibrationJson(string jsonOrFilePath)
+        {
+            if (string.IsNullOrWhiteSpace(jsonOrFilePath))
+                throw new ArgumentException("标定 JSON 不能为空", nameof(jsonOrFilePath));
+
+            string json = jsonOrFilePath.Trim();
+            if (File.Exists(json))
+                json = File.ReadAllText(json).Trim();
+
+            if (json.Length > 0 && json[0] == '\uFEFF')
+                json = json[1..].Trim();
+
+            if (json.Contains("\"extrinsicsPerView\"", StringComparison.Ordinal))
+                return json;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+                if (root.TryGetProperty("calibrationJson", out var calEl) && calEl.ValueKind == JsonValueKind.String)
+                {
+                    string inner = calEl.GetString() ?? "";
+                    if (inner.Contains("\"extrinsicsPerView\"", StringComparison.Ordinal))
+                        return inner;
+                }
+                if (root.TryGetProperty("CalibrationJson", out var calEl2) && calEl2.ValueKind == JsonValueKind.String)
+                {
+                    string inner = calEl2.GetString() ?? "";
+                    if (inner.Contains("\"extrinsicsPerView\"", StringComparison.Ordinal))
+                        return inner;
+                }
+            }
+            catch (JsonException)
+            {
+                // fall through
+            }
+
+            if (json.Contains("\"fx\"", StringComparison.Ordinal) || json.Contains("\"Fx\"", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "当前 JSON 只有相机内参，缺少 extrinsicsPerView，不能用于透视展开。\n" +
+                    "请使用「棋盘格内参标定」的 **CalibrationJson** 输出（整包），不要接 **IntrinsicsJson**；\n" +
+                    "或指定含 extrinsicsPerView 的完整文件，例如 test_images/chessboard_calibration_from_dir.json。");
+            }
+
+            throw new InvalidOperationException(
+                "无法识别的标定 JSON：透视展开需要含 intrinsics 与 extrinsicsPerView 的完整标定结果。");
+        }
+
+        /// <summary>内参去畸变用 JSON：完整包或仅内参短 JSON 均可。</summary>
+        public static string NormalizeIntrinsicsCalibrationJson(string jsonOrFilePath)
+        {
+            string json = NormalizeChessboardCalibrationJsonSafe(jsonOrFilePath);
+            if (json.Contains("\"intrinsics\"", StringComparison.Ordinal))
+                return json;
+            if (json.Contains("\"fx\"", StringComparison.Ordinal) || json.Contains("\"Fx\"", StringComparison.Ordinal))
+                return "{\"intrinsics\":" + json + "}";
+            throw new InvalidOperationException("无法从内参 JSON 解析 fx/fy/cx/cy。");
+        }
+
+        private static string NormalizeChessboardCalibrationJsonSafe(string jsonOrFilePath)
+        {
+            if (string.IsNullOrWhiteSpace(jsonOrFilePath))
+                return "";
+            string json = jsonOrFilePath.Trim();
+            if (File.Exists(json))
+                json = File.ReadAllText(json).Trim();
+            if (json.Length > 0 && json[0] == '\uFEFF')
+                json = json[1..].Trim();
+            return json;
+        }
+
+        /// <summary>确保 native Image.channels 为 1 或 3（部分路径 C# Channels 已更新但 native 未同步）。</summary>
+        public static void EnsureNativeImageChannels(CalibImage img)
+        {
+            if (img == null) throw new ArgumentNullException(nameof(img));
+            var n = img.GetNativeStruct();
+            if (n.data == IntPtr.Zero || n.width <= 0 || n.height <= 0)
+                throw new InvalidOperationException($"图像无效: {n.width}x{n.height} channels={n.channels}");
+
+            if (n.channels == 1 || n.channels == 3)
+            {
+                img.Channels = n.channels;
+                return;
+            }
+
+            int fix = img.Channels;
+            if (fix != 1 && fix != 3)
+                fix = 1;
+            n.channels = fix;
+            Marshal.StructureToPtr(n, img.NativePtr, false);
+            img.Channels = fix;
+        }
+
+        /// <summary>
         /// 多视图棋盘格标定：OpenCV calibrateCamera 优化求解内参、畸变，以及每张成功视图的外参 rvec/tvec（board→camera）。
         /// 返回的 calibrationJson 含 intrinsics、extrinsicsPerView、convention 字段。
         /// </summary>
@@ -343,6 +442,99 @@ namespace CalibOperatorPInvoke
                 result[i] = Point2D.FromNative(nativeOut[i]);
             return result;
         }
+
+        /// <summary>
+        /// 使用针孔内参与畸变系数对图像做 lens undistort（OpenCV cv::undistort）。
+        /// alpha &lt; 0：保持原 K 与尺寸；0..1：getOptimalNewCameraMatrix 裁剪黑边。
+        /// </summary>
+        public static CalibImage UndistortImage(CalibImage src, CameraIntrinsics intrinsics, double alpha = -1.0)
+        {
+            if (src == null) throw new ArgumentNullException(nameof(src));
+            int ch = src.Channels > 0 ? src.Channels : 3;
+            var dst = new CalibImage(src.Width, src.Height, ch);
+            int rc = NativeAPI.CALIB_UndistortImageWithIntrinsics(
+                src.NativePtr, dst.NativePtr,
+                intrinsics.Fx, intrinsics.Fy, intrinsics.Cx, intrinsics.Cy,
+                intrinsics.K1, intrinsics.K2, intrinsics.P1, intrinsics.P2, intrinsics.K3,
+                alpha);
+            if (rc != 0)
+                throw new InvalidOperationException($"内参畸变矫正失败 (code {rc})");
+            return dst;
+        }
+
+        /// <summary>从 CalibrationJson 读取 intrinsics 后 undistort。</summary>
+        public static CalibImage UndistortImage(CalibImage src, string calibrationJson, double alpha = -1.0)
+        {
+            if (src == null) throw new ArgumentNullException(nameof(src));
+            if (string.IsNullOrWhiteSpace(calibrationJson))
+                throw new ArgumentException("calibrationJson 不能为空", nameof(calibrationJson));
+            int ch = src.Channels > 0 ? src.Channels : 3;
+            var dst = new CalibImage(src.Width, src.Height, ch);
+            string calNorm = NormalizeIntrinsicsCalibrationJson(calibrationJson);
+            EnsureNativeImageChannels(src);
+            int rc = NativeAPI.CALIB_UndistortImageFromCalibrationJson(src.NativePtr, dst.NativePtr, calNorm, alpha);
+            if (rc != 0)
+                throw new InvalidOperationException($"内参畸变矫正失败 (code {rc})，请检查 CalibrationJson 是否含 intrinsics。");
+            SyncCalibImageFromNative(dst);
+            return dst;
+        }
+
+        /// <summary>透视展开到棋盘平面（鸟瞰），使用 CalibrationJson 内参 + extrinsicsPerView[viewIndex]。</summary>
+        public static CalibImage WarpToChessboardPlane(CalibImage src, string calibrationJson, int viewIndex,
+            int boardCols, int boardRows, double squareSizeMm, double pxPerMm = 1.0, int perspectiveOutputMode = 0,
+            bool assumeUndistortedInput = false, int outputSizeMode = 1)
+        {
+            if (src == null) throw new ArgumentNullException(nameof(src));
+            string calNorm = NormalizeChessboardCalibrationJson(calibrationJson);
+            if (boardCols < 2 || boardRows < 2)
+                throw new ArgumentOutOfRangeException(nameof(boardCols), "棋盘内侧角点列/行数须 >= 2");
+            if (squareSizeMm <= 0 || pxPerMm <= 0)
+                throw new ArgumentOutOfRangeException(nameof(squareSizeMm));
+
+            EnsureNativeImageChannels(src);
+            var sn = src.GetNativeStruct();
+            int ch = sn.channels is 1 or 3 ? sn.channels : 1;
+            int outW = (int)Math.Round((boardCols - 1) * squareSizeMm * pxPerMm);
+            int outH = (int)Math.Round((boardRows - 1) * squareSizeMm * pxPerMm);
+            if (outW < 8 || outH < 8)
+                throw new InvalidOperationException("透视矫正输出尺寸过小，请检查 squareSizeMm 与 pxPerMm。");
+
+            var dst = new CalibImage(outW, outH, ch);
+            int rc = NativeAPI.CALIB_WarpImageToChessboardPlaneFromCalibrationJson(
+                src.NativePtr, dst.NativePtr, calNorm, viewIndex, boardCols, boardRows, squareSizeMm, pxPerMm,
+                perspectiveOutputMode, assumeUndistortedInput ? 1 : 0, outputSizeMode);
+            if (rc != 0)
+            {
+                dst.Dispose();
+                throw new InvalidOperationException(
+                    $"透视矫正失败 (code {rc}): {DescribePerspectiveWarpError(rc)}");
+            }
+
+            SyncCalibImageFromNative(dst);
+            return dst;
+        }
+
+        private static void SyncCalibImageFromNative(CalibImage img)
+        {
+            var n = img.GetNativeStruct();
+            img.Width = n.width;
+            img.Height = n.height;
+            img.Channels = n.channels;
+        }
+
+        private static string DescribePerspectiveWarpError(int code) => code switch
+        {
+            -1 => "参数无效",
+            -2 => "棋盘 cols/rows/squareSizeMm/pxPerMm 无效",
+            -3 => "native 无法读取图像像素（channels 须为 1 或 3；请重新编译 CalibOperator.dll）",
+            -4 => "projectPoints 失败",
+            -5 => "输出尺寸过小",
+            -6 => "warpPerspective 失败",
+            -7 => "输出缓冲分配失败",
+            -8 => "整图(共面)透视画布过大，请检查 viewIndex/外参或改用 board/local",
+            -9 => "perspectiveOutputMode 无效（0=board 1=local 2=plane）",
+            _ => $"JSON 解析或 viewIndex 越界 (native code {code})，请确认接的是 CalibrationJson 整包且 viewIndex 有效"
+        };
 
         private static string Utf8NullTerminated(byte[] buf)
         {

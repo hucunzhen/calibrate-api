@@ -164,6 +164,25 @@ CALIB_API int CALIB_PixelsToChessboardPlaneFromCalibrationJson(
     Point2D* worldXYOut,
     int count);
 
+/**
+ * Undistort image with pinhole intrinsics + distortion. alpha&lt;0: same K/size; 0..1: cv::getOptimalNewCameraMatrix crop.
+ * Returns 0 on success.
+ */
+CALIB_API int CALIB_UndistortImageWithIntrinsics(Image* src, Image* dst,
+    double fx, double fy, double cx, double cy,
+    double k1, double k2, double p1, double p2, double k3,
+    double alpha);
+
+/** Parse intrinsics from CalibrationJson then undistort. Returns 0 on success. */
+CALIB_API int CALIB_UndistortImageFromCalibrationJson(Image* src, Image* dst,
+    const char* calibrationJsonUtf8, double alpha);
+
+/** Warp image to chessboard plane (bird's-eye) using CalibrationJson intrinsics + extrinsicsPerView[viewIndex]. */
+CALIB_API int CALIB_WarpImageToChessboardPlaneFromCalibrationJson(Image* src, Image* dst,
+    const char* calibrationJsonUtf8, int viewIndex,
+    int boardCols, int boardRows, double squareSizeMm, double pxPerMm,
+    int perspectiveOutputMode, int assumeUndistortedInput, int outputSizeMode);
+
 // ================================================================
 // Calibration
 // ================================================================
