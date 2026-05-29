@@ -1,0 +1,311 @@
+{
+  "Nodes": [
+    {
+      "Id": "b2000001-0001-4001-8001-000000000001",
+      "TypeId": "load_image",
+      "X": 246.976,
+      "Y": 0,
+      "Params": {
+        "filePath": "D:\\work\\data\\Image_20260518154103272.bmp"
+      }
+    },
+    {
+      "Id": "b2000001-0001-4001-8001-000000000010",
+      "TypeId": "halcon_coarse_shape_match",
+      "X": 748,
+      "Y": 96,
+      "Params": {
+        "angleStart": "-5",
+        "angleExtent": "10",
+        "minScore": "0.8",
+        "numMatches": "5",
+        "maxOverlap": "0.5",
+        "subPixel": "none",
+        "numLevels": "0",
+        "greediness": "0.85",
+        "allowRetry": "false"
+      }
+    },
+    {
+      "Id": "e1000001-0001-4001-8001-000000000011",
+      "TypeId": "halcon_coarse_shape_reduce_domain",
+      "X": 670,
+      "Y": 301,
+      "Params": {
+        "loopEmit": "true",
+        "candidateIndex": "0",
+        "maskErosionPx": "2",
+        "maskFillDilatePx": "0",
+        "contourLevel": "1",
+        "maxCandidates": "0"
+      }
+    },
+    {
+      "Id": "e1000001-0001-4001-8001-000000000016",
+      "TypeId": "halcon_reduce_domain_by_mask",
+      "X": 900,
+      "Y": 269,
+      "Params": {}
+    },
+    {
+      "Id": "b2000001-0001-4001-8001-000000000009",
+      "TypeId": "halcon_fine_deformable_match",
+      "X": 1249,
+      "Y": 320.6576,
+      "Params": {
+        "fineAngleMargin": "5",
+        "fineMinScore": "0.45",
+        "fineNumLevels": "0",
+        "fineGreediness": "0.75",
+        "fineScaleMin": "0.97",
+        "fineScaleMax": "1.03",
+        "deformedContourMode": "first",
+        "fineAllowFallback": "false"
+      }
+    },
+    {
+      "Id": "b2000001-0001-4001-8001-00000000000a",
+      "TypeId": "halcon_display_shape_match",
+      "X": 1508,
+      "Y": 5,
+      "Params": {
+        "contourLevel": "1",
+        "crossHalf": "14",
+        "strokeWidth": "2.5",
+        "drawScores": "true"
+      }
+    },
+    {
+      "Id": "b2000001-0001-4001-8001-00000000000b",
+      "TypeId": "display",
+      "X": 1576,
+      "Y": 365,
+      "Params": {
+        "dotRadius": "2",
+        "pointLineJoin": "auto"
+      }
+    },
+    {
+      "Id": "b2000001-0001-4001-8001-00000000000c",
+      "TypeId": "halcon_load_shape_model",
+      "X": 383.7231999999999,
+      "Y": 202.32960000000003,
+      "Params": {
+        "filePath": "D:\\work\\calibrate-api\\flows\\shape_model_fixed.shm"
+      }
+    },
+    {
+      "Id": "b2000001-0001-4001-8001-00000000000d",
+      "TypeId": "halcon_load_deformable_model",
+      "X": 490.0511999999999,
+      "Y": 432.0608,
+      "Params": {
+        "filePath": "D:\\work\\calibrate-api\\flows\\deformable_model.dfm"
+      }
+    },
+    {
+      "Id": "7d44141a-44cc-40b3-a07d-144c44622e0e",
+      "TypeId": "halcon_display_shape_match",
+      "X": 1085,
+      "Y": 31,
+      "Params": {
+        "contourLevel": "1",
+        "crossHalf": "14",
+        "strokeWidth": "2.5",
+        "drawScores": "true"
+      }
+    },
+    {
+      "Id": "e1000001-0001-4001-8001-000000000013",
+      "TypeId": "display",
+      "X": 1085,
+      "Y": 520,
+      "Params": {
+        "dotRadius": "2",
+        "pointLineJoin": "auto"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000009",
+      "FromPort": "Row",
+      "ToNodeId": "b2000001-0001-4001-8001-00000000000a",
+      "ToPort": "Row"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000009",
+      "FromPort": "Column",
+      "ToNodeId": "b2000001-0001-4001-8001-00000000000a",
+      "ToPort": "Column"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000009",
+      "FromPort": "Angle",
+      "ToNodeId": "b2000001-0001-4001-8001-00000000000a",
+      "ToPort": "Angle"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000009",
+      "FromPort": "Score",
+      "ToNodeId": "b2000001-0001-4001-8001-00000000000a",
+      "ToPort": "Score"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000009",
+      "FromPort": "DeformedXld",
+      "ToNodeId": "b2000001-0001-4001-8001-00000000000b",
+      "ToPort": "Xld"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-00000000000c",
+      "FromPort": "ModelId",
+      "ToNodeId": "b2000001-0001-4001-8001-000000000010",
+      "ToPort": "ModelId"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-00000000000c",
+      "FromPort": "ModelId",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000011",
+      "ToPort": "ModelId"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-00000000000c",
+      "FromPort": "ModelId",
+      "ToNodeId": "b2000001-0001-4001-8001-00000000000a",
+      "ToPort": "ModelId"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-00000000000d",
+      "FromPort": "ModelId",
+      "ToNodeId": "b2000001-0001-4001-8001-000000000009",
+      "ToPort": "DeformableModelId"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000001",
+      "FromPort": "Image",
+      "ToNodeId": "b2000001-0001-4001-8001-000000000010",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000001",
+      "FromPort": "Image",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000011",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000001",
+      "FromPort": "Image",
+      "ToNodeId": "b2000001-0001-4001-8001-00000000000a",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000001",
+      "FromPort": "Image",
+      "ToNodeId": "b2000001-0001-4001-8001-00000000000b",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000001",
+      "FromPort": "Image",
+      "ToNodeId": "7d44141a-44cc-40b3-a07d-144c44622e0e",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-00000000000c",
+      "FromPort": "ModelId",
+      "ToNodeId": "7d44141a-44cc-40b3-a07d-144c44622e0e",
+      "ToPort": "ModelId"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Row",
+      "ToNodeId": "7d44141a-44cc-40b3-a07d-144c44622e0e",
+      "ToPort": "Row"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Column",
+      "ToNodeId": "7d44141a-44cc-40b3-a07d-144c44622e0e",
+      "ToPort": "Column"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Angle",
+      "ToNodeId": "7d44141a-44cc-40b3-a07d-144c44622e0e",
+      "ToPort": "Angle"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Score",
+      "ToNodeId": "7d44141a-44cc-40b3-a07d-144c44622e0e",
+      "ToPort": "Score"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Row",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000011",
+      "ToPort": "CoarseRow"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Column",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000011",
+      "ToPort": "CoarseColumn"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Angle",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000011",
+      "ToPort": "CoarseAngle"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Score",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000011",
+      "ToPort": "CoarseScore"
+    },
+    {
+      "FromNodeId": "e1000001-0001-4001-8001-000000000011",
+      "FromPort": "Mask",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000016",
+      "ToPort": "Mask"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000001",
+      "FromPort": "Image",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000016",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "e1000001-0001-4001-8001-000000000016",
+      "FromPort": "Out",
+      "ToNodeId": "b2000001-0001-4001-8001-000000000009",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "e1000001-0001-4001-8001-000000000011",
+      "FromPort": "CoarseRowOut",
+      "ToNodeId": "b2000001-0001-4001-8001-000000000009",
+      "ToPort": "CoarseRow"
+    },
+    {
+      "FromNodeId": "e1000001-0001-4001-8001-000000000011",
+      "FromPort": "CoarseColumnOut",
+      "ToNodeId": "b2000001-0001-4001-8001-000000000009",
+      "ToPort": "CoarseColumn"
+    },
+    {
+      "FromNodeId": "e1000001-0001-4001-8001-000000000011",
+      "FromPort": "CoarseAngleOut",
+      "ToNodeId": "b2000001-0001-4001-8001-000000000009",
+      "ToPort": "CoarseAngle"
+    },
+    {
+      "FromNodeId": "e1000001-0001-4001-8001-000000000011",
+      "FromPort": "Mask",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000013",
+      "ToPort": "Image"
+    }
+  ]
+}

@@ -61,7 +61,8 @@
                                                                    FontSize="12" FontWeight="SemiBold"/>
                                                         <TextBlock Text="{Binding Description}" Foreground="#858585"
                                                                    FontSize="10" Margin="0,2,0,0"
-                                                                   TextTrimming="CharacterEllipsis"/>
+                                                                   TextWrapping="Wrap"
+                                                                   ToolTip="{Binding Description}"/>
                                                     </StackPanel>
                                                 </Border>
                                             </DataTemplate>

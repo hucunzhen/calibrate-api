@@ -336,7 +336,7 @@ namespace CalibOperatorCLI_Example
             return Path.GetFullPath(Path.Combine(baseDir, path));
         }
 
-        private static string? FindRepoRoot()
+        public static string? FindRepoRoot()
         {
             var dir = new DirectoryInfo(AppContext.BaseDirectory);
             while (dir != null)

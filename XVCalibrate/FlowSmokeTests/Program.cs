@@ -14,6 +14,15 @@ namespace FlowSmokeTests
                     root = args[++i];
             }
 
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i] == "--halcon-coarse-fine")
+                {
+                    Console.WriteLine("=== HalconCoarseFineSmokeTest ===");
+                    return HalconCoarseFineSmokeTest.Run(root);
+                }
+            }
+
             Console.WriteLine("=== FlowCalibrationSmokeTest ===");
             return FlowCalibrationSmokeTest.Run(root);
         }

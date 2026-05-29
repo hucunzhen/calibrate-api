@@ -6093,6 +6093,252 @@ namespace CalibOperatorCLI_Example
             return sorted.Where(downstream.Contains).ToList();
         }
 
+#if HALCON_ENABLED
+        private static HalconCoarseMaskBatch BuildCoarseShapeMaskBatchForNode(
+            FlowNode maskNode,
+            IReadOnlyDictionary<string, object?> inputs)
+        {
+            var rdImg = inputs["In"] as CalibImage
+                        ?? throw new InvalidOperationException("HALCON 粗形状Mask: 缺少 In");
+            long rdModelId = Convert.ToInt64(inputs["ModelId"]);
+            if (inputs["CoarseRow"] is not double[] rdRows || inputs["CoarseColumn"] is not double[] rdCols)
+                throw new InvalidOperationException("HALCON 粗形状Mask: 请连接粗定位 CoarseRow/CoarseColumn");
+            inputs.TryGetValue("CoarseAngle", out var rdAngObj);
+            double[]? rdAngles = rdAngObj as double[];
+            double[]? rdScores = inputs.TryGetValue("CoarseScore", out var rdScObj) && rdScObj is double[] rdScArr
+                ? rdScArr
+                : null;
+
+            double maskErosionPx = double.TryParse(
+                maskNode.Params.GetValueOrDefault("maskErosionPx", "2"),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out double me)
+                ? me
+                : 2;
+            int contourLevel = int.TryParse(
+                maskNode.Params.GetValueOrDefault("contourLevel", "1"),
+                System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out int cl)
+                ? Math.Max(1, cl)
+                : 1;
+            int maxCandidates = int.TryParse(
+                maskNode.Params.GetValueOrDefault("maxCandidates", "0"),
+                System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out int mc)
+                ? Math.Max(0, mc)
+                : 0;
+            double maskFillDilatePx = double.TryParse(
+                maskNode.Params.GetValueOrDefault("maskFillDilatePx", "0"),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out double mfd)
+                ? Math.Max(0, mfd)
+                : 0;
+
+            return HalconFlowBridge.BuildCoarseShapeMaskBatch(
+                rdImg,
+                rdModelId,
+                rdRows,
+                rdCols,
+                rdAngles,
+                rdScores,
+                maskErosionPx,
+                contourLevel,
+                maxCandidates,
+                maskFillDilatePx);
+        }
+
+        private static void SetCoarseShapeMaskRoundOutputs(FlowNode maskNode, HalconCoarseMaskBatch batch, int index)
+        {
+            maskNode.Outputs["Mask"] = batch.Masks[index];
+            maskNode.Outputs["MaskIndex"] = index;
+            maskNode.Outputs["MaskCount"] = batch.Count;
+            maskNode.Outputs["CoarseRowOut"] = batch.CoarseRows[index];
+            maskNode.Outputs["CoarseColumnOut"] = batch.CoarseCols[index];
+            maskNode.Outputs["CoarseAngleOut"] = batch.CoarseAngles[index];
+            maskNode.ResultSummary = $"Mask {index + 1}/{batch.Count}";
+        }
+
+        private sealed class FineMatchRoundAccumulator
+        {
+            public readonly List<double> Rows = new();
+            public readonly List<double> Cols = new();
+            public readonly List<double> Angles = new();
+            public readonly List<double> Scores = new();
+            public readonly List<Point2D[]> Contours = new();
+            public int Width;
+            public int Height;
+        }
+
+        private static void AccumulateFineMatchRound(FlowNode fineNode, FineMatchRoundAccumulator acc)
+        {
+            if (fineNode.Outputs.TryGetValue("Row", out var rowObj))
+            {
+                if (rowObj is double[] rowArr)
+                    acc.Rows.AddRange(rowArr);
+                else if (HalconFlowBridge.TryReadCoarseScalar(rowObj, out double rowScalar))
+                    acc.Rows.Add(rowScalar);
+            }
+
+            if (fineNode.Outputs.TryGetValue("Column", out var colObj))
+            {
+                if (colObj is double[] colArr)
+                    acc.Cols.AddRange(colArr);
+                else if (HalconFlowBridge.TryReadCoarseScalar(colObj, out double colScalar))
+                    acc.Cols.Add(colScalar);
+            }
+
+            if (fineNode.Outputs.TryGetValue("Angle", out var angObj))
+            {
+                if (angObj is double[] angArr)
+                    acc.Angles.AddRange(angArr);
+                else if (HalconFlowBridge.TryReadCoarseScalar(angObj, out double angScalar))
+                    acc.Angles.Add(angScalar);
+            }
+
+            if (fineNode.Outputs.TryGetValue("Score", out var scObj))
+            {
+                if (scObj is double[] scArr)
+                    acc.Scores.AddRange(scArr);
+                else if (HalconFlowBridge.TryReadCoarseScalar(scObj, out double scScalar))
+                    acc.Scores.Add(scScalar);
+            }
+
+            if (fineNode.Outputs.TryGetValue("DeformedXld", out var xldObj)
+                && xldObj is HalconXldContourBundle bundle
+                && bundle.Contours != null)
+            {
+                acc.Width = bundle.Width;
+                acc.Height = bundle.Height;
+                acc.Contours.AddRange(bundle.Contours);
+            }
+        }
+
+        private static void ApplyFineMatchAccumulator(FlowNode fineNode, FineMatchRoundAccumulator acc)
+        {
+            fineNode.Outputs["Row"] = acc.Rows.ToArray();
+            fineNode.Outputs["Column"] = acc.Cols.ToArray();
+            fineNode.Outputs["Angle"] = acc.Angles.ToArray();
+            fineNode.Outputs["Score"] = acc.Scores.ToArray();
+            if (acc.Contours.Count > 0)
+            {
+                fineNode.Outputs["DeformedXld"] = new HalconXldContourBundle
+                {
+                    Width = acc.Width,
+                    Height = acc.Height,
+                    Contours = acc.Contours
+                };
+            }
+
+            fineNode.ResultSummary = acc.Rows.Count == 0
+                ? "精匹配无结果"
+                : $"精 {acc.Rows.Count} 个（Mask 循环汇总）";
+        }
+
+        private async System.Threading.Tasks.Task<bool> RunCoarseShapeMaskEachLoopAsync(List<FlowNode> sorted, FlowNode maskNode)
+        {
+            var downstream = GetDownstreamNodes(maskNode);
+            var preNodes = sorted.Where(n => !downstream.Contains(n)).ToList();
+            var postNodes = GetOrderedDownstreamOfNode(maskNode);
+            var fineNodes = postNodes.Where(n => n.Def.TypeId == "halcon_fine_deformable_match").ToList();
+            var fineAccumulators = fineNodes.ToDictionary(n => n.Id, _ => new FineMatchRoundAccumulator());
+
+            AppendLog(
+                $"检测到粗形状Mask循环: {maskNode.Def.DisplayName}，前置 {preNodes.Count} 节点，下游 {postNodes.Count} 节点");
+
+            int successCountPre = 0;
+            for (int i = 0; i < preNodes.Count; i++)
+            {
+                ThrowIfExecutionCancelled();
+                var node = preNodes[i];
+                StatusText.Text = $"Mask循环-前置 [{i + 1}/{preNodes.Count}] {node.Def.DisplayName}...";
+                AppendLog($"[MASK-PRE {i + 1}/{preNodes.Count}] 执行: {node.Def.DisplayName}");
+                await System.Threading.Tasks.Task.Yield();
+                try
+                {
+                    await ExecuteNodeForRunAsync(node, "MASK-PRE");
+                    successCountPre++;
+                }
+                catch (FlowExecutionGracefulStopException ex)
+                {
+                    AppendLog($"[MASK-PRE][STOP] {node.Def.DisplayName}: {ex.Message}", true);
+                    if (ex.InnerException != null)
+                        AppendLog($"  {ex.InnerException.Message}", true);
+                    StatusText.Text = ex.Message;
+                    StatusText.Foreground = new SolidColorBrush(Colors.Orange);
+                    AppendLog("========== 执行中止 ==========");
+                    return false;
+                }
+            }
+
+            var batch = BuildCoarseShapeMaskBatchForNode(maskNode, GetNodeInputs(maskNode));
+            if (batch.Count == 0)
+                throw new InvalidOperationException("HALCON 粗形状Mask: 无粗候选，无法生成 Mask");
+
+            maskNode.Executed = true;
+            maskNode.ErrorMessage = null;
+            SetNodeStatus(maskNode, false);
+            UpdateNodeSummary(maskNode);
+
+            for (int mi = 0; mi < batch.Count; mi++)
+            {
+                ThrowIfExecutionCancelled();
+                SetCoarseShapeMaskRoundOutputs(maskNode, batch, mi);
+                UpdateNodeSummary(maskNode);
+                AppendLog($"[MASK {mi + 1}/{batch.Count}] 开始下游 {postNodes.Count} 节点");
+
+                for (int j = 0; j < postNodes.Count; j++)
+                {
+                    ThrowIfExecutionCancelled();
+                    var node = postNodes[j];
+                    node.Outputs.Clear();
+                    node.ErrorMessage = null;
+                    node.Executed = false;
+                    StatusText.Text =
+                        $"Mask[{mi + 1}/{batch.Count}] [{j + 1}/{postNodes.Count}] {node.Def.DisplayName}...";
+                    await System.Threading.Tasks.Task.Yield();
+                    try
+                    {
+                        await ExecuteNodeForRunAsync(node, $"M{mi + 1}");
+                    }
+                    catch (FlowExecutionGracefulStopException ex)
+                    {
+                        AppendLog($"[MASK][STOP] {node.Def.DisplayName}: {ex.Message}", true);
+                        if (ex.InnerException != null)
+                            AppendLog($"  {ex.InnerException.Message}", true);
+                        StatusText.Text = ex.Message;
+                        StatusText.Foreground = new SolidColorBrush(Colors.Orange);
+                        AppendLog("========== 执行中止 ==========");
+                        return false;
+                    }
+
+                    if (fineAccumulators.TryGetValue(node.Id, out var acc))
+                        AccumulateFineMatchRound(node, acc);
+                }
+            }
+
+            foreach (FlowNode fn in fineNodes)
+            {
+                fn.Executed = true;
+                fn.ErrorMessage = null;
+                SetNodeStatus(fn, false);
+                ApplyFineMatchAccumulator(fn, fineAccumulators[fn.Id]);
+                UpdateNodeSummary(fn);
+            }
+
+            int fineTotal = fineNodes.Sum(fn => fineAccumulators[fn.Id].Rows.Count);
+            StatusText.Text =
+                $"粗形状Mask循环完成: 前置 {successCountPre}/{preNodes.Count}，{batch.Count} 张 Mask，精匹配 {fineTotal} 个";
+            StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
+            AppendLog(
+                $"========== 粗形状Mask循环完成: masks={batch.Count}，精匹配汇总={fineTotal} ==========");
+            return true;
+        }
+#endif
+
         /// <summary>循环结束后才执行的节点：exposure_fusion，以及仅由 flow_sink / 已延后节点供数的下游。</summary>
         private HashSet<FlowNode> ComputePostLoopDeferredNodes(IReadOnlyList<FlowNode> postNodes)
         {
@@ -10524,6 +10770,251 @@ namespace CalibOperatorCLI_Example
                         node.ResultSummary = $"HALCON 已加载 .shm ModelId={modelId}";
                         break;
                     }
+
+                    case "halcon_create_deformable_model":
+                    {
+                        inputs.TryGetValue("Xld", out var xldObj);
+                        var xldBundle = xldObj as HalconXldContourBundle;
+                        int numLevels = int.TryParse(node.Params.GetValueOrDefault("numLevels"), out var nl) ? nl : 4;
+                        double angleStart = double.TryParse(node.Params.GetValueOrDefault("angleStart"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var asv) ? asv : -30.0;
+                        double angleExtent = double.TryParse(node.Params.GetValueOrDefault("angleExtent"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var aev) ? aev : 60.0;
+                        double angleStep = double.TryParse(node.Params.GetValueOrDefault("angleStep"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var apv) ? apv : 0.5;
+                        string optimization = node.Params.GetValueOrDefault("optimization") ?? "auto";
+                        string metric = node.Params.GetValueOrDefault("metric") ?? "ignore_local_polarity";
+                        int minContrast = int.TryParse(node.Params.GetValueOrDefault("minContrast"), out var mc) ? mc : 5;
+                        double scaleMin = double.TryParse(node.Params.GetValueOrDefault("scaleMin"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var smn) ? smn : 0.97;
+                        double scaleMax = double.TryParse(node.Params.GetValueOrDefault("scaleMax"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var smx) ? smx : 1.03;
+                        string deformableKind = (node.Params.GetValueOrDefault("deformableKind") ?? "local").Trim();
+                        bool planar = deformableKind.Equals("planar", StringComparison.OrdinalIgnoreCase)
+                            || deformableKind.Equals("planar_uncalib", StringComparison.OrdinalIgnoreCase)
+                            || deformableKind.Equals("perspective", StringComparison.OrdinalIgnoreCase);
+                        long modelId = HalconFlowBridge.CreateShapeModelFromXld(xldBundle, new HalconShapeModelCreateOptions
+                        {
+                            ModelKind = planar ? HalconShapeModelKind.PlanarDeformable : HalconShapeModelKind.Deformable,
+                            SourceKind = HalconShapeModelSourceKind.ThresholdXld,
+                            NumLevels = numLevels,
+                            AngleStartDeg = angleStart,
+                            AngleExtentDeg = angleExtent,
+                            AngleStepDeg = angleStep,
+                            Optimization = optimization,
+                            Metric = metric,
+                            MinContrast = minContrast,
+                            ScaleMin = scaleMin,
+                            ScaleMax = scaleMax
+                        });
+                        node.Outputs["ModelId"] = modelId;
+                        node.ResultSummary = $"HALCON CreateDeformableModel ModelId={modelId}";
+                        break;
+                    }
+
+                    case "halcon_load_deformable_model":
+                    {
+                        string configuredPath = node.Params.GetValueOrDefault("filePath", "")?.Trim() ?? "";
+                        if (string.IsNullOrWhiteSpace(configuredPath))
+                            throw new InvalidOperationException("HALCON 加载可变形模型: filePath 为空");
+                        string resolvedPath = ResolveCompositeFlowPath(configuredPath);
+                        long modelId = HalconFlowBridge.LoadDeformableModelFromFile(resolvedPath);
+                        node.Outputs["ModelId"] = modelId;
+                        string subtypeLabel = HalconFlowBridge.GetDeformableModelSubtypeLabel(modelId);
+                        node.ResultSummary = $"HALCON 已加载 .dfm ({subtypeLabel}) ModelId={modelId}";
+                        break;
+                    }
+
+                    case "halcon_coarse_shape_match":
+                    {
+                        var coarseImg = inputs["In"] as CalibImage;
+                        if (coarseImg == null)
+                            throw new InvalidOperationException("HALCON 粗定位: 缺少 In");
+                        long modelId = Convert.ToInt64(inputs["ModelId"]);
+                        static double Pc(IReadOnlyDictionary<string, string> p, string key, double def) =>
+                            double.TryParse(p.GetValueOrDefault(key), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : def;
+                        static int Pic(IReadOnlyDictionary<string, string> p, string key, int def) =>
+                            int.TryParse(p.GetValueOrDefault(key), out var v) ? v : def;
+                        static bool Pbc(IReadOnlyDictionary<string, string> p, string key, bool def) =>
+                            bool.TryParse(p.GetValueOrDefault(key), out var v) ? v : def;
+                        static string Psc(IReadOnlyDictionary<string, string> p, string key, string def) =>
+                            string.IsNullOrWhiteSpace(p.GetValueOrDefault(key)) ? def : p[key]!.Trim();
+
+                        var (rows, cols, angles, scores) = HalconFlowBridge.CoarseShapeMatch(
+                            coarseImg, modelId,
+                            Pc(node.Params, "angleStart", -30),
+                            Pc(node.Params, "angleExtent", 60),
+                            Pc(node.Params, "minScore", 0.4),
+                            Pic(node.Params, "numMatches", 5),
+                            Pc(node.Params, "maxOverlap", 0.5),
+                            Psc(node.Params, "subPixel", "none"),
+                            Pic(node.Params, "numLevels", 0),
+                            Pc(node.Params, "greediness", 0.85),
+                            Pbc(node.Params, "allowRetry", false));
+                        node.Outputs["Row"] = rows;
+                        node.Outputs["Column"] = cols;
+                        node.Outputs["Angle"] = angles;
+                        node.Outputs["Score"] = scores;
+                        node.ResultSummary = $"HALCON 粗定位 {rows.Length} 个候选";
+                        break;
+                    }
+
+                    case "halcon_coarse_shape_reduce_domain":
+                    {
+#if HALCON_ENABLED
+                        var batch = BuildCoarseShapeMaskBatchForNode(node, inputs);
+                        if (batch.Count == 0)
+                            throw new InvalidOperationException("HALCON 粗形状Mask: 无粗候选");
+
+                        int candidateIndex = int.TryParse(
+                            node.Params.GetValueOrDefault("candidateIndex", "0"),
+                            System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out int ci)
+                            ? ci
+                            : 0;
+                        if (candidateIndex < 0 || candidateIndex >= batch.Count)
+                            throw new InvalidOperationException(
+                                $"HALCON 粗形状Mask: candidateIndex={candidateIndex} 超出范围 [0,{batch.Count - 1}]");
+
+                        SetCoarseShapeMaskRoundOutputs(node, batch, candidateIndex);
+                        node.ResultSummary = $"粗形状填充Mask {candidateIndex + 1}/{batch.Count}";
+                        break;
+#else
+                        throw new InvalidOperationException("HALCON 粗形状Mask: 需要 HALCON 支持编译");
+#endif
+                    }
+
+                    case "halcon_reduce_domain_by_mask":
+                    {
+#if HALCON_ENABLED
+                        var srcImg = inputs["Image"] as CalibImage;
+                        if (srcImg == null)
+                            throw new InvalidOperationException("HALCON Mask域内图: 缺少 Image");
+                        if (inputs["Mask"] is not CalibImage maskImg)
+                            throw new InvalidOperationException("HALCON Mask域内图: 缺少单张 Mask");
+
+                        CalibImage domainOut = HalconFlowBridge.ReduceDomainByMask(srcImg, maskImg);
+                        node.Outputs["Out"] = domainOut;
+                        node.ResultSummary = $"reduce_domain 域内图 {srcImg.Width}×{srcImg.Height}";
+                        break;
+#else
+                        throw new InvalidOperationException("HALCON Mask域内图: 需要 HALCON 支持编译");
+#endif
+                    }
+
+                    case "halcon_fine_deformable_match":
+                    {
+#if HALCON_ENABLED
+                        if (inputs["In"] is not CalibImage domainImg)
+                            throw new InvalidOperationException("HALCON 可变形精匹配: 缺少 In（接 halcon_reduce_domain_by_mask 的 Out）");
+                        long deformId = Convert.ToInt64(inputs["DeformableModelId"]);
+                        inputs.TryGetValue("CoarseRow", out var crObj);
+                        inputs.TryGetValue("CoarseColumn", out var ccObj);
+                        inputs.TryGetValue("CoarseAngle", out var caObj);
+                        double anchorRow = HalconFlowBridge.TryReadCoarseScalar(crObj, out double ar) ? ar : double.NaN;
+                        double anchorCol = HalconFlowBridge.TryReadCoarseScalar(ccObj, out double ac) ? ac : double.NaN;
+                        double anchorAng = HalconFlowBridge.TryReadCoarseScalar(caObj, out double aa) ? aa : 0;
+
+                        static double Pf(IReadOnlyDictionary<string, string> p, string key, double def) =>
+                            double.TryParse(p.GetValueOrDefault(key), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : def;
+                        static int Pfi(IReadOnlyDictionary<string, string> p, string key, int def) =>
+                            int.TryParse(p.GetValueOrDefault(key), out var v) ? v : def;
+                        static bool Pfb(IReadOnlyDictionary<string, string> p, string key, bool def) =>
+                            bool.TryParse(p.GetValueOrDefault(key), out var v) ? v : def;
+                        static string Pfs(IReadOnlyDictionary<string, string> p, string key, string def) =>
+                            string.IsNullOrWhiteSpace(p.GetValueOrDefault(key)) ? def : p[key]!.Trim();
+
+                        string contourMode = Pfs(node.Params, "deformedContourMode", "first");
+                        bool wantDeformed = !string.Equals(contourMode, "none", StringComparison.OrdinalIgnoreCase);
+
+                        HalconCoarseFineMatchResult fineResult = HalconFlowBridge.FineDeformableMatchOnDomainImage(
+                            domainImg,
+                            deformId,
+                            anchorRow,
+                            anchorCol,
+                            anchorAng,
+                            Pf(node.Params, "fineAngleMargin", 5),
+                            Pf(node.Params, "fineMinScore", 0.45),
+                            Pfi(node.Params, "fineNumLevels", 0),
+                            Pf(node.Params, "fineGreediness", 0.75),
+                            Pf(node.Params, "fineScaleMin", 0.97),
+                            Pf(node.Params, "fineScaleMax", 1.03),
+                            wantDeformed,
+                            Pfb(node.Params, "fineAllowFallback", false),
+                            Pf(node.Params, "roiMarginPx", 12),
+                            Pf(node.Params, "maxRoiHalfPx", 120));
+
+                        node.Outputs["Row"] = fineResult.FineRows;
+                        node.Outputs["Column"] = fineResult.FineCols;
+                        node.Outputs["Angle"] = fineResult.FineAngles;
+                        node.Outputs["Score"] = fineResult.FineScores;
+                        if (fineResult.DeformedXld != null)
+                            node.Outputs["DeformedXld"] = fineResult.DeformedXld;
+
+                        node.ResultSummary = fineResult.FineCount == 0
+                            ? "精匹配无结果"
+                            : $"精 1 个 sc={fineResult.FineScores[0]:F3}";
+                        break;
+#else
+                        throw new InvalidOperationException("HALCON 可变形精匹配: 需要 HALCON 支持编译");
+#endif
+                    }
+
+                    case "halcon_coarse_fine_shape_match":
+                    {
+                        var matchImg = inputs["In"] as CalibImage;
+                        if (matchImg == null)
+                            throw new InvalidOperationException("HALCON 粗精匹配: 缺少 In");
+                        long rigidId = Convert.ToInt64(inputs["RigidModelId"]);
+                        long deformId = Convert.ToInt64(inputs["DeformableModelId"]);
+
+                        static double P(IReadOnlyDictionary<string, string> p, string key, double def) =>
+                            double.TryParse(p.GetValueOrDefault(key), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : def;
+                        static int Pi(IReadOnlyDictionary<string, string> p, string key, int def) =>
+                            int.TryParse(p.GetValueOrDefault(key), out var v) ? v : def;
+
+                        static bool Pb(IReadOnlyDictionary<string, string> p, string key, bool def) =>
+                            bool.TryParse(p.GetValueOrDefault(key), out var v) ? v : def;
+                        static string Ps(IReadOnlyDictionary<string, string> p, string key, string def) =>
+                            string.IsNullOrWhiteSpace(p.GetValueOrDefault(key)) ? def : p[key]!.Trim();
+
+                        var result = HalconFlowBridge.CoarseFineShapeMatch(
+                            matchImg,
+                            rigidId,
+                            deformId,
+                            P(node.Params, "coarseAngleStart", -30),
+                            P(node.Params, "coarseAngleExtent", 60),
+                            P(node.Params, "coarseMinScore", 0.4),
+                            Pi(node.Params, "coarseNumMatches", 5),
+                            0.5,
+                            Ps(node.Params, "coarseSubPixel", "none"),
+                            Pi(node.Params, "coarseNumLevels", 0),
+                            P(node.Params, "coarseGreediness", 0.85),
+                            Pb(node.Params, "coarseAllowRetry", false),
+                            P(node.Params, "fineAngleMargin", 5),
+                            P(node.Params, "fineMinScore", 0.45),
+                            Pi(node.Params, "fineNumLevels", 0),
+                            P(node.Params, "fineGreediness", 0.75),
+                            P(node.Params, "fineScaleMin", 0.97),
+                            P(node.Params, "fineScaleMax", 1.03),
+                            P(node.Params, "roiMarginPx", 20),
+                            P(node.Params, "maxRoiHalfPx", 0),
+                            Pi(node.Params, "maxFineMatches", 2),
+                            Ps(node.Params, "deformedContourMode", "first"),
+                            Pb(node.Params, "fineAllowFallback", false));
+
+                        node.Outputs["Row"] = result.FineRows;
+                        node.Outputs["Column"] = result.FineCols;
+                        node.Outputs["Angle"] = result.FineAngles;
+                        node.Outputs["Score"] = result.FineScores;
+                        node.Outputs["CoarseRow"] = result.CoarseRows;
+                        node.Outputs["CoarseColumn"] = result.CoarseCols;
+                        node.Outputs["CoarseAngle"] = result.CoarseAngles;
+                        node.Outputs["CoarseScore"] = result.CoarseScores;
+                        if (result.DeformedXld != null)
+                            node.Outputs["DeformedXld"] = result.DeformedXld;
+
+                        node.ResultSummary = result.CoarseCount == 0
+                            ? "粗定位无结果"
+                            : $"粗 {result.CoarseCount} → 精 {result.FineCount}";
+                        break;
+                    }
 #endif
 
                     case "halcon_shape_match_centers":
@@ -11517,16 +12008,19 @@ namespace CalibOperatorCLI_Example
 
             bool compositeUi = node.Def.TypeId == "composite";
 
+            const int paramLabelWidth = 128;
+            int inputFieldWidth = compositeUi ? 400 : 260;
+
             var win = new Window
             {
                 Title = $"{node.Def.DisplayName} - 算子配置面板",
-                Width = compositeUi ? 640 : 420,
-                Height = compositeUi ? Math.Min(420 + node.Def.Params.Count * 56, 680) : Math.Min(60 + node.Def.Params.Count * 60, 500),
-                MinWidth = compositeUi ? 520 : 380,
-                MinHeight = compositeUi ? 360 : 200,
+                Width = compositeUi ? 680 : 520,
+                Height = compositeUi ? Math.Min(420 + node.Def.Params.Count * 72, 720) : Math.Min(80 + node.Def.Params.Count * 78, 620),
+                MinWidth = compositeUi ? 540 : 440,
+                MinHeight = compositeUi ? 360 : 220,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Owner = Window.GetWindow(this),
-                ResizeMode = compositeUi ? ResizeMode.CanResizeWithGrip : ResizeMode.NoResize
+                ResizeMode = ResizeMode.CanResizeWithGrip
             };
 
             var root = new DockPanel();
@@ -11538,14 +12032,16 @@ namespace CalibOperatorCLI_Example
             {
                 var param = node.Def.Params[i];
 
-                var row = new DockPanel { Margin = new Thickness(0, 4, 0, 4) };
+                var paramBlock = new StackPanel { Margin = new Thickness(0, 6, 0, 10) };
+                var row = new DockPanel();
 
                 var label = new TextBlock
                 {
                     Text = param.DisplayName,
-                    Width = 120,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    FontWeight = FontWeights.Medium
+                    Width = paramLabelWidth,
+                    VerticalAlignment = VerticalAlignment.Top,
+                    FontWeight = FontWeights.Medium,
+                    TextWrapping = TextWrapping.Wrap
                 };
 
                 string currentValue = node.Params.GetValueOrDefault(param.Name, param.DefaultValue);
@@ -11554,7 +12050,8 @@ namespace CalibOperatorCLI_Example
                 {
                     var cb = new ComboBox
                     {
-                        Width = 200,
+                        MinWidth = inputFieldWidth,
+                        Width = inputFieldWidth,
                         VerticalAlignment = VerticalAlignment.Center,
                         ItemsSource = param.Options
                     };
@@ -11610,7 +12107,8 @@ namespace CalibOperatorCLI_Example
                 {
                     var tb = new TextBox
                     {
-                        Width = compositeUi ? 380 : 200,
+                        MinWidth = inputFieldWidth,
+                        Width = inputFieldWidth,
                         Text = currentValue,
                         VerticalAlignment = VerticalAlignment.Center
                     };
@@ -11702,20 +12200,33 @@ namespace CalibOperatorCLI_Example
                     };
                 }
 
-                var tip = new TextBlock
-                {
-                    Text = param.Description,
-                    Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
-                    FontSize = 9,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(8, 0, 0, 0)
-                };
-
+                DockPanel.SetDock(label, Dock.Left);
+                DockPanel.SetDock(input, Dock.Left);
                 row.Children.Add(label);
                 row.Children.Add(input);
-                if (browseBtn != null) row.Children.Add(browseBtn);
-                row.Children.Add(tip);
-                fieldsPanel.Children.Add(row);
+                if (browseBtn != null)
+                {
+                    DockPanel.SetDock(browseBtn, Dock.Left);
+                    row.Children.Add(browseBtn);
+                }
+                row.LastChildFill = false;
+                paramBlock.Children.Add(row);
+
+                if (!string.IsNullOrWhiteSpace(param.Description))
+                {
+                    var tip = new TextBlock
+                    {
+                        Text = param.Description.Trim(),
+                        Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+                        FontSize = 10,
+                        TextWrapping = TextWrapping.Wrap,
+                        Margin = new Thickness(paramLabelWidth, 4, 0, 0)
+                    };
+                    ToolTipService.SetToolTip(tip, param.Description.Trim());
+                    paramBlock.Children.Add(tip);
+                }
+
+                fieldsPanel.Children.Add(paramBlock);
             }
 
             var scroll = new ScrollViewer
@@ -13009,6 +13520,13 @@ namespace CalibOperatorCLI_Example
 
                 var flowLoops = sorted.Where(n => n.Def.TypeId == "flow_loop").ToList();
 
+                var maskEachNodes = sorted
+                    .Where(n => n.Def.TypeId == "halcon_coarse_shape_reduce_domain" &&
+                                GetDownstreamNodes(n).Count > 1 &&
+                                !string.Equals(n.Params.GetValueOrDefault("loopEmit", "true"), "false",
+                                    StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
                 if (perFrameLoops.Count > 1)
                 {
                     StatusText.Text = "执行失败: 当前仅支持一个 per_frame camera_loop 节点";
@@ -13048,6 +13566,28 @@ namespace CalibOperatorCLI_Example
                     AppendLog("[ERROR] flow_loop 与 camera_loop(per_frame)/load_image_dir(each) 互斥", true);
                     return false;
                 }
+
+                if (maskEachNodes.Count > 1)
+                {
+                    StatusText.Text = "执行失败: 当前仅支持一个「粗形状Mask循环」节点";
+                    StatusText.Foreground = new SolidColorBrush(Colors.Red);
+                    AppendLog("[ERROR] 检测到多个 halcon_coarse_shape_reduce_domain(loopEmit=true) 且带下游", true);
+                    return false;
+                }
+
+                if (maskEachNodes.Count == 1 &&
+                    (flowLoops.Count == 1 || perFrameLoops.Count == 1 || dirEachLoops.Count == 1))
+                {
+                    StatusText.Text = "执行失败: 粗形状Mask循环不可与 flow_loop / 相机循环 / 目录遍历同时使用";
+                    StatusText.Foreground = new SolidColorBrush(Colors.Red);
+                    AppendLog("[ERROR] halcon_coarse_shape_reduce_domain 循环与 flow_loop/camera_loop/load_image_dir 互斥", true);
+                    return false;
+                }
+
+#if HALCON_ENABLED
+                if (maskEachNodes.Count == 1)
+                    return await RunCoarseShapeMaskEachLoopAsync(sorted, maskEachNodes[0]);
+#endif
 
                 if (dirEachLoops.Count == 1)
                 {

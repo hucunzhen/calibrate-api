@@ -3090,6 +3090,196 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "halcon_create_deformable_model",
+                DisplayName = "HALCON 创建可变形模板",
+                Description = "基于 XLD 创建 .dfm。deformableKind=planar 为透视(平面未标定)；local 为局部可变形。粗定位请用 halcon_create_shape_model。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "deformableKind", DisplayName = "可变形类型", DefaultValue = "planar", Description = "planar/透视=CreatePlanarUncalib；local=CreateLocal" },
+                    new OperatorParam { Name = "numLevels", DisplayName = "NumLevels", DefaultValue = "4", Description = "金字塔层数，0=自动" },
+                    new OperatorParam { Name = "angleStart", DisplayName = "AngleStart(°)", DefaultValue = "-30", Description = "起始角度(度)" },
+                    new OperatorParam { Name = "angleExtent", DisplayName = "AngleExtent(°)", DefaultValue = "60", Description = "角度范围(度)" },
+                    new OperatorParam { Name = "angleStep", DisplayName = "AngleStep(°)", DefaultValue = "0.5", Description = "角度步长(度)" },
+                    new OperatorParam { Name = "optimization", DisplayName = "Optimization", DefaultValue = "auto", Description = "auto / none / point_reduction_*" },
+                    new OperatorParam { Name = "metric", DisplayName = "Metric", DefaultValue = "ignore_local_polarity", Description = "匹配度量" },
+                    new OperatorParam { Name = "minContrast", DisplayName = "MinContrast", DefaultValue = "5", Description = "搜索图最小边缘对比度" },
+                    new OperatorParam { Name = "scaleMin", DisplayName = "ScaleMin", DefaultValue = "0.97", Description = "可变形缩放下限" },
+                    new OperatorParam { Name = "scaleMax", DisplayName = "ScaleMax", DefaultValue = "1.03", Description = "可变形缩放上限" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Xld", Direction = PortDirection.Input, DataType = typeof(HalconXldContourBundle), ColorHex = "#E65100" },
+                    new PortDef { Name = "ModelId", Direction = PortDirection.Output, DataType = typeof(long), ColorHex = "#9C27B0" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_load_deformable_model",
+                DisplayName = "HALCON 加载可变形模板",
+                Description = "从 .dfm 加载可变形模型（形状模板页导出）。filePath 相对流程 .flow.json 目录。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "filePath", DisplayName = "模型文件", DefaultValue = "deformable_model.dfm", Description = ".dfm 路径" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "ModelId", Direction = PortDirection.Output, DataType = typeof(long), ColorHex = "#9C27B0" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_coarse_shape_match",
+                DisplayName = "HALCON 粗定位(刚性)",
+                Description = "FindShapeModel 全图刚性粗定位。输出接 halcon_fine_deformable_match 的 Coarse* 端口。与 halcon_find_shape_model 等价，参数名面向粗+精流程。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "angleStart", DisplayName = "AngleStart(°)", DefaultValue = "-30", Description = "起始角度(度)" },
+                    new OperatorParam { Name = "angleExtent", DisplayName = "AngleExtent(°)", DefaultValue = "60", Description = "角度范围(度)" },
+                    new OperatorParam { Name = "minScore", DisplayName = "MinScore", DefaultValue = "0.4", Description = "最低匹配分" },
+                    new OperatorParam { Name = "numMatches", DisplayName = "NumMatches", DefaultValue = "5", Description = "最多返回数，0=全部" },
+                    new OperatorParam { Name = "maxOverlap", DisplayName = "MaxOverlap", DefaultValue = "0.5", Description = "最大重叠度" },
+                    new OperatorParam { Name = "subPixel", DisplayName = "SubPixel", DefaultValue = "none", Description = "none 最快；interpolation 更准" },
+                    new OperatorParam { Name = "numLevels", DisplayName = "NumLevels", DefaultValue = "0", Description = "金字塔层数，0=模型默认" },
+                    new OperatorParam { Name = "greediness", DisplayName = "Greediness", DefaultValue = "0.85", Description = "贪心系数" },
+                    new OperatorParam { Name = "allowRetry", DisplayName = "失败重试", DefaultValue = "false", Description = "无结果时降分再搜" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "ModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#9C27B0" },
+                    new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#03A9F4" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Score", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FFEB3B" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_coarse_shape_reduce_domain",
+                DisplayName = "HALCON 粗形状Mask",
+                Description = "按粗位姿生成填充区域 Mask（非轮廓）。有下游时自动循环：每张 Mask 触发下游执行一次。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "loopEmit", DisplayName = "循环输出Mask", DefaultValue = "true", Description = "true=每张粗候选循环输出 Mask 并驱动下游；false=仅输出 candidateIndex 指定的一张" },
+                    new OperatorParam { Name = "candidateIndex", DisplayName = "单张索引", DefaultValue = "0", Description = "loopEmit=false 时输出的粗候选下标" },
+                    new OperatorParam { Name = "maskErosionPx", DisplayName = "Mask内缩(px)", DefaultValue = "2", Description = "填充区域腐蚀半径" },
+                    new OperatorParam { Name = "maskFillDilatePx", DisplayName = "Mask填充膨胀(px)", DefaultValue = "0", Description = "0=凸包实心填充；>0=改用手动膨胀（凹形工件可试 30~80）" },
+                    new OperatorParam { Name = "contourLevel", DisplayName = "模板层", DefaultValue = "1", Description = "生成填充区域用的形状模型层（输出为填充 Mask，不是轮廓 XLD）" },
+                    new OperatorParam { Name = "maxCandidates", DisplayName = "最多Mask数", DefaultValue = "0", Description = "0=全部粗候选；N=仅前 N 个" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "ModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#9C27B0" },
+                    new PortDef { Name = "CoarseRow", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "CoarseColumn", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#03A9F4" },
+                    new PortDef { Name = "CoarseAngle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF9800", IsOptional = true },
+                    new PortDef { Name = "CoarseScore", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FFEB3B", IsOptional = true },
+                    new PortDef { Name = "Mask", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FFB74D" },
+                    new PortDef { Name = "MaskIndex", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FF7043" },
+                    new PortDef { Name = "MaskCount", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FF7043" },
+                    new PortDef { Name = "CoarseRowOut", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "CoarseColumnOut", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#03A9F4" },
+                    new PortDef { Name = "CoarseAngleOut", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_reduce_domain_by_mask",
+                DisplayName = "HALCON Mask域内图",
+                Description = "原图 + 单张填充 Mask → reduce_domain 域内图（每次循环处理一张）。",
+                Category = "HALCON",
+                Params = { },
+                Ports =
+                {
+                    new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Mask", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FFB74D" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_fine_deformable_match",
+                DisplayName = "HALCON 可变形精匹配",
+                Description = "仅 .dfm + 单张域内图 In；CoarseRow/Column/Angle 接粗形状Mask 的 Coarse*Out（标量，每轮一个）。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "fineAngleMargin", DisplayName = "精角度余量(°)", DefaultValue = "5", Description = "以粗角度为中心 ± 该值(度)；粗 SubPixel=none 时建议 ≥5" },
+                    new OperatorParam { Name = "fineMinScore", DisplayName = "精 MinScore", DefaultValue = "0.45", Description = "可变形最低分" },
+                    new OperatorParam { Name = "fineNumLevels", DisplayName = "精 NumLevels", DefaultValue = "0", Description = "可变形金字塔层数，0=与建模一致" },
+                    new OperatorParam { Name = "fineGreediness", DisplayName = "精 Greediness", DefaultValue = "0.75", Description = "可变形贪心系数" },
+                    new OperatorParam { Name = "fineScaleMin", DisplayName = "精 ScaleMin", DefaultValue = "0.97", Description = "精匹配缩放下限" },
+                    new OperatorParam { Name = "fineScaleMax", DisplayName = "精 ScaleMax", DefaultValue = "1.03", Description = "精匹配缩放上限" },
+                    new OperatorParam { Name = "deformedContourMode", DisplayName = "变形轮廓", DefaultValue = "first", Description = "none=不输出(最快)；first=输出变形轮廓" },
+                    new OperatorParam { Name = "fineAllowFallback", DisplayName = "精失败放宽重试", DefaultValue = "false", Description = "精匹配失败时降分/扩角再搜" },
+                    new OperatorParam { Name = "roiMarginPx", DisplayName = "ROI边距(px)", DefaultValue = "12", Description = "粗位姿周围 CropRectangle2 的额外边距（透视 .dfm 必用）" },
+                    new OperatorParam { Name = "maxRoiHalfPx", DisplayName = "ROI半长上限(px)", DefaultValue = "120", Description = "限制精匹配裁剪区半长，0=不限制" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "DeformableModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#7B1FA2" },
+                    new PortDef { Name = "CoarseRow", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#8BC34A", IsOptional = true },
+                    new PortDef { Name = "CoarseColumn", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#03A9F4", IsOptional = true },
+                    new PortDef { Name = "CoarseAngle", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#FF9800", IsOptional = true },
+                    new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF5722" },
+                    new PortDef { Name = "Score", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FFC107" },
+                    new PortDef { Name = "DeformedXld", Direction = PortDirection.Output, DataType = typeof(HalconXldContourBundle), ColorHex = "#E65100", IsOptional = true }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_coarse_fine_shape_match",
+                DisplayName = "HALCON 粗定位+可变形精匹配(组合)",
+                Description = "单节点完成粗+精（内部调用 halcon_coarse_shape_match + halcon_fine_deformable_match）。拆分时请用两个独立算子串联。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "coarseAngleStart", DisplayName = "粗 AngleStart(°)", DefaultValue = "-30", Description = "粗定位角度起点" },
+                    new OperatorParam { Name = "coarseAngleExtent", DisplayName = "粗 AngleExtent(°)", DefaultValue = "60", Description = "粗定位角度范围" },
+                    new OperatorParam { Name = "coarseMinScore", DisplayName = "粗 MinScore", DefaultValue = "0.4", Description = "粗匹配最低分" },
+                    new OperatorParam { Name = "coarseNumMatches", DisplayName = "粗 NumMatches", DefaultValue = "5", Description = "粗匹配数量，0=全部（精匹配会按分数取前 N 个）" },
+                    new OperatorParam { Name = "coarseGreediness", DisplayName = "粗 Greediness", DefaultValue = "0.85", Description = "粗定位贪心系数，略高可加速" },
+                    new OperatorParam { Name = "coarseSubPixel", DisplayName = "粗 SubPixel", DefaultValue = "none", Description = "粗定位亚像素：none 最快，interpolation 更准" },
+                    new OperatorParam { Name = "coarseNumLevels", DisplayName = "粗 NumLevels", DefaultValue = "0", Description = "粗金字塔层数，0=用模型默认" },
+                    new OperatorParam { Name = "coarseAllowRetry", DisplayName = "粗失败重试", DefaultValue = "false", Description = "无结果时是否降分再搜一次（会拖慢）" },
+                    new OperatorParam { Name = "fineAngleMargin", DisplayName = "精角度余量(°)", DefaultValue = "5", Description = "以粗角度为中心 ± 该值(度)；粗 SubPixel=none 时建议 ≥5" },
+                    new OperatorParam { Name = "fineMinScore", DisplayName = "精 MinScore", DefaultValue = "0.45", Description = "可变形最低分" },
+                    new OperatorParam { Name = "fineNumLevels", DisplayName = "精 NumLevels", DefaultValue = "0", Description = "可变形金字塔层数，0=与建模一致" },
+                    new OperatorParam { Name = "fineGreediness", DisplayName = "精 Greediness", DefaultValue = "0.75", Description = "可变形贪心系数" },
+                    new OperatorParam { Name = "fineScaleMin", DisplayName = "精 ScaleMin", DefaultValue = "0.97", Description = "精匹配缩放下限" },
+                    new OperatorParam { Name = "fineScaleMax", DisplayName = "精 ScaleMax", DefaultValue = "1.03", Description = "精匹配缩放上限" },
+                    new OperatorParam { Name = "roiMarginPx", DisplayName = "ROI边距(px)", DefaultValue = "12", Description = "粗结果周围可变形搜索矩形额外边距" },
+                    new OperatorParam { Name = "maxRoiHalfPx", DisplayName = "ROI半长上限(px)", DefaultValue = "120", Description = "限制精匹配裁剪区，0=不限制" },
+                    new OperatorParam { Name = "maxFineMatches", DisplayName = "最多精匹配数", DefaultValue = "2", Description = "对分数最高的前 N 个粗候选做精匹配" },
+                    new OperatorParam { Name = "deformedContourMode", DisplayName = "变形轮廓", DefaultValue = "first", Description = "none=不输出(最快)；first=仅首个精匹配；all=全部" },
+                    new OperatorParam { Name = "fineAllowFallback", DisplayName = "精失败放宽重试", DefaultValue = "false", Description = "精匹配失败时降分/扩角再搜；默认关" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "RigidModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#9C27B0" },
+                    new PortDef { Name = "DeformableModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#7B1FA2" },
+                    new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF5722" },
+                    new PortDef { Name = "Score", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FFC107" },
+                    new PortDef { Name = "CoarseRow", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#8BC34A" },
+                    new PortDef { Name = "CoarseColumn", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#03A9F4" },
+                    new PortDef { Name = "CoarseAngle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF9800" },
+                    new PortDef { Name = "CoarseScore", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FFEB3B" },
+                    new PortDef { Name = "DeformedXld", Direction = PortDirection.Output, DataType = typeof(HalconXldContourBundle), ColorHex = "#E65100", IsOptional = true }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "halcon_shape_match_centers",
                 DisplayName = "HALCON 匹配中心→点列",
                 Description = "将 FindShapeModel 的 Row/Column 转为 Point2D[]（X=列,Y=行），并按参数排序。默认 yx=先行后列（与九点世界坐标行优先一致）；接阵列过滤时可设 grid 并按 GridRow/GridCol 排序。",

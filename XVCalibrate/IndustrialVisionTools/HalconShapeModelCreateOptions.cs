@@ -1,3 +1,13 @@
+namespace CalibOperatorCLI_Example
+{
+    /// <summary>形状模板页 / Flow 持有的 HALCON 模型族。</summary>
+    public enum HalconFlowModelKind
+    {
+        Shape,
+        Deformable
+    }
+}
+
 #if HALCON_ENABLED
 namespace CalibOperatorCLI_Example
 {
@@ -5,7 +15,18 @@ namespace CalibOperatorCLI_Example
     public enum HalconShapeModelKind
     {
         Shape,
-        ScaledShape
+        ScaledShape,
+        /// <summary>局部可变形模板（CreateLocalDeformableModel/Xld），适合局部拉伸/褶皱。</summary>
+        Deformable,
+        /// <summary>平面未标定可变形（CreatePlanarUncalibDeformableModel/Xld），适合透视形变（梯形、斜视角平面件）。</summary>
+        PlanarDeformable
+    }
+
+    /// <summary>可变形模板子类型（与 .dfm 文件一一对应，混用会导致匹配失败）。</summary>
+    public enum HalconDeformableModelSubtype
+    {
+        Local,
+        PlanarUncalib
     }
 
     /// <summary>形状模板创建：轮廓/图像来源。</summary>
@@ -15,7 +36,7 @@ namespace CalibOperatorCLI_Example
         ThresholdXld,
         /// <summary>EdgesSubPix (Canny) → XLD，含 edge_direction</summary>
         EdgesXld,
-        /// <summary>手绘多边形折线 → GenContourPolygonXld</summary>
+        /// <summary>手绘闭合 ROI 边线几何 + 向内/向外梯度方向（edge_direction）</summary>
         PolygonXld,
         /// <summary>矩形 ROI 内灰度图 → create_shape_model</summary>
         ImageRectangle,
@@ -45,6 +66,9 @@ namespace CalibOperatorCLI_Example
         public double ScaleMin { get; set; } = 0.9;
         public double ScaleMax { get; set; } = 1.1;
         public double ScaleStep { get; set; } = 0;
+
+        /// <summary>仅 ModelKind 为 Deformable/PlanarDeformable 时有效。</summary>
+        public HalconDeformableModelSubtype DeformableSubtype { get; set; } = HalconDeformableModelSubtype.Local;
 
         // —— 轮廓提取 ——
         public string GenContourMode { get; set; } = "border";

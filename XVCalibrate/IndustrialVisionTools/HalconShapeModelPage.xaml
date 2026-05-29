@@ -38,9 +38,18 @@
                     <RadioButton x:Name="RbRingMode" Content="环形" GroupName="DrawMode"
                                  Foreground="#CCC" VerticalAlignment="Center"
                                  Checked="DrawMode_Changed"
-                                 ToolTip="先绘外圈多边形并闭合，再绘内圈多边形并闭合"/>
+                                 ToolTip="外圈/内圈各绘一圈并单击起点闭合；下一段可选直线或圆弧"/>
                     <Button x:Name="BtnUndoPoint" Content="撤销点" Width="60" Height="28" Margin="8,0,0,0" 
                             Click="BtnUndoPoint_Click" ToolTip="多边形撤销点；环形回退一步 (Ctrl+Z)"/>
+                    <Button x:Name="BtnClosePolygon" Content="闭合说明" Width="64" Height="28" Margin="4,0,0,0"
+                            Click="BtnClosePolygon_Click" ToolTip="不会自动闭合；≥3 点后须单击第一个顶点（起点）"/>
+                    <Separator Width="1" Background="#555" Margin="8,2,4,2"/>
+                    <TextBlock Text="下一段：" VerticalAlignment="Center" Foreground="#CCC" Margin="4,0,4,0"/>
+                    <RadioButton x:Name="RbNextSegmentLine" Content="直线" GroupName="NextSeg"
+                                 Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,0" IsChecked="True"/>
+                    <RadioButton x:Name="RbNextSegmentArc" Content="圆弧" GroupName="NextSeg"
+                                 Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,4,0"
+                                 ToolTip="先点终点，再点弧上经过的一点"/>
                     </StackPanel>
                 </Border>
 
@@ -62,6 +71,8 @@
                                  Fill="#2000FF00" Visibility="Collapsed" Canvas.Left="0" Canvas.Top="0"/>
                         <Polyline x:Name="PolygonLine" Stroke="#FFFF00" StrokeThickness="2"
                                   Visibility="Collapsed" Points=""/>
+                        <Polyline x:Name="PolygonRubberLine" Stroke="#FFAA00" StrokeThickness="1.5"
+                                  StrokeDashArray="4,3" Visibility="Collapsed" Points=""/>
                         <Polyline x:Name="RingOuterLine" Stroke="#00FF00" StrokeThickness="2"
                                   Fill="#2000FF00" Visibility="Collapsed" Points=""/>
                         <Polyline x:Name="RingInnerLine" Stroke="#00FFFF" StrokeThickness="2"
@@ -84,7 +95,7 @@
                                   SelectionChanged="CreateOption_Changed">
                             <ComboBoxItem Content="ROI 内灰度阈值 → 轮廓" Tag="ThresholdXld" IsSelected="True"/>
                             <ComboBoxItem Content="ROI 内 Canny 边缘 → 轮廓" Tag="EdgesXld"/>
-                            <ComboBoxItem Content="仅 ROI 边线 (不阈值)" Tag="PolygonXld"/>
+                            <ComboBoxItem Content="手绘 ROI 边线 (设梯度方向)" Tag="PolygonXld"/>
                             <ComboBoxItem Content="矩形 ROI 灰度图" Tag="ImageRectangle"/>
                             <ComboBoxItem Content="多边形域灰度图" Tag="ImagePolygon"/>
                         </ComboBox>
@@ -92,8 +103,10 @@
                         <ComboBox x:Name="CmbModelKind" Height="26" SelectionChanged="CreateOption_Changed">
                             <ComboBoxItem Content="标准形状" Tag="Shape" IsSelected="True"/>
                             <ComboBoxItem Content="缩放形状" Tag="ScaledShape"/>
+                            <ComboBoxItem Content="可变形(局部)" Tag="Deformable"/>
+                            <ComboBoxItem Content="可变形(透视)" Tag="PlanarDeformable"/>
                         </ComboBox>
-                        <TextBlock Text="矩形/圆形/多边形/环形 ROI 可限制提取与图像模板区域；环形=外多边形减内多边形（环带）" FontSize="10" Foreground="#888" 
+                        <TextBlock Text="矩形/圆形/多边形/环形 ROI 可限制提取与图像模板区域；环形=外圈减内圈（均支持直线/圆弧段）" FontSize="10" Foreground="#888" 
                                    TextWrapping="Wrap" Margin="0,8,0,0"/>
                     </StackPanel>
                 </Border>
@@ -168,6 +181,37 @@
                     </StackPanel>
                 </Border>
 
+                <Border x:Name="PnlRoiBoundaryDir" Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" 
+                        BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3" Visibility="Collapsed">
+                    <StackPanel>
+                        <TextBlock FontWeight="Bold" Text="手绘边线梯度" Margin="0,0,0,6"/>
+                        <TextBlock Text="轮廓=手绘闭合边线；外/内圈分别生成带方向 XLD 后合并。环形时内圈梯度可相反或单独设置。" 
+                                   FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                        <TextBlock Text="外圈梯度" FontSize="11" Foreground="#888" Margin="0,0,0,4"/>
+                        <StackPanel x:Name="PnlGradientPolarity" Orientation="Horizontal" Margin="0,0,0,8">
+                            <RadioButton x:Name="RbGradientOutward" Content="向外" GroupName="GradPol"
+                                         Foreground="#CCC" Margin="0,0,12,0" IsChecked="True"
+                                         ToolTip="边线法向指向该圈多边形外侧"/>
+                            <RadioButton x:Name="RbGradientInward" Content="向内" GroupName="GradPol"
+                                         Foreground="#CCC"
+                                         ToolTip="边线法向指向该圈多边形内侧"/>
+                        </StackPanel>
+                        <TextBlock Text="环形内圈梯度（仅环形 ROI）" FontSize="11" Foreground="#888" Margin="0,0,0,4"/>
+                        <ComboBox x:Name="CmbRingInnerGradientMode" Height="26" Margin="0,0,0,6"
+                                  SelectionChanged="RingInnerGradientMode_Changed">
+                            <ComboBoxItem Content="与外圈相反" Tag="opposite" IsSelected="True"/>
+                            <ComboBoxItem Content="与外圈相同" Tag="same"/>
+                            <ComboBoxItem Content="单独设置" Tag="custom"/>
+                        </ComboBox>
+                        <StackPanel x:Name="PnlRingInnerGradientCustom" Orientation="Horizontal" Visibility="Collapsed">
+                            <RadioButton x:Name="RbInnerGradientOutward" Content="内圈向外" GroupName="GradPolInner"
+                                         Foreground="#CCC" Margin="0,0,12,0" IsChecked="True"/>
+                            <RadioButton x:Name="RbInnerGradientInward" Content="内圈向内" GroupName="GradPolInner"
+                                         Foreground="#CCC"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
                 <Border x:Name="PnlEdgeExtract" Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" 
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3" Visibility="Collapsed">
                     <StackPanel>
@@ -196,6 +240,8 @@
                             <TextBlock Grid.Column="0" Text="高阈" VerticalAlignment="Center"/>
                             <TextBox x:Name="TxtEdgeHigh" Grid.Column="1" Text="40" Height="24" VerticalContentAlignment="Center"/>
                         </Grid>
+                        <TextBlock Text="在 ROI 区域内做 Canny；与「手绘边线」模式不同" 
+                                   FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,4,0,0"/>
                     </StackPanel>
                 </Border>
 
@@ -257,6 +303,17 @@
                         </Grid>
                         <Button x:Name="BtnAutoThreshold" Content="自动阈值" Width="100" Height="26" Margin="0,4,0,0" 
                                 HorizontalAlignment="Left" Click="BtnAutoThreshold_Click"/>
+                        <Grid Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="70"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="起点容差" VerticalAlignment="Center"
+                                       ToolTip="单击位置距起点小于该值(像素)时视为点击起点并闭合"/>
+                            <TextBox x:Name="TxtPolygonCloseDist" Grid.Column="1" Text="12" Height="24" VerticalContentAlignment="Center"/>
+                        </Grid>
+                        <TextBlock Text="多边形≥3点后，须单击第一个顶点（起点）闭合；下一段可选直线或圆弧" FontSize="10" Foreground="#888"
+                                   TextWrapping="Wrap" Margin="0,6,0,0"/>
                     </StackPanel>
                 </Border>
 

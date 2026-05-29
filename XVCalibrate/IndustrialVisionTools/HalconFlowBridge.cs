@@ -15,7 +15,7 @@ namespace CalibOperatorCLI_Example
     /// <summary>
     /// CalibImage ↔ HALCON HObject（灰度 / BGR 字节图）转换，供 Flow HALCON 算子使用。
     /// </summary>
-    internal static class HalconFlowBridge
+    internal static partial class HalconFlowBridge
     {
         /// <summary>经临时 BMP + ReadImage 导入，避免 GenImage1 与指针在 HalconDotNet 下的 Tuple 互操作问题。</summary>
         public static HObject CalibToHObject(CalibImage img)
@@ -1996,44 +1996,6 @@ namespace CalibOperatorCLI_Example
         // HALCON 形状模板匹配
         // ================================================================
 
-        /// <summary>新版 HalconDotNet 句柄不可再当 long 用；用 id 持有 <see cref="HShapeModel"/> 生命周期。</summary>
-        private static class HalconShapeModelRegistry
-        {
-            private static readonly object Lock = new();
-            private static readonly Dictionary<long, HShapeModel> Models = new();
-            private static long _nextId = 1;
-
-            public static long Register(HShapeModel model)
-            {
-                lock (Lock)
-                {
-                    long id = _nextId++;
-                    Models[id] = model;
-                    return id;
-                }
-            }
-
-            public static HShapeModel Get(long id)
-            {
-                lock (Lock)
-                {
-                    if (!Models.TryGetValue(id, out HShapeModel? model))
-                        throw new InvalidOperationException($"形状模型 ModelId={id} 不存在或已释放");
-                    return model;
-                }
-            }
-
-            public static void Release(long id)
-            {
-                lock (Lock)
-                {
-                    if (!Models.Remove(id, out HShapeModel? model))
-                        return;
-                    model.Dispose();
-                }
-            }
-        }
-
         /// <summary>按选项过滤 XLD 包（最小点数、仅保留最长轮廓）。</summary>
         public static HalconXldContourBundle FilterXldBundle(HalconXldContourBundle bundle, int minContourPoints, bool largestOnly)
         {
@@ -2284,205 +2246,12 @@ namespace CalibOperatorCLI_Example
             opt.MinContrast > 0 ? opt.MinContrast : 5;
 
         /// <summary>统一创建入口：XLD 或 ROI 灰度图。</summary>
-        public static long CreateShapeModel(
-            CalibImage? image,
-            HalconXldContourBundle? xldBundle,
-            HObject? region,
-            HalconShapeModelCreateOptions opt)
-        {
-            if (opt == null) throw new ArgumentNullException(nameof(opt));
-
-            bool fromImage = opt.SourceKind is HalconShapeModelSourceKind.ImageRectangle
-                or HalconShapeModelSourceKind.ImagePolygon;
-
-            if (fromImage)
-            {
-                if (image == null) throw new ArgumentNullException(nameof(image));
-                if (region == null || !region.IsInitialized())
-                    throw new InvalidOperationException("图像模板模式需要有效的 ROI 区域");
-                return CreateShapeModelFromImageRegion(image, region, opt);
-            }
-
-            if (xldBundle == null || xldBundle.Contours == null || xldBundle.Contours.Count == 0)
-                throw new InvalidOperationException("XLD 轮廓为空");
-
-            return CreateShapeModelFromXld(xldBundle, opt);
-        }
 
         /// <summary>CreateShapeModel：基于 XLD 轮廓（兼容旧参数）。</summary>
-        public static long CreateShapeModelFromXld(
-            HalconXldContourBundle? xldBundle,
-            int numLevels,
-            double angleStartDeg,
-            double angleExtentDeg,
-            double angleStepDeg,
-            string optimization,
-            string metric,
-            int contrast,
-            int minContrast)
-        {
-            return CreateShapeModelFromXld(xldBundle, new HalconShapeModelCreateOptions
-            {
-                ModelKind = HalconShapeModelKind.Shape,
-                SourceKind = HalconShapeModelSourceKind.ThresholdXld,
-                NumLevels = numLevels,
-                AngleStartDeg = angleStartDeg,
-                AngleExtentDeg = angleExtentDeg,
-                AngleStepDeg = angleStepDeg,
-                Optimization = optimization,
-                Metric = metric,
-                Contrast = contrast > 0 ? contrast.ToString(CultureInfo.InvariantCulture) : "auto",
-                MinContrast = minContrast
-            });
-        }
 
         /// <summary>CreateShapeModel / CreateScaledShapeModel：基于 XLD。</summary>
-        public static long CreateShapeModelFromXld(HalconXldContourBundle? xldBundle, HalconShapeModelCreateOptions opt)
-        {
-            HObject conts = new HObject();
-            try
-            {
-                if (xldBundle?.Contours == null || xldBundle.Contours.Count == 0)
-                    throw new InvalidOperationException("XLD轮廓为空");
-
-                List<Point2D[]> contours = xldBundle.Contours
-                    .Where(c => c != null && c.Length >= 2)
-                    .ToList();
-                if (contours.Count == 0)
-                    throw new InvalidOperationException($"没有有效轮廓（共 {xldBundle.Contours.Count} 条）");
-
-                conts = XldBundleToHObject(contours);
-                if (!conts.IsInitialized() || conts.CountObj() == 0)
-                    throw new InvalidOperationException("轮廓对象无效/为空");
-
-                string metricResolved = ResolveShapeModelXldMetric(conts, opt.Metric);
-                double angleStartRad = opt.AngleStartDeg * Math.PI / 180.0;
-                double angleExtentRad = opt.AngleExtentDeg * Math.PI / 180.0;
-                HTuple numLevels = ToNumLevelsTuple(opt.NumLevels);
-                HTuple angleStep = ToAngleStepTuple(opt.AngleStepDeg);
-                HTuple optimization = new HTuple(string.IsNullOrWhiteSpace(opt.Optimization) ? "auto" : opt.Optimization);
-                int minContrastVal = ResolveMinContrast(opt);
-
-                var xld = new HXLDCont(conts);
-                var shapeModel = new HShapeModel();
-                try
-                {
-                    if (opt.ModelKind == HalconShapeModelKind.ScaledShape)
-                    {
-                        shapeModel.CreateScaledShapeModelXld(
-                            xld,
-                            numLevels,
-                            angleStartRad,
-                            angleExtentRad,
-                            angleStep,
-                            opt.ScaleMin,
-                            opt.ScaleMax,
-                            ToScaleStepTuple(opt.ScaleStep),
-                            optimization,
-                            metricResolved,
-                            minContrastVal);
-                    }
-                    else
-                    {
-                        shapeModel.CreateShapeModelXld(
-                            xld,
-                            numLevels,
-                            angleStartRad,
-                            angleExtentRad,
-                            angleStep,
-                            optimization,
-                            metricResolved,
-                            minContrastVal);
-                    }
-                }
-                catch
-                {
-                    shapeModel.Dispose();
-                    throw;
-                }
-
-                return HalconShapeModelRegistry.Register(shapeModel);
-            }
-            finally
-            {
-                conts.Dispose();
-            }
-        }
 
         /// <summary>CreateShapeModel / CreateScaledShapeModel：ROI 内灰度图。</summary>
-        public static long CreateShapeModelFromImageRegion(
-            CalibImage image,
-            HObject region,
-            HalconShapeModelCreateOptions opt)
-        {
-            if (image == null) throw new ArgumentNullException(nameof(image));
-            if (region == null || !region.IsInitialized())
-                throw new ArgumentException("区域无效", nameof(region));
-
-            HObject ho = CalibToHObject(image);
-            try
-            {
-                ho = EnsureGray(ho);
-                HOperatorSet.ReduceDomain(ho, region, out HObject reduced);
-                ho.Dispose();
-                ho = reduced;
-
-                using var hImg = new HImage(ho);
-                double angleStartRad = opt.AngleStartDeg * Math.PI / 180.0;
-                double angleExtentRad = opt.AngleExtentDeg * Math.PI / 180.0;
-                HTuple numLevels = ToNumLevelsTuple(opt.NumLevels);
-                HTuple angleStep = ToAngleStepTuple(opt.AngleStepDeg);
-                HTuple optimization = new HTuple(string.IsNullOrWhiteSpace(opt.Optimization) ? "auto" : opt.Optimization);
-                string metric = string.IsNullOrWhiteSpace(opt.Metric) ? "use_polarity" : opt.Metric;
-                HTuple contrast = ToContrastTuple(opt.Contrast, 0);
-                HTuple minContrast = new HTuple(ResolveMinContrast(opt));
-
-                var shapeModel = new HShapeModel();
-                try
-                {
-                    if (opt.ModelKind == HalconShapeModelKind.ScaledShape)
-                    {
-                        shapeModel.CreateScaledShapeModel(
-                            hImg,
-                            numLevels,
-                            angleStartRad,
-                            angleExtentRad,
-                            angleStep,
-                            opt.ScaleMin,
-                            opt.ScaleMax,
-                            ToScaleStepTuple(opt.ScaleStep),
-                            optimization,
-                            metric,
-                            contrast,
-                            minContrast);
-                    }
-                    else
-                    {
-                        shapeModel.CreateShapeModel(
-                            hImg,
-                            numLevels,
-                            angleStartRad,
-                            angleExtentRad,
-                            angleStep,
-                            optimization,
-                            metric,
-                            contrast,
-                            minContrast);
-                    }
-                }
-                catch
-                {
-                    shapeModel.Dispose();
-                    throw;
-                }
-
-                return HalconShapeModelRegistry.Register(shapeModel);
-            }
-            finally
-            {
-                ho.Dispose();
-            }
-        }
 
         /// <summary>
         /// FindShapeModel：在图像中查找形状模板
@@ -2758,64 +2527,6 @@ namespace CalibOperatorCLI_Example
         /// <summary>
         /// 将形状模型轮廓按匹配位姿变换到图像，生成填充 Region（最大轮廓为外，较小为孔洞）。
         /// </summary>
-        public static ShapeMatchRegionMask[] BuildShapeMatchFilledRegions(
-            long modelId,
-            double[] rows,
-            double[] cols,
-            double[]? angles,
-            int contourLevel,
-            double erosionInsetPx)
-        {
-            if (modelId < 0)
-                throw new ArgumentException("ModelId 无效", nameof(modelId));
-
-            int n = Math.Min(rows?.Length ?? 0, cols?.Length ?? 0);
-            var masks = new ShapeMatchRegionMask[n];
-            if (n == 0)
-                return masks;
-
-            HShapeModel shapeModel = HalconShapeModelRegistry.Get(modelId);
-            using HXLDCont modelXld = shapeModel.GetShapeModelContours(contourLevel);
-            int objCount = modelXld.CountObj();
-            if (objCount <= 0)
-                return masks;
-
-            for (int m = 0; m < n; m++)
-            {
-                masks[m] = new ShapeMatchRegionMask { Region = null };
-                double matchRow = rows[m];
-                double matchCol = cols[m];
-                double angleDeg = angles != null && angles.Length > m ? angles[m] : 0;
-                double angleRad = angleDeg * Math.PI / 180.0;
-
-                HOperatorSet.HomMat2dIdentity(out HTuple hom);
-                HOperatorSet.HomMat2dRotate(hom, angleRad, 0, 0, out hom);
-                HOperatorSet.HomMat2dTranslate(hom, matchRow, matchCol, out hom);
-                HOperatorSet.AffineTransContourXld(modelXld, out HObject transXld, hom);
-
-                try
-                {
-                    HRegion? filled = BuildFilledRegionFromTransformedXld(transXld);
-                    if (filled == null || !filled.IsInitialized())
-                        continue;
-
-                    if (erosionInsetPx > 0.5)
-                    {
-                        HRegion eroded = filled.ErosionCircle(erosionInsetPx);
-                        filled.Dispose();
-                        filled = eroded;
-                    }
-
-                    masks[m].Region = filled;
-                }
-                finally
-                {
-                    transXld.Dispose();
-                }
-            }
-
-            return masks;
-        }
 
         /// <summary>合并所有有效匹配区域（并集）。</summary>
         public static HRegion? UnionShapeMatchRegions(ShapeMatchRegionMask[] masks)
@@ -3088,60 +2799,6 @@ namespace CalibOperatorCLI_Example
             return -1;
         }
 
-        private static HRegion? BuildFilledRegionFromTransformedXld(HObject transXld)
-        {
-            HOperatorSet.CountObj(transXld, out HTuple count);
-            int n = count.I;
-            if (n <= 0)
-                return null;
-
-            var parts = new List<(double area, HRegion region)>();
-            for (int i = 1; i <= n; i++)
-            {
-                HObject one = transXld.SelectObj(i);
-                try
-                {
-                    HOperatorSet.GenRegionContourXld(one, out HObject regObj, new HTuple("filled"));
-                    var reg = new HRegion(regObj);
-                    regObj.Dispose();
-                    HOperatorSet.AreaCenter(reg, out HTuple area, out HTuple _, out HTuple _);
-                    double a = area.Length > 0 ? area[0].D : 0;
-                    if (a >= 4)
-                        parts.Add((a, reg));
-                    else
-                        reg.Dispose();
-                }
-                finally
-                {
-                    one.Dispose();
-                }
-            }
-
-            if (parts.Count == 0)
-                return null;
-
-            parts.Sort((x, y) => y.area.CompareTo(x.area));
-            HRegion result = parts[0].region;
-            bool disposeResult = false;
-            for (int pi = 1; pi < parts.Count; pi++)
-            {
-                if (parts[pi].area < parts[0].area * 0.02)
-                {
-                    parts[pi].region.Dispose();
-                    continue;
-                }
-
-                HRegion diff = result.Difference(parts[pi].region);
-                parts[pi].region.Dispose();
-                if (disposeResult)
-                    result.Dispose();
-                else
-                    disposeResult = true;
-                result = diff;
-            }
-
-            return result;
-        }
 
         /// <summary>
         /// use_polarity / ignore_global_polarity 需要轮廓带 edge_direction；阈值/多边形轮廓应使用 ignore_local_polarity。
