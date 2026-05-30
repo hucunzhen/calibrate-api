@@ -25,7 +25,7 @@
         "greediness": "0.01",
         "allowRetry": "false",
         "endScoreWeight": "0.9",
-        "endArcFraction": "0.7"
+        "endArcFraction": "0.12"
       }
     },
     {
@@ -97,7 +97,7 @@
       "X": 383.7231999999999,
       "Y": 202.32960000000003,
       "Params": {
-        "filePath": "D:\\work\\calibrate-api\\flows\\shape_model_fixed.shm"
+        "filePath": "flows/shape_model_fixed.shm"
       }
     },
     {
@@ -106,7 +106,7 @@
       "X": 302.3711999999997,
       "Y": 501.9807999999999,
       "Params": {
-        "filePath": "D:\\work\\calibrate-api\\flows\\deformable_model.dfm"
+        "filePath": "flows/deformable_model.dfm"
       }
     },
     {
@@ -119,6 +119,47 @@
         "crossHalf": "14",
         "strokeWidth": "2.5",
         "drawScores": "true"
+      }
+    },
+    {
+      "Id": "e2000001-0001-4001-8001-00000000001a",
+      "TypeId": "halcon_xld_sample_points",
+      "X": 1249,
+      "Y": 520,
+      "Params": {
+        "spacing": "4",
+        "maxBars": "0",
+        "contourOrder": "list"
+      }
+    },
+    {
+      "Id": "e2000001-0001-4001-8001-00000000001b",
+      "TypeId": "points_sink",
+      "X": 1480,
+      "Y": 520,
+      "Params": {
+        "acceptEmpty": "true",
+        "groupIdMode": "round"
+      }
+    },
+    {
+      "Id": "e2000001-0001-4001-8001-00000000001c",
+      "TypeId": "polyline_simplify_dp",
+      "X": 1710,
+      "Y": 520,
+      "Params": {
+        "epsilon": "2.0",
+        "closed": "true"
+      }
+    },
+    {
+      "Id": "e2000001-0001-4001-8001-00000000001d",
+      "TypeId": "display",
+      "X": 1940,
+      "Y": 520,
+      "Params": {
+        "dotRadius": "3",
+        "pointLineJoin": "bars"
       }
     }
   ],
@@ -296,6 +337,66 @@
       "FromPort": "ModelId",
       "ToNodeId": "e1000001-0001-4001-8001-000000000011",
       "ToPort": "ModelId"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000009",
+      "FromPort": "DeformedXld",
+      "ToNodeId": "e2000001-0001-4001-8001-00000000001a",
+      "ToPort": "Xld"
+    },
+    {
+      "FromNodeId": "e2000001-0001-4001-8001-00000000001a",
+      "FromPort": "Points",
+      "ToNodeId": "e2000001-0001-4001-8001-00000000001b",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "e2000001-0001-4001-8001-00000000001b",
+      "FromPort": "MergedPoints",
+      "ToNodeId": "e2000001-0001-4001-8001-00000000001c",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "e2000001-0001-4001-8001-00000000001b",
+      "FromPort": "MergedGroupBarIds",
+      "ToNodeId": "e2000001-0001-4001-8001-00000000001c",
+      "ToPort": "GroupBarIds"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000001",
+      "FromPort": "Image",
+      "ToNodeId": "e2000001-0001-4001-8001-00000000001d",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "e2000001-0001-4001-8001-00000000001c",
+      "FromPort": "Out",
+      "ToNodeId": "e2000001-0001-4001-8001-00000000001d",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "e2000001-0001-4001-8001-00000000001c",
+      "FromPort": "OutBarIds",
+      "ToNodeId": "e2000001-0001-4001-8001-00000000001d",
+      "ToPort": "BarIds"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-00000000000c",
+      "FromPort": "ModelId",
+      "ToNodeId": "b2000001-0001-4001-8001-000000000009",
+      "ToPort": "RigidModelId"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000001",
+      "FromPort": "Image",
+      "ToNodeId": "b2000001-0001-4001-8001-000000000009",
+      "ToPort": "FullImage"
+    },
+    {
+      "FromNodeId": "e2000001-0001-4001-8001-00000000001a",
+      "FromPort": "BarIds",
+      "ToNodeId": "e2000001-0001-4001-8001-00000000001b",
+      "ToPort": "BarIds"
     }
   ]
 }

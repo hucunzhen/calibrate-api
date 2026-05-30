@@ -276,5 +276,154 @@ namespace CalibOperatorCLI_Example
                 throw new InvalidOperationException($"旋转: 无效角度 '{raw}'");
             return a;
         }
+
+        /// <summary>缩放 CalibImage。mode: factor / absolute / max_side。</summary>
+        public static CalibImage Resize(
+            CalibImage src,
+            string mode,
+            double scale,
+            int targetWidth,
+            int targetHeight,
+            int maxSide,
+            bool keepAspect,
+            string interpolation)
+        {
+            if (src == null) throw new ArgumentNullException(nameof(src));
+            var n = src.GetNativeStruct();
+            if (n.data == IntPtr.Zero || n.width <= 0 || n.height <= 0)
+                throw new InvalidOperationException("图像缩放: 图像无有效数据");
+
+            ResolveResizeOutputSize(
+                mode, scale, targetWidth, targetHeight, maxSide, keepAspect,
+                n.width, n.height, out int newW, out int newH);
+
+            if (newW == n.width && newH == n.height)
+                return CalibAPI.DuplicateImage(src);
+
+            using var srcBmp = src.ToBitmap()
+                ?? throw new InvalidOperationException("图像缩放: 无法转换为位图");
+
+            using var dstBmp = new Bitmap(newW, newH, srcBmp.PixelFormat);
+            if (srcBmp.PixelFormat == PixelFormat.Format8bppIndexed)
+            {
+                ColorPalette pal = dstBmp.Palette;
+                for (int i = 0; i < 256; i++)
+                    pal.Entries[i] = Color.FromArgb(i, i, i);
+                dstBmp.Palette = pal;
+            }
+
+            using (var g = Graphics.FromImage(dstBmp))
+            {
+                g.Clear(Color.Black);
+                g.InterpolationMode = ParseInterpolation(interpolation);
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.SmoothingMode = SmoothingMode.None;
+                g.DrawImage(srcBmp, new Rectangle(0, 0, newW, newH), new Rectangle(0, 0, srcBmp.Width, srcBmp.Height), GraphicsUnit.Pixel);
+            }
+
+            return FromBitmap(dstBmp);
+        }
+
+        private static void ResolveResizeOutputSize(
+            string? modeRaw,
+            double scale,
+            int targetWidth,
+            int targetHeight,
+            int maxSide,
+            bool keepAspect,
+            int srcW,
+            int srcH,
+            out int dstW,
+            out int dstH)
+        {
+            string mode = (modeRaw ?? "factor").Trim().ToLowerInvariant();
+            if (mode is "max_side" or "maxside" or "fit" or "最长边")
+                mode = "max_side";
+            else if (mode is "absolute" or "size" or "绝对" or "指定尺寸")
+                mode = "absolute";
+            else
+                mode = "factor";
+
+            if (mode == "factor")
+            {
+                if (scale <= 0)
+                    throw new InvalidOperationException("图像缩放: scale 须 > 0");
+                dstW = Math.Max(1, (int)Math.Round(srcW * scale));
+                dstH = Math.Max(1, (int)Math.Round(srcH * scale));
+                return;
+            }
+
+            if (mode == "max_side")
+            {
+                if (maxSide <= 0)
+                    throw new InvalidOperationException("图像缩放: max_side 模式须填写 maxSide > 0");
+                int ms = maxSide;
+                if (srcW >= srcH)
+                {
+                    dstW = ms;
+                    dstH = Math.Max(1, (int)Math.Round((double)srcH * ms / srcW));
+                }
+                else
+                {
+                    dstH = ms;
+                    dstW = Math.Max(1, (int)Math.Round((double)srcW * ms / srcH));
+                }
+                return;
+            }
+
+            if (targetWidth <= 0 && targetHeight <= 0)
+                throw new InvalidOperationException("图像缩放: absolute 模式须指定 width 或 height > 0");
+
+            if (targetWidth > 0 && targetHeight > 0)
+            {
+                dstW = targetWidth;
+                dstH = targetHeight;
+                return;
+            }
+
+            if (targetWidth > 0)
+            {
+                dstW = targetWidth;
+                dstH = keepAspect
+                    ? Math.Max(1, (int)Math.Round((double)srcH * targetWidth / srcW))
+                    : srcH;
+                return;
+            }
+
+            dstH = targetHeight;
+            dstW = keepAspect
+                ? Math.Max(1, (int)Math.Round((double)srcW * targetHeight / srcH))
+                : srcW;
+        }
+
+        private static InterpolationMode ParseInterpolation(string? raw)
+        {
+            string s = (raw ?? "linear").Trim().ToLowerInvariant();
+            return s switch
+            {
+                "nearest" or "近邻" => InterpolationMode.NearestNeighbor,
+                "bicubic" or "双三次" => InterpolationMode.HighQualityBicubic,
+                _ => InterpolationMode.HighQualityBilinear,
+            };
+        }
+
+        public static double ParseScale(string? raw, double defaultScale = 1.0)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return defaultScale;
+            if (!double.TryParse(raw.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double v)
+                && !double.TryParse(raw.Trim(), NumberStyles.Float, CultureInfo.CurrentCulture, out v))
+                throw new InvalidOperationException($"图像缩放: 无效 scale '{raw}'");
+            return v;
+        }
+
+        public static int ParsePositiveOrZeroInt(string? raw, int defaultValue = 0)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return defaultValue;
+            if (!int.TryParse(raw.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int v))
+                throw new InvalidOperationException($"图像缩放: 无效整数 '{raw}'");
+            return Math.Max(0, v);
+        }
     }
 }

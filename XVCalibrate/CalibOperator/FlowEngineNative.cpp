@@ -1240,6 +1240,51 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         out["Out"] = MakeImage(EnsureGray(vin.img));
         return true;
     }
+    if (n.type == "image_resize") {
+        Value vin = InputOf(e, n.id, "In");
+        if (vin.kind != Value::Kind::Image) { err = "image_resize: missing In"; return false; }
+        cv::Mat src = vin.img;
+        if (src.empty()) { err = "image_resize: empty image"; return false; }
+        std::string mode = NodeParam(n, "mode", "factor");
+        for (auto& c : mode) c = (char)tolower((unsigned char)c);
+        double scale = ToDouble(NodeParam(n, "scale", "1.0"), 1.0);
+        int tw = ToInt(NodeParam(n, "width", "0"), 0);
+        int th = ToInt(NodeParam(n, "height", "0"), 0);
+        int maxSide = ToInt(NodeParam(n, "maxSide", "0"), 0);
+        std::string keepRaw = NodeParam(n, "keepAspect", "true");
+        bool keepAspect = !(keepRaw == "0" || keepRaw == "false" || keepRaw == "False");
+        int sw = src.cols, sh = src.rows;
+        int dw = sw, dh = sh;
+        if (mode == "max_side") {
+            if (maxSide <= 0) { err = "image_resize: max_side requires maxSide > 0"; return false; }
+            if (sw >= sh) { dw = maxSide; dh = std::max(1, (int)std::lround((double)sh * maxSide / sw)); }
+            else { dh = maxSide; dw = std::max(1, (int)std::lround((double)sw * maxSide / sh)); }
+        } else if (mode == "absolute" || mode == "size") {
+            if (tw <= 0 && th <= 0) { err = "image_resize: absolute requires width or height"; return false; }
+            if (tw > 0 && th > 0) { dw = tw; dh = th; }
+            else if (tw > 0) {
+                dw = tw;
+                dh = keepAspect ? std::max(1, (int)std::lround((double)sh * tw / sw)) : sh;
+            } else {
+                dh = th;
+                dw = keepAspect ? std::max(1, (int)std::lround((double)sw * th / sh)) : sw;
+            }
+        } else {
+            if (scale <= 0) { err = "image_resize: scale must be > 0"; return false; }
+            dw = std::max(1, (int)std::lround(sw * scale));
+            dh = std::max(1, (int)std::lround(sh * scale));
+        }
+        std::string interp = NodeParam(n, "interpolation", "linear");
+        for (auto& c : interp) c = (char)tolower((unsigned char)c);
+        int interpFlag = cv::INTER_LINEAR;
+        if (interp == "nearest") interpFlag = cv::INTER_NEAREST;
+        else if (interp == "area") interpFlag = cv::INTER_AREA;
+        else if (interp == "bicubic") interpFlag = cv::INTER_CUBIC;
+        cv::Mat dst;
+        cv::resize(src, dst, cv::Size(dw, dh), 0, 0, interpFlag);
+        out["Out"] = MakeImage(dst);
+        return true;
+    }
     if (n.type == "clahe") {
         Value vin = InputOf(e, n.id, "In");
         if (vin.kind != Value::Kind::Image) { err = "clahe: missing In"; return false; }

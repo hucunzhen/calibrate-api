@@ -64,6 +64,9 @@ namespace CalibOperatorCLI_Example
             /// <summary>flow_sink 在 flow_loop 多轮执行时累积的输入（不参与流程 JSON 序列化）。</summary>
             public List<object?>? SinkAccumulator { get; set; }
 
+            /// <summary>points_sink 在循环多轮执行时累积的点列（不参与流程 JSON 序列化）。</summary>
+            public PointsSinkRoundAccumulator? PointsSinkAccumulator { get; set; }
+
             public FlowNode(OperatorDef def, double x, double y, Guid? fixedId = null)
             {
                 Id = fixedId ?? Guid.NewGuid();
@@ -99,6 +102,14 @@ namespace CalibOperatorCLI_Example
             public string Name { get; set; } = "";
             public bool IsExpanded { get; set; } = true;
             public ObservableCollection<OperatorDef> Operators { get; } = new ObservableCollection<OperatorDef>();
+        }
+
+        /// <summary>轨迹收集算子跨轮累积缓冲。</summary>
+        public sealed class PointsSinkRoundAccumulator
+        {
+            public readonly List<Point2D> Points = new();
+            public readonly List<int> GroupBarIds = new();
+            public int RoundCount;
         }
 
         /// <summary>

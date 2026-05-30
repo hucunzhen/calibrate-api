@@ -1270,6 +1270,32 @@ namespace CalibOperatorCLI_Example
             return idx;
         }
 
+        private static (double[] rows, double[] cols, double[] angles, double[] scores) ReorderMatchResultsByScore(
+            double[] rows,
+            double[] cols,
+            double[] angles,
+            double[] scores)
+        {
+            if (scores.Length <= 1)
+                return (rows, cols, angles, scores);
+
+            int[] order = SortIndicesByScoreDescending(scores);
+            var rows2 = new double[order.Length];
+            var cols2 = new double[order.Length];
+            var angles2 = new double[order.Length];
+            var scores2 = new double[order.Length];
+            for (int k = 0; k < order.Length; k++)
+            {
+                int i = order[k];
+                rows2[k] = rows[i];
+                cols2[k] = cols[i];
+                angles2[k] = angles[i];
+                scores2[k] = scores[i];
+            }
+
+            return (rows2, cols2, angles2, scores2);
+        }
+
         private static Point2D[] OffsetContourToFullImage(Point2D[] contour, double rowOffset, double colOffset)
         {
             var shifted = new Point2D[contour.Length];
@@ -1638,7 +1664,7 @@ namespace CalibOperatorCLI_Example
                         endScoreWeight, endArcFraction, contourLevel);
                 }
 
-                return (rows, cols, angles, adjusted);
+                return ReorderMatchResultsByScore(rows, cols, angles, adjusted);
             }
             finally
             {

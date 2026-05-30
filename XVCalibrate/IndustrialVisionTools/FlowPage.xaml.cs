@@ -114,8 +114,18 @@ namespace CalibOperatorCLI_Example
         private HashSet<Guid>? _skipFlowRunNodeIds;
         private Guid _sendPlcDownstreamChainSourceId;
         private List<FlowNode>? _sendPlcDownstreamChainCache;
-        /// <summary>flow_loop 多轮执行时为 true，flow_sink 跨轮累积而不每轮清空。</summary>
-        private bool _flowLoopSinkAccumulateActive;
+        /// <summary>flow_loop / Mask 循环嵌套深度；&gt;0 时 flow_sink / points_sink 跨轮累积。</summary>
+        private int _flowLoopSinkAccumulateDepth;
+
+        private bool FlowLoopSinkAccumulateActive => _flowLoopSinkAccumulateDepth > 0;
+
+        private void EnterFlowLoopSinkAccumulate() => _flowLoopSinkAccumulateDepth++;
+
+        private void ExitFlowLoopSinkAccumulate()
+        {
+            if (_flowLoopSinkAccumulateDepth > 0)
+                _flowLoopSinkAccumulateDepth--;
+        }
 
         private static PlcConfig LoadFlowPlcConfig()
         {
@@ -5652,17 +5662,162 @@ namespace CalibOperatorCLI_Example
             _compositeInnerWiredOutputs = innerWiredOutputs;
             try
             {
-                foreach (var inner in sorted)
+                // 检测子流程中是否有 halcon_coarse_shape_reduce_domain loopEmit=true 需要循环展开
+                FlowNode? compositeMaskEachNode = sorted
+                    .FirstOrDefault(n => n.Def.TypeId == "halcon_coarse_shape_reduce_domain" &&
+                                         !string.Equals(n.Params.GetValueOrDefault("loopEmit", "true"), "false",
+                                             StringComparison.OrdinalIgnoreCase));
+
+#if HALCON_ENABLED
+                if (compositeMaskEachNode != null)
                 {
-                    var innerInputs = BuildInnerInputsFromEdges(inner.Id, edges, idMap);
-                    MergeCompositeExternalInputs(inner, innerInputs, compositeInputs, spec);
-                    bool innerIsSource = !edges.Any(e => e.ToId == inner.Id);
-                    if (!strictCompositeInputBinding)
-                        AutoFillUnboundCompositeInnerInputs(inner, innerInputs, compositeInputs, innerIsSource);
-                    var swInner = Stopwatch.StartNew();
-                    ExecuteNode(inner, innerInputs, compositeInputs, baseDirForNestedComposites);
-                    swInner.Stop();
-                    LogOperatorTiming(inner, swInner.Elapsed.TotalMilliseconds, "composite");
+                    // 本地辅助：计算子流程内的上下游关系
+                    HashSet<Guid> CompositeDownstreamIds(Guid sourceId)
+                    {
+                        var result = new HashSet<Guid> { sourceId };
+                        var q = new Queue<Guid>();
+                        q.Enqueue(sourceId);
+                        while (q.Count > 0)
+                        {
+                            var cur = q.Dequeue();
+                            foreach (var e in edges)
+                            {
+                                if (e.FromId != cur) continue;
+                                if (result.Add(e.ToId))
+                                    q.Enqueue(e.ToId);
+                            }
+                        }
+                        return result;
+                    }
+
+                    var downstreamIds = CompositeDownstreamIds(compositeMaskEachNode.Id);
+                    var preNodes = sorted.Where(n => !downstreamIds.Contains(n.Id)).ToList();
+                    var postNodes = sorted.Where(n => downstreamIds.Contains(n.Id) && n.Id != compositeMaskEachNode.Id).ToList();
+                    var fineNodes = postNodes.Where(n => n.Def.TypeId == "halcon_fine_deformable_match").ToList();
+                    var fineAccumulators = fineNodes.ToDictionary(n => n.Id, _ => new FineMatchRoundAccumulator());
+
+                    // 前置节点执行一次
+                    foreach (var inner in preNodes)
+                    {
+                        var innerInputs = BuildInnerInputsFromEdges(inner.Id, edges, idMap);
+                        MergeCompositeExternalInputs(inner, innerInputs, compositeInputs, spec);
+                        bool innerIsSource = !edges.Any(e => e.ToId == inner.Id);
+                        if (!strictCompositeInputBinding)
+                            AutoFillUnboundCompositeInnerInputs(inner, innerInputs, compositeInputs, innerIsSource);
+                        var swInner = Stopwatch.StartNew();
+                        ExecuteNode(inner, innerInputs, compositeInputs, baseDirForNestedComposites);
+                        swInner.Stop();
+                        LogOperatorTiming(inner, swInner.Elapsed.TotalMilliseconds, "composite");
+                    }
+
+                    // 构建 mask batch
+                    var maskInputs = BuildInnerInputsFromEdges(compositeMaskEachNode.Id, edges, idMap);
+                    MergeCompositeExternalInputs(compositeMaskEachNode, maskInputs, compositeInputs, spec);
+                    var batch = BuildCoarseShapeMaskBatchForNode(compositeMaskEachNode, maskInputs);
+                    if (batch.Count == 0)
+                        throw new InvalidOperationException("HALCON 粗形状Mask: 无粗候选，无法生成 Mask（组合算子内）");
+                    compositeMaskEachNode.Executed = true;
+                    compositeMaskEachNode.ErrorMessage = null;
+
+                    var postLoopDeferred = ComputePostLoopDeferredNodesCore(postNodes, n =>
+                        edges.Where(e => e.ToId == n.Id && idMap.TryGetValue(e.FromId, out var from) && postNodes.Contains(from))
+                            .Select(e => idMap[e.FromId]));
+                    var perRoundNodes = postNodes.Where(n => !postLoopDeferred.Contains(n)).ToList();
+
+                    EnterFlowLoopSinkAccumulate();
+                    try
+                    {
+                        ResetFlowSinkAccumulators(perRoundNodes);
+
+                        // 循环展开
+                        for (int mi = 0; mi < batch.Count; mi++)
+                        {
+                            SetCoarseShapeMaskRoundOutputs(compositeMaskEachNode, batch, mi);
+                            foreach (var inner in perRoundNodes)
+                            {
+                                inner.Outputs.Clear();
+                                inner.ErrorMessage = null;
+                                inner.Executed = false;
+                                var innerInputs = BuildInnerInputsFromEdges(inner.Id, edges, idMap);
+                                MergeCompositeExternalInputs(inner, innerInputs, compositeInputs, spec);
+                                if (inner.Def.TypeId == "halcon_fine_deformable_match")
+                                {
+                                    if (!innerInputs.ContainsKey("FullImage") && batch.SourceImage != null)
+                                        innerInputs["FullImage"] = batch.SourceImage;
+                                    if (!innerInputs.ContainsKey("RigidModelId")
+                                        && maskInputs.TryGetValue("ModelId", out var rigidMid)
+                                        && rigidMid != null)
+                                    {
+                                        long rid = HalconFlowBridge.ResolveRegisteredShapeModelId(Convert.ToInt64(rigidMid));
+                                        if (rid >= 0)
+                                            innerInputs["RigidModelId"] = rid;
+                                    }
+                                }
+
+                                bool innerIsSource = !edges.Any(e => e.ToId == inner.Id);
+                                if (!strictCompositeInputBinding)
+                                    AutoFillUnboundCompositeInnerInputs(inner, innerInputs, compositeInputs, innerIsSource);
+                                var swInner = Stopwatch.StartNew();
+                                ExecuteNode(inner, innerInputs, compositeInputs, baseDirForNestedComposites);
+                                swInner.Stop();
+                                LogOperatorTiming(inner, swInner.Elapsed.TotalMilliseconds, "composite");
+
+                                if (fineAccumulators.TryGetValue(inner.Id, out var acc))
+                                    AccumulateFineMatchRound(inner, acc);
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        ExitFlowLoopSinkAccumulate();
+                    }
+
+                    RefreshPointsSinkMergedOutputs(perRoundNodes);
+
+                    // 汇总精匹配结果
+                    foreach (FlowNode fn in fineNodes)
+                    {
+                        fn.Executed = true;
+                        fn.ErrorMessage = null;
+                        ApplyFineMatchAccumulator(fn, fineAccumulators[fn.Id]);
+                    }
+
+                    var orderedDeferred = postNodes.Where(postLoopDeferred.Contains).ToList();
+                    foreach (var inner in orderedDeferred)
+                    {
+                        inner.Outputs.Clear();
+                        inner.ErrorMessage = null;
+                        inner.Executed = false;
+                        var innerInputs = BuildInnerInputsFromEdges(inner.Id, edges, idMap);
+                        MergeCompositeExternalInputs(inner, innerInputs, compositeInputs, spec);
+                        bool innerIsSource = !edges.Any(e => e.ToId == inner.Id);
+                        if (!strictCompositeInputBinding)
+                            AutoFillUnboundCompositeInnerInputs(inner, innerInputs, compositeInputs, innerIsSource);
+                        var swInner = Stopwatch.StartNew();
+                        ExecuteNode(inner, innerInputs, compositeInputs, baseDirForNestedComposites);
+                        swInner.Stop();
+                        LogOperatorTiming(inner, swInner.Elapsed.TotalMilliseconds, "composite");
+                    }
+
+                    compositeMaskEachNode.ResultSummary = $"Mask循环 {batch.Count} 轮（组合算子内）"
+                        + (orderedDeferred.Count > 0 ? $"，延后 {orderedDeferred.Count}" : "");
+                }
+                else
+#endif
+                {
+                    // 无 mask-each-loop 时（或非 HALCON 构建）：顺序执行所有节点
+                    foreach (var inner in sorted)
+                    {
+                        var innerInputs = BuildInnerInputsFromEdges(inner.Id, edges, idMap);
+                        MergeCompositeExternalInputs(inner, innerInputs, compositeInputs, spec);
+                        bool innerIsSource = !edges.Any(e => e.ToId == inner.Id);
+                        if (!strictCompositeInputBinding)
+                            AutoFillUnboundCompositeInnerInputs(inner, innerInputs, compositeInputs, innerIsSource);
+                        var swInner = Stopwatch.StartNew();
+                        ExecuteNode(inner, innerInputs, compositeInputs, baseDirForNestedComposites);
+                        swInner.Stop();
+                        LogOperatorTiming(inner, swInner.Elapsed.TotalMilliseconds, "composite");
+                    }
                 }
 
                 string? flowLabel = !string.IsNullOrWhiteSpace(path)
@@ -6325,45 +6480,62 @@ namespace CalibOperatorCLI_Example
             SetNodeStatus(maskNode, false);
             UpdateNodeSummary(maskNode);
 
-            for (int mi = 0; mi < batch.Count; mi++)
-            {
-                ThrowIfExecutionCancelled();
-                SetCoarseShapeMaskRoundOutputs(maskNode, batch, mi);
-                UpdateNodeSummary(maskNode);
-                AppendLog($"[MASK {mi + 1}/{batch.Count}] 开始下游 {postNodes.Count} 节点");
+            var postLoopDeferred = ComputePostLoopDeferredNodes(postNodes);
+            var perRoundNodes = postNodes.Where(n => !postLoopDeferred.Contains(n)).ToList();
+            if (postLoopDeferred.Count > 0)
+                AppendLog($"Mask循环延后执行: {postLoopDeferred.Count} 个节点（如轨迹收集之后接简化）");
 
-                for (int j = 0; j < postNodes.Count; j++)
+            EnterFlowLoopSinkAccumulate();
+            try
+            {
+                ResetFlowSinkAccumulators(perRoundNodes);
+
+                for (int mi = 0; mi < batch.Count; mi++)
                 {
                     ThrowIfExecutionCancelled();
-                    var node = postNodes[j];
-                    node.Outputs.Clear();
-                    node.ErrorMessage = null;
-                    node.Executed = false;
-                    StatusText.Text =
-                        $"Mask[{mi + 1}/{batch.Count}] [{j + 1}/{postNodes.Count}] {node.Def.DisplayName}...";
-                    await System.Threading.Tasks.Task.Yield();
-                    try
-                    {
-                        Dictionary<string, object?>? loopInputs = node.Def.TypeId == "halcon_fine_deformable_match"
-                            ? BuildFineDeformableMaskLoopInputs(node, maskInputs, batch)
-                            : null;
-                        await ExecuteNodeForRunAsync(node, $"M{mi + 1}", loopInputs);
-                    }
-                    catch (FlowExecutionGracefulStopException ex)
-                    {
-                        AppendLog($"[MASK][STOP] {node.Def.DisplayName}: {ex.Message}", true);
-                        if (ex.InnerException != null)
-                            AppendLog($"  {ex.InnerException.Message}", true);
-                        StatusText.Text = ex.Message;
-                        StatusText.Foreground = new SolidColorBrush(Colors.Orange);
-                        AppendLog("========== 执行中止 ==========");
-                        return false;
-                    }
+                    SetCoarseShapeMaskRoundOutputs(maskNode, batch, mi);
+                    UpdateNodeSummary(maskNode);
+                    AppendLog($"[MASK {mi + 1}/{batch.Count}] 开始下游 {perRoundNodes.Count} 节点");
 
-                    if (fineAccumulators.TryGetValue(node.Id, out var acc))
-                        AccumulateFineMatchRound(node, acc);
+                    for (int j = 0; j < perRoundNodes.Count; j++)
+                    {
+                        ThrowIfExecutionCancelled();
+                        var node = perRoundNodes[j];
+                        node.Outputs.Clear();
+                        node.ErrorMessage = null;
+                        node.Executed = false;
+                        StatusText.Text =
+                            $"Mask[{mi + 1}/{batch.Count}] [{j + 1}/{perRoundNodes.Count}] {node.Def.DisplayName}...";
+                        await System.Threading.Tasks.Task.Yield();
+                        try
+                        {
+                            Dictionary<string, object?>? loopInputs = node.Def.TypeId == "halcon_fine_deformable_match"
+                                ? BuildFineDeformableMaskLoopInputs(node, maskInputs, batch)
+                                : null;
+                            await ExecuteNodeForRunAsync(node, $"M{mi + 1}", loopInputs);
+                        }
+                        catch (FlowExecutionGracefulStopException ex)
+                        {
+                            AppendLog($"[MASK][STOP] {node.Def.DisplayName}: {ex.Message}", true);
+                            if (ex.InnerException != null)
+                                AppendLog($"  {ex.InnerException.Message}", true);
+                            StatusText.Text = ex.Message;
+                            StatusText.Foreground = new SolidColorBrush(Colors.Orange);
+                            AppendLog("========== 执行中止 ==========");
+                            return false;
+                        }
+
+                        if (fineAccumulators.TryGetValue(node.Id, out var acc))
+                            AccumulateFineMatchRound(node, acc);
+                    }
                 }
             }
+            finally
+            {
+                ExitFlowLoopSinkAccumulate();
+            }
+
+            RefreshPointsSinkMergedOutputs(perRoundNodes);
 
             foreach (FlowNode fn in fineNodes)
             {
@@ -6374,9 +6546,38 @@ namespace CalibOperatorCLI_Example
                 UpdateNodeSummary(fn);
             }
 
+            var orderedDeferred = postNodes.Where(postLoopDeferred.Contains).ToList();
+            if (orderedDeferred.Count > 0)
+            {
+                AppendLog($"[MASK] 循环后执行 {orderedDeferred.Count} 个节点");
+                for (int j = 0; j < orderedDeferred.Count; j++)
+                {
+                    ThrowIfExecutionCancelled();
+                    var node = orderedDeferred[j];
+                    node.Outputs.Clear();
+                    node.ErrorMessage = null;
+                    node.Executed = false;
+                    StatusText.Text = $"Mask循环后 [{j + 1}/{orderedDeferred.Count}] {node.Def.DisplayName}...";
+                    await System.Threading.Tasks.Task.Yield();
+                    try
+                    {
+                        await ExecuteNodeForRunAsync(node, "MASK-POST");
+                    }
+                    catch (FlowExecutionGracefulStopException ex)
+                    {
+                        AppendLog($"[MASK-POST][STOP] {node.Def.DisplayName}: {ex.Message}", true);
+                        StatusText.Text = ex.Message;
+                        StatusText.Foreground = new SolidColorBrush(Colors.Orange);
+                        AppendLog("========== 执行中止 ==========");
+                        return false;
+                    }
+                }
+            }
+
             int fineTotal = fineNodes.Sum(fn => fineAccumulators[fn.Id].Rows.Count);
             StatusText.Text =
-                $"粗形状Mask循环完成: 前置 {successCountPre}/{preNodes.Count}，{batch.Count} 张 Mask，精匹配 {fineTotal} 个";
+                $"粗形状Mask循环完成: 前置 {successCountPre}/{preNodes.Count}，{batch.Count} 张 Mask，精匹配 {fineTotal} 个"
+                + (orderedDeferred.Count > 0 ? $"，延后 {orderedDeferred.Count}" : "");
             StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
             AppendLog(
                 $"========== 粗形状Mask循环完成: masks={batch.Count}，精匹配汇总={fineTotal} ==========");
@@ -6384,8 +6585,15 @@ namespace CalibOperatorCLI_Example
         }
 #endif
 
-        /// <summary>循环结束后才执行的节点：exposure_fusion，以及仅由 flow_sink / 已延后节点供数的下游。</summary>
-        private HashSet<FlowNode> ComputePostLoopDeferredNodes(IReadOnlyList<FlowNode> postNodes)
+        /// <summary>循环结束后才执行的节点：exposure_fusion，以及仅由 flow_sink / points_sink 供数的下游。</summary>
+        private HashSet<FlowNode> ComputePostLoopDeferredNodes(IReadOnlyList<FlowNode> postNodes) =>
+            ComputePostLoopDeferredNodesCore(postNodes, n =>
+                _connections.Where(c => c.ToPort.Owner == n && postNodes.Contains(c.FromPort.Owner))
+                    .Select(c => c.FromPort.Owner));
+
+        private static HashSet<FlowNode> ComputePostLoopDeferredNodesCore(
+            IReadOnlyList<FlowNode> postNodes,
+            Func<FlowNode, IEnumerable<FlowNode>> getInboundSourcesInPost)
         {
             var deferred = new HashSet<FlowNode>(postNodes.Where(n => n.Def.TypeId == "exposure_fusion"));
             bool changed = true;
@@ -6397,14 +6605,13 @@ namespace CalibOperatorCLI_Example
                     if (deferred.Contains(n))
                         continue;
 
-                    var inConns = _connections.Where(c =>
-                        c.ToPort.Owner == n && postNodes.Contains(c.FromPort.Owner)).ToList();
-                    if (inConns.Count == 0)
+                    var inSources = getInboundSourcesInPost(n).ToList();
+                    if (inSources.Count == 0)
                         continue;
 
-                    if (inConns.All(c =>
-                            deferred.Contains(c.FromPort.Owner)
-                            || c.FromPort.Owner.Def.TypeId == "flow_sink"))
+                    if (inSources.All(s =>
+                            deferred.Contains(s)
+                            || s.Def.TypeId is "flow_sink" or "points_sink"))
                     {
                         deferred.Add(n);
                         changed = true;
@@ -6421,7 +6628,83 @@ namespace CalibOperatorCLI_Example
             {
                 if (n.Def.TypeId == "flow_sink")
                     n.SinkAccumulator = new List<object?>();
+                if (n.Def.TypeId == "points_sink")
+                    n.PointsSinkAccumulator = new PointsSinkRoundAccumulator();
             }
+        }
+
+        private static void RefreshPointsSinkMergedOutputs(IEnumerable<FlowNode> perRoundNodes)
+        {
+            foreach (var n in perRoundNodes.Where(n => n.Def.TypeId == "points_sink"))
+            {
+                if (n.PointsSinkAccumulator == null)
+                    continue;
+                ApplyPointsSinkOutputs(n, n.PointsSinkAccumulator, new Dictionary<string, object?>());
+            }
+        }
+
+        private static void AppendPointsSinkRound(
+            PointsSinkRoundAccumulator acc,
+            Point2D[] pts,
+            int[]? barIn,
+            string groupIdMode,
+            bool loopAccumulate)
+        {
+            if (pts == null || pts.Length == 0)
+            {
+                acc.RoundCount++;
+                return;
+            }
+
+            string mode = (groupIdMode ?? "round").Trim().ToLowerInvariant();
+            // 循环累积时 preserve + 每轮 XLD BarIds 常为全 0，会合并成一条焊道
+            if (loopAccumulate && mode == "preserve"
+                && (barIn == null || barIn.Length != pts.Length || barIn.Distinct().Count() <= 1))
+                mode = "round";
+
+            int[] idsForRound;
+            if (mode == "preserve" && barIn != null && barIn.Length == pts.Length)
+            {
+                idsForRound = barIn;
+            }
+            else if (mode == "offset" && barIn != null && barIn.Length == pts.Length)
+            {
+                int minBar = barIn.Min();
+                int offset = 0;
+                if (acc.GroupBarIds.Count > 0)
+                    offset = acc.GroupBarIds.Max() + 1 - minBar;
+                idsForRound = barIn.Select(b => b + offset).ToArray();
+            }
+            else
+            {
+                int gid = acc.RoundCount;
+                idsForRound = Enumerable.Repeat(gid, pts.Length).ToArray();
+            }
+
+            acc.Points.AddRange(pts);
+            acc.GroupBarIds.AddRange(idsForRound);
+            acc.RoundCount++;
+        }
+
+        private static void ApplyPointsSinkOutputs(FlowNode node, PointsSinkRoundAccumulator acc, Dictionary<string, object?> inputs)
+        {
+            var mergedPts = acc.Points.ToArray();
+            var mergedIds = acc.GroupBarIds.Count == mergedPts.Length
+                ? acc.GroupBarIds.ToArray()
+                : Enumerable.Repeat(0, mergedPts.Length).ToArray();
+
+            node.Outputs["MergedPoints"] = mergedPts;
+            node.Outputs["MergedGroupBarIds"] = mergedIds;
+            node.Outputs["BarIds"] = mergedIds;
+            node.Outputs["Count"] = acc.RoundCount;
+            if (inputs.TryGetValue("After", out var afterSink))
+                node.Outputs["Out"] = afterSink;
+            else if (mergedPts.Length > 0)
+                node.Outputs["Out"] = mergedPts;
+
+            node.ResultSummary = mergedPts.Length == 0
+                ? $"收集 {acc.RoundCount} 轮 · 0 点"
+                : $"收集 {acc.RoundCount} 轮 · {mergedPts.Length} 点 · 条号 {mergedIds.Distinct().Count()} 种";
         }
 
         private static List<CalibImage> CoerceToCalibImageList(object? src, string context)
@@ -7107,7 +7390,7 @@ namespace CalibOperatorCLI_Example
                             StringComparison.OrdinalIgnoreCase)
                             || node.Params.GetValueOrDefault("acceptNull", "false")?.Trim() == "1";
 
-                        if (!_flowLoopSinkAccumulateActive)
+                        if (!FlowLoopSinkAccumulateActive)
                             node.SinkAccumulator = new List<object?>();
                         else
                             node.SinkAccumulator ??= new List<object?>();
@@ -7131,9 +7414,42 @@ namespace CalibOperatorCLI_Example
                         else if (acc.Count > 0)
                             node.Outputs["Out"] = acc[^1];
 
-                        node.ResultSummary = _flowLoopSinkAccumulateActive
+                        node.ResultSummary = FlowLoopSinkAccumulateActive
                             ? $"收集 {acc.Count} 项（图 {imageList.Count}）"
                             : $"收集 {acc.Count} 项（单轮试跑）";
+                        break;
+                    }
+
+                    case "points_sink":
+                    {
+                        bool acceptEmpty = string.Equals(
+                            node.Params.GetValueOrDefault("acceptEmpty", "true")?.Trim(),
+                            "true",
+                            StringComparison.OrdinalIgnoreCase)
+                            || node.Params.GetValueOrDefault("acceptEmpty", "true")?.Trim() == "1";
+                        string groupIdMode = node.Params.GetValueOrDefault("groupIdMode", "round") ?? "round";
+
+                        if (!FlowLoopSinkAccumulateActive)
+                            node.PointsSinkAccumulator = new PointsSinkRoundAccumulator();
+                        else
+                            node.PointsSinkAccumulator ??= new PointsSinkRoundAccumulator();
+
+                        var acc = node.PointsSinkAccumulator!;
+                        var pts = inputs.TryGetValue("Points", out var pObj) ? pObj as Point2D[] : null;
+                        pts ??= Array.Empty<Point2D>();
+
+                        int[]? barIn = null;
+                        if (inputs.TryGetValue("GroupBarIds", out var gbObj) && gbObj is int[] gb && gb.Length == pts.Length)
+                            barIn = gb;
+                        else if (inputs.TryGetValue("BarIds", out var bObj) && bObj is int[] ba && ba.Length == pts.Length)
+                            barIn = ba;
+
+                        if (pts.Length > 0 || acceptEmpty)
+                            AppendPointsSinkRound(acc, pts, barIn, groupIdMode, FlowLoopSinkAccumulateActive);
+
+                        ApplyPointsSinkOutputs(node, acc, inputs);
+                        if (!FlowLoopSinkAccumulateActive)
+                            node.ResultSummary += "（单轮试跑）";
                         break;
                     }
 
@@ -7240,6 +7556,24 @@ namespace CalibOperatorCLI_Example
                         var rotated = CalibImageTransform.Rotate(srcImg, angleDeg, expand);
                         node.Outputs["Out"] = rotated;
                         node.ResultSummary = $"rotate CW {angleDeg:G}° → {rotated.Width}x{rotated.Height}";
+                        break;
+                    }
+
+                    case "image_resize":
+                    {
+                        var srcImg = inputs["In"] as CalibImage;
+                        if (srcImg == null) throw new InvalidOperationException("图像缩放: 缺少输入图像");
+                        string mode = node.Params.GetValueOrDefault("mode", "factor") ?? "factor";
+                        double scale = CalibImageTransform.ParseScale(node.Params.GetValueOrDefault("scale"), 1.0);
+                        int tw = CalibImageTransform.ParsePositiveOrZeroInt(node.Params.GetValueOrDefault("width"));
+                        int th = CalibImageTransform.ParsePositiveOrZeroInt(node.Params.GetValueOrDefault("height"));
+                        int maxSide = CalibImageTransform.ParsePositiveOrZeroInt(node.Params.GetValueOrDefault("maxSide"));
+                        string keepRaw = node.Params.GetValueOrDefault("keepAspect", "true") ?? "true";
+                        bool keepAspect = !string.Equals(keepRaw.Trim(), "false", StringComparison.OrdinalIgnoreCase) && keepRaw.Trim() != "0";
+                        string interp = node.Params.GetValueOrDefault("interpolation", "linear") ?? "linear";
+                        var resized = CalibImageTransform.Resize(srcImg, mode, scale, tw, th, maxSide, keepAspect, interp);
+                        node.Outputs["Out"] = resized;
+                        node.ResultSummary = $"resize {mode} {srcImg.Width}x{srcImg.Height} → {resized.Width}x{resized.Height}";
                         break;
                     }
 
@@ -9729,6 +10063,11 @@ namespace CalibOperatorCLI_Example
                         int[]? barIn = null;
                         if (inputs.TryGetValue("GroupBarIds", out var gbObj) && gbObj is int[] gb && gb.Length == pts.Length)
                             barIn = gb;
+                        if (barIn == null
+                            && inputs.TryGetValue("MergedGroupBarIds", out var mgbObj)
+                            && mgbObj is int[] mgb
+                            && mgb.Length == pts.Length)
+                            barIn = mgb;
                         if (barIn == null)
                         {
                             inputs.TryGetValue("BarIds", out var barObj);
@@ -12330,6 +12669,18 @@ namespace CalibOperatorCLI_Example
             var fieldsPanel = new StackPanel { Margin = new Thickness(12, 12, 12, 8) };
             var inputs = new Control[node.Def.Params.Count];
 
+            if (!string.IsNullOrWhiteSpace(node.Def.Description))
+            {
+                fieldsPanel.Children.Add(new TextBlock
+                {
+                    Text = node.Def.Description.Trim(),
+                    Foreground = new SolidColorBrush(Color.FromRgb(0x9A, 0x9A, 0x9A)),
+                    FontSize = 11,
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 0, 0, 10)
+                });
+            }
+
             for (int i = 0; i < node.Def.Params.Count; i++)
             {
                 var param = node.Def.Params[i];
@@ -12345,6 +12696,8 @@ namespace CalibOperatorCLI_Example
                     FontWeight = FontWeights.Medium,
                     TextWrapping = TextWrapping.Wrap
                 };
+                if (!string.IsNullOrWhiteSpace(param.Description))
+                    ToolTipService.SetToolTip(label, param.Description.Trim());
 
                 string currentValue = node.Params.GetValueOrDefault(param.Name, param.DefaultValue);
                 Control input;
@@ -14156,10 +14509,13 @@ namespace CalibOperatorCLI_Example
                     if (postLoopDeferred.Count > 0)
                         AppendLog($"循环延后执行: {postLoopDeferred.Count} 个节点（如 Exposure Fusion）");
 
-                    _flowLoopSinkAccumulateActive = true;
-                    ResetFlowSinkAccumulators(perRoundNodes);
-
                     int successCountPre = 0;
+                    long completedRounds = 0;
+                    EnterFlowLoopSinkAccumulate();
+                    try
+                    {
+                        ResetFlowSinkAccumulators(perRoundNodes);
+
                     for (int i = 0; i < preNodes.Count; i++)
                     {
                         ThrowIfExecutionCancelled();
@@ -14185,7 +14541,6 @@ namespace CalibOperatorCLI_Example
                     }
 
                     long li = 0;
-                    long completedRounds = 0;
                     while (infiniteLoop || li < repeatCount)
                     {
                         ThrowIfExecutionCancelled();
@@ -14247,7 +14602,13 @@ namespace CalibOperatorCLI_Example
                             await System.Threading.Tasks.Task.Delay(intervalMs, _runCts?.Token ?? System.Threading.CancellationToken.None);
                     }
 
-                    _flowLoopSinkAccumulateActive = false;
+                    }
+                    finally
+                    {
+                        ExitFlowLoopSinkAccumulate();
+                    }
+
+                    RefreshPointsSinkMergedOutputs(perRoundNodes);
 
                     var orderedDeferred = postNodes.Where(postLoopDeferred.Contains).ToList();
                     if (orderedDeferred.Count > 0)

@@ -309,6 +309,49 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "image_resize",
+                DisplayName = "图像缩放",
+                Description = "缩放 CalibImage（灰度或 BGR）。factor=按比例；absolute=指定宽高；max_side=最长边限制",
+                Category = "预处理",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "mode",
+                        DisplayName = "模式",
+                        DefaultValue = "factor",
+                        Description = "factor=scale；absolute=width/height；max_side=maxSide",
+                        Options = new List<string> { "factor", "absolute", "max_side" }
+                    },
+                    new OperatorParam { Name = "scale", DisplayName = "比例", DefaultValue = "1.0", Description = "factor 模式：如 0.5、2.0" },
+                    new OperatorParam { Name = "width", DisplayName = "目标宽", DefaultValue = "0", Description = "absolute 模式；0=由 height 推算" },
+                    new OperatorParam { Name = "height", DisplayName = "目标高", DefaultValue = "0", Description = "absolute 模式；0=由 width 推算" },
+                    new OperatorParam { Name = "maxSide", DisplayName = "最长边", DefaultValue = "0", Description = "max_side 模式：输出最长边像素数" },
+                    new OperatorParam
+                    {
+                        Name = "keepAspect",
+                        DisplayName = "保持宽高比",
+                        DefaultValue = "true",
+                        Description = "absolute 且只填宽或高时生效",
+                        Options = new List<string> { "true", "false" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "interpolation",
+                        DisplayName = "插值",
+                        DefaultValue = "linear",
+                        Description = "linear / nearest / bicubic",
+                        Options = new List<string> { "linear", "nearest", "bicubic" }
+                    }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "clahe",
                 DisplayName = "CLAHE",
                 Description = "对比度受限自适应直方图均衡化",
@@ -2236,6 +2279,44 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "After", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
                     new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
                     new PortDef { Name = "List", Direction = PortDirection.Output, DataType = typeof(List<CalibImage>), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Count", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#607D8B" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "points_sink",
+                DisplayName = "轨迹收集",
+                Description = "接在循环下游（flow_loop / 粗形状Mask循环）：每轮将 Points 追加合并，输出 GroupBarIds 供「轮廓点简化」。默认 groupIdMode=round 每轮一条焊道号(0,1,2…)。须放在循环体内；简化等算子放在收集之后、由引擎循环结束后执行。",
+                Category = "流程",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "acceptEmpty",
+                        DisplayName = "接受空点列",
+                        DefaultValue = "true",
+                        Description = "true=本轮 0 点也占一轮序号；false=跳过空输入",
+                        Options = new List<string> { "true", "false" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "groupIdMode",
+                        DisplayName = "分组条号",
+                        DefaultValue = "round",
+                        Description = "round=每轮统一条号(0..N-1)；preserve=沿用输入 GroupBarIds/BarIds；offset=在已有最大条号上偏移",
+                        Options = new List<string> { "round", "preserve", "offset" }
+                    }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "GroupBarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFEB3B", IsOptional = true },
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "After", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "MergedPoints", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "MergedGroupBarIds", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#FFEB3B" },
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true },
                     new PortDef { Name = "Count", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#607D8B" }
                 }
             },

@@ -1990,6 +1990,17 @@ namespace CalibOperatorCLI_Example
                     nextAt += spacing;
                 }
             }
+
+            // 等弧长步进常漏掉真实终点，导致每条轨迹首尾采样偏短
+            if (pts.Length > 1)
+            {
+                Point2D end = pts[^1];
+                Point2D tail = sink[sink.Count - 1];
+                double edx = end.X - tail.X;
+                double edy = end.Y - tail.Y;
+                if (edx * edx + edy * edy > 1e-6)
+                    sink.Add(end);
+            }
         }
 
         // ================================================================
