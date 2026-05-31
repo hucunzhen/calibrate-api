@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -11,10 +13,16 @@ namespace CalibOperatorCLI_Example
     /// </summary>
     public sealed partial class FlowHostPage : Page
     {
+        private bool _suppressSessionNotify;
+
         public FlowHostPage()
         {
             InitializeComponent();
-            AddEmptyTab(switchToSelected: true);
+            FlowTabs.SelectionChanged += (_, _) =>
+            {
+                if (!_suppressSessionNotify)
+                    OpenTabsChanged?.Invoke();
+            };
         }
 
         /// <summary>当前选中的流程编排页。</summary>
@@ -22,6 +30,11 @@ namespace CalibOperatorCLI_Example
 
         /// <summary>任一标签加载或保存路径变更时通知（路径为 null 表示清空为未命名）。</summary>
         public event Action<string?>? FlowLoaded;
+
+        /// <summary>标签集合或当前选中标签变更（用于持久化打开的文件列表）。</summary>
+        public event Action? OpenTabsChanged;
+
+        public readonly record struct FlowTabsSessionSnapshot(IReadOnlyList<string?> Tabs, int ActiveIndex);
 
         public FlowPage? ActiveFlowOrFirst()
         {
@@ -32,28 +45,82 @@ namespace CalibOperatorCLI_Example
             return null;
         }
 
+        /// <summary>启动时恢复上次打开的全部流程标签；无记录时保留一个空白标签。</summary>
+        public void RestoreOpenFlows(IReadOnlyList<string?>? tabPaths, int activeIndex)
+        {
+            _suppressSessionNotify = true;
+            try
+            {
+                FlowTabs.Items.Clear();
+                var paths = tabPaths?.ToList() ?? new List<string?>();
+                if (paths.Count == 0)
+                {
+                    AddEmptyTab(switchToSelected: true);
+                    return;
+                }
+
+                int loaded = 0;
+                foreach (string? raw in paths)
+                {
+                    if (string.IsNullOrWhiteSpace(raw))
+                    {
+                        AddEmptyTab(switchToSelected: false);
+                        loaded++;
+                        continue;
+                    }
+
+                    string full = Path.GetFullPath(raw.Trim());
+                    if (!File.Exists(full))
+                        continue;
+
+                    var ti = AddEmptyTab(switchToSelected: false);
+                    if (ti.Content is FlowPage fp)
+                        fp.LoadFlowFromFile(full, showErrorDialog: false);
+                    loaded++;
+                }
+
+                if (loaded == 0)
+                {
+                    AddEmptyTab(switchToSelected: true);
+                    return;
+                }
+
+                int idx = Math.Clamp(activeIndex, 0, FlowTabs.Items.Count - 1);
+                FlowTabs.SelectedIndex = idx;
+            }
+            finally
+            {
+                _suppressSessionNotify = false;
+            }
+        }
+
+        public FlowTabsSessionSnapshot GetSessionSnapshot()
+        {
+            var tabs = new List<string?>();
+            foreach (TabItem ti in FlowTabs.Items)
+            {
+                if (ti.Content is FlowPage fp)
+                {
+                    tabs.Add(string.IsNullOrWhiteSpace(fp.CurrentFlowFilePath)
+                        ? null
+                        : Path.GetFullPath(fp.CurrentFlowFilePath.Trim()));
+                }
+            }
+
+            int activeIndex = 0;
+            if (FlowTabs.SelectedItem is TabItem sel)
+                activeIndex = FlowTabs.Items.IndexOf(sel);
+            if (activeIndex < 0)
+                activeIndex = 0;
+            return new FlowTabsSessionSnapshot(tabs, activeIndex);
+        }
+
         /// <summary>打开或切换到新标签并加载指定文件。</summary>
         public void OpenFlowInNewTab(string filePath)
         {
             var ti = AddEmptyTab(switchToSelected: true);
             if (ti.Content is FlowPage fp)
                 fp.LoadFlowFromFile(filePath, showErrorDialog: true);
-        }
-
-        /// <summary>启动时：仅当当前活动标签为空白画布时，恢复上次打开的 .flow.json。</summary>
-        public void TryAutoLoadLastFlowIfApplicable(string? lastPathCandidate)
-        {
-            if (string.IsNullOrWhiteSpace(lastPathCandidate) || !File.Exists(lastPathCandidate))
-                return;
-            string full = Path.GetFullPath(lastPathCandidate.Trim());
-            var fp = ActiveFlowPage;
-            if (fp == null)
-                return;
-            if (!fp.IsPristineEmptyDocument)
-                return;
-            if (string.Equals(full, fp.CurrentFlowFilePath ?? string.Empty, StringComparison.OrdinalIgnoreCase))
-                return;
-            fp.LoadFlowFromFile(full, showErrorDialog: false);
         }
 
         private TabItem AddEmptyTab(bool switchToSelected)
@@ -74,7 +141,8 @@ namespace CalibOperatorCLI_Example
             fp.FlowLoaded += path =>
             {
                 SetTabHeader(ownerTab, path);
-                // 仅活动标签变更才写入 last_flow_path，避免后台标签加载覆盖全局记录
+                if (!_suppressSessionNotify)
+                    OpenTabsChanged?.Invoke();
                 if (ReferenceEquals(FlowTabs.SelectedItem, ownerTab))
                     FlowLoaded?.Invoke(path);
             };
@@ -86,6 +154,7 @@ namespace CalibOperatorCLI_Example
             fp.RequestNewEmptyFlowTab = () =>
             {
                 AddEmptyTab(switchToSelected: true);
+                OpenTabsChanged?.Invoke();
                 return true;
             };
             return fp;
@@ -156,6 +225,8 @@ namespace CalibOperatorCLI_Example
                 int newIdx = Math.Min(Math.Max(0, idx), FlowTabs.Items.Count - 1);
                 FlowTabs.SelectedIndex = newIdx;
             }
+
+            OpenTabsChanged?.Invoke();
         }
     }
 }

@@ -292,7 +292,7 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>
-        /// OpenFileDialog 须在 UI 线程；其余算子在专用 STA 后台线程执行：避免阻塞 UI，且满足 System.Drawing/GDI+（SAM 等）对 STA 的要求——若用线程池 MTA 易出现卡住且 CPU 空闲。
+        /// OpenFileDialog 须在 UI 线程。
         /// </summary>
         private static bool ExecuteNodeRequiresUiDispatcher(FlowNode node)
         {
@@ -313,6 +313,32 @@ namespace CalibOperatorCLI_Example
 
             return false;
         }
+
+        /// <summary>
+        /// SAM 等依赖 System.Drawing/GDI+ 的算子须在 STA 后台线程执行；HALCON 等走 <see cref="HalconComputeRunner"/>（MTA + 全局门闩）。
+        /// </summary>
+        private static bool ExecuteNodeRequiresStaApartment(FlowNode node) =>
+            node.Def.TypeId == "sam_onnx_segment";
+
+#if HALCON_ENABLED
+        private static bool IsHalconFlowNode(FlowNode node) =>
+            node.Def.TypeId.StartsWith("halcon_", StringComparison.OrdinalIgnoreCase);
+
+        private static HalconThreadPolicy ResolveHalconThreadPolicy(FlowNode node) =>
+            node.Def.TypeId switch
+            {
+                "halcon_find_shape_model" => HalconThreadPolicy.ParallelFind,
+                "halcon_coarse_shape_match" => HalconThreadPolicy.ParallelFind,
+                "halcon_fine_deformable_match" => HalconThreadPolicy.ParallelFind,
+                "halcon_coarse_fine_shape_match" => HalconThreadPolicy.ParallelFind,
+                _ => HalconThreadPolicy.Geometry,
+            };
+#endif
+
+        private static System.Threading.Tasks.TaskScheduler ResolveNodeExecutionScheduler(FlowNode node) =>
+            ExecuteNodeRequiresStaApartment(node)
+                ? FlowStaTaskScheduler.Default
+                : System.Threading.Tasks.TaskScheduler.Default;
 
         private static bool CalibrateRequiresCorrespondenceDialog(FlowNode node)
         {
@@ -498,6 +524,17 @@ namespace CalibOperatorCLI_Example
                     return;
                 }
 
+#if HALCON_ENABLED
+                if (IsHalconFlowNode(node))
+                {
+                    await HalconComputeRunner.RunAsync(
+                        () => ExecuteNode(node, explicitInputs, halconGateEntered: true),
+                        ResolveHalconThreadPolicy(node),
+                        _runCts?.Token ?? System.Threading.CancellationToken.None);
+                    return;
+                }
+#endif
+
                 await System.Threading.Tasks.Task.Factory.StartNew(
                     () =>
                     {
@@ -506,7 +543,7 @@ namespace CalibOperatorCLI_Example
                     },
                     _runCts?.Token ?? System.Threading.CancellationToken.None,
                     System.Threading.Tasks.TaskCreationOptions.None,
-                    FlowStaTaskScheduler.Default);
+                    ResolveNodeExecutionScheduler(node));
             }
             catch (OperationCanceledException)
             {
@@ -698,6 +735,9 @@ namespace CalibOperatorCLI_Example
             var menuCompositeVars = new MenuItem { Header = "查看子流程变量" };
             menuCompositeVars.Click += (_, _) => ShowCompositeVariablesWindow(node);
 
+            var menuOpenInnerFlow = new MenuItem { Header = "打开子流程（新标签）" };
+            menuOpenInnerFlow.Click += (_, _) => OpenCompositeInnerFlowInNewTab(node);
+
             var menuRunTo = new MenuItem { Header = "执行到此节点（含上游）" };
             menuRunTo.Click += (_, _) => { _ = RunUpstreamToNodeAsync(node); };
 
@@ -709,7 +749,10 @@ namespace CalibOperatorCLI_Example
             ctx.Items.Add(new Separator());
             ctx.Items.Add(menuParams);
             if (def.TypeId == "composite")
+            {
+                ctx.Items.Add(menuOpenInnerFlow);
                 ctx.Items.Add(menuCompositeVars);
+            }
             ctx.Items.Add(menuRunTo);
             ctx.Items.Add(menuPreviewPts);
             ctx.Items.Add(menuDelete);
@@ -1532,29 +1575,58 @@ namespace CalibOperatorCLI_Example
 
         private void SaveFlow_Click(object sender, RoutedEventArgs e)
         {
-            var dlg = new SaveFileDialog
+            if (string.IsNullOrWhiteSpace(CurrentFlowFilePath))
             {
-                Filter = "流程文件|*.flow.json|所有文件|*.*",
-                DefaultExt = ".flow.json",
-                Title = "保存流程"
-            };
-            if (dlg.ShowDialog() != true) return;
+                SaveFlowAs_Click(sender, e);
+                return;
+            }
 
             try
             {
-                var data = BuildCurrentFlowData();
-                var options = new JsonSerializerOptions { WriteIndented = true };
-                var json = JsonSerializer.Serialize(data, options);
-                System.IO.File.WriteAllText(dlg.FileName, json);
-
-                CurrentFlowFilePath = System.IO.Path.GetFullPath(dlg.FileName);
-                FlowLoaded?.Invoke(CurrentFlowFilePath);
-                StatusText.Text = $"已保存: {System.IO.Path.GetFileName(dlg.FileName)}";
+                WriteFlowToFile(CurrentFlowFilePath);
+                StatusText.Text = $"已保存: {System.IO.Path.GetFileName(CurrentFlowFilePath)}";
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"保存失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private void SaveFlowAs_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new SaveFileDialog
+            {
+                Filter = "流程文件|*.flow.json|所有文件|*.*",
+                DefaultExt = ".flow.json",
+                Title = "流程另存为"
+            };
+            if (!string.IsNullOrWhiteSpace(CurrentFlowFilePath))
+            {
+                dlg.InitialDirectory = System.IO.Path.GetDirectoryName(CurrentFlowFilePath);
+                dlg.FileName = System.IO.Path.GetFileName(CurrentFlowFilePath);
+            }
+
+            if (dlg.ShowDialog() != true) return;
+
+            try
+            {
+                WriteFlowToFile(dlg.FileName);
+                CurrentFlowFilePath = System.IO.Path.GetFullPath(dlg.FileName);
+                FlowLoaded?.Invoke(CurrentFlowFilePath);
+                StatusText.Text = $"已另存为: {System.IO.Path.GetFileName(dlg.FileName)}";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"另存为失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void WriteFlowToFile(string filePath)
+        {
+            var data = BuildCurrentFlowData();
+            var options = new JsonSerializerOptions { WriteIndented = true };
+            var json = JsonSerializer.Serialize(data, options);
+            System.IO.File.WriteAllText(filePath, json);
         }
 
         private FlowData BuildCurrentFlowData()
@@ -1576,7 +1648,10 @@ namespace CalibOperatorCLI_Example
                 ToPort = c.ToPort.Definition.Name
             }).ToList();
 
-            return new FlowData { Nodes = nodes, Connections = connections };
+            PersistLatticeConfigFromUi();
+            var data = new FlowData { Nodes = nodes, Connections = connections };
+            MergeFlowMetaInto(data);
+            return data;
         }
 
         private FlowData BuildClipboardFlowSubset(IReadOnlyList<FlowNode> nodes)
@@ -1853,6 +1928,9 @@ namespace CalibOperatorCLI_Example
             {
                 ClearCanvasCore();
                 PopulateCanvasFromFlowData(data);
+                ApplyFlowMetaFromData(data);
+                UpdateLatticeConfigUi();
+                UpdateStandaloneDebugUi();
             }
             finally
             {
@@ -1955,7 +2033,13 @@ namespace CalibOperatorCLI_Example
 
                 CurrentFlowFilePath = System.IO.Path.GetFullPath(filePath);
                 FlowLoaded?.Invoke(CurrentFlowFilePath);
-                StatusText.Text = $"已加载: {System.IO.Path.GetFileName(filePath)} ({data.Nodes.Count} 节点, {data.Connections.Count} 连线)";
+                ApplyFlowMetaFromData(data);
+                UpdateLatticeConfigUi();
+                UpdateStandaloneDebugUi();
+                if (IsStandaloneDebugActive)
+                    StatusText.Text = $"已加载(子流程调试): {System.IO.Path.GetFileName(filePath)} ({data.Nodes.Count} 节点)";
+                else
+                    StatusText.Text = $"已加载: {System.IO.Path.GetFileName(filePath)} ({data.Nodes.Count} 节点, {data.Connections.Count} 连线)";
                 return true;
             }
             catch (Exception ex)
@@ -2010,6 +2094,9 @@ namespace CalibOperatorCLI_Example
             {
                 ClearCanvasCore();
                 CurrentFlowFilePath = null;
+                _flowMeta.Clear();
+                UpdateLatticeConfigUi();
+                UpdateStandaloneDebugUi();
                 _flowUndoStack.Clear();
                 _flowRedoStack.Clear();
                 RefreshFlowUndoRedoButtons();
@@ -4704,11 +4791,7 @@ namespace CalibOperatorCLI_Example
             {
                 try
                 {
-                    string prefix = debugDumpPrefix.Trim();
-                    if (!System.IO.Path.IsPathRooted(prefix))
-                        prefix = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, prefix));
-                    else
-                        prefix = System.IO.Path.GetFullPath(prefix);
+                    string prefix = System.IO.Path.GetFullPath(debugDumpPrefix.Trim());
                     string? dir = System.IO.Path.GetDirectoryName(prefix);
                     if (!string.IsNullOrWhiteSpace(dir))
                         System.IO.Directory.CreateDirectory(dir);
@@ -5293,6 +5376,50 @@ namespace CalibOperatorCLI_Example
             return mask;
         }
 
+        /// <summary>当前流程或嵌套子流程 .flow.json 所在目录；未保存且无嵌套基准时返回 null。</summary>
+        private string? GetFlowBaseDirectory(string? compositeInnerFlowBaseDir = null)
+        {
+            if (!string.IsNullOrWhiteSpace(compositeInnerFlowBaseDir))
+                return System.IO.Path.GetFullPath(compositeInnerFlowBaseDir.Trim());
+            if (!string.IsNullOrEmpty(CurrentFlowFilePath))
+            {
+                var dir = System.IO.Path.GetDirectoryName(CurrentFlowFilePath);
+                if (!string.IsNullOrEmpty(dir))
+                    return System.IO.Path.GetFullPath(dir);
+            }
+            return null;
+        }
+
+        /// <summary>将绝对路径转为相对 flow 目录的路径；跨盘符时保留绝对路径。</summary>
+        private string FormatPathForFlowParam(string absolutePath, string? compositeInnerFlowBaseDir = null)
+        {
+            if (string.IsNullOrWhiteSpace(absolutePath))
+                return absolutePath;
+            absolutePath = System.IO.Path.GetFullPath(absolutePath.Trim());
+            var flowBase = GetFlowBaseDirectory(compositeInnerFlowBaseDir);
+            if (string.IsNullOrEmpty(flowBase))
+                return absolutePath;
+            try
+            {
+                flowBase = System.IO.Path.GetFullPath(flowBase);
+                string flowRoot = System.IO.Path.GetPathRoot(flowBase) ?? "";
+                string fileRoot = System.IO.Path.GetPathRoot(absolutePath) ?? "";
+                if (!string.Equals(flowRoot, fileRoot, StringComparison.OrdinalIgnoreCase))
+                    return absolutePath;
+                return System.IO.Path.GetRelativePath(flowBase, absolutePath);
+            }
+            catch
+            {
+                return absolutePath;
+            }
+        }
+
+        private static bool IsFlowRelativePathParam(string paramName) =>
+            paramName is "filePath" or "directory" or "imageDirectory" or "innerFlowPath"
+                or "calibrationJsonFile" or "worldPointsFile" or "templatePath" or "debugDumpPrefix"
+                or "uvProjectionSvg" or "encoderPath" or "decoderPath" or "owlv2OnnxPath" or "tokenizerPath"
+                or "scriptPath" or "launcherScript" or "checkpointPath" or "jitRepoRoot" or "weightsPath";
+
         /// <param name="relativeBaseDirectory">嵌套组合算子时传入当前子流程 .flow.json 所在目录；顶层为 null 则用 CurrentFlowFilePath 目录。</param>
         private string ResolveCompositeFlowPath(string path, string? relativeBaseDirectory = null)
         {
@@ -5300,14 +5427,9 @@ namespace CalibOperatorCLI_Example
             path = path.Trim();
             if (System.IO.Path.IsPathRooted(path))
                 return System.IO.Path.GetFullPath(path);
-            if (!string.IsNullOrWhiteSpace(relativeBaseDirectory))
-                return System.IO.Path.GetFullPath(System.IO.Path.Combine(relativeBaseDirectory.Trim(), path));
-            if (!string.IsNullOrEmpty(CurrentFlowFilePath))
-            {
-                var dir = System.IO.Path.GetDirectoryName(CurrentFlowFilePath);
-                if (!string.IsNullOrEmpty(dir))
-                    return System.IO.Path.GetFullPath(System.IO.Path.Combine(dir, path));
-            }
+            var flowBase = GetFlowBaseDirectory(relativeBaseDirectory);
+            if (!string.IsNullOrEmpty(flowBase))
+                return System.IO.Path.GetFullPath(System.IO.Path.Combine(flowBase, path));
             return System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, path));
         }
 
@@ -6299,17 +6421,19 @@ namespace CalibOperatorCLI_Example
                 ? Math.Max(0, mfd)
                 : 0;
 
-            return HalconFlowBridge.BuildCoarseShapeMaskBatch(
-                rdImg,
-                rdModelId,
-                rdRows,
-                rdCols,
-                rdAngles,
-                rdScores,
-                maskErosionPx,
-                contourLevel,
-                maxCandidates,
-                maskFillDilatePx);
+            return HalconComputeRunner.Run(
+                () => HalconFlowBridge.BuildCoarseShapeMaskBatch(
+                    rdImg,
+                    rdModelId,
+                    rdRows,
+                    rdCols,
+                    rdAngles,
+                    rdScores,
+                    maskErosionPx,
+                    contourLevel,
+                    maxCandidates,
+                    maskFillDilatePx),
+                HalconThreadPolicy.Geometry);
         }
 
         private Dictionary<string, object?> BuildFineDeformableMaskLoopInputs(
@@ -7177,17 +7301,16 @@ namespace CalibOperatorCLI_Example
             return current;
         }
 
-        /// <summary>解析「加载图像目录」的根路径；相对路径相对 exe。目录为空时弹出选文件夹；取消则返回 false。</summary>
-        private static bool TryResolveLoadImageDirectory(FlowNode node, out string resolvedDir)
+        /// <summary>解析「加载图像目录」的根路径；相对路径相对 flow 文件目录。目录为空时弹出选文件夹；取消则返回 false。</summary>
+        private bool TryResolveLoadImageDirectory(FlowNode node, string? compositeInnerFlowBaseDir, out string resolvedDir)
         {
             resolvedDir = "";
             string configuredDir = node.Params.GetValueOrDefault("directory", "")?.Trim() ?? "";
-            resolvedDir = configuredDir;
-            if (!string.IsNullOrWhiteSpace(configuredDir) && !System.IO.Path.IsPathRooted(configuredDir))
-                resolvedDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, configuredDir));
-
-            if (!string.IsNullOrWhiteSpace(resolvedDir))
+            if (!string.IsNullOrWhiteSpace(configuredDir))
+            {
+                resolvedDir = ResolveCompositeFlowPath(configuredDir, compositeInnerFlowBaseDir);
                 return true;
+            }
 
             using var fbd = new System.Windows.Forms.FolderBrowserDialog
             {
@@ -7196,12 +7319,28 @@ namespace CalibOperatorCLI_Example
             };
             if (fbd.ShowDialog() != System.Windows.Forms.DialogResult.OK)
                 return false;
-            resolvedDir = fbd.SelectedPath;
+            resolvedDir = System.IO.Path.GetFullPath(fbd.SelectedPath);
+            node.Params["directory"] = FormatPathForFlowParam(resolvedDir, compositeInnerFlowBaseDir);
             return true;
         }
 
-        private void ExecuteNode(FlowNode node, Dictionary<string, object?>? explicitInputs = null, Dictionary<string, object?>? compositeExternalInputsForBindIn = null, string? compositeInnerFlowBaseDir = null)
+        private void ExecuteNode(
+            FlowNode node,
+            Dictionary<string, object?>? explicitInputs = null,
+            Dictionary<string, object?>? compositeExternalInputsForBindIn = null,
+            string? compositeInnerFlowBaseDir = null,
+            bool halconGateEntered = false)
         {
+#if HALCON_ENABLED
+            if (!halconGateEntered && IsHalconFlowNode(node))
+            {
+                HalconComputeRunner.Run(
+                    () => ExecuteNode(node, explicitInputs, compositeExternalInputsForBindIn, compositeInnerFlowBaseDir, halconGateEntered: true),
+                    ResolveHalconThreadPolicy(node));
+                return;
+            }
+#endif
+
             var inputs = explicitInputs ?? GetNodeInputs(node);
             node.Outputs.Clear();
             node.ErrorMessage = null;
@@ -7210,14 +7349,15 @@ namespace CalibOperatorCLI_Example
 
             try
             {
+                string? flowBaseDir = GetFlowBaseDirectory(compositeInnerFlowBaseDir);
                 switch (node.Def.TypeId)
                 {
                     case "load_image":
                     {
                         string configuredPath = node.Params.GetValueOrDefault("filePath", "")?.Trim() ?? "";
-                        string resolvedPath = configuredPath;
-                        if (!string.IsNullOrWhiteSpace(configuredPath) && !System.IO.Path.IsPathRooted(configuredPath))
-                            resolvedPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, configuredPath));
+                        string resolvedPath = string.IsNullOrWhiteSpace(configuredPath)
+                            ? ""
+                            : ResolveCompositeFlowPath(configuredPath, compositeInnerFlowBaseDir);
 
                         if (!string.IsNullOrWhiteSpace(resolvedPath))
                         {
@@ -7235,6 +7375,8 @@ namespace CalibOperatorCLI_Example
                         };
                         if (dlg.ShowDialog() == true)
                         {
+                            string storedPath = FormatPathForFlowParam(dlg.FileName, compositeInnerFlowBaseDir);
+                            node.Params["filePath"] = storedPath;
                             var img = ApplyOptionalCameraCorrection(node, inputs, CalibAPI.LoadImage(dlg.FileName), compositeInnerFlowBaseDir);
                             node.Outputs["Image"] = img;
                         }
@@ -7247,7 +7389,7 @@ namespace CalibOperatorCLI_Example
 
                     case "load_image_dir":
                     {
-                        if (!TryResolveLoadImageDirectory(node, out var resolvedDir))
+                        if (!TryResolveLoadImageDirectory(node, compositeInnerFlowBaseDir, out var resolvedDir))
                         {
                             node.ErrorMessage = "用户取消";
                             break;
@@ -7287,16 +7429,17 @@ namespace CalibOperatorCLI_Example
                         string py = node.Params.GetValueOrDefault("pythonPath", "python") ?? "python";
                         string launcherRel = node.Params.GetValueOrDefault("launcherScript", JitSampleBridge.DefaultLauncherRepoRelative)
                                              ?? JitSampleBridge.DefaultLauncherRepoRelative;
-                        string launcherAbs = SamOnnxSegmentation.ResolveModelPath(launcherRel);
+                        string launcherAbs = SamOnnxSegmentation.ResolveModelPath(launcherRel, flowBaseDir);
                         string repoRoot = node.Params.GetValueOrDefault("jitRepoRoot", "")?.Trim() ?? "";
                         if (string.IsNullOrWhiteSpace(repoRoot))
                             throw new InvalidOperationException("JiT采样: 请填写 jitRepoRoot（just-image-transformer 克隆路径）");
+                        string repoRootAbs = JitSampleBridge.ResolveExistingDirectory(repoRoot, flowBaseDir);
                         string cfgYaml = node.Params.GetValueOrDefault("configYaml", JitSampleBridge.DefaultConfigYamlRelative)
                                          ?? JitSampleBridge.DefaultConfigYamlRelative;
                         string ckRel = node.Params.GetValueOrDefault("checkpointPath", "")?.Trim() ?? "";
                         if (string.IsNullOrWhiteSpace(ckRel))
                             throw new InvalidOperationException("JiT采样: 请填写 checkpointPath（model.npz 或含 model.npz 的 .zip）");
-                        string ckAbs = SamOnnxSegmentation.ResolveModelPath(ckRel);
+                        string ckAbs = SamOnnxSegmentation.ResolveModelPath(ckRel, flowBaseDir);
                         int seed = int.TryParse(node.Params.GetValueOrDefault("seed"), out var sd) ? sd : 555;
                         int label = int.TryParse(node.Params.GetValueOrDefault("label"), out var lb) ? lb : 123;
                         double cfgS = double.TryParse(
@@ -7317,7 +7460,7 @@ namespace CalibOperatorCLI_Example
                         {
                             var img = JitSampleBridge.Run(
                                 launcherAbs,
-                                repoRoot,
+                                repoRootAbs,
                                 py.Trim(),
                                 cfgYaml.Trim(),
                                 ckAbs,
@@ -7817,6 +7960,8 @@ namespace CalibOperatorCLI_Example
                         double noiseSigma = double.TryParse(node.Params.GetValueOrDefault("noiseSigma"), out var ns) ? ns : 0.12;
                         int blurKsize = int.TryParse(node.Params.GetValueOrDefault("blurKsize"), out var bk) ? bk : 3;
                         string debugDumpPrefix = node.Params.GetValueOrDefault("debugDumpPrefix", "") ?? "";
+                        if (!string.IsNullOrWhiteSpace(debugDumpPrefix))
+                            debugDumpPrefix = ResolveCompositeFlowPath(debugDumpPrefix.Trim(), compositeInnerFlowBaseDir);
                         var resultImgs = PhaseCongruencyEdgeImage(srcImg, threshold, noiseSigma, blurKsize, debugDumpPrefix);
                         node.Outputs["Response"] = resultImgs.Response;
                         var edgeImg = resultImgs.Edge;
@@ -7894,7 +8039,7 @@ namespace CalibOperatorCLI_Example
                         string py = node.Params.GetValueOrDefault("pythonPath", "python") ?? "python";
                         string scriptRel = node.Params.GetValueOrDefault("scriptPath", DipDenoiseBridge.DefaultScriptRepoRelative)
                                            ?? DipDenoiseBridge.DefaultScriptRepoRelative;
-                        string scriptAbs = SamOnnxSegmentation.ResolveModelPath(scriptRel);
+                        string scriptAbs = SamOnnxSegmentation.ResolveModelPath(scriptRel, flowBaseDir);
                         int iterations = int.TryParse(node.Params.GetValueOrDefault("iterations"), out var it) ? it : 2400;
                         double lr = double.TryParse(
                             node.Params.GetValueOrDefault("learningRate"),
@@ -7938,7 +8083,7 @@ namespace CalibOperatorCLI_Example
                         string py = node.Params.GetValueOrDefault("pythonPath", "python") ?? "python";
                         string scriptRel = node.Params.GetValueOrDefault("scriptPath", SwinTransformerBridge.DefaultScriptRepoRelative)
                                              ?? SwinTransformerBridge.DefaultScriptRepoRelative;
-                        string scriptAbs = SamOnnxSegmentation.ResolveModelPath(scriptRel);
+                        string scriptAbs = SamOnnxSegmentation.ResolveModelPath(scriptRel, flowBaseDir);
                         string modelName = node.Params.GetValueOrDefault("modelName", "swin_tiny_patch4_window7_224")
                                            ?? "swin_tiny_patch4_window7_224";
                         bool enableClassification = string.Equals(
@@ -7993,12 +8138,12 @@ namespace CalibOperatorCLI_Example
                         string py = node.Params.GetValueOrDefault("pythonPath", "python") ?? "python";
                         string scriptRel = node.Params.GetValueOrDefault("scriptPath", YoloSegInferenceBridge.DefaultScriptRepoRelative)
                                            ?? YoloSegInferenceBridge.DefaultScriptRepoRelative;
-                        string scriptAbs = SamOnnxSegmentation.ResolveModelPath(scriptRel);
+                        string scriptAbs = SamOnnxSegmentation.ResolveModelPath(scriptRel, flowBaseDir);
                         string weightsRel = node.Params.GetValueOrDefault(
                                                 "weightsPath",
                                                 "yolo_data/runs/segment/train-2/weights/best.pt")
                                            ?? "yolo_data/runs/segment/train-2/weights/best.pt";
-                        string weightsAbs = SamOnnxSegmentation.ResolveModelPath(weightsRel.Trim());
+                        string weightsAbs = SamOnnxSegmentation.ResolveModelPath(weightsRel.Trim(), flowBaseDir);
                         double conf = double.TryParse(
                             node.Params.GetValueOrDefault("conf"),
                             System.Globalization.NumberStyles.Float,
@@ -8840,6 +8985,8 @@ namespace CalibOperatorCLI_Example
                         int edgeMinComponent = int.Parse(node.Params["edgeMinComponent"]);
                         int edgeOpenRadius = int.Parse(node.Params["edgeOpenRadius"]);
                         string templatePath = (node.Params.GetValueOrDefault("templatePath", "") ?? "").Trim();
+                        if (!string.IsNullOrWhiteSpace(templatePath))
+                            templatePath = ResolveCompositeFlowPath(templatePath, compositeInnerFlowBaseDir);
 
                         using var edgeBmp = edgeImg.ToBitmap();
                         if (edgeBmp == null) throw new InvalidOperationException("全局形状匹配: 边缘图转换失败");
@@ -9226,8 +9373,8 @@ namespace CalibOperatorCLI_Example
                         bool useGpu = bool.TryParse(node.Params.GetValueOrDefault("useGpu"), out var ug) && ug;
                         string enc = node.Params.GetValueOrDefault("encoderPath", "") ?? "";
                         string dec = node.Params.GetValueOrDefault("decoderPath", "") ?? "";
-                        string encAbs = SamOnnxSegmentation.ResolveModelPath(string.IsNullOrWhiteSpace(enc) ? SamOnnxSegmentation.DefaultEncoderRepoRelative : enc);
-                        string decAbs = SamOnnxSegmentation.ResolveModelPath(string.IsNullOrWhiteSpace(dec) ? SamOnnxSegmentation.DefaultDecoderRepoRelative : dec);
+                        string encAbs = SamOnnxSegmentation.ResolveModelPath(string.IsNullOrWhiteSpace(enc) ? SamOnnxSegmentation.DefaultEncoderRepoRelative : enc, flowBaseDir);
+                        string decAbs = SamOnnxSegmentation.ResolveModelPath(string.IsNullOrWhiteSpace(dec) ? SamOnnxSegmentation.DefaultDecoderRepoRelative : dec, flowBaseDir);
 
                         SamOnnxSegmentation.OrigBoxPrompt? boxOrig = null;
                         IReadOnlyList<Owlv2OnnxTextToBox.Owlv2Detection>? textDetections = null;
@@ -9262,8 +9409,8 @@ namespace CalibOperatorCLI_Example
                             string tokRel = (node.Params.GetValueOrDefault("owlv2TokenizerJson", "") ?? "").Trim();
                             if (string.IsNullOrEmpty(tokRel))
                                 tokRel = Owlv2OnnxTextToBox.DefaultTokenizerJsonRelative;
-                            string onnxAbs = SamOnnxSegmentation.ResolveModelPath(owlv2OnnxRel);
-                            string tokenizerAbs = SamOnnxSegmentation.ResolveModelPath(tokRel);
+                            string onnxAbs = SamOnnxSegmentation.ResolveModelPath(owlv2OnnxRel, flowBaseDir);
+                            string tokenizerAbs = SamOnnxSegmentation.ResolveModelPath(tokRel, flowBaseDir);
                             bool rawQ = bool.TryParse(node.Params.GetValueOrDefault("textRawQuery"), out var trq) && trq;
                             try
                             {
@@ -9813,6 +9960,7 @@ namespace CalibOperatorCLI_Example
                                 break;
                             }
                             resolvedPath = dlg.FileName;
+                            node.Params["filePath"] = FormatPathForFlowParam(dlg.FileName, compositeInnerFlowBaseDir);
                         }
                         else if (!System.IO.File.Exists(resolvedPath))
                             throw new System.IO.FileNotFoundException(
@@ -9974,9 +10122,7 @@ namespace CalibOperatorCLI_Example
                         var pathParam = node.Params.GetValueOrDefault("filePath", "flow_output.bmp");
                         if (string.IsNullOrWhiteSpace(pathParam))
                             pathParam = "flow_output.bmp";
-                        var resolvedPath = System.IO.Path.IsPathRooted(pathParam)
-                            ? System.IO.Path.GetFullPath(pathParam)
-                            : System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, pathParam));
+                        var resolvedPath = ResolveCompositeFlowPath(pathParam, compositeInnerFlowBaseDir);
                         var dir = System.IO.Path.GetDirectoryName(resolvedPath);
                         if (!string.IsNullOrWhiteSpace(dir))
                             System.IO.Directory.CreateDirectory(dir);
@@ -9996,9 +10142,7 @@ namespace CalibOperatorCLI_Example
                         var pathParam = node.Params.GetValueOrDefault("filePath", "flow_output.txt");
                         if (string.IsNullOrWhiteSpace(pathParam))
                             pathParam = "flow_output.txt";
-                        var resolvedPath = System.IO.Path.IsPathRooted(pathParam)
-                            ? System.IO.Path.GetFullPath(pathParam)
-                            : System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, pathParam));
+                        var resolvedPath = ResolveCompositeFlowPath(pathParam, compositeInnerFlowBaseDir);
                         var dir = System.IO.Path.GetDirectoryName(resolvedPath);
                         if (!string.IsNullOrWhiteSpace(dir))
                             System.IO.Directory.CreateDirectory(dir);
@@ -11346,7 +11490,7 @@ namespace CalibOperatorCLI_Example
                         double angleStart = double.TryParse(node.Params.GetValueOrDefault("angleStart"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var asv) ? asv : -30.0;
                         double angleExtent = double.TryParse(node.Params.GetValueOrDefault("angleExtent"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var aev) ? aev : 60.0;
                         double minScore = double.TryParse(node.Params.GetValueOrDefault("minScore"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ms) ? ms : 0.5;
-                        int numMatches = int.TryParse(node.Params.GetValueOrDefault("numMatches"), out var nm) ? nm : 0;
+                        int numMatches = ResolveNumMatchesFromLattice(node, "numMatches");
                         double maxOverlap = double.TryParse(node.Params.GetValueOrDefault("maxOverlap"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mo) ? mo : 0.5;
                         string subPixel = node.Params.GetValueOrDefault("subPixel") ?? "interpolation";
                         int numLevels = int.TryParse(node.Params.GetValueOrDefault("numLevels"), out var nl) ? nl : 0;
@@ -11375,7 +11519,7 @@ namespace CalibOperatorCLI_Example
                         string configuredPath = node.Params.GetValueOrDefault("filePath", "")?.Trim() ?? "";
                         if (string.IsNullOrWhiteSpace(configuredPath))
                             throw new InvalidOperationException("HALCON 加载形状模型: filePath 为空");
-                        string resolvedPath = ResolveCompositeFlowPath(configuredPath);
+                        string resolvedPath = ResolveCompositeFlowPath(configuredPath, compositeInnerFlowBaseDir);
                         long modelId = HalconFlowBridge.LoadShapeModelFromFile(resolvedPath);
                         node.Outputs["ModelId"] = modelId;
                         node.ResultSummary = $"HALCON 已加载 .shm ModelId={modelId}";
@@ -11423,7 +11567,7 @@ namespace CalibOperatorCLI_Example
                         string configuredPath = node.Params.GetValueOrDefault("filePath", "")?.Trim() ?? "";
                         if (string.IsNullOrWhiteSpace(configuredPath))
                             throw new InvalidOperationException("HALCON 加载可变形模型: filePath 为空");
-                        string resolvedPath = ResolveCompositeFlowPath(configuredPath);
+                        string resolvedPath = ResolveCompositeFlowPath(configuredPath, compositeInnerFlowBaseDir);
                         long modelId = HalconFlowBridge.LoadDeformableModelFromFile(resolvedPath);
                         node.Outputs["ModelId"] = modelId;
                         string subtypeLabel = HalconFlowBridge.GetDeformableModelSubtypeLabel(modelId);
@@ -11454,7 +11598,7 @@ namespace CalibOperatorCLI_Example
                             Pc(node.Params, "angleStart", -30),
                             Pc(node.Params, "angleExtent", 60),
                             Pc(node.Params, "minScore", 0.4),
-                            Pic(node.Params, "numMatches", 5),
+                            ResolveNumMatchesFromLattice(node, "numMatches"),
                             Pc(node.Params, "maxOverlap", 0.5),
                             Psc(node.Params, "subPixel", "none"),
                             Pic(node.Params, "numLevels", 0),
@@ -11565,6 +11709,12 @@ namespace CalibOperatorCLI_Example
                             Pf(node.Params, "fineEndScoreWeight", HalconFlowBridge.DefaultEndScoreWeight),
                             Pf(node.Params, "fineEndArcFraction", HalconFlowBridge.DefaultEndArcFraction));
 
+                        domainImg.RefreshProperties();
+                        AppendLog(
+                            $"[HALCON] 精匹配: 域内图 {domainImg.Width}x{domainImg.Height}, " +
+                            $"thread_num={HalconRuntimeSettings.LastParallelFindThreadNum}, " +
+                            $"parallelize={HalconRuntimeSettings.LastParallelFindParallelize}");
+
                         node.Outputs["Row"] = fineResult.FineRows;
                         node.Outputs["Column"] = fineResult.FineCols;
                         node.Outputs["Angle"] = fineResult.FineAngles;
@@ -11617,7 +11767,7 @@ namespace CalibOperatorCLI_Example
                             P(node.Params, "coarseAngleStart", -30),
                             P(node.Params, "coarseAngleExtent", 60),
                             P(node.Params, "coarseMinScore", 0.4),
-                            Pi(node.Params, "coarseNumMatches", 5),
+                            ResolveNumMatchesFromLattice(node, "coarseNumMatches"),
                             0.5,
                             Ps(node.Params, "coarseSubPixel", "none"),
                             Pi(node.Params, "coarseNumLevels", 0),
@@ -11722,20 +11872,7 @@ namespace CalibOperatorCLI_Example
                             out var dzTr)
                             ? dzTr
                             : 0;
-                        int latticeGridRowsTr = int.TryParse(
-                            node.Params.GetValueOrDefault("gridRows"),
-                            System.Globalization.NumberStyles.Integer,
-                            System.Globalization.CultureInfo.InvariantCulture,
-                            out var lgrTr)
-                            ? lgrTr
-                            : 0;
-                        int latticeGridColsTr = int.TryParse(
-                            node.Params.GetValueOrDefault("gridCols"),
-                            System.Globalization.NumberStyles.Integer,
-                            System.Globalization.CultureInfo.InvariantCulture,
-                            out var lgcTr)
-                            ? lgcTr
-                            : 0;
+                        var (latticeGridRowsTr, latticeGridColsTr) = ResolveLatticeGridOptional(node);
 
                         var traj = HalconShapeMatchGridTrajectory.Build(
                             modelIdTr,
@@ -11770,8 +11907,7 @@ namespace CalibOperatorCLI_Example
                         inputs.TryGetValue("Score", out var sUv);
                         double[]? scoresUv = sUv as double[];
 
-                        int gridRowsUv = int.TryParse(node.Params.GetValueOrDefault("gridRows"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int grUv) ? grUv : 8;
-                        int gridColsUv = int.TryParse(node.Params.GetValueOrDefault("gridCols"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int gcUv) ? gcUv : 2;
+                        var (gridRowsUv, gridColsUv) = ResolveLatticeGrid(node, 8, 2);
                         double minScoreUv = double.TryParse(node.Params.GetValueOrDefault("minScoreKeep"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double msUv) ? msUv : 0;
                         double snapTolUv = double.TryParse(node.Params.GetValueOrDefault("snapTolerancePx"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double stUv) ? stUv : 0;
 
@@ -11790,7 +11926,7 @@ namespace CalibOperatorCLI_Example
                         string? svgOutPath = null;
                         string svgParam = node.Params.GetValueOrDefault("uvProjectionSvg") ?? "";
                         if (!string.IsNullOrWhiteSpace(svgParam))
-                            svgOutPath = ResolveCompositeFlowPath(svgParam);
+                            svgOutPath = ResolveCompositeFlowPath(svgParam, compositeInnerFlowBaseDir);
 
                         string diagTagUv = $"{node.Def.DisplayName}#{node.Id.ToString()[..8]}";
                         bool wantLogUv = HalconShapeMatchGridDiagnostics.ShouldLogForParam(
@@ -11840,8 +11976,7 @@ namespace CalibOperatorCLI_Example
                         inputs.TryGetValue("Score", out var sRs);
                         double[]? scoresRs = sRs as double[];
 
-                        int gridRowsRs = int.TryParse(node.Params.GetValueOrDefault("gridRows"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int grRs) ? grRs : 8;
-                        int gridColsRs = int.TryParse(node.Params.GetValueOrDefault("gridCols"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int gcRs) ? gcRs : 2;
+                        var (gridRowsRs, gridColsRs) = ResolveLatticeGrid(node, 8, 2);
                         double minScoreRs = double.TryParse(node.Params.GetValueOrDefault("minScoreKeep"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double mskRs) ? mskRs : 0;
                         double snapTolRs = double.TryParse(node.Params.GetValueOrDefault("snapTolerancePx"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double stRs) ? stRs : 0;
                         int ransacIter = int.TryParse(node.Params.GetValueOrDefault("ransacIterations"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int riRs) ? riRs : 500;
@@ -11850,7 +11985,7 @@ namespace CalibOperatorCLI_Example
                         string? svgOutRs = null;
                         string svgParamRs = node.Params.GetValueOrDefault("uvProjectionSvg") ?? "";
                         if (!string.IsNullOrWhiteSpace(svgParamRs))
-                            svgOutRs = ResolveCompositeFlowPath(svgParamRs);
+                            svgOutRs = ResolveCompositeFlowPath(svgParamRs, compositeInnerFlowBaseDir);
 
                         string diagTagRs = $"{node.Def.DisplayName}#{node.Id.ToString()[..8]}";
                         bool wantLogRs = HalconShapeMatchGridDiagnostics.ShouldLogForParam(
@@ -11901,8 +12036,7 @@ namespace CalibOperatorCLI_Example
                         inputs.TryGetValue("Score", out var sPk);
                         double[]? scoresPk = sPk as double[];
 
-                        int gridRowsPk = int.TryParse(node.Params.GetValueOrDefault("gridRows"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int grPk) ? grPk : 2;
-                        int gridColsPk = int.TryParse(node.Params.GetValueOrDefault("gridCols"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int gcPk) ? gcPk : 8;
+                        var (gridRowsPk, gridColsPk) = ResolveLatticeGrid(node, 8, 2);
                         double minScorePk = double.TryParse(node.Params.GetValueOrDefault("minScoreKeep"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double mskPk) ? mskPk : 0;
 
                         string diagTagPk = $"{node.Def.DisplayName}#{node.Id.ToString()[..8]}";
@@ -11951,8 +12085,7 @@ namespace CalibOperatorCLI_Example
                         inputs.TryGetValue("Score", out var sSt);
                         double[]? scoresSt = sSt as double[];
 
-                        int gridRowsSt = int.TryParse(node.Params.GetValueOrDefault("gridRows"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int grSt) ? grSt : 8;
-                        int gridColsSt = int.TryParse(node.Params.GetValueOrDefault("gridCols"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int gcSt) ? gcSt : 2;
+                        var (gridRowsSt, gridColsSt) = ResolveLatticeGrid(node, 8, 2);
 
                         string diagTagSt = $"{node.Def.DisplayName}#{node.Id.ToString()[..8]}";
                         bool wantLogSt = HalconShapeMatchGridDiagnostics.ShouldLogForParam(
@@ -12098,8 +12231,7 @@ namespace CalibOperatorCLI_Example
                         inputs.TryGetValue("Score", out var sCh);
                         double[]? scoresCh = sCh as double[];
 
-                        int gridRowsCh = int.TryParse(node.Params.GetValueOrDefault("gridRows"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int grCh) ? grCh : 3;
-                        int gridColsCh = int.TryParse(node.Params.GetValueOrDefault("gridCols"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int gcCh) ? gcCh : 3;
+                        var (gridRowsCh, gridColsCh) = ResolveLatticeGrid(node, 8, 2);
 
                         string diagTagCh = $"{node.Def.DisplayName}#{node.Id.ToString()[..8]}";
                         bool wantLogCh = HalconShapeMatchGridDiagnostics.ShouldLogForParam(
@@ -12146,8 +12278,7 @@ namespace CalibOperatorCLI_Example
                         inputs.TryGetValue("Score", out var sIn0);
                         double[]? scores0 = sIn0 as double[];
 
-                        int gridRows0 = int.TryParse(node.Params.GetValueOrDefault("gridRows"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int gr0) ? gr0 : 3;
-                        int gridCols0 = int.TryParse(node.Params.GetValueOrDefault("gridCols"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int gc0) ? gc0 : 3;
+                        var (gridRows0, gridCols0) = ResolveLatticeGrid(node, 3, 3);
                         double pitchRow0 = double.TryParse(node.Params.GetValueOrDefault("pitchRow"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double pr0) ? pr0 : 0;
                         double pitchCol0 = double.TryParse(node.Params.GetValueOrDefault("pitchCol"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double pc0) ? pc0 : 0;
                         string angleRaw0 = (node.Params.GetValueOrDefault("gridAngleDeg", "auto") ?? "auto").Trim();
@@ -12231,8 +12362,7 @@ namespace CalibOperatorCLI_Example
                         inputs.TryGetValue("Score", out var sIn);
                         double[]? scoresIn = sIn as double[];
 
-                        int gridRows = int.TryParse(node.Params.GetValueOrDefault("gridRows"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int gr) ? gr : 3;
-                        int gridCols = int.TryParse(node.Params.GetValueOrDefault("gridCols"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int gc) ? gc : 3;
+                        var (gridRows, gridCols) = ResolveLatticeGrid(node, 3, 3);
                         double pitchRow = double.TryParse(node.Params.GetValueOrDefault("pitchRow"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double pr) ? pr : 0;
                         double pitchCol = double.TryParse(node.Params.GetValueOrDefault("pitchCol"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double pc) ? pc : 0;
                         string angleRaw = (node.Params.GetValueOrDefault("gridAngleDeg", "auto") ?? "auto").Trim();
@@ -12583,12 +12713,22 @@ namespace CalibOperatorCLI_Example
 
                     case "composite_bind_in":
                     {
-                        if (compositeExternalInputsForBindIn == null)
-                            throw new InvalidOperationException("组合绑定入 仅用于组合算子子流程：填写父输入端口名，将 Out 连到子算子输入");
+                        var extInputs = GetCompositeBindInInputsForExecute(compositeExternalInputsForBindIn);
+                        if (extInputs == null)
+                            throw new InvalidOperationException(
+                                "组合绑定入 仅用于组合算子子流程：在父流程中运行组合算子，或在本子流程工具栏设置「子流程调试图」后 F5 独立调试。");
                         string ext = node.Params.GetValueOrDefault("externalPort", "In")?.Trim() ?? "In";
-                        compositeExternalInputsForBindIn.TryGetValue(ext, out var v);
+                        if (!extInputs.TryGetValue(ext, out var v))
+                        {
+                            if (string.Equals(ext, "In", StringComparison.OrdinalIgnoreCase))
+                                extInputs.TryGetValue("Image", out v);
+                            if (v == null)
+                                extInputs.TryGetValue("Img", out v);
+                        }
                         node.Outputs["Out"] = v;
-                        node.ResultSummary = $"{ext}→子图";
+                        node.ResultSummary = v != null
+                            ? $"{ext}→子图 ({DescribeFlowValueBrief(v)})"
+                            : $"{ext}→子图 (无数据)";
                         break;
                     }
 
@@ -12791,7 +12931,7 @@ namespace CalibOperatorCLI_Example
                                 : "所有文件|*.*"
                         };
                         if (ofd.ShowDialog() == true && input is TextBox pathBox)
-                            pathBox.Text = ofd.FileName;
+                            pathBox.Text = FormatPathForFlowParam(ofd.FileName);
                     };
                 }
                 else if (param.Name == "calibrationJsonFile"
@@ -12813,7 +12953,7 @@ namespace CalibOperatorCLI_Example
                             Filter = "JSON|*.json|所有文件|*.*"
                         };
                         if (ofd.ShowDialog() == true && input is TextBox jsonBox)
-                            jsonBox.Text = ofd.FileName;
+                            jsonBox.Text = FormatPathForFlowParam(ofd.FileName);
                     };
                 }
                 else if ((param.Name == "directory" && node.Def.TypeId == "load_image_dir")
@@ -12834,7 +12974,7 @@ namespace CalibOperatorCLI_Example
                             UseDescriptionForTitle = true
                         };
                         if (fbd.ShowDialog() == System.Windows.Forms.DialogResult.OK && input is TextBox dirBox)
-                            dirBox.Text = fbd.SelectedPath;
+                            dirBox.Text = FormatPathForFlowParam(fbd.SelectedPath);
                     };
                 }
                 else if (param.Name == "innerFlowPath")
@@ -12854,7 +12994,7 @@ namespace CalibOperatorCLI_Example
                             Filter = "流程文件|*.flow.json|所有文件|*.*"
                         };
                         if (ofd.ShowDialog() == true && input is TextBox pathBox)
-                            pathBox.Text = ofd.FileName;
+                            pathBox.Text = FormatPathForFlowParam(ofd.FileName);
                     };
                 }
                 else if (param.Name == "worldPointsFile" && NodeUsesCalibrateWorldPointParams(node))
@@ -12874,7 +13014,7 @@ namespace CalibOperatorCLI_Example
                             Filter = "文本|*.txt;*.csv|所有文件|*.*"
                         };
                         if (ofd.ShowDialog() == true && input is TextBox pathBox)
-                            pathBox.Text = ofd.FileName;
+                            pathBox.Text = FormatPathForFlowParam(ofd.FileName);
                     };
                 }
 
@@ -12930,13 +13070,18 @@ namespace CalibOperatorCLI_Example
                 PushFlowUndoSnapshotBeforeChange();
                 for (int i = 0; i < node.Def.Params.Count; i++)
                 {
+                    var paramDef = node.Def.Params[i];
                     string value = inputs[i] switch
                     {
-                        ComboBox cb => cb.SelectedItem?.ToString() ?? node.Def.Params[i].DefaultValue,
+                        ComboBox cb => cb.SelectedItem?.ToString() ?? paramDef.DefaultValue,
                         TextBox tb => tb.Text,
-                        _ => node.Def.Params[i].DefaultValue
+                        _ => paramDef.DefaultValue
                     };
-                    node.Params[node.Def.Params[i].Name] = value;
+                    if (IsFlowRelativePathParam(paramDef.Name)
+                        && !string.IsNullOrWhiteSpace(value)
+                        && System.IO.Path.IsPathRooted(value.Trim()))
+                        value = FormatPathForFlowParam(value);
+                    node.Params[paramDef.Name] = value;
                 }
                 if (node.Def.TypeId == "composite")
                     RefreshCompositeNodeCaption(node);
@@ -14023,6 +14168,8 @@ namespace CalibOperatorCLI_Example
             StatusText.Text = "运行中...";
             StatusText.Foreground = new SolidColorBrush(Colors.Orange);
             if (clearLog) LogBox.Text = "";
+            if (IsStandaloneDebugActive)
+                AppendLog("========== 子流程独立调试模式 ==========");
             AppendLog("========== 开始执行 ==========");
 
             // 清除所有节点的执行状态
@@ -14038,6 +14185,13 @@ namespace CalibOperatorCLI_Example
             try
             {
                 ThrowIfExecutionCancelled();
+                if (preferNativeEngine && IsStandaloneDebugActive)
+                {
+                    AppendLog("[WARN] 子流程独立调试仅支持托管「运行」，Native 已改用托管执行");
+                    preferNativeEngine = false;
+                }
+
+                BeginStandaloneDebugRunScope();
                 if (preferNativeEngine)
                 {
                     // C++ 原生流程引擎：整段 Run 在线程池执行，避免长时间占用 UI 线程导致窗口卡死、日志不刷新
@@ -14122,6 +14276,7 @@ namespace CalibOperatorCLI_Example
             }
             finally
             {
+                EndStandaloneDebugRunScope();
                 _isRunInProgress = false;
                 if (StopRunButton != null) StopRunButton.IsEnabled = false;
             }
@@ -14301,7 +14456,7 @@ namespace CalibOperatorCLI_Example
                         }
                     }
 
-                    if (!TryResolveLoadImageDirectory(loopNode, out var resolvedDir))
+                    if (!TryResolveLoadImageDirectory(loopNode, null, out var resolvedDir))
                         throw new InvalidOperationException("加载图像目录: 未选择文件夹");
 
                     string extSpec = loopNode.Params.GetValueOrDefault("extensions", ".bmp;.png;.jpg;.jpeg;.tif;.tiff")
@@ -14761,6 +14916,7 @@ namespace CalibOperatorCLI_Example
 
             try
             {
+                BeginStandaloneDebugRunScope();
                 ThrowIfExecutionCancelled();
                 var sortedFull = TopologicalSort();
                 if (sortedFull.Count != _nodes.Count)
@@ -14830,6 +14986,7 @@ namespace CalibOperatorCLI_Example
             }
             finally
             {
+                EndStandaloneDebugRunScope();
                 _isRunInProgress = false;
                 if (StopRunButton != null) StopRunButton.IsEnabled = false;
             }

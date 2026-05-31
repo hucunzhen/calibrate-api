@@ -7,6 +7,7 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading;
 using CalibOperatorPInvoke;
 using HalconDotNet;
 
@@ -17,8 +18,48 @@ namespace CalibOperatorCLI_Example
     /// </summary>
     internal static partial class HalconFlowBridge
     {
-        /// <summary>经临时 BMP + ReadImage 导入，避免 GenImage1 与指针在 HalconDotNet 下的 Tuple 互操作问题。</summary>
+        static HalconFlowBridge() => HalconRuntimeSettings.EnsureApplied();
+
+        /// <summary>单通道灰度经 GenImage1 导入 HALCON（无临时 BMP）。</summary>
+        private static HObject CalibGrayToHObject(CalibImage grayImg)
+        {
+            var n = grayImg.GetNativeStruct();
+            int w = n.width, h = n.height, nPix = w * h;
+            if (w <= 0 || h <= 0 || n.data == IntPtr.Zero || nPix <= 0)
+                throw new InvalidOperationException("HALCON: CalibImage 无有效灰度数据");
+
+            var buf = new byte[nPix];
+            Marshal.Copy(n.data, buf, 0, nPix);
+            GCHandle handle = GCHandle.Alloc(buf, GCHandleType.Pinned);
+            try
+            {
+                HOperatorSet.GenImage1(out HObject himg, "byte", w, h, handle.AddrOfPinnedObject());
+                return himg;
+            }
+            finally
+            {
+                handle.Free();
+            }
+        }
+
+        /// <summary>CalibImage → HObject。单/三通道走内存直传；其余仍经临时 BMP。</summary>
         public static HObject CalibToHObject(CalibImage img)
+        {
+            if (img == null) throw new ArgumentNullException(nameof(img));
+            img.RefreshProperties();
+            if (img.Channels == 1)
+                return CalibGrayToHObject(img);
+            if (img.Channels == 3)
+            {
+                using CalibImage gray = ToSingleChannelGray(img);
+                return CalibGrayToHObject(gray);
+            }
+
+            return CalibToHObjectViaTempBmp(img);
+        }
+
+        /// <summary>经临时 BMP + ReadImage（非 1/3 通道时的兜底）。</summary>
+        private static HObject CalibToHObjectViaTempBmp(CalibImage img)
         {
             if (img == null) throw new ArgumentNullException(nameof(img));
             using Bitmap? bmp = img.ToBitmap();
@@ -2265,6 +2306,18 @@ namespace CalibOperatorCLI_Example
         /// <summary>CreateShapeModel / CreateScaledShapeModel：ROI 内灰度图。</summary>
 
         /// <summary>
+        /// numMatches：&gt;0 直接用；否则按阵列行×列；仍无则 <paramref name="fallbackWhenUnset"/>（避免 0=全部匹配导致内存暴涨）。
+        /// </summary>
+        public static int ResolveFindNumMatches(int rawNumMatches, int latticeRows, int latticeCols, int fallbackWhenUnset = 100)
+        {
+            if (rawNumMatches > 0)
+                return rawNumMatches;
+            if (latticeRows > 0 && latticeCols > 0)
+                return latticeRows * latticeCols;
+            return Math.Max(1, fallbackWhenUnset);
+        }
+
+        /// <summary>
         /// FindShapeModel：在图像中查找形状模板
         /// </summary>
         public static (double[] rows, double[] cols, double[] angles, double[] scores) FindShapeModel(
@@ -2339,11 +2392,15 @@ namespace CalibOperatorCLI_Example
             double maxOverlap,
             string subPixel,
             int numLevels,
-            double greediness)
+            double greediness,
+            CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var first = FindShapeModel(inImg, modelId, angleStartDeg, angleExtentDeg, minScore, numMatches, maxOverlap, subPixel, numLevels, greediness);
             if (first.rows.Length > 0)
                 return first;
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             double retryScore = Math.Max(0.2, minScore * 0.65);
             double retryGreed = Math.Max(0.5, greediness * 0.85);
@@ -2414,7 +2471,10 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>获取形状模型轮廓点（模型坐标系：X=列, Y=行），用于叠加显示。</summary>
-        public static Point2D[][] GetShapeModelContourPoints(long modelId, int level = 1)
+        public static Point2D[][] GetShapeModelContourPoints(long modelId, int level = 1) =>
+            HalconRuntimeSettings.RunGeometrySafe(() => GetShapeModelContourPointsCore(modelId, level));
+
+        private static Point2D[][] GetShapeModelContourPointsCore(long modelId, int level = 1)
         {
             if (!HalconShapeModelRegistry.TryGet(modelId, out HShapeModel shapeModel))
                 return Array.Empty<Point2D[]>();

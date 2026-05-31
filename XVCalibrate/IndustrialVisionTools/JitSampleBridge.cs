@@ -17,9 +17,9 @@ namespace CalibOperatorCLI_Example
         public const string DefaultConfigYamlRelative = "config/jit_L_32.yaml";
 
         /// <summary>
-        /// 解析存在的目录（相对路径：exe 目录、再向上级查找源码树）。
+        /// 解析存在的目录（相对路径：先 flow 文件目录，再 exe 目录、向上级查找源码树）。
         /// </summary>
-        public static string ResolveExistingDirectory(string path)
+        public static string ResolveExistingDirectory(string path, string? flowRelativeBaseDirectory = null)
         {
             if (string.IsNullOrWhiteSpace(path))
                 throw new ArgumentException("JiT 仓库路径为空", nameof(path));
@@ -33,6 +33,13 @@ namespace CalibOperatorCLI_Example
 
             static string CombineUnder(string dir, string rel) =>
                 Path.GetFullPath(Path.Combine(dir, rel));
+
+            if (!string.IsNullOrWhiteSpace(flowRelativeBaseDirectory))
+            {
+                string fromFlow = CombineUnder(flowRelativeBaseDirectory.Trim(), path);
+                if (Directory.Exists(fromFlow))
+                    return fromFlow;
+            }
 
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
             string fromExe = CombineUnder(baseDir, path);

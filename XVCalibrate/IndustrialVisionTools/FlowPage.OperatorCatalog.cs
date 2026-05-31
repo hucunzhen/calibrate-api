@@ -91,7 +91,7 @@ namespace CalibOperatorCLI_Example
                         Name = "filePath",
                         DisplayName = "图像路径",
                         DefaultValue = "",
-                        Description = "可选；填写后自动加载，留空则弹窗选择"
+                        Description = "可选；填写后自动加载（相对路径相对当前 .flow.json 目录）；留空则弹窗选择"
                     }),
                 Ports =
                 {
@@ -119,7 +119,7 @@ namespace CalibOperatorCLI_Example
                         Name = "directory",
                         DisplayName = "目录路径",
                         DefaultValue = "",
-                        Description = "托管执行：相对 exe 目录；Native：建议绝对路径（与 load_image 一致）。留空时在界面线程弹出选文件夹"
+                        Description = "相对当前 .flow.json 目录；留空时在界面线程弹出选文件夹"
                     },
                     new OperatorParam
                     {
@@ -154,7 +154,7 @@ namespace CalibOperatorCLI_Example
                 {
                     new OperatorParam { Name = "pythonPath", DisplayName = "Python", DefaultValue = "python", Description = "已安装该 JiT 仓库依赖的解释器（常用仓库内 .venv）" },
                     new OperatorParam { Name = "launcherScript", DisplayName = "启动脚本", DefaultValue = "JIT_Inference/jit_calibrate_launcher.py", Description = "本仓库内 launcher；路径解析同 ONNX" },
-                    new OperatorParam { Name = "jitRepoRoot", DisplayName = "JiT仓库根目录", DefaultValue = "just-image-transformer", Description = "克隆的 just-image-transformer 根路径（相对 exe 或源码树）" },
+                    new OperatorParam { Name = "jitRepoRoot", DisplayName = "JiT仓库根目录", DefaultValue = "just-image-transformer", Description = "克隆的 just-image-transformer 根路径（相对 flow 目录，否则向上查找源码树）" },
                     new OperatorParam { Name = "configYaml", DisplayName = "配置YAML", DefaultValue = "config/jit_L_32.yaml", Description = "相对 JiT 仓库根，如 config/jit_L_32.yaml" },
                     new OperatorParam
                     {
@@ -544,7 +544,7 @@ namespace CalibOperatorCLI_Example
                 Params =
                 {
                     new OperatorParam { Name = "pythonPath", DisplayName = "Python", DefaultValue = "python", Description = "python.exe 或可执行文件名（PATH 中）" },
-                    new OperatorParam { Name = "scriptPath", DisplayName = "脚本路径", DefaultValue = "DIP_Inference/dip_denoise.py", Description = "相对仓库根或 exe 目录；解析规则同 ONNX 模型路径" },
+                    new OperatorParam { Name = "scriptPath", DisplayName = "脚本路径", DefaultValue = "DIP_Inference/dip_denoise.py", Description = "相对 flow 目录，否则向上查找仓库根；解析规则同 ONNX 模型路径" },
                     new OperatorParam { Name = "iterations", DisplayName = "迭代次数", DefaultValue = "2400", Description = "Adam 步数，越大越慢" },
                     new OperatorParam { Name = "learningRate", DisplayName = "学习率", DefaultValue = "0.01", Description = "Adam lr" },
                     new OperatorParam { Name = "tvWeight", DisplayName = "TV权重", DefaultValue = "0.000001", Description = "全变分正则，0 关闭" },
@@ -570,7 +570,7 @@ namespace CalibOperatorCLI_Example
                 Params =
                 {
                     new OperatorParam { Name = "pythonPath", DisplayName = "Python", DefaultValue = "python", Description = "已安装 torch/timm/torchvision 的解释器" },
-                    new OperatorParam { Name = "scriptPath", DisplayName = "脚本路径", DefaultValue = "Swin_Inference/swin_infer.py", Description = "相对仓库根或 exe；解析规则同 ONNX" },
+                    new OperatorParam { Name = "scriptPath", DisplayName = "脚本路径", DefaultValue = "Swin_Inference/swin_infer.py", Description = "相对 flow 目录，否则向上查找仓库根；解析规则同 ONNX" },
                     new OperatorParam
                     {
                         Name = "modelName",
@@ -602,13 +602,13 @@ namespace CalibOperatorCLI_Example
                 Params =
                 {
                     new OperatorParam { Name = "pythonPath", DisplayName = "Python", DefaultValue = "python", Description = "已安装 ultralytics 的解释器" },
-                    new OperatorParam { Name = "scriptPath", DisplayName = "脚本路径", DefaultValue = "YoloSeg_Tools/predict_seg.py", Description = "相对仓库根或 exe" },
+                    new OperatorParam { Name = "scriptPath", DisplayName = "脚本路径", DefaultValue = "YoloSeg_Tools/predict_seg.py", Description = "相对 flow 目录，否则向上查找仓库根" },
                     new OperatorParam
                     {
                         Name = "weightsPath",
                         DisplayName = "权重 .pt",
                         DefaultValue = "yolo_data/runs/segment/train-2/weights/best.pt",
-                        Description = "best.pt 或 last.pt；相对路径从 exe 向上查找仓库根"
+                        Description = "best.pt 或 last.pt；相对 flow 目录，否则向上查找仓库根"
                     },
                     new OperatorParam { Name = "conf", DisplayName = "置信度阈值", DefaultValue = "0.25", Description = "与 Ultralytics predict conf 一致" },
                     new OperatorParam
@@ -1274,7 +1274,7 @@ namespace CalibOperatorCLI_Example
                         Name = "filePath",
                         DisplayName = "保存路径",
                         DefaultValue = "flow_output.bmp",
-                        Description = "支持绝对路径或相对路径（相对可执行目录）"
+                        Description = "支持绝对路径或相对路径（相对当前 .flow.json 目录）"
                     }
                 },
                 Ports =
@@ -1296,7 +1296,7 @@ namespace CalibOperatorCLI_Example
                         Name = "filePath",
                         DisplayName = "保存路径",
                         DefaultValue = "flow_output.txt",
-                        Description = "绝对路径或相对可执行目录"
+                        Description = "绝对路径或相对当前 .flow.json 目录"
                     }
                 },
                 Ports =
@@ -1755,7 +1755,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "save_calibration_result",
                 DisplayName = "保存标定结果",
-                Description = "将 CalibrationJson（棋盘多视图）、Affine / Homography / Poly2D、Intrinsics 以 JSON 落盘（可同时写入多项）。至少连接一路输入。filePath 为空或未配置绝对路径时相对程序目录。",
+                Description = "将 CalibrationJson（棋盘多视图）、Affine / Homography / Poly2D、Intrinsics 以 JSON 落盘（可同时写入多项）。至少连接一路输入。相对路径相对当前 .flow.json 目录。",
                 Category = "标定",
                 Params =
                 {
@@ -1778,7 +1778,7 @@ namespace CalibOperatorCLI_Example
                 Category = "标定",
                 Params =
                 {
-                    new OperatorParam { Name = "filePath", DisplayName = "文件路径", DefaultValue = "", Description = "可选；填写后自动读取（相对路径相对程序目录）；留空则弹窗选择" }
+                    new OperatorParam { Name = "filePath", DisplayName = "文件路径", DefaultValue = "", Description = "可选；填写后自动读取（相对路径相对当前 .flow.json 目录）；留空则弹窗选择" }
                 },
                 Ports =
                 {
@@ -2392,8 +2392,8 @@ namespace CalibOperatorCLI_Example
                 Category = "AI模型",
                 Params =
                 {
-                    new OperatorParam { Name = "encoderPath", DisplayName = "Encoder ONNX", DefaultValue = SamOnnxSegmentation.DefaultEncoderRepoRelative, Description = "相对源码树 models/onnx（或 exe 目录）；不存在时自动向上查找仓库根；可为绝对路径" },
-                    new OperatorParam { Name = "decoderPath", DisplayName = "Decoder ONNX", DefaultValue = SamOnnxSegmentation.DefaultDecoderRepoRelative, Description = "相对源码树 models/onnx（或 exe 目录）；不存在时自动向上查找仓库根；可为绝对路径" },
+                    new OperatorParam { Name = "encoderPath", DisplayName = "Encoder ONNX", DefaultValue = SamOnnxSegmentation.DefaultEncoderRepoRelative, Description = "相对 flow 目录，否则向上查找仓库根 models/onnx；可为绝对路径" },
+                    new OperatorParam { Name = "decoderPath", DisplayName = "Decoder ONNX", DefaultValue = SamOnnxSegmentation.DefaultDecoderRepoRelative, Description = "相对 flow 目录，否则向上查找仓库根 models/onnx；可为绝对路径" },
                     new OperatorParam { Name = "textPrompt", DisplayName = "文本选物体", DefaultValue = "", Description = "非空时调用 OWLv2 生成框再 SAM；优先于 Points。模型单次查询约 16 英文词元，脚本会自动截断；中文建议尽量短或 textRawQuery=true" },
                     new OperatorParam { Name = "textThreshold", DisplayName = "文本检测阈值", DefaultValue = "0.25", Description = "OWLv2 post_process_object_detection threshold；无框时可调低" },
                     new OperatorParam { Name = "textRawQuery", DisplayName = "文本不加前缀", DefaultValue = "false", Description = "true 时直接把 textPrompt 送入模型；false 时使用「a photo of …」模板" },
@@ -3206,7 +3206,7 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "angleStart", DisplayName = "AngleStart(°)", DefaultValue = "-30", Description = "起始角度(度)" },
                     new OperatorParam { Name = "angleExtent", DisplayName = "AngleExtent(°)", DefaultValue = "60", Description = "角度范围(度)" },
                     new OperatorParam { Name = "minScore", DisplayName = "MinScore", DefaultValue = "0.4", Description = "最小匹配得分；漏检降低、误检提高" },
-                    new OperatorParam { Name = "numMatches", DisplayName = "NumMatches", DefaultValue = "0", Description = "返回最多匹配数，0=全部" },
+                    new OperatorParam { Name = "numMatches", DisplayName = "NumMatches", DefaultValue = "0", Description = NumMatchesLatticeHint },
                     new OperatorParam { Name = "maxOverlap", DisplayName = "MaxOverlap", DefaultValue = "0.5", Description = "最大重叠度" },
                     new OperatorParam { Name = "subPixel", DisplayName = "SubPixel", DefaultValue = "interpolation", Description = "亚像素：none / interpolation / least_squares / least_squares_high" },
                     new OperatorParam { Name = "numLevels", DisplayName = "NumLevels", DefaultValue = "0", Description = "金字塔层数，0=创建模型时使用" },
@@ -3290,7 +3290,7 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "angleStart", DisplayName = "AngleStart(°)", DefaultValue = "-30", Description = "起始角度(度)" },
                     new OperatorParam { Name = "angleExtent", DisplayName = "AngleExtent(°)", DefaultValue = "60", Description = "角度范围(度)" },
                     new OperatorParam { Name = "minScore", DisplayName = "MinScore", DefaultValue = "0.4", Description = "最低匹配分" },
-                    new OperatorParam { Name = "numMatches", DisplayName = "NumMatches", DefaultValue = "5", Description = "最多返回数，0=全部" },
+                    new OperatorParam { Name = "numMatches", DisplayName = "NumMatches", DefaultValue = "0", Description = NumMatchesLatticeHint },
                     new OperatorParam { Name = "maxOverlap", DisplayName = "MaxOverlap", DefaultValue = "0.5", Description = "最大重叠度" },
                     new OperatorParam { Name = "subPixel", DisplayName = "SubPixel", DefaultValue = "none", Description = "none 最快；interpolation 更准" },
                     new OperatorParam { Name = "numLevels", DisplayName = "NumLevels", DefaultValue = "0", Description = "金字塔层数，0=模型默认" },
@@ -3402,7 +3402,7 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "coarseAngleStart", DisplayName = "粗 AngleStart(°)", DefaultValue = "-30", Description = "粗定位角度起点" },
                     new OperatorParam { Name = "coarseAngleExtent", DisplayName = "粗 AngleExtent(°)", DefaultValue = "60", Description = "粗定位角度范围" },
                     new OperatorParam { Name = "coarseMinScore", DisplayName = "粗 MinScore", DefaultValue = "0.4", Description = "粗匹配最低分" },
-                    new OperatorParam { Name = "coarseNumMatches", DisplayName = "粗 NumMatches", DefaultValue = "5", Description = "粗匹配数量，0=全部（精匹配会按分数取前 N 个）" },
+                    new OperatorParam { Name = "coarseNumMatches", DisplayName = "粗 NumMatches", DefaultValue = "0", Description = NumMatchesLatticeHint },
                     new OperatorParam { Name = "coarseGreediness", DisplayName = "粗 Greediness", DefaultValue = "0.85", Description = "粗定位贪心系数，略高可加速" },
                     new OperatorParam { Name = "coarseSubPixel", DisplayName = "粗 SubPixel", DefaultValue = "none", Description = "粗定位亚像素：none 最快，interpolation 更准" },
                     new OperatorParam { Name = "coarseNumLevels", DisplayName = "粗 NumLevels", DefaultValue = "0", Description = "粗金字塔层数，0=用模型默认" },
@@ -3499,8 +3499,8 @@ namespace CalibOperatorCLI_Example
                         Description = "写入 GroupBarIds（PLC separate_batch 用）；per_match=0..N-1；grid_cell=行×列格号(须 gridCols)；BarIds 为轮廓段号",
                         Options = new List<string> { "per_match", "grid_cell", "grid_col", "grid_row", "single" }
                     },
-                    new OperatorParam { Name = "gridRows", DisplayName = "落格行数", DefaultValue = "8", Description = "barIdSource=grid_cell 时用于 gr×cols+gc；0=从 GridRow/Col 推断" },
-                    new OperatorParam { Name = "gridCols", DisplayName = "落格列数", DefaultValue = "2", Description = "barIdSource=grid_cell 时格号列宽；须与落格算子一致(如 8×2=16 格)" },
+                    new OperatorParam { Name = "gridRows", DisplayName = "落格行数", DefaultValue = "8", Description = $"barIdSource=grid_cell 时 gr×cols+gc；0=从 GridRow/Col 推断；{LatticeGridMetaHint}" },
+                    new OperatorParam { Name = "gridCols", DisplayName = "落格列数", DefaultValue = "2", Description = $"barIdSource=grid_cell 时列宽；须与落格算子一致；{LatticeGridMetaHint}" },
                     new OperatorParam { Name = "closeTolPx", DisplayName = "闭合容差(px)", DefaultValue = "0.5", Description = "仅当首尾几乎重合(≤容差)时不补点；否则强制在末尾补起点闭合" },
                     new OperatorParam { Name = "defaultZ", DisplayName = "SamplePts Z", DefaultValue = "0", Description = "SamplePts 的 Z" }
                 },
@@ -3526,8 +3526,8 @@ namespace CalibOperatorCLI_Example
                 Category = "HALCON",
                 Params =
                 {
-                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8", Description = "阵列行数" },
-                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2", Description = "阵列列数" },
+                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8", Description = $"阵列行数；{LatticeGridMetaHint}" },
+                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2", Description = $"阵列列数；{LatticeGridMetaHint}" },
                     new OperatorParam { Name = "minScoreKeep", DisplayName = "最低得分", DefaultValue = "0", Description = "0=关闭；每格保留匹配的最低 Score" },
                     new OperatorParam { Name = "snapTolerancePx", DisplayName = "吸附容差(px)", DefaultValue = "0", Description = "0=自动；u/v 落格吸附半径" },
                     new OperatorParam { Name = "ransacIterations", DisplayName = "RANSAC 迭代", DefaultValue = "500", Description = "假设采样次数（含 θ 扰动与三点最小集）" },
@@ -3567,8 +3567,8 @@ namespace CalibOperatorCLI_Example
                 Category = "HALCON",
                 Params =
                 {
-                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8", Description = "阵列行数（2 列×8 行 → 行=8、列=2；内部可自动 swap）" },
-                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2", Description = "阵列列数" },
+                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8", Description = $"阵列行数（2 列×8 行 → 行=8、列=2；内部可自动 swap）；{LatticeGridMetaHint}" },
+                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2", Description = $"阵列列数；{LatticeGridMetaHint}" },
                     new OperatorParam { Name = "minScoreKeep", DisplayName = "最低得分", DefaultValue = "0", Description = "0=关闭；每格保留匹配的最低 Score" },
                     new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto", Description = "写入 *.grid-filter.log" }
                 },
@@ -3601,8 +3601,8 @@ namespace CalibOperatorCLI_Example
                 Category = "HALCON",
                 Params =
                 {
-                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8", Description = "阵列行数" },
-                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2", Description = "阵列列数" },
+                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8", Description = $"阵列行数；{LatticeGridMetaHint}" },
+                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2", Description = $"阵列列数；{LatticeGridMetaHint}" },
                     new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto", Description = "写入 *.grid-filter.log" }
                 },
                 Ports =
@@ -3628,11 +3628,11 @@ namespace CalibOperatorCLI_Example
                 Category = "HALCON",
                 Params =
                 {
-                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8" },
-                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2" },
+                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8", Description = LatticeGridMetaHint },
+                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2", Description = LatticeGridMetaHint },
                     new OperatorParam { Name = "minScoreKeep", DisplayName = "最低得分(已忽略)", DefaultValue = "0", Description = "保留参数兼容；落格不再按分过滤，请在前级匹配设 minScore" },
                     new OperatorParam { Name = "snapTolerancePx", DisplayName = "格点容差(px)", DefaultValue = "0", Description = "0=自动" },
-                    new OperatorParam { Name = "uvProjectionSvg", DisplayName = "u/v投影SVG", DefaultValue = "", Description = "相对 exe 或绝对路径；留空不写 SVG" },
+                    new OperatorParam { Name = "uvProjectionSvg", DisplayName = "u/v投影SVG", DefaultValue = "", Description = "相对 flow 目录或绝对路径；留空不写 SVG" },
                     new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto" }
                 },
                 Ports =
@@ -3670,8 +3670,8 @@ namespace CalibOperatorCLI_Example
                 Category = "HALCON",
                 Params =
                 {
-                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8" },
-                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2" },
+                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8", Description = LatticeGridMetaHint },
+                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2", Description = LatticeGridMetaHint },
                     new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto" }
                 },
                 Ports =
@@ -3729,8 +3729,8 @@ namespace CalibOperatorCLI_Example
                 Category = "HALCON",
                 Params =
                 {
-                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8", Description = "阵列行数（2 列×8 行 → 行=8、列=2）" },
-                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2", Description = "阵列列数" },
+                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8", Description = $"阵列行数（2 列×8 行 → 行=8、列=2）；{LatticeGridMetaHint}" },
+                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2", Description = $"阵列列数；{LatticeGridMetaHint}" },
                     new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto", Description = "写入 *.grid-filter.log" }
                 },
                 Ports =
@@ -3757,8 +3757,8 @@ namespace CalibOperatorCLI_Example
                 Category = "HALCON",
                 Params =
                 {
-                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "3", Description = "阵列行数（沿副轴 v）" },
-                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "3", Description = "阵列列数（沿主轴 u）" },
+                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "3", Description = $"阵列行数（沿副轴 v）；{LatticeGridMetaHint}" },
+                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "3", Description = $"阵列列数（沿主轴 u）；{LatticeGridMetaHint}" },
                     new OperatorParam { Name = "pitchRow", DisplayName = "行间距(px)", DefaultValue = "0", Description = "0=自动估计" },
                     new OperatorParam { Name = "pitchCol", DisplayName = "列间距(px)", DefaultValue = "0", Description = "0=自动估计" },
                     new OperatorParam { Name = "gridAngleDeg", DisplayName = "阵列角度(°)", DefaultValue = "auto", Description = "auto=模板角聚类+PCA 消歧；或固定角度" },
@@ -3803,8 +3803,8 @@ namespace CalibOperatorCLI_Example
                 Category = "HALCON",
                 Params =
                 {
-                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "3", Description = "阵列行数（沿副轴 v）" },
-                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "3", Description = "阵列列数（沿主轴 u）" },
+                    new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "3", Description = $"阵列行数（沿副轴 v）；{LatticeGridMetaHint}" },
+                    new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "3", Description = $"阵列列数（沿主轴 u）；{LatticeGridMetaHint}" },
                     new OperatorParam { Name = "pitchRow", DisplayName = "行间距(px)", DefaultValue = "0", Description = "0=自动估计（沿 v / 图像行方向间距）" },
                     new OperatorParam { Name = "pitchCol", DisplayName = "列间距(px)", DefaultValue = "0", Description = "0=自动估计（沿 u / 图像列方向间距）" },
                     new OperatorParam { Name = "gridAngleDeg", DisplayName = "阵列角度(°)", DefaultValue = "auto", Description = "auto=匹配角+PCA，并自动消歧 ±90°/行列对调；也可填固定角度(仍会自动试行列对调)" },

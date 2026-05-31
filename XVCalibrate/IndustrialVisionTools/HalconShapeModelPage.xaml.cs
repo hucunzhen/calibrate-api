@@ -3,12 +3,14 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using CalibOperatorPInvoke;
 using Microsoft.Win32;
 #if HALCON_ENABLED
@@ -63,6 +65,14 @@ namespace CalibOperatorCLI_Example
         private long _modelId = -1;
         private HalconFlowModelKind _modelKind = HalconFlowModelKind.Shape;
 
+#if HALCON_ENABLED
+        private CancellationTokenSource? _findShapeCts;
+        private int _findShapeRunId;
+        private int _modelEpoch;
+        private bool _createModelInProgress;
+        private string? _contourFingerprint;
+#endif
+
         /// <summary>预览/修剪后的轮廓，创建 XLD 模型时优先使用。</summary>
         private HalconXldContourBundle? _workingContours;
 
@@ -93,36 +103,27 @@ namespace CalibOperatorCLI_Example
         private readonly ScaleTransform _viewScale = new ScaleTransform();
         private readonly TranslateTransform _viewTranslate = new TranslateTransform();
 
+        private readonly DispatcherTimer _sessionPersistTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(450)
+        };
+
         public HalconShapeModelPage()
         {
+            _suppressSessionPersist = true;
+            _sessionPersistTimer.Tick += (_, _) =>
+            {
+                _sessionPersistTimer.Stop();
+                PersistSessionFromUi();
+            };
             InitializeComponent();
             ImageCanvas.RenderTransform = new TransformGroup
             {
                 Children = new TransformCollection { _viewScale, _viewTranslate }
             };
             ImageCanvas.RenderTransformOrigin = new Point(0, 0);
-            Loaded += (_, _) =>
-            {
-                UpdateCreatePanelsVisibility();
-                if (string.IsNullOrWhiteSpace(TxtCalibrationJsonPath.Text))
-                {
-                    string guess = IoPath.GetFullPath(IoPath.Combine(
-                        AppDomain.CurrentDomain.BaseDirectory,
-                        "..", "..", "..", "test_images", "chessboard_calibration_from_dir.json"));
-                    if (System.IO.File.Exists(guess))
-                        TxtCalibrationJsonPath.Text = guess;
-                }
-
-                if (_imgWidth > 0)
-                    FitImageToView();
-            };
-            Unloaded += (_, _) =>
-            {
-                DisposeNativeXldForCreate();
-                DisposeCurrentModel();
-                _rawCalibImage?.Dispose();
-                _rawCalibImage = null;
-            };
+            Loaded += HalconShapeModelPage_Loaded;
+            Unloaded += HalconShapeModelPage_Unloaded;
         }
 
         private void AppendLog(string msg)
@@ -153,11 +154,12 @@ namespace CalibOperatorCLI_Example
             }
         }
 
-        private void LoadImage(string path)
+        private void LoadImage(string path, bool clearRoi = true)
         {
+            path = IoPath.GetFullPath(path);
             var bitmap = new BitmapImage();
             bitmap.BeginInit();
-            bitmap.UriSource = new Uri(path);
+            bitmap.UriSource = new Uri(path, UriKind.Absolute);
             bitmap.CacheOption = BitmapCacheOption.OnLoad;
             bitmap.EndInit();
             bitmap.Freeze();
@@ -216,12 +218,26 @@ namespace CalibOperatorCLI_Example
             _rawCalibImage?.Dispose();
             _rawCalibImage = CalibAPI.DuplicateImage(_currentImage);
 
-            TryApplyCameraCorrections(logSuccess: true);
+            try
+            {
+                TryApplyCameraCorrections(logSuccess: true);
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"[相机矫正] {ex.Message}，显示原图");
+                CommitCalibImageToUi(_rawCalibImage, disposeIncoming: false);
+            }
 
-            ClearRoiState();
-            _workingContours = null;
-            UpdateContourStats();
+            if (clearRoi)
+                ClearRoiState();
+            else
+            {
+                _workingContours = null;
+                UpdateContourStats();
+            }
+
             FitImageToView();
+            FlushSessionPersist();
         }
 
         private void BtnBrowseCalibrationJson_Click(object sender, RoutedEventArgs e)
@@ -248,6 +264,7 @@ namespace CalibOperatorCLI_Example
             if (dlg.ShowDialog() != true)
                 return;
             TxtCalibrationJsonPath.Text = dlg.FileName;
+            PersistSessionChange();
         }
 
         private void BtnApplyCameraCorrection_Click(object sender, RoutedEventArgs e)
@@ -885,6 +902,7 @@ namespace CalibOperatorCLI_Example
             UpdatePolygonPreview();
             UpdateThresholdPreview();
             AppendLog($"多边形 ROI 已{closingKindLabel}闭合: {_roiPath.VertexCount} 个顶点, {_roiPath.EdgeKinds.Count} 段");
+            PersistSessionChange();
             return true;
         }
 
@@ -932,6 +950,7 @@ namespace CalibOperatorCLI_Example
                 _hasRingRoi = true;
                 _hasRoi = true;
                 AppendLog($"环形 ROI 完成：外 {_ringOuterPath.VertexCount} 顶点，内 {_ringInnerPath.VertexCount} 顶点");
+                PersistSessionChange();
             }
         }
 
@@ -1099,10 +1118,16 @@ namespace CalibOperatorCLI_Example
                     ThresholdOverlayImage.Visibility = Visibility.Collapsed;
                 _thresholdOverlay = null;
                 ClearFindResultOverlay();
+#if HALCON_ENABLED
+                InvalidateContourCache();
+#else
                 _workingContours = null;
                 UpdateContourStats();
+#endif
             }
             catch { /* 忽略 XAML 控件未初始化错误 */ }
+
+            PersistSessionChange();
         }
 
         private void UpdateContourStats()
@@ -1155,7 +1180,15 @@ namespace CalibOperatorCLI_Example
             return new Point(colImg, rowImg);
         }
 
-        private void DrawFindResultOverlay(double[] rows, double[] cols, double[] angles, double[] scores, int[]? gridRow = null, int[]? gridCol = null)
+        private void DrawFindResultOverlay(
+            long modelId,
+            HalconFlowModelKind modelKind,
+            double[] rows,
+            double[] cols,
+            double[] angles,
+            double[] scores,
+            int[]? gridRow = null,
+            int[]? gridCol = null)
         {
             if (FindResultOverlay == null || rows.Length == 0)
                 return;
@@ -1170,13 +1203,13 @@ namespace CalibOperatorCLI_Example
                 double angleDeg = angles.Length > m ? angles[m] : 0;
 
                 Point2D[][] matchContours = Array.Empty<Point2D[]>();
-                if (_modelId >= 0)
+                if (modelId >= 0)
                 {
                     try
                     {
-                        matchContours = _modelKind == HalconFlowModelKind.Deformable
-                            ? HalconFlowBridge.GetDeformableModelContourPoints(_modelId, 1)
-                            : HalconFlowBridge.GetShapeModelContourPoints(_modelId, 1);
+                        matchContours = modelKind == HalconFlowModelKind.Deformable
+                            ? HalconFlowBridge.GetDeformableModelContourPoints(modelId, 1)
+                            : HalconFlowBridge.GetShapeModelContourPoints(modelId, 1);
                     }
                     catch (Exception ex)
                     {
@@ -1327,13 +1360,109 @@ namespace CalibOperatorCLI_Example
                 _modelId = -1;
             }
             _modelKind = HalconFlowModelKind.Shape;
+            _modelEpoch++;
 #else
             _modelId = -1;
 #endif
         }
 
+#if HALCON_ENABLED
+        private void InvalidateContourCache()
+        {
+            _contourFingerprint = null;
+            _workingContours = null;
+            DisposeNativeXldForCreate();
+            UpdateContourStats();
+        }
+
+        private string ComputeContourFingerprint(HalconShapeModelCreateOptions opt, double minGray, double maxGray, bool includeTrimState)
+        {
+            var sb = new System.Text.StringBuilder(256);
+            sb.Append(_imgWidth).Append('x').Append(_imgHeight).Append('|');
+            sb.Append(opt.SourceKind).Append('|');
+            sb.Append(minGray.ToString(CultureInfo.InvariantCulture))
+                .Append('-')
+                .Append(maxGray.ToString(CultureInfo.InvariantCulture))
+                .Append('|');
+            sb.Append(_hasRoi).Append('|');
+            if (_hasRoi)
+            {
+                foreach (Point p in _roiPath.Vertices)
+                {
+                    sb.Append(p.X.ToString("F1", CultureInfo.InvariantCulture))
+                        .Append(',')
+                        .Append(p.Y.ToString("F1", CultureInfo.InvariantCulture))
+                        .Append(';');
+                }
+            }
+
+            sb.Append(opt.ModelKind).Append('|')
+                .Append(opt.NumLevels).Append('|')
+                .Append(opt.Metric).Append('|')
+                .Append(opt.Optimization).Append('|')
+                .Append(opt.GenContourMode).Append('|')
+                .Append(opt.MinContourPoints).Append('|')
+                .Append(opt.LargestContourOnly).Append('|')
+                .Append(opt.EdgeAlpha.ToString(CultureInfo.InvariantCulture)).Append('|')
+                .Append(opt.EdgeLow.ToString(CultureInfo.InvariantCulture)).Append('-')
+                .Append(opt.EdgeHigh.ToString(CultureInfo.InvariantCulture)).Append('|')
+                .Append(ReadRoiGradientPolarityForFingerprint());
+
+            if (includeTrimState && _workingContours?.Contours != null && _workingContours.Contours.Count > 0)
+            {
+                var trim = ReadTrimOptionsFromUi();
+                sb.Append("|trim:")
+                    .Append(trim.Mode).Append('|')
+                    .Append(trim.Epsilon.ToString(CultureInfo.InvariantCulture)).Append('|')
+                    .Append(trim.TrimEndsPx.ToString(CultureInfo.InvariantCulture)).Append('|')
+                    .Append(trim.MinContourLength.ToString(CultureInfo.InvariantCulture)).Append('|')
+                    .Append(trim.ClosedContour);
+            }
+
+            return sb.ToString();
+        }
+
+        private void MarkContourCacheReady(HalconShapeModelCreateOptions opt, double minGray, double maxGray, bool includeTrimState)
+        {
+            _contourFingerprint = ComputeContourFingerprint(opt, minGray, maxGray, includeTrimState);
+        }
+
+        private void ResetFindResultUi()
+        {
+            ClearFindResultOverlay();
+            TxtFindResult.Text = "无";
+        }
+
+        private void CancelFindShapeRun(string? logMessage = null)
+        {
+            if (_findShapeCts == null || _findShapeCts.IsCancellationRequested)
+                return;
+            _findShapeCts.Cancel();
+            if (!string.IsNullOrWhiteSpace(logMessage))
+                AppendLog(logMessage);
+        }
+
+        private void PrepareReplaceShapeModel()
+        {
+            CancelFindShapeRun("已取消进行中的匹配（即将替换模型）");
+            if (_modelId >= 0)
+                AppendLog($"释放旧模型 ModelID={_modelId}（epoch→{_modelEpoch + 1}）");
+            DisposeCurrentModel();
+            ResetFindResultUi();
+        }
+
+        private bool IsModelSessionCurrent(long modelId, int modelEpoch, HalconFlowModelKind modelKind)
+        {
+            if (modelId != _modelId || modelEpoch != _modelEpoch || modelKind != _modelKind)
+                return false;
+            return HalconFlowBridge.TryGetRegisteredModelKind(modelId, out _);
+        }
+#endif
+
         private void DrawMode_Changed(object sender, RoutedEventArgs e)
         {
+            if (!_uiReady || _suppressDrawModeClear)
+                return;
             ClearRoiState();
         }
 
@@ -1542,6 +1671,7 @@ namespace CalibOperatorCLI_Example
                     RefreshRoiVisuals();
                     UpdateThresholdPreview();
                     AppendLog($"圆形ROI: 圆心=({_circleCenterImage.X:F0},{_circleCenterImage.Y:F0}) R={_circleRadiusImage:F0}");
+                    PersistSessionChange();
                 }
                 else
                     ResetCircleDrawState();
@@ -1564,6 +1694,7 @@ namespace CalibOperatorCLI_Example
                     RefreshRoiVisuals();
                     UpdateThresholdPreview();
                     AppendLog($"矩形ROI: ({x:F0},{y:F0}) {w:F0}x{h:F0}");
+                    PersistSessionChange();
                 }
                 else if (RoiRect != null)
                 {
@@ -2182,6 +2313,14 @@ namespace CalibOperatorCLI_Example
         private RoiGradientPolarity ReadGradientPolarity() =>
             RbGradientInward?.IsChecked == true ? RoiGradientPolarity.Inward : RoiGradientPolarity.Outward;
 
+        private string ReadRoiGradientPolarityForFingerprint()
+        {
+            var outer = ReadGradientPolarity();
+            if (HasUsableRingRoi())
+                return outer + "|" + ReadRingInnerGradientPolarity(outer);
+            return outer.ToString();
+        }
+
         private RoiGradientPolarity ReadRingInnerGradientPolarity(RoiGradientPolarity outerPolarity)
         {
             string mode = (CmbRingInnerGradientMode?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "opposite";
@@ -2375,6 +2514,10 @@ namespace CalibOperatorCLI_Example
 
                 int ptsAfter = HalconXldContourTrimmer.CountPoints(trimmed);
                 SetWorkingContours(trimmed, trimmed: true);
+                var opt = ReadCreateOptionsFromUi();
+                if (!double.TryParse(TxtMinGray.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double minGray)) minGray = 0;
+                if (!double.TryParse(TxtMaxGray.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double maxGray)) maxGray = 255;
+                MarkContourCacheReady(opt, minGray, maxGray, includeTrimState: true);
                 AppendLog($"轮廓修剪 [{trimOpt.Mode}]: {nBefore}条/{ptsBefore}点 → {trimmed.Contours.Count}条/{ptsAfter}点");
             }
             catch (Exception ex)
@@ -2387,11 +2530,9 @@ namespace CalibOperatorCLI_Example
 
         private void BtnResetContours_Click(object sender, RoutedEventArgs e)
         {
-            _workingContours = null;
-            DisposeNativeXldForCreate();
+            InvalidateContourCache();
             ClearFindResultOverlay();
-            UpdateContourStats();
-            AppendLog("已清除修剪结果，请重新预览轮廓");
+            AppendLog("已清除轮廓缓存，请重新预览轮廓");
         }
 
 #endif
@@ -2426,6 +2567,7 @@ namespace CalibOperatorCLI_Example
                             Height = _imgHeight,
                             Contours = boundary
                         });
+                        MarkContourCacheReady(opt, 0, 255, includeTrimState: false);
                         AppendLog(HasUsableRingRoi()
                             ? $"已预览环形 ROI 边界（{boundary.Count} 条，含内外圈）"
                             : "已预览图像模板 ROI 边界（蓝线）");
@@ -2448,6 +2590,7 @@ namespace CalibOperatorCLI_Example
                 }
 
                 SetWorkingContours(bundle);
+                MarkContourCacheReady(opt, minGray, maxGray, includeTrimState: false);
                 AppendLog($"轮廓预览: {bundle.Contours.Count} 条");
             }
             catch (Exception ex)
@@ -2459,7 +2602,7 @@ namespace CalibOperatorCLI_Example
         }
 
         // ───────── 创建形状模型 ─────────
-        private void BtnCreateModel_Click(object sender, RoutedEventArgs e)
+        private async void BtnCreateModel_Click(object sender, RoutedEventArgs e)
         {
 #if !HALCON_ENABLED
             MessageBox.Show("当前构建未启用 HALCON，无法创建形状模型。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -2471,21 +2614,24 @@ namespace CalibOperatorCLI_Example
                 return;
             }
 
-            if (_modelId >= 0)
+            if (_createModelInProgress)
             {
-                var result = MessageBox.Show("已存在模型，将被替换。是否继续？", "确认", MessageBoxButton.YesNo, MessageBoxImage.Question);
-                if (result != MessageBoxResult.Yes) return;
-                DisposeCurrentModel();
+                AppendLog("模型创建进行中，请稍候…");
+                return;
             }
 
+            PrepareReplaceShapeModel();
+
+            _createModelInProgress = true;
+            BtnCreateModel.IsEnabled = false;
+            BtnTestFind.IsEnabled = false;
             try
             {
                 var opt = ReadCreateOptionsFromUi();
                 if (!double.TryParse(TxtMinGray.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double minGray)) minGray = 0;
                 if (!double.TryParse(TxtMaxGray.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double maxGray)) maxGray = 255;
 
-                AppendLog($"创建模式: {opt.SourceKind} / {opt.ModelKind}");
-                ClearFindResultOverlay();
+                AppendLog($"创建模式: {opt.SourceKind} / {opt.ModelKind}（epoch={_modelEpoch}）");
 
                 bool fromImage = opt.SourceKind is HalconShapeModelSourceKind.ImageRectangle
                     or HalconShapeModelSourceKind.ImagePolygon;
@@ -2497,18 +2643,23 @@ namespace CalibOperatorCLI_Example
                 {
                     region = BuildRequiredRegionForImageMode(opt.SourceKind);
                     AppendLog("使用 ROI 灰度图创建模板...");
-                    _modelId = HalconFlowBridge.CreateShapeModel(_currentImage, null, region, opt);
+                    var image = _currentImage;
+                    _modelId = await HalconComputeRunner.RunAsync(() =>
+                        HalconFlowBridge.CreateShapeModel(image, null, region, opt),
+                        HalconThreadPolicy.Geometry);
                 }
                 else
                 {
-                    if (_workingContours?.Contours != null && _workingContours.Contours.Count > 0)
+                    string fingerprint = ComputeContourFingerprint(opt, minGray, maxGray, includeTrimState: true);
+                    if (_workingContours?.Contours != null && _workingContours.Contours.Count > 0
+                        && string.Equals(_contourFingerprint, fingerprint, StringComparison.Ordinal))
                     {
                         xldBundle = _workingContours;
-                        AppendLog($"使用已预览/修剪轮廓: {xldBundle.Contours.Count} 条");
+                        AppendLog($"使用与预览一致的轮廓: {xldBundle.Contours.Count} 条");
                     }
                     else
                     {
-                        AppendLog("提取 XLD 轮廓...");
+                        AppendLog("参数/ROI 已变或未预览，重新提取轮廓…");
                         xldBundle = ExtractXldBundleForCreate(opt, minGray, maxGray);
                         if (xldBundle?.Contours == null || xldBundle.Contours.Count == 0)
                         {
@@ -2520,15 +2671,22 @@ namespace CalibOperatorCLI_Example
 
                         AppendLog($"轮廓: {xldBundle.Contours.Count} 条");
                         SetWorkingContours(xldBundle);
+                        MarkContourCacheReady(opt, minGray, maxGray, includeTrimState: false);
                     }
 
-                    _modelId = HalconFlowBridge.CreateShapeModel(
-                        _currentImage, xldBundle, null, opt, _nativeXldForCreate);
+                    var image = _currentImage;
+                    var nativeXld = _nativeXldForCreate;
+                    _modelId = await HalconComputeRunner.RunAsync(() =>
+                        HalconFlowBridge.CreateShapeModel(image, xldBundle, null, opt, nativeXld),
+                        HalconThreadPolicy.Geometry);
                     if (opt.SourceKind == HalconShapeModelSourceKind.PolygonXld)
                         AppendLog("匹配指标建议: use_polarity（已含 edge_direction）");
                 }
 
                 region?.Dispose();
+
+                if (!HalconFlowBridge.TryGetRegisteredModelKind(_modelId, out _))
+                    throw new InvalidOperationException($"模型注册失败 ModelID={_modelId}");
 
                 _modelKind = opt.ModelKind is HalconShapeModelKind.Deformable or HalconShapeModelKind.PlanarDeformable
                     ? HalconFlowModelKind.Deformable
@@ -2537,6 +2695,7 @@ namespace CalibOperatorCLI_Example
                 string levelsText = opt.NumLevels > 0 ? opt.NumLevels.ToString() : "auto";
                 TxtModelInfo.Text =
                     $"ModelID: {_modelId}\n" +
+                    $"Epoch: {_modelEpoch}\n" +
                     $"来源: {opt.SourceKind}\n" +
                     $"类型: {opt.ModelKind}\n" +
                     $"图像: {_imgWidth}x{_imgHeight}\n" +
@@ -2544,7 +2703,8 @@ namespace CalibOperatorCLI_Example
                     $"NumLevels: {levelsText}\n" +
                     (xldBundle != null ? $"轮廓数: {xldBundle.Contours.Count}\n" : "");
 
-                AppendLog($"模型创建成功 ModelID={_modelId} ({_modelKind})");
+                ResetFindResultUi();
+                AppendLog($"模型创建成功 ModelID={_modelId}, epoch={_modelEpoch} ({_modelKind})");
                 string modelLabel = _modelKind == HalconFlowModelKind.Deformable ? "可变形模板" : "形状模型";
                 MessageBox.Show($"{modelLabel}创建成功!\nModelID: {_modelId}", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
             }
@@ -2552,6 +2712,12 @@ namespace CalibOperatorCLI_Example
             {
                 AppendLog($"[错误] {ex.Message}");
                 MessageBox.Show($"创建模型失败:\n{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                _createModelInProgress = false;
+                BtnCreateModel.IsEnabled = true;
+                BtnTestFind.IsEnabled = _modelId >= 0;
             }
 #endif
         }
@@ -2628,7 +2794,65 @@ namespace CalibOperatorCLI_Example
         }
 
         // ───────── 测试 FindShapeModel ─────────
-        private void BtnTestFind_Click(object sender, RoutedEventArgs e)
+#if HALCON_ENABLED
+        private void SetFindShapeUiRunning(bool running)
+        {
+            BtnTestFind.IsEnabled = !running;
+            BtnStopFind.IsEnabled = running;
+            BtnStopFind.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void BeginFindShapeRun(out CancellationToken findToken, out int runId)
+        {
+            _findShapeCts?.Cancel();
+            _findShapeCts?.Dispose();
+            runId = ++_findShapeRunId;
+            _findShapeCts = new CancellationTokenSource();
+            findToken = _findShapeCts.Token;
+            SetFindShapeUiRunning(true);
+        }
+
+        private bool IsFindShapeRunCancelled(int runId) =>
+            runId != _findShapeRunId || (_findShapeCts?.IsCancellationRequested ?? false);
+
+        private void ApplyFindShapeStopped(int runId)
+        {
+            if (!IsFindShapeRunCancelled(runId))
+                return;
+            AppendLog("匹配已停止");
+            ClearFindResultOverlay();
+            TxtFindResult.Text = "已停止";
+        }
+
+        private bool TryConsumeFindResult(int runId, long modelId, int modelEpoch, HalconFlowModelKind modelKind)
+        {
+            if (IsFindShapeRunCancelled(runId))
+            {
+                ApplyFindShapeStopped(runId);
+                return false;
+            }
+
+            if (!IsModelSessionCurrent(modelId, modelEpoch, modelKind))
+            {
+                AppendLog($"丢弃过期匹配结果（测试时 epoch={modelEpoch}/ModelID={modelId}，当前 epoch={_modelEpoch}/ModelID={_modelId}）");
+                ResetFindResultUi();
+                return false;
+            }
+
+            return true;
+        }
+#endif
+
+        private void BtnStopFind_Click(object sender, RoutedEventArgs e)
+        {
+#if HALCON_ENABLED
+            CancelFindShapeRun("已请求停止匹配…");
+            BtnStopFind.IsEnabled = false;
+            TxtFindResult.Text = "正在停止…（等待 HALCON 结束当前搜索）";
+#endif
+        }
+
+        private async void BtnTestFind_Click(object sender, RoutedEventArgs e)
         {
 #if !HALCON_ENABLED
             MessageBox.Show("当前构建未启用 HALCON。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -2640,18 +2864,40 @@ namespace CalibOperatorCLI_Example
                 return;
             }
 
+            if (_createModelInProgress)
+            {
+                MessageBox.Show("模型创建中，请稍候再测试匹配。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (!HalconFlowBridge.TryGetRegisteredModelKind(_modelId, out _))
+            {
+                MessageBox.Show("当前模型已失效，请重新创建或导入。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                DisposeCurrentModel();
+                TxtModelInfo.Text = "未创建模型";
+                return;
+            }
+
             if (_currentImage == null)
             {
                 MessageBox.Show("请先加载图像", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
+            BeginFindShapeRun(out CancellationToken findToken, out int runId);
             try
             {
                 if (!double.TryParse(TxtAngleStart.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double angleStart)) angleStart = -30;
                 if (!double.TryParse(TxtAngleExtent.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double angleExtent)) angleExtent = 60;
-                if (!int.TryParse(TxtFindNumMatches.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int numMatches) || numMatches < 0)
-                    numMatches = 0;
+                if (!int.TryParse(TxtFindNumMatches.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int numMatchesRaw) || numMatchesRaw < 0)
+                    numMatchesRaw = 0;
+                if (!int.TryParse(TxtFindGridRows.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int gridRowsHint) || gridRowsHint < 1)
+                    gridRowsHint = 3;
+                if (!int.TryParse(TxtFindGridCols.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int gridColsHint) || gridColsHint < 1)
+                    gridColsHint = 3;
+                int numMatches = HalconFlowBridge.ResolveFindNumMatches(numMatchesRaw, gridRowsHint, gridColsHint);
+                if (numMatchesRaw <= 0)
+                    AppendLog($"匹配个数: {numMatchesRaw} → 实际 {numMatches}（阵列 {gridRowsHint}×{gridColsHint} 或默认上限，避免搜全部匹配占满内存）");
                 if (!double.TryParse(TxtFindMinScore.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double minScore) || minScore < 0 || minScore > 1)
                     minScore = 0.4;
                 if (!double.TryParse(TxtFindMaxOverlap.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double maxOverlap) || maxOverlap < 0 || maxOverlap > 1)
@@ -2666,24 +2912,35 @@ namespace CalibOperatorCLI_Example
                 if (findNumLevels == 0 && createNumLevels > 0)
                     findNumLevels = createNumLevels;
 
-                AppendLog($"查找({_modelKind}): MinScore={minScore}, Greediness={greediness}, NumLevels={findNumLevels}, 角度[{angleStart}°~{angleStart + angleExtent}°]");
+                bool autoRetry = ChkFindAutoRetry.IsChecked == true;
+                long modelId = _modelId;
+                int modelEpoch = _modelEpoch;
+                var modelKind = _modelKind;
+                var image = _currentImage;
 
-                if (_modelKind == HalconFlowModelKind.Deformable)
+                AppendLog($"查找({modelKind}): ModelID={modelId}, epoch={modelEpoch}, NumMatches={numMatches}, MinScore={minScore}, Greediness={greediness}, NumLevels={findNumLevels}, 角度[{angleStart}°~{angleStart + angleExtent}°]");
+                TxtFindResult.Text = "查找中…";
+
+                if (modelKind == HalconFlowModelKind.Deformable)
                 {
                     var scaleOpt = ReadCreateOptionsFromUi();
-                    (double[] rows, double[] cols, double[] scores, List<Point2D[]> deformed) findDef;
-                    if (ChkFindAutoRetry.IsChecked == true)
+                    var findDef = await HalconComputeRunner.RunAsync(ct =>
                     {
-                        findDef = HalconFlowBridge.FindDeformableModelWithFallback(
-                            _currentImage, _modelId, angleStart, angleExtent, minScore, numMatches, maxOverlap,
+                        if (autoRetry)
+                        {
+                            return HalconFlowBridge.FindDeformableModelWithFallback(
+                                image, modelId, angleStart, angleExtent, minScore, numMatches, maxOverlap,
+                                findNumLevels, greediness, scaleOpt, ct);
+                        }
+
+                        ct.ThrowIfCancellationRequested();
+                        return HalconFlowBridge.FindDeformableModel(
+                            image, modelId, angleStart, angleExtent, minScore, numMatches, maxOverlap,
                             findNumLevels, greediness, scaleOpt);
-                    }
-                    else
-                    {
-                        findDef = HalconFlowBridge.FindDeformableModel(
-                            _currentImage, _modelId, angleStart, angleExtent, minScore, numMatches, maxOverlap,
-                            findNumLevels, greediness, scaleOpt);
-                    }
+                    }, findToken);
+
+                    if (!TryConsumeFindResult(runId, modelId, modelEpoch, modelKind))
+                        return;
 
                     if (findDef.rows.Length == 0)
                     {
@@ -2693,7 +2950,7 @@ namespace CalibOperatorCLI_Example
                     }
                     else
                     {
-                        DrawDeformableFindResultOverlay(findDef.rows, findDef.cols, findDef.scores, findDef.deformed);
+                        DrawDeformableFindResultOverlay(findDef.rows, findDef.cols, findDef.scores, findDef.deformedContoursPerMatch);
                         var sb = new System.Text.StringBuilder();
                         sb.AppendLine($"找到 {findDef.rows.Length} 个可变形匹配:");
                         for (int i = 0; i < findDef.rows.Length; i++)
@@ -2705,12 +2962,28 @@ namespace CalibOperatorCLI_Example
                     return;
                 }
 
-                (double[] rows, double[] cols, double[] angles, double[] scores) findResult;
-                if (ChkFindAutoRetry.IsChecked == true)
+                var findResult = await HalconComputeRunner.RunAsync(ct =>
                 {
-                    findResult = HalconFlowBridge.FindShapeModelWithFallback(
-                        _currentImage,
-                        _modelId,
+                    if (autoRetry)
+                    {
+                        return HalconFlowBridge.FindShapeModelWithFallback(
+                            image,
+                            modelId,
+                            angleStart,
+                            angleExtent,
+                            minScore,
+                            numMatches,
+                            maxOverlap,
+                            "least_squares",
+                            findNumLevels,
+                            greediness,
+                            ct);
+                    }
+
+                    ct.ThrowIfCancellationRequested();
+                    return HalconFlowBridge.FindShapeModel(
+                        image,
+                        modelId,
                         angleStart,
                         angleExtent,
                         minScore,
@@ -2719,21 +2992,10 @@ namespace CalibOperatorCLI_Example
                         "least_squares",
                         findNumLevels,
                         greediness);
-                }
-                else
-                {
-                    findResult = HalconFlowBridge.FindShapeModel(
-                        _currentImage,
-                        _modelId,
-                        angleStart,
-                        angleExtent,
-                        minScore,
-                        numMatches,
-                        maxOverlap,
-                        "least_squares",
-                        findNumLevels,
-                        greediness);
-                }
+                }, findToken);
+
+                if (!TryConsumeFindResult(runId, modelId, modelEpoch, modelKind))
+                    return;
 
                 var (rows, cols, angles, scores) = findResult;
                 int rawCount = rows.Length;
@@ -2794,7 +3056,7 @@ namespace CalibOperatorCLI_Example
                         return;
                     }
 
-                    DrawFindResultOverlay(rows, cols, angles, scores, gridRowOut, gridColOut);
+                    DrawFindResultOverlay(modelId, modelKind, rows, cols, angles, scores, gridRowOut, gridColOut);
                     var filteredResult = new System.Text.StringBuilder();
                     filteredResult.AppendLine($"找到 {rows.Length} 个匹配（阵列 {gridRows}×{gridCols}）:");
                     for (int i = 0; i < rows.Length; i++)
@@ -2821,7 +3083,7 @@ namespace CalibOperatorCLI_Example
                 }
                 else
                 {
-                    DrawFindResultOverlay(rows, cols, angles, scores);
+                    DrawFindResultOverlay(modelId, modelKind, rows, cols, angles, scores);
                     var result = new System.Text.StringBuilder();
                     result.AppendLine($"找到 {rows.Length} 个匹配（未做阵列格标注）:");
                     for (int i = 0; i < rows.Length; i++)
@@ -2832,10 +3094,26 @@ namespace CalibOperatorCLI_Example
                     AppendLog($"查找完成: {rows.Length} 个匹配（已在图像上高亮）");
                 }
             }
+            catch (OperationCanceledException)
+            {
+                ApplyFindShapeStopped(runId);
+            }
             catch (Exception ex)
             {
-                AppendLog($"[错误] {ex.Message}");
-                MessageBox.Show($"查找失败:\n{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                if (!IsFindShapeRunCancelled(runId))
+                {
+                    AppendLog($"[错误] {ex.Message}");
+                    MessageBox.Show($"查找失败:\n{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                else
+                {
+                    ApplyFindShapeStopped(runId);
+                }
+            }
+            finally
+            {
+                if (runId == _findShapeRunId)
+                    SetFindShapeUiRunning(false);
             }
 #endif
         }
@@ -2858,13 +3136,16 @@ namespace CalibOperatorCLI_Example
             {
                 var confirm = MessageBox.Show("已存在模型，导入将替换当前模型。是否继续？", "确认",
                     MessageBoxButton.YesNo, MessageBoxImage.Question);
-                if (confirm != MessageBoxResult.Yes) return;
-                DisposeCurrentModel();
+                if (confirm != MessageBoxResult.Yes)
+                    return;
             }
+
+            PrepareReplaceShapeModel();
+            InvalidateContourCache();
 
             try
             {
-                ClearFindResultOverlay();
+                ResetFindResultUi();
                 string ext = IoPath.GetExtension(dlg.FileName).ToLowerInvariant();
                 if (ext == ".dfm")
                 {
@@ -2880,8 +3161,8 @@ namespace CalibOperatorCLI_Example
                 string summary = _modelKind == HalconFlowModelKind.Deformable
                     ? HalconFlowBridge.GetDeformableModelParamsSummary(_modelId)
                     : HalconFlowBridge.GetShapeModelParamsSummary(_modelId);
-                TxtModelInfo.Text = $"来源: 文件导入 ({_modelKind})\n文件: {dlg.FileName}\n{summary}";
-                AppendLog($"模型已导入: {dlg.FileName} (ModelID={_modelId}, {_modelKind})");
+                TxtModelInfo.Text = $"来源: 文件导入 ({_modelKind})\nEpoch: {_modelEpoch}\n文件: {dlg.FileName}\n{summary}";
+                AppendLog($"模型已导入: {dlg.FileName} (ModelID={_modelId}, epoch={_modelEpoch}, {_modelKind})");
                 MessageBox.Show($"模型已导入，可进行匹配测试。\nModelID: {_modelId}", "导入成功",
                     MessageBoxButton.OK, MessageBoxImage.Information);
             }

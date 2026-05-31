@@ -27,6 +27,7 @@
     <HalconRootEffective Condition="'$(HalconRootEffective)'==''">D:\HALCON</HalconRootEffective>
   </PropertyGroup>
   <PropertyGroup>
+    <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRootEffective)\bin\dotnet80\HalconDotNet.dll')">$(HalconRootEffective)\bin\dotnet80\HalconDotNet.dll</HalconDotNetDll>
     <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRootEffective)\bin\dotnet60\HalconDotNet.dll')">$(HalconRootEffective)\bin\dotnet60\HalconDotNet.dll</HalconDotNetDll>
     <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRootEffective)\bin\dotnet50\HalconDotNet.dll')">$(HalconRootEffective)\bin\dotnet50\HalconDotNet.dll</HalconDotNetDll>
     <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRootEffective)\bin\dotnet48\HalconDotNet.dll')">$(HalconRootEffective)\bin\dotnet48\HalconDotNet.dll</HalconDotNetDll>
@@ -36,7 +37,17 @@
     <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRootEffective)\bin\dotnet20\HalconDotNet.dll')">$(HalconRootEffective)\bin\dotnet20\HalconDotNet.dll</HalconDotNetDll>
     <HalconDotNetDll Condition="'$(HalconDotNetDll)'=='' and Exists('$(HalconRootEffective)\bin\dotnetcore31\HalconDotNet.dll')">$(HalconRootEffective)\bin\dotnetcore31\HalconDotNet.dll</HalconDotNetDll>
   </PropertyGroup>
+  <!-- 本地 HALCON 安装优先；否则回退 NuGet（MVTec.HalconDotNet）以启用 HALCON_ENABLED -->
   <PropertyGroup Condition="'$(HalconDotNetDll)' != ''">
+    <HalconEnabled>true</HalconEnabled>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(HalconDotNetDll)' == ''">
+    <PackageReference Include="MVTec.HalconDotNet" Version="25110.0.0" />
+  </ItemGroup>
+  <PropertyGroup Condition="'$(HalconDotNetDll)' == ''">
+    <HalconEnabled>true</HalconEnabled>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HalconEnabled)' == 'true'">
     <DefineConstants>$(DefineConstants);HALCON_ENABLED</DefineConstants>
   </PropertyGroup>
   <ItemGroup Condition="'$(HalconDotNetDll)' != ''">
@@ -44,7 +55,7 @@
       <HintPath>$(HalconDotNetDll)</HintPath>
     </Reference>
   </ItemGroup>
-  <ItemGroup Condition="'$(HalconDotNetDll)' == ''">
+  <ItemGroup Condition="'$(HalconEnabled)' != 'true'">
     <Compile Remove="HalconFlowBridge.cs" />
     <Compile Remove="HalconDlSegBridge.cs" />
     <Compile Remove="HalconDlSegBridge.Preprocess.cs" />
@@ -134,13 +145,9 @@
       <_HslDll Condition="Exists('$(PkgHslCommunication)\lib\netstandard2.1\HslCommunication.dll')">$(PkgHslCommunication)\lib\netstandard2.1\HslCommunication.dll</_HslDll>
       <_HslDll Condition="'$(_HslDll)' == '' and Exists('$(PkgHslCommunication)\lib\netstandard2.0\HslCommunication.dll')">$(PkgHslCommunication)\lib\netstandard2.0\HslCommunication.dll</_HslDll>
     </PropertyGroup>
-    <Error Condition="'$(_HslDll)' == ''"
-           Text="未找到 HslCommunication.dll，请执行: dotnet restore $(MSBuildProjectFile)" />
+    <Error Condition="'$(_HslDll)' == ''" Text="未找到 HslCommunication.dll，请执行: dotnet restore $(MSBuildProjectFile)" />
     <Copy SourceFiles="$(_HslDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="false" />
-    <Copy SourceFiles="$(PkgHslCommunication)\lib\netstandard2.1\HslCommunication.xml"
-          DestinationFolder="$(OutputPath)"
-          SkipUnchangedFiles="true"
-          Condition="Exists('$(PkgHslCommunication)\lib\netstandard2.1\HslCommunication.xml')" />
+    <Copy SourceFiles="$(PkgHslCommunication)\lib\netstandard2.1\HslCommunication.xml" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="Exists('$(PkgHslCommunication)\lib\netstandard2.1\HslCommunication.xml')" />
   </Target>
 
   <!-- 光源控制器原生 DLL 必须与 exe 同目录（ControllerDllCSharp 通过 DllImport 加载 CommonToolDll 等） -->
@@ -229,10 +236,7 @@
       <!-- 保留 Win64_x64 下子目录（GenICam 等）；勿扁平化为单一输出目录，否则同名 DLL 互相覆盖且 .cti/.xml 丢失 -->
       <_MvsRuntimeFile Include="$(MvsRuntimeDir)\**\*.*" Exclude="$(MvsRuntimeDir)\**\*.pdb" />
     </ItemGroup>
-    <Copy SourceFiles="@(_MvsRuntimeFile)"
-          DestinationFiles="@(_MvsRuntimeFile->'$(OutputPath)%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true"
-          Condition="'@(_MvsRuntimeFile)' != ''" />
+    <Copy SourceFiles="@(_MvsRuntimeFile)" DestinationFiles="@(_MvsRuntimeFile->'$(OutputPath)%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'@(_MvsRuntimeFile)' != ''" />
   </Target>
 
   <!-- 海康 MVS：在 SDK 冲突消解之后、增量清理读取 ResolvedFileToPublish 之前写入清单，否则会被 ResolveOverlapping / 孤儿清理丢掉。 -->
@@ -249,8 +253,7 @@
       <_MvsRtPub Condition="'$(_MvsRtPub)' == '' and Exists('$(ProgramFiles)\Common Files\MVS\Runtime\Win64_x64')">$(ProgramFiles)\Common Files\MVS\Runtime\Win64_x64</_MvsRtPub>
       <_MvsRtPub Condition="'$(_MvsRtPub)' == '' and Exists('D:\MVS\Runtime\Win64_x64')">D:\MVS\Runtime\Win64_x64</_MvsRtPub>
     </PropertyGroup>
-    <Warning Text="未找到海康 MVS Win64_x64 运行时目录，publish 将不包含相机运行时文件；请安装 MVS 或设置 MvsRuntimeDir，或设置 SuppressMvsPublishMissingWarning=true。"
-             Condition="'$(_IsPublishing)' == 'true' and '$(_MvsRtPub)' == '' and '$(SuppressMvsPublishMissingWarning)' != 'true'" />
+    <Warning Text="未找到海康 MVS Win64_x64 运行时目录，publish 将不包含相机运行时文件；请安装 MVS 或设置 MvsRuntimeDir，或设置 SuppressMvsPublishMissingWarning=true。" Condition="'$(_IsPublishing)' == 'true' and '$(_MvsRtPub)' == '' and '$(SuppressMvsPublishMissingWarning)' != 'true'" />
     <ItemGroup Condition="'$(_MvsRtPub)' != ''">
       <_MvsForPub Include="$(_MvsRtPub)\**\*.*" Exclude="$(_MvsRtPub)\**\*.pdb" />
     </ItemGroup>
@@ -260,8 +263,6 @@
         <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       </ResolvedFileToPublish>
     </ItemGroup>
-    <Message Text="[MVS] publish 已加入 ResolvedFileToPublish: $(_MvsRtPub) -> $(PublishDir)"
-             Condition="'$(_MvsRtPub)' != '' and '@(_MvsForPub)' != ''"
-             Importance="normal" />
+    <Message Text="[MVS] publish 已加入 ResolvedFileToPublish: $(_MvsRtPub) -&gt; $(PublishDir)" Condition="'$(_MvsRtPub)' != '' and '@(_MvsForPub)' != ''" Importance="normal" />
   </Target>
 </Project>

@@ -83,9 +83,9 @@ namespace CalibOperatorCLI_Example
 
         /// <summary>
         /// 解析模型路径：绝对路径规范化；
-        /// 相对路径先相对 exe 目录（BaseDirectory），不存在则沿上级目录查找源码树中的同名相对路径（直至找到含文件的目录）。
+        /// 相对路径先相对 flow 文件目录（若提供），再相对 exe 目录（BaseDirectory），不存在则沿上级目录查找源码树中的同名相对路径。
         /// </summary>
-        public static string ResolveModelPath(string path)
+        public static string ResolveModelPath(string path, string? flowRelativeBaseDirectory = null)
         {
             if (string.IsNullOrWhiteSpace(path))
                 throw new ArgumentException("模型路径为空", nameof(path));
@@ -114,6 +114,13 @@ namespace CalibOperatorCLI_Example
                 }
 
                 return null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(flowRelativeBaseDirectory))
+            {
+                string fromFlow = CombineUnder(flowRelativeBaseDirectory.Trim(), path);
+                if (File.Exists(fromFlow))
+                    return fromFlow;
             }
 
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;

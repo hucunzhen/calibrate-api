@@ -34,6 +34,9 @@ namespace CalibOperatorCLI_Example
         {
             public List<FlowNodeData> Nodes { get; set; } = new();
             public List<FlowConnData> Connections { get; set; } = new();
+
+            /// <summary>可选元数据，如子流程独立调试路径、流程级阵列行列 latticeGridRows/Cols。</summary>
+            public Dictionary<string, string>? Meta { get; set; }
         }
 
         private class FlowNodeData

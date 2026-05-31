@@ -55,6 +55,7 @@ namespace CalibOperatorCLI_Example
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
+            HalconRuntimeSettings.EnsureApplied();
             var mainWindow = new MainWindow();
             mainWindow.Show();
 

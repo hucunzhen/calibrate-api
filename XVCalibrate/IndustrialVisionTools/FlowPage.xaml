@@ -162,12 +162,21 @@
                     </Button>
                     <Separator Width="1" Background="#555" Margin="10,4,10,8"/>
                     <Button Style="{StaticResource FlowToolbarPrimaryBtnStyle}"
-                            ToolTip="保存流程" Click="SaveFlow_Click"
+                            ToolTip="保存流程到当前文件（未命名时等同另存为）" Click="SaveFlow_Click"
                             Foreground="#B8F4B8"
                             AutomationProperties.Name="保存流程">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE74E;" FontSize="14" VerticalAlignment="Center"/>
                             <TextBlock Text="保存" Margin="6,0,0,0" VerticalAlignment="Center" FontSize="12"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource FlowToolbarPrimaryBtnStyle}" Margin="6,0,0,4"
+                            ToolTip="将流程保存到新文件" Click="SaveFlowAs_Click"
+                            Foreground="#B8F4B8"
+                            AutomationProperties.Name="流程另存为">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE792;" FontSize="14" VerticalAlignment="Center"/>
+                            <TextBlock Text="另存为" Margin="6,0,0,0" VerticalAlignment="Center" FontSize="12"/>
                         </StackPanel>
                     </Button>
                     <Button Style="{StaticResource FlowToolbarPrimaryBtnStyle}" Margin="6,0,0,4"
@@ -198,6 +207,35 @@
                         </StackPanel>
                     </Button>
                     <Separator Width="1" Background="#555" Margin="10,4,10,8"/>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                                Margin="0,4,8,4"
+                                ToolTip="写入 flow Meta；HALCON 落格算子 gridRows/gridCols 留空或 0 时继承">
+                        <TextBlock Text="阵列行列" Foreground="#B8D4A8" FontSize="11"
+                                   VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBlock Text="行" Foreground="#AAA" FontSize="11"
+                                   VerticalAlignment="Center" Margin="0,0,4,0"/>
+                        <TextBox x:Name="LatticeGridRowsBox" Width="36" Height="24"
+                                 VerticalContentAlignment="Center" FontSize="11"
+                                 LostFocus="LatticeGridConfig_LostFocus"/>
+                        <TextBlock Text="列" Foreground="#AAA" FontSize="11"
+                                   VerticalAlignment="Center" Margin="8,0,4,0"/>
+                        <TextBox x:Name="LatticeGridColsBox" Width="36" Height="24"
+                                 VerticalContentAlignment="Center" FontSize="11"
+                                 LostFocus="LatticeGridConfig_LostFocus"/>
+                    </StackPanel>
+                    <Separator Width="1" Background="#555" Margin="10,4,10,8"/>
+                    <StackPanel x:Name="StandaloneDebugPanel" Orientation="Horizontal"
+                                VerticalAlignment="Center" Margin="0,4,8,4"
+                                Visibility="Collapsed" ToolTip="含组合绑定入/出的子流程：F5 使用此处测试图模拟父组合输入">
+                        <TextBlock Text="子流程调试图" Foreground="#E8C070" FontSize="11"
+                                   VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBox x:Name="StandaloneDebugImageBox" Width="220" Height="24"
+                                 VerticalContentAlignment="Center" FontSize="11"
+                                 ToolTip="相对当前 .flow.json 目录；运行前注入 composite_bind_in"/>
+                        <Button Style="{StaticResource FlowToolbarIconBtnStyle}" Margin="4,0,0,0"
+                                Content="…" Width="28" Height="24"
+                                ToolTip="选择调试图像" Click="StandaloneDebugBrowseImage_Click"/>
+                    </StackPanel>
                     <TextBlock x:Name="StatusText" Text="就绪" Foreground="#9CDCFE"
                                VerticalAlignment="Center" FontSize="12" Margin="0,4,0,4"/>
                     <Separator Width="1" Background="#555" Margin="10,4,10,8"/>

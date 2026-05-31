@@ -10,6 +10,8 @@ namespace CalibOperatorCLI_Example
     /// </summary>
     internal static partial class HalconDlSegBridge
     {
+        static HalconDlSegBridge() => HalconRuntimeSettings.EnsureApplied();
+
         /// <summary>从模型参数推断输入通道数（常见语义分割为 3）；失败时默认 3（RGB）。</summary>
         internal static int TryGetDlModelInputChannels(HDlModel model, Action<string>? log)
         {

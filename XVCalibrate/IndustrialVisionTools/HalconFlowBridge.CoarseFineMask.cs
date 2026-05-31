@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading;
 using CalibOperatorPInvoke;
 using HalconDotNet;
 
@@ -515,6 +516,17 @@ namespace CalibOperatorCLI_Example
             if (HalconShapeModelRegistry.TryGetKind(modelId, out HalconFlowModelKind shape))
                 return shape;
             throw new InvalidOperationException($"ModelId={modelId} 不存在或已释放");
+        }
+
+        /// <summary>模型 id 是否仍在注册表中（未被 ClearModel 释放）。</summary>
+        public static bool TryGetRegisteredModelKind(long modelId, out HalconFlowModelKind kind)
+        {
+            kind = default;
+            if (modelId < 0)
+                return false;
+            if (HalconDeformableModelRegistry.TryGetKind(modelId, out kind))
+                return true;
+            return HalconShapeModelRegistry.TryGetKind(modelId, out kind);
         }
 
         /// <summary>若 id 在形状模型注册表中则返回该 id，否则 -1。</summary>
@@ -1169,11 +1181,15 @@ namespace CalibOperatorCLI_Example
             double maxOverlap,
             int numLevels,
             double greediness,
-            HalconShapeModelCreateOptions? scaleOpt = null)
+            HalconShapeModelCreateOptions? scaleOpt = null,
+            CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var first = FindDeformableModel(inImg, modelId, angleStartDeg, angleExtentDeg, minScore, numMatches, maxOverlap, numLevels, greediness, scaleOpt);
             if (first.rows.Length > 0)
                 return first;
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             double retryScore = Math.Max(0.2, minScore * 0.65);
             double retryGreed = Math.Max(0.5, greediness * 0.85);
@@ -3379,6 +3395,14 @@ namespace CalibOperatorCLI_Example
             deformedContour = null;
 
             findLevels = ClampFineRoiFindLevels(deformableModelId, findLevels);
+            if (HalconRuntimeSettings.IsTraceEnabled())
+            {
+                hSearch.GetImageSize(out HTuple sw, out HTuple sh);
+                System.Diagnostics.Debug.WriteLine(
+                    $"[HALCON] FindLocalDeformableModel 搜索图 {sw.I}x{sh.I}, levels={findLevels}, " +
+                    $"thread_num={HalconRuntimeSettings.LastParallelFindThreadNum}");
+            }
+
             HDeformableModel model = HalconDeformableModelRegistry.Get(deformableModelId);
             double marginRad = angleMarginDeg * Math.PI / 180.0;
             bool alignAxisCrop = cropMode == FineRoiCropMode.CropRectangle2AlignAxis;
@@ -3580,6 +3604,18 @@ namespace CalibOperatorCLI_Example
             double[]? angles,
             int contourLevel,
             double erosionInsetPx,
+            double maskFillDilatePx = 0) =>
+            HalconRuntimeSettings.RunGeometrySafe(() =>
+                BuildShapeMatchFilledRegionsCore(
+                    modelId, rows, cols, angles, contourLevel, erosionInsetPx, maskFillDilatePx));
+
+        private static ShapeMatchRegionMask[] BuildShapeMatchFilledRegionsCore(
+            long modelId,
+            double[] rows,
+            double[] cols,
+            double[]? angles,
+            int contourLevel,
+            double erosionInsetPx,
             double maskFillDilatePx = 0)
         {
             long shapeId = ResolveRegisteredShapeModelId(modelId);
@@ -3713,7 +3749,12 @@ namespace CalibOperatorCLI_Example
             }
 
             if (built == 0)
-                throw new InvalidOperationException($"粗形状 Mask 批: {emitCount} 个候选均未生成有效填充区域");
+            {
+                string diag = DescribeCoarseMaskBatchFailure(
+                    rigidModelId, coarseRows, coarseCols, coarseAngles, maskErosionPx, contourLevel, maskFillDilatePx, w, h);
+                throw new InvalidOperationException(
+                    $"粗形状 Mask 批: {emitCount} 个候选均未生成有效填充区域。{diag}");
+            }
 
             if (built < emitCount)
             {
@@ -3755,6 +3796,84 @@ namespace CalibOperatorCLI_Example
             => BuildCoarseShapeMaskBatch(
                 image, rigidModelId, coarseRows, coarseCols, coarseAngles, coarseScores,
                 maskErosionPx, contourLevel, maxCandidates, maskFillDilatePx);
+
+        private static string DescribeCoarseMaskBatchFailure(
+            long rigidModelId,
+            double[] coarseRows,
+            double[] coarseCols,
+            double[]? coarseAngles,
+            double maskErosionPx,
+            int contourLevel,
+            double maskFillDilatePx,
+            int imageWidth,
+            int imageHeight)
+        {
+            try
+            {
+                long shapeId = ResolveRegisteredShapeModelId(rigidModelId);
+                if (shapeId < 0)
+                    return " ModelId 无效。";
+
+                HShapeModel shapeModel = HalconShapeModelRegistry.Get(shapeId);
+                using HXLDCont modelXld = shapeModel.GetShapeModelContours(contourLevel);
+                int objCount = modelXld.CountObj();
+                double row0 = coarseRows[0];
+                double col0 = coarseCols[0];
+                double ang0 = coarseAngles != null && coarseAngles.Length > 0 ? coarseAngles[0] : 0;
+                if (objCount <= 0)
+                    return $" 模板 contourLevel={contourLevel} 无轮廓；首候选 row={row0:F1} col={col0:F1} angle={ang0:F1}°。";
+
+                double angleRad = ang0 * Math.PI / 180.0;
+                HOperatorSet.HomMat2dIdentity(out HTuple hom);
+                HOperatorSet.HomMat2dRotate(hom, angleRad, 0, 0, out hom);
+                HOperatorSet.HomMat2dTranslate(hom, row0, col0, out hom);
+                HOperatorSet.AffineTransContourXld(modelXld, out HObject transXld, hom);
+                try
+                {
+                    HOperatorSet.CountObj(transXld, out HTuple txCount);
+                    if (txCount.I <= 0)
+                        return $" 首候选 AffineTransContourXld 为空；row={row0:F1} col={col0:F1} angle={ang0:F1}°。";
+
+                    HObject fillXld = transXld;
+                    bool disposeFillXld = false;
+                    if (maskErosionPx > 0.5)
+                    {
+                        if (!TryInsetTransformedContourXldNormal(transXld, maskErosionPx, out HObject insetXld))
+                            return $" 首候选轮廓内缩失败（maskErosionPx={maskErosionPx}）；可尝试减小该值。";
+                        fillXld = insetXld;
+                        disposeFillXld = true;
+                    }
+
+                    try
+                    {
+                        HRegion? filled = BuildFilledRegionFromTransformedXld(fillXld, maskFillDilatePx);
+                        if (filled == null || !filled.IsInitialized())
+                        {
+                            return
+                                $" 首候选轮廓填充失败（GenRegion/FillUp）；contourObjs={objCount} image={imageWidth}x{imageHeight} erosion={maskErosionPx} thread_num={HalconRuntimeSettings.EffectiveThreadNum}。";
+                        }
+
+                        filled.Dispose();
+                    }
+                    finally
+                    {
+                        if (disposeFillXld)
+                            fillXld.Dispose();
+                    }
+                }
+                finally
+                {
+                    transXld.Dispose();
+                }
+
+                return
+                    $" 首候选 Region 可生成但批处理全失败；请检查是否在 STA 线程调用 HALCON（应走 HalconComputeRunner）。";
+            }
+            catch (Exception ex)
+            {
+                return $" 诊断异常: {ex.Message}";
+            }
+        }
 
         /// <summary>由单候选位姿生成填充区域 Mask 图（区域内 255）。</summary>
         public static bool TryBuildCoarseShapeMaskCalib(

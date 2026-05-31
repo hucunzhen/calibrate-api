@@ -499,8 +499,9 @@
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Text="匹配个数" VerticalAlignment="Center"
-                                       ToolTip="0 = 返回全部匹配"/>
-                            <TextBox x:Name="TxtFindNumMatches" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
+                                       ToolTip="0=按下方阵列行×列（默认 3×3）；填正整数则固定上限；流程中 0 才表示全部"/>
+                            <TextBox x:Name="TxtFindNumMatches" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"
+                                     ToolTip="测试页 0 不会搜全部匹配，而是按阵列行列或默认 100 封顶"/>
                         </Grid>
                         <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions>
@@ -586,8 +587,18 @@
                         <Button x:Name="BtnImportModel" Content="导入模型(.shm)" Height="28"
                                 Margin="0,0,0,8" Click="BtnImportModel_Click"
                                 ToolTip="从文件加载 HALCON 形状模型，可直接测试形状匹配，无需在本页创建"/>
-                        <Button x:Name="BtnTestFind" Content="测试形状匹配" Height="28" 
-                                Margin="0,0,0,8" Click="BtnTestFind_Click"/>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="BtnTestFind" Grid.Column="0" Content="测试形状匹配" Height="28"
+                                    Click="BtnTestFind_Click"/>
+                            <Button x:Name="BtnStopFind" Grid.Column="2" Content="停止" Height="28" MinWidth="56"
+                                    IsEnabled="False" Visibility="Collapsed" Click="BtnStopFind_Click"
+                                    ToolTip="停止当前匹配（HALCON 须结束本轮搜索后 UI 恢复；自动重试会在两轮之间停止）"/>
+                        </Grid>
                         <Button x:Name="BtnExportModel" Content="导出模型(.shm)" Height="28" 
                                 Margin="0,0,0,8" Click="BtnExportModel_Click"/>
                     </StackPanel>

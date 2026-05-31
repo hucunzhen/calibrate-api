@@ -1,5 +1,8 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -11,6 +14,18 @@ namespace CalibOperatorCLI_Example
     public partial class MainWindow : Window
     {
         private const string LastFlowFileName = "last_flow_path.txt";
+        private const string OpenFlowTabsFileName = "open_flow_tabs.json";
+
+        private sealed class FlowTabsSessionFile
+        {
+            public int ActiveIndex { get; set; }
+            public List<string?> Tabs { get; set; } = new();
+        }
+
+        private static readonly JsonSerializerOptions FlowSessionJsonOptions = new()
+        {
+            WriteIndented = true
+        };
         private PlcPage _plcPage;
         private ControllerLightPage _controllerLightPage;
         private HistogramPage _histogramPage;
@@ -38,7 +53,8 @@ namespace CalibOperatorCLI_Example
             _controllerLightPage = new ControllerLightPage();
             _histogramPage = new HistogramPage();
             _flowHostPage = new FlowHostPage();
-            _flowHostPage.FlowLoaded += SaveLastFlowPath;
+            _flowHostPage.FlowLoaded += _ => SaveFlowSession();
+            _flowHostPage.OpenTabsChanged += SaveFlowSession;
             _yoloSegTrainPage = new YoloSegTrainPage();
             _halconDlSegPage = new HalconDlSegPage();
             _samTrainPage = new SamTrainPage();
@@ -46,17 +62,21 @@ namespace CalibOperatorCLI_Example
 
             NavigateTo(_flowHostPage);
             HighlightTab("Flow");
-            TryAutoLoadLastFlowOnFlowPageSwitch();
+            TryRestoreFlowSessionOnStartup();
         }
 
         protected override void OnClosed(EventArgs e)
         {
+            _halconShapeModelPage.SaveSession();
+            SaveFlowSession();
             base.OnClosed(e);
             try { CameraService.FinalizeSDK(); } catch { /* ignored */ }
         }
 
         private void NavigateTo(Page page)
         {
+            if (MainFrame.Content == _halconShapeModelPage && !ReferenceEquals(page, _halconShapeModelPage))
+                _halconShapeModelPage.SaveSession();
             MainFrame.Navigate(page);
         }
 
@@ -148,6 +168,7 @@ namespace CalibOperatorCLI_Example
         {
             NavigateTo(_halconShapeModelPage);
             HighlightTab("HalconShapeModel");
+            _halconShapeModelPage.RestoreSessionOnShow();
         }
 
         public async Task<bool> RunFlowConfigInBackgroundAsync(string flowFilePath, bool preferNativeEngine = false)
@@ -166,7 +187,7 @@ namespace CalibOperatorCLI_Example
             bool loaded = fp.LoadFlowFromFile(flowFilePath, showErrorDialog: false);
             if (!loaded) return false;
 
-            SaveLastFlowPath(flowFilePath);
+            SaveFlowSession();
             fp.MirrorErrorsToStderr = true;
             fp.TraceEnginePathToConsole = true;
             HalconShapeMatchGridDiagnostics.EnableForFlowFile(flowFilePath, mirrorConsole: true);
@@ -183,12 +204,46 @@ namespace CalibOperatorCLI_Example
             }
         }
 
-        private static string GetLastFlowRecordPath()
+        private static string GetAppDataRecordPath(string fileName)
         {
             string dir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 AppProduct.AppDataFolderName);
-            return Path.Combine(dir, LastFlowFileName);
+            return Path.Combine(dir, fileName);
+        }
+
+        private static void EnsureAppDataDirectory()
+        {
+            string? parent = Path.GetDirectoryName(GetAppDataRecordPath(OpenFlowTabsFileName));
+            if (!string.IsNullOrWhiteSpace(parent))
+                Directory.CreateDirectory(parent);
+        }
+
+        private void SaveFlowSession()
+        {
+            try
+            {
+                var snapshot = _flowHostPage.GetSessionSnapshot();
+                EnsureAppDataDirectory();
+
+                var dto = new FlowTabsSessionFile
+                {
+                    ActiveIndex = snapshot.ActiveIndex,
+                    Tabs = snapshot.Tabs.ToList()
+                };
+                File.WriteAllText(
+                    GetAppDataRecordPath(OpenFlowTabsFileName),
+                    JsonSerializer.Serialize(dto, FlowSessionJsonOptions));
+
+                string? activePath = snapshot.ActiveIndex >= 0 && snapshot.ActiveIndex < snapshot.Tabs.Count
+                    ? snapshot.Tabs[snapshot.ActiveIndex]
+                    : snapshot.Tabs.FirstOrDefault(p => !string.IsNullOrWhiteSpace(p));
+                SaveLastFlowPath(activePath);
+            }
+            catch
+            {
+                // 非关键流程，忽略持久化失败
+            }
         }
 
         private static void SaveLastFlowPath(string? flowPath)
@@ -197,11 +252,8 @@ namespace CalibOperatorCLI_Example
             try
             {
                 string full = Path.GetFullPath(flowPath);
-                string recordPath = GetLastFlowRecordPath();
-                string? parent = Path.GetDirectoryName(recordPath);
-                if (!string.IsNullOrWhiteSpace(parent))
-                    Directory.CreateDirectory(parent);
-                File.WriteAllText(recordPath, full);
+                EnsureAppDataDirectory();
+                File.WriteAllText(GetAppDataRecordPath(LastFlowFileName), full);
             }
             catch
             {
@@ -209,11 +261,41 @@ namespace CalibOperatorCLI_Example
             }
         }
 
+        private static FlowTabsSessionFile? TryReadFlowSession()
+        {
+            try
+            {
+                string recordPath = GetAppDataRecordPath(OpenFlowTabsFileName);
+                if (File.Exists(recordPath))
+                {
+                    var dto = JsonSerializer.Deserialize<FlowTabsSessionFile>(File.ReadAllText(recordPath), FlowSessionJsonOptions);
+                    if (dto?.Tabs != null && dto.Tabs.Count > 0)
+                        return dto;
+                }
+
+                string? legacy = TryReadLastFlowPath();
+                if (!string.IsNullOrWhiteSpace(legacy))
+                {
+                    return new FlowTabsSessionFile
+                    {
+                        ActiveIndex = 0,
+                        Tabs = new List<string?> { legacy }
+                    };
+                }
+            }
+            catch
+            {
+                // ignored
+            }
+
+            return null;
+        }
+
         private static string? TryReadLastFlowPath()
         {
             try
             {
-                string recordPath = GetLastFlowRecordPath();
+                string recordPath = GetAppDataRecordPath(LastFlowFileName);
                 if (!File.Exists(recordPath)) return null;
                 string path = File.ReadAllText(recordPath).Trim();
                 if (string.IsNullOrWhiteSpace(path)) return null;
@@ -225,12 +307,16 @@ namespace CalibOperatorCLI_Example
             }
         }
 
-        private void TryAutoLoadLastFlowOnFlowPageSwitch()
+        private void TryRestoreFlowSessionOnStartup()
         {
-            string? lastPath = TryReadLastFlowPath();
-            if (string.IsNullOrWhiteSpace(lastPath) || !File.Exists(lastPath)) return;
+            var session = TryReadFlowSession();
+            if (session == null)
+            {
+                _flowHostPage.RestoreOpenFlows(Array.Empty<string?>(), 0);
+                return;
+            }
 
-            _flowHostPage.TryAutoLoadLastFlowIfApplicable(lastPath);
+            _flowHostPage.RestoreOpenFlows(session.Tabs, session.ActiveIndex);
         }
     }
 }
