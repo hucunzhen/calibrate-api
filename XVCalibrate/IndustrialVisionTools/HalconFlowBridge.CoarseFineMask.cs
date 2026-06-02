@@ -1804,7 +1804,7 @@ namespace CalibOperatorCLI_Example
             long deformableModelId,
             double anchorRow = double.NaN,
             double anchorCol = double.NaN,
-            double anchorAngleDeg = 0,
+            double poseAngleDeg = 0,
             double fineAngleMarginDeg = 5,
             double fineMinScore = 0.45,
             int fineNumLevels = 0,
@@ -1818,7 +1818,9 @@ namespace CalibOperatorCLI_Example
             CalibImage? fullImage = null,
             long rigidModelId = -1,
             double fineEndScoreWeight = 0,
-            double fineEndArcFraction = DefaultEndArcFraction)
+            double fineEndArcFraction = DefaultEndArcFraction,
+            double angleSearchCenterDeg = double.NaN,
+            double angleSearchMarginDeg = double.NaN)
         {
             if (domainImg == null)
                 throw new ArgumentNullException(nameof(domainImg));
@@ -1838,10 +1840,11 @@ namespace CalibOperatorCLI_Example
             };
 
             if (!TryFineMatchSingleDomainImage(
-                    domainImg, deformableModelId, anchorRow, anchorCol, anchorAngleDeg,
+                    domainImg, deformableModelId, anchorRow, anchorCol, poseAngleDeg,
                     fineAngleMarginDeg, fineMinScore, fineNumLevels, fineGreediness, scaleOpt,
                     wantDeformed, fineAllowFallback, roiMarginPx, maxRoiHalfPx, fullImage,
-                    out double row, out double col, out double ang, out double score, out Point2D[]? contour))
+                    out double row, out double col, out double ang, out double score, out Point2D[]? contour,
+                    angleSearchCenterDeg, angleSearchMarginDeg))
                 return HalconCoarseFineMatchResult.Empty;
 
             CalibImage scoreImg = fullImage ?? domainImg;
@@ -2072,7 +2075,7 @@ namespace CalibOperatorCLI_Example
             long deformableModelId,
             double anchorRow,
             double anchorCol,
-            double anchorAngleDeg,
+            double poseAngleDeg,
             double fineAngleMarginDeg,
             double fineMinScore,
             int fineNumLevels,
@@ -2087,10 +2090,17 @@ namespace CalibOperatorCLI_Example
             out double fineCol,
             out double fineAngleDeg,
             out double fineScore,
-            out Point2D[]? deformedContour)
+            out Point2D[]? deformedContour,
+            double angleSearchCenterDeg = double.NaN,
+            double angleSearchMarginDeg = double.NaN)
         {
             fineRow = fineCol = fineAngleDeg = fineScore = 0;
             deformedContour = null;
+
+            double searchCenter = double.IsNaN(angleSearchCenterDeg) ? poseAngleDeg : angleSearchCenterDeg;
+            double searchMargin = double.IsNaN(angleSearchMarginDeg)
+                ? Math.Max(3.0, fineAngleMarginDeg)
+                : Math.Max(3.0, angleSearchMarginDeg);
 
             HObject ho = CalibToHObject(domainImg);
             try
@@ -2098,7 +2108,6 @@ namespace CalibOperatorCLI_Example
                 HImage hMasked = new HImage(EnsureGray(ho));
                 try
                 {
-                    double angleMargin = Math.Max(3.0, fineAngleMarginDeg);
                     bool haveAnchor = !double.IsNaN(anchorRow) && !double.IsNaN(anchorCol);
 
                     // 透视 .dfm 须在原图 ROI 上搜（域内图域外为 0，缺少背景会导致 FindPlanarUncalib 失败）
@@ -2113,12 +2122,13 @@ namespace CalibOperatorCLI_Example
                                 var (halfR, halfC) = EstimateDeformableModelHalfExtents(
                                     deformableModelId, roiMarginPx, maxRoiHalfPx);
                                 if (TryFindDeformableNearPose(
-                                        hFull, deformableModelId, anchorRow, anchorCol, anchorAngleDeg,
-                                        halfR, halfC, angleMargin, fineMinScore, fineNumLevels, fineGreediness,
+                                        hFull, deformableModelId, anchorRow, anchorCol, poseAngleDeg,
+                                        halfR, halfC, searchMargin, fineMinScore, fineNumLevels, fineGreediness,
                                         scaleOpt, wantDeformed, fineAllowFallback,
-                                        out fineRow, out fineCol, out fineScore, out deformedContour))
+                                        out fineRow, out fineCol, out fineScore, out deformedContour,
+                                        searchCenter, searchMargin))
                                 {
-                                    fineAngleDeg = anchorAngleDeg;
+                                    fineAngleDeg = searchCenter;
                                     return true;
                                 }
                             }
@@ -2145,13 +2155,13 @@ namespace CalibOperatorCLI_Example
                     try
                     {
                         if (!TryFindDeformableInMaskedImage(
-                                searchImg, deformableModelId, anchorRow, anchorCol, anchorAngleDeg,
-                                angleMargin, fineMinScore, fineNumLevels, fineGreediness,
+                                searchImg, deformableModelId, anchorRow, anchorCol, searchCenter,
+                                searchMargin, fineMinScore, fineNumLevels, fineGreediness,
                                 scaleOpt, wantDeformed, fineAllowFallback, cropRow1, cropCol1,
                                 out fineRow, out fineCol, out fineScore, out deformedContour))
                             return false;
 
-                        fineAngleDeg = anchorAngleDeg;
+                        fineAngleDeg = searchCenter;
                         return true;
                     }
                     finally
@@ -2371,11 +2381,23 @@ namespace CalibOperatorCLI_Example
             double fineMaskErosionPx = 2,
             HalconCoarseMaskBatch? preReducedMasks = null,
             double endScoreWeight = DefaultEndScoreWeight,
-            double endArcFraction = DefaultEndArcFraction)
+            double endArcFraction = DefaultEndArcFraction,
+            double fineAngleRelativeStartDeg = double.NaN,
+            double fineAngleRelativeExtentDeg = double.NaN,
+            double matchDirectionDeg = 0)
         {
             if (coarseRows == null || coarseCols == null || coarseAngles == null
                 || coarseRows.Length == 0 || coarseRows.Length != coarseCols.Length || coarseRows.Length != coarseAngles.Length)
                 return HalconCoarseFineMatchResult.Empty;
+
+            if (double.IsNaN(fineAngleRelativeStartDeg) || double.IsNaN(fineAngleRelativeExtentDeg))
+            {
+                (fineAngleRelativeStartDeg, fineAngleRelativeExtentDeg) =
+                    FineAngleMarginToRelativeRange(fineAngleMarginDeg);
+            }
+
+            var (fineSearchCenter, fineSearchMargin) = ResolveFineAngleSearchCenterMargin(
+                matchDirectionDeg, fineAngleRelativeStartDeg, fineAngleRelativeExtentDeg);
 
             double[] scoresForSort = coarseScores != null && coarseScores.Length == coarseRows.Length
                 ? coarseScores
@@ -2435,10 +2457,11 @@ namespace CalibOperatorCLI_Example
                         {
                             matched = TryFineMatchSingleDomainImage(
                                 domainImg, deformableModelId, cRow, cCol, cAng,
-                                fineAngleMarginDeg, fineMinScore, fineNumLevels, fineGreediness, scaleOpt,
+                                fineSearchMargin, fineMinScore, fineNumLevels, fineGreediness, scaleOpt,
                                 wantDeformed, fineAllowFallback, roiMarginPx, maxRoiHalfPx,
                                 null,
-                                out fRow, out fCol, out fAng, out fScore, out deformed);
+                                out fRow, out fCol, out fAng, out fScore, out deformed,
+                                fineSearchCenter, fineSearchMargin);
                         }
                         finally
                         {
@@ -2454,9 +2477,10 @@ namespace CalibOperatorCLI_Example
                             matched = TryFineMatchInCoarseMask(
                                 hFull, rigidModelId, deformableModelId, maskRegion,
                                 cRow, cCol, cAng, halfLenRow, halfLenCol,
-                                fineAngleMarginDeg, fineMinScore, fineNumLevels, fineGreediness, scaleOpt,
+                                fineSearchMargin, fineMinScore, fineNumLevels, fineGreediness, scaleOpt,
                                 wantDeformed, fineAllowFallback, rigidContourFallback,
-                                out fRow, out fCol, out fAng, out fScore, out deformed);
+                                out fRow, out fCol, out fAng, out fScore, out deformed,
+                                fineSearchCenter, fineSearchMargin);
                         }
                         finally
                         {
@@ -2467,8 +2491,8 @@ namespace CalibOperatorCLI_Example
                     if (!matched)
                     {
                         if (TryRigidShapeFineInRoi(
-                                hFull, rigidModelId, cRow, cCol, cAng,
-                                halfLenRow, halfLenCol, fineAngleMarginDeg, fineMinScore, fineNumLevels, fineGreediness,
+                                hFull, rigidModelId, cRow, cCol, fineSearchCenter,
+                                halfLenRow, halfLenCol, fineSearchMargin, fineMinScore, fineNumLevels, fineGreediness,
                                 endScoreWeight, endArcFraction,
                                 out fRow, out fCol, out fAng, out fScore))
                         {
@@ -2477,7 +2501,7 @@ namespace CalibOperatorCLI_Example
                             {
                                 deformed = TryExtractDeformableContourAtPose(
                                     hFull, deformableModelId, fRow, fCol, fAng,
-                                    halfLenRow, halfLenCol, fineAngleMarginDeg, fineMinScore,
+                                    halfLenRow, halfLenCol, fineSearchMargin, fineMinScore,
                                     fineNumLevels, fineGreediness, scaleOpt);
                                 if (deformed == null && rigidContourFallback)
                                     deformed = BuildShapeModelContourAtPose(rigidModelId, fRow, fCol, fAng);
@@ -2485,16 +2509,17 @@ namespace CalibOperatorCLI_Example
                         }
                         else if (!TryFindDeformableNearPose(
                                 hFull, deformableModelId, cRow, cCol, cAng,
-                                halfLenRow, halfLenCol, fineAngleMarginDeg,
+                                halfLenRow, halfLenCol, fineSearchMargin,
                                 fineMinScore, fineNumLevels, fineGreediness, scaleOpt, wantDeformed, fineAllowFallback,
-                                out fRow, out fCol, out fScore, out deformed))
+                                out fRow, out fCol, out fScore, out deformed,
+                                fineSearchCenter, fineSearchMargin))
                         {
                             continue;
                         }
                         else
                         {
                             matched = true;
-                            fAng = cAng;
+                            fAng = fineSearchCenter;
                         }
                     }
 
@@ -2582,10 +2607,18 @@ namespace CalibOperatorCLI_Example
             double endScoreWeight = DefaultEndScoreWeight,
             double endArcFraction = DefaultEndArcFraction,
             double fineEndScoreWeight = double.NaN,
-            double fineEndArcFraction = double.NaN)
+            double fineEndArcFraction = double.NaN,
+            double fineAngleRelativeStartDeg = double.NaN,
+            double fineAngleRelativeExtentDeg = double.NaN,
+            double matchDirectionDeg = 0)
         {
             double fineWeight = double.IsNaN(fineEndScoreWeight) ? endScoreWeight : fineEndScoreWeight;
             double fineArc = double.IsNaN(fineEndArcFraction) ? endArcFraction : fineEndArcFraction;
+            if (double.IsNaN(fineAngleRelativeStartDeg) || double.IsNaN(fineAngleRelativeExtentDeg))
+            {
+                (fineAngleRelativeStartDeg, fineAngleRelativeExtentDeg) =
+                    FineAngleMarginToRelativeRange(fineAngleMarginDeg);
+            }
 
             var coarse = CoarseShapeMatch(
                 inImg, rigidModelId, coarseAngleStartDeg, coarseAngleExtentDeg,
@@ -2602,7 +2635,10 @@ namespace CalibOperatorCLI_Example
                 fineAngleMarginDeg, fineMinScore, fineNumLevels, fineGreediness,
                 fineScaleMin, fineScaleMax, roiMarginPx, maxRoiHalfPx, maxFineMatches, deformedContourMode,
                 fineAllowFallback, rigidContourFallback,
-                endScoreWeight: fineWeight, endArcFraction: fineArc);
+                endScoreWeight: fineWeight, endArcFraction: fineArc,
+                fineAngleRelativeStartDeg: fineAngleRelativeStartDeg,
+                fineAngleRelativeExtentDeg: fineAngleRelativeExtentDeg,
+                matchDirectionDeg: matchDirectionDeg);
         }
 
         /// <summary>由粗位姿与刚性模板估计精匹配旋转矩形 ROI 半长（行/列方向，像素）。</summary>
@@ -2816,7 +2852,7 @@ namespace CalibOperatorCLI_Example
             HRegion maskRegion,
             double coarseRow,
             double coarseCol,
-            double coarseAngleDeg,
+            double poseAngleDeg,
             double halfLenRow,
             double halfLenCol,
             double fineAngleMarginDeg,
@@ -2831,7 +2867,9 @@ namespace CalibOperatorCLI_Example
             out double fineCol,
             out double fineAngleDeg,
             out double fineScore,
-            out Point2D[]? deformedContour)
+            out Point2D[]? deformedContour,
+            double angleSearchCenterDeg = double.NaN,
+            double angleSearchMarginDeg = double.NaN)
         {
             fineRow = fineCol = fineAngleDeg = fineScore = 0;
             deformedContour = null;
@@ -2843,10 +2881,11 @@ namespace CalibOperatorCLI_Example
             {
                 return TryFineMatchInMaskedHImage(
                     hMasked, rigidModelId, deformableModelId,
-                    coarseRow, coarseCol, coarseAngleDeg,
+                    coarseRow, coarseCol, poseAngleDeg,
                     fineAngleMarginDeg, fineMinScore, fineNumLevels, fineGreediness, scaleOpt,
                     wantDeformed, fineAllowFallback, rigidContourFallback,
-                    out fineRow, out fineCol, out fineAngleDeg, out fineScore, out deformedContour);
+                    out fineRow, out fineCol, out fineAngleDeg, out fineScore, out deformedContour,
+                    angleSearchCenterDeg, angleSearchMarginDeg);
             }
             finally
             {
@@ -2861,7 +2900,7 @@ namespace CalibOperatorCLI_Example
             long deformableModelId,
             double coarseRow,
             double coarseCol,
-            double coarseAngleDeg,
+            double poseAngleDeg,
             double fineAngleMarginDeg,
             double fineMinScore,
             int fineNumLevels,
@@ -2874,21 +2913,28 @@ namespace CalibOperatorCLI_Example
             out double fineCol,
             out double fineAngleDeg,
             out double fineScore,
-            out Point2D[]? deformedContour)
+            out Point2D[]? deformedContour,
+            double angleSearchCenterDeg = double.NaN,
+            double angleSearchMarginDeg = double.NaN)
         {
             fineRow = fineCol = fineAngleDeg = fineScore = 0;
             deformedContour = null;
 
+            double searchCenter = double.IsNaN(angleSearchCenterDeg) ? poseAngleDeg : angleSearchCenterDeg;
+            double searchMargin = double.IsNaN(angleSearchMarginDeg)
+                ? Math.Max(3.0, fineAngleMarginDeg)
+                : Math.Max(3.0, angleSearchMarginDeg);
+
             if (TryRigidShapeFineInMaskedImage(
-                    hMasked, rigidModelId, coarseRow, coarseCol, coarseAngleDeg,
-                    fineAngleMarginDeg, fineMinScore, fineNumLevels, fineGreediness,
+                    hMasked, rigidModelId, coarseRow, coarseCol, searchCenter,
+                    searchMargin, fineMinScore, fineNumLevels, fineGreediness,
                     out fineRow, out fineCol, out fineAngleDeg, out fineScore))
             {
                 if (wantDeformed)
                 {
                     deformedContour = TryExtractDeformableContourInMaskedImage(
-                        hMasked, deformableModelId, coarseRow, coarseCol, coarseAngleDeg,
-                        fineAngleMarginDeg, fineMinScore, fineNumLevels, fineGreediness, scaleOpt);
+                        hMasked, deformableModelId, coarseRow, coarseCol, searchCenter,
+                        searchMargin, fineMinScore, fineNumLevels, fineGreediness, scaleOpt);
                     if (deformedContour == null && rigidContourFallback)
                         deformedContour = BuildShapeModelContourAtPose(rigidModelId, fineRow, fineCol, fineAngleDeg);
                 }
@@ -2896,13 +2942,13 @@ namespace CalibOperatorCLI_Example
             }
 
             if (!TryFindDeformableInMaskedImage(
-                    hMasked, deformableModelId, coarseRow, coarseCol, coarseAngleDeg,
-                    fineAngleMarginDeg, fineMinScore, fineNumLevels, fineGreediness,
+                    hMasked, deformableModelId, coarseRow, coarseCol, searchCenter,
+                    searchMargin, fineMinScore, fineNumLevels, fineGreediness,
                     scaleOpt, wantDeformed, fineAllowFallback, 0, 0,
                     out fineRow, out fineCol, out fineScore, out deformedContour))
                 return false;
 
-            fineAngleDeg = coarseAngleDeg;
+            fineAngleDeg = searchCenter;
             return true;
         }
 
@@ -3234,7 +3280,7 @@ namespace CalibOperatorCLI_Example
             long deformableModelId,
             double coarseRow,
             double coarseCol,
-            double coarseAngleDeg,
+            double poseAngleDeg,
             double halfLenRow,
             double halfLenCol,
             double fineAngleMarginDeg,
@@ -3247,37 +3293,45 @@ namespace CalibOperatorCLI_Example
             out double fineRow,
             out double fineCol,
             out double fineScore,
-            out Point2D[]? deformedContour)
+            out Point2D[]? deformedContour,
+            double angleSearchCenterDeg = double.NaN,
+            double angleSearchMarginDeg = double.NaN)
         {
             fineRow = fineCol = fineScore = 0;
             deformedContour = null;
 
             int findLevels = ClampFineRoiFindLevels(deformableModelId, fineNumLevels);
-            double marginDeg = Math.Max(3.0, fineAngleMarginDeg);
+            double marginDeg = double.IsNaN(angleSearchMarginDeg)
+                ? Math.Max(3.0, fineAngleMarginDeg)
+                : Math.Max(3.0, angleSearchMarginDeg);
+            double searchCenter = double.IsNaN(angleSearchCenterDeg) ? poseAngleDeg : angleSearchCenterDeg;
             HalconDeformableModelSubtype subtype = HalconDeformableModelRegistry.GetSubtype(deformableModelId);
             double halfSq = Math.Max(halfLenRow, halfLenCol);
 
             if (subtype == HalconDeformableModelSubtype.PlanarUncalib)
             {
                 if (RunDeformableFindInRoi(
-                        hFullGray, deformableModelId, coarseRow, coarseCol, coarseAngleDeg,
+                        hFullGray, deformableModelId, coarseRow, coarseCol, poseAngleDeg,
                         halfSq, halfSq, marginDeg, fineMinScore, findLevels, fineGreediness, scaleOpt,
                         FineRoiCropMode.CropRectangle2AlignAxis, includeDeformedContours,
-                        out fineRow, out fineCol, out fineScore, out deformedContour))
+                        out fineRow, out fineCol, out fineScore, out deformedContour,
+                        searchCenter))
                     return true;
 
                 if (TryLocalDeformableFineInRoi(
-                        hFullGray, deformableModelId, coarseRow, coarseCol, coarseAngleDeg,
+                        hFullGray, deformableModelId, coarseRow, coarseCol, poseAngleDeg,
                         halfSq, halfSq, marginDeg, fineMinScore, findLevels, fineGreediness, scaleOpt,
                         includeDeformedContours,
-                        out fineRow, out fineCol, out fineScore, out deformedContour))
+                        out fineRow, out fineCol, out fineScore, out deformedContour,
+                        searchCenter))
                     return true;
             }
             else if (RunDeformableFindInRoi(
-                    hFullGray, deformableModelId, coarseRow, coarseCol, coarseAngleDeg,
+                    hFullGray, deformableModelId, coarseRow, coarseCol, poseAngleDeg,
                     halfSq, halfSq, marginDeg, fineMinScore, findLevels, fineGreediness, scaleOpt,
                     FineRoiCropMode.CropRectangle2, includeDeformedContours,
-                    out fineRow, out fineCol, out fineScore, out deformedContour))
+                    out fineRow, out fineCol, out fineScore, out deformedContour,
+                    searchCenter))
             {
                 return true;
             }
@@ -3292,10 +3346,11 @@ namespace CalibOperatorCLI_Example
                 ? FineRoiCropMode.CropRectangle2AlignAxis
                 : FineRoiCropMode.CropRectangle2;
             return RunDeformableFindInRoi(
-                hFullGray, deformableModelId, coarseRow, coarseCol, coarseAngleDeg,
+                hFullGray, deformableModelId, coarseRow, coarseCol, poseAngleDeg,
                 halfSq, halfSq, retryMargin, retryScore, findLevels, retryGreed, scaleOpt,
                 retryCrop, includeDeformedContours,
-                out fineRow, out fineCol, out fineScore, out deformedContour);
+                out fineRow, out fineCol, out fineScore, out deformedContour,
+                searchCenter);
         }
 
         private enum FineRoiCropMode
@@ -3354,7 +3409,7 @@ namespace CalibOperatorCLI_Example
             long deformableModelId,
             double coarseRow,
             double coarseCol,
-            double coarseAngleDeg,
+            double poseAngleDeg,
             double halfLenRow,
             double halfLenCol,
             double angleMarginDeg,
@@ -3367,14 +3422,16 @@ namespace CalibOperatorCLI_Example
             out double fineRow,
             out double fineCol,
             out double fineScore,
-            out Point2D[]? deformedContour)
+            out Point2D[]? deformedContour,
+            double angleSearchCenterDeg = double.NaN)
         {
             fineRow = fineCol = fineScore = 0;
             deformedContour = null;
 
             findLevels = ClampFineRoiFindLevels(deformableModelId, findLevels);
+            double searchAngleDeg = double.IsNaN(angleSearchCenterDeg) ? poseAngleDeg : angleSearchCenterDeg;
 
-            double phi = coarseAngleDeg * Math.PI / 180.0;
+            double phi = poseAngleDeg * Math.PI / 180.0;
             HObject rect = new HObject();
             HObject cropped = new HObject();
             try
@@ -3385,7 +3442,7 @@ namespace CalibOperatorCLI_Example
 
                 using var hRoi = new HImage(cropped);
                 return RunDeformableFindOnSearchImage(
-                    hRoi, deformableModelId, coarseRow, coarseCol, coarseAngleDeg,
+                    hRoi, deformableModelId, coarseRow, coarseCol, searchAngleDeg,
                     angleMarginDeg, minScore, findLevels, greediness, scaleOpt, cropMode, includeDeformedContours,
                     cropRow1, cropCol1,
                     out fineRow, out fineCol, out fineScore, out deformedContour);
@@ -3517,7 +3574,7 @@ namespace CalibOperatorCLI_Example
             long deformableModelId,
             double coarseRow,
             double coarseCol,
-            double coarseAngleDeg,
+            double poseAngleDeg,
             double halfLenRow,
             double halfLenCol,
             double angleMarginDeg,
@@ -3529,12 +3586,14 @@ namespace CalibOperatorCLI_Example
             out double fineRow,
             out double fineCol,
             out double fineScore,
-            out Point2D[]? deformedContour)
+            out Point2D[]? deformedContour,
+            double angleSearchCenterDeg = double.NaN)
         {
             fineRow = fineCol = fineScore = 0;
             deformedContour = null;
 
-            double phi = coarseAngleDeg * Math.PI / 180.0;
+            double searchAngleDeg = double.IsNaN(angleSearchCenterDeg) ? poseAngleDeg : angleSearchCenterDeg;
+            double phi = poseAngleDeg * Math.PI / 180.0;
             HObject rect = new HObject();
             HObject cropped = new HObject();
             try
@@ -3547,7 +3606,7 @@ namespace CalibOperatorCLI_Example
                 using var hRoi = new HImage(cropped);
                 HDeformableModel model = HalconDeformableModelRegistry.Get(deformableModelId);
                 if (!TryLocalDeformableInRoiImage(
-                        hRoi, model, coarseAngleDeg, angleMarginDeg, minScore, findLevels, greediness, scaleOpt,
+                        hRoi, model, searchAngleDeg, angleMarginDeg, minScore, findLevels, greediness, scaleOpt,
                         out double lr, out double lc, out double ls))
                     return false;
 

@@ -1,0 +1,80 @@
+{
+  "Nodes": [
+    {
+      "Id": "11111111-1111-4111-8111-111111111101",
+      "TypeId": "flow_loop",
+      "X": 420,
+      "Y": 200,
+      "Params": {
+        "count": "2",
+        "stepValues": "100;200",
+        "intervalMs": "0"
+      }
+    },
+    {
+      "Id": "11111111-1111-4111-8111-111111111102",
+      "TypeId": "flow_loop",
+      "X": 720,
+      "Y": 200,
+      "Params": {
+        "count": "3",
+        "stepValues": "1;2;3",
+        "intervalMs": "0"
+      }
+    },
+    {
+      "Id": "11111111-1111-4111-8111-111111111104",
+      "TypeId": "points_sink",
+      "X": 1020,
+      "Y": 280,
+      "Params": {
+        "acceptEmpty": "true",
+        "groupIdMode": "round"
+      }
+    },
+    {
+      "Id": "11111111-1111-4111-8111-111111111105",
+      "TypeId": "points_to_text",
+      "X": 1320,
+      "Y": 280,
+      "Params": {
+        "lineSeparator": "lf"
+      }
+    },
+    {
+      "Id": "11111111-1111-4111-8111-111111111106",
+      "TypeId": "save_text",
+      "X": 1620,
+      "Y": 280,
+      "Params": {
+        "filePath": "nested_loop_trace.txt"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "11111111-1111-4111-8111-111111111101",
+      "FromPort": "Out",
+      "ToNodeId": "11111111-1111-4111-8111-111111111102",
+      "ToPort": "After"
+    },
+    {
+      "FromNodeId": "11111111-1111-4111-8111-111111111102",
+      "FromPort": "Out",
+      "ToNodeId": "11111111-1111-4111-8111-111111111104",
+      "ToPort": "After"
+    },
+    {
+      "FromNodeId": "11111111-1111-4111-8111-111111111104",
+      "FromPort": "MergedPoints",
+      "ToNodeId": "11111111-1111-4111-8111-111111111105",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "11111111-1111-4111-8111-111111111105",
+      "FromPort": "Text",
+      "ToNodeId": "11111111-1111-4111-8111-111111111106",
+      "ToPort": "Text"
+    }
+  ]
+}

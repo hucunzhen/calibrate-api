@@ -21,6 +21,12 @@ namespace FlowSmokeTests
                     Console.WriteLine("=== HalconCoarseFineSmokeTest ===");
                     return HalconCoarseFineSmokeTest.Run(root);
                 }
+
+                if (args[i] == "--nested-flow-loop")
+                {
+                    Console.WriteLine("=== FlowNestedLoopSmokeTest ===");
+                    return FlowNestedLoopSmokeTest.Run(root);
+                }
             }
 
             Console.WriteLine("=== FlowCalibrationSmokeTest ===");

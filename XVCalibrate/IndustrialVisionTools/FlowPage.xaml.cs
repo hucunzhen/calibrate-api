@@ -54,6 +54,11 @@ namespace CalibOperatorCLI_Example
         /// </summary>
         public bool TraceEnginePathToConsole { get; set; }
 
+        /// <summary>Smoke test / CLI 诊断：读取当前流程日志文本。</summary>
+        public string GetFlowExecutionLogText() =>
+            LogBox.Dispatcher.CheckAccess()
+                ? LogBox.Text
+                : LogBox.Dispatcher.Invoke(() => LogBox.Text);
 
         // ================================================================
         // 页面状态
@@ -12435,10 +12440,16 @@ namespace CalibOperatorCLI_Example
 
                         double coarseScaleMin = PcAlias(node.Params, "coarseScaleMin", "scaleMin", 1.0);
                         double coarseScaleMax = PcAlias(node.Params, "coarseScaleMax", "scaleMax", 1.0);
+                        inputs.TryGetValue("MatchDirection", out var mdObj);
+                        double matchDirection = HalconFlowBridge.ResolveMatchDirectionInput(mdObj, 0);
+                        var (coarseAbsStart, coarseAbsExtent) = HalconFlowBridge.ResolveRelativeAngleRangeDeg(
+                            matchDirection,
+                            Pc(node.Params, "angleStart", -30),
+                            Pc(node.Params, "angleExtent", 60));
                         var (rows, cols, angles, scales, scores) = HalconFlowBridge.CoarseShapeMatch(
                             coarseImg, modelId,
-                            Pc(node.Params, "angleStart", -30),
-                            Pc(node.Params, "angleExtent", 60),
+                            coarseAbsStart,
+                            coarseAbsExtent,
                             Pc(node.Params, "minScore", 0.4),
                             ResolveNumMatchesFromLattice(node, "numMatches"),
                             Pc(node.Params, "maxOverlap", 0.5),
@@ -12520,9 +12531,12 @@ namespace CalibOperatorCLI_Example
                         inputs.TryGetValue("CoarseRow", out var crObj);
                         inputs.TryGetValue("CoarseColumn", out var ccObj);
                         inputs.TryGetValue("CoarseAngle", out var caObj);
+                        inputs.TryGetValue("MatchDirection", out var mdObj);
                         double anchorRow = HalconFlowBridge.TryReadCoarseScalar(crObj, out double ar) ? ar : double.NaN;
                         double anchorCol = HalconFlowBridge.TryReadCoarseScalar(ccObj, out double ac) ? ac : double.NaN;
-                        double anchorAng = HalconFlowBridge.TryReadCoarseScalar(caObj, out double aa) ? aa : 0;
+                        bool hasCoarseAngle = HalconFlowBridge.TryReadCoarseScalar(caObj, out double anchorAng);
+                        double matchDirection = HalconFlowBridge.ResolveMatchDirectionInput(mdObj, 0);
+                        double poseAngle = hasCoarseAngle ? anchorAng : matchDirection;
 
                         static double Pf(IReadOnlyDictionary<string, string> p, string key, double def) =>
                             double.TryParse(p.GetValueOrDefault(key), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : def;
@@ -12533,6 +12547,11 @@ namespace CalibOperatorCLI_Example
                         static string Pfs(IReadOnlyDictionary<string, string> p, string key, string def) =>
                             string.IsNullOrWhiteSpace(p.GetValueOrDefault(key)) ? def : p[key]!.Trim();
 
+                        var (fineRelStart, fineRelExtent) = HalconFlowBridge.ResolveFineRelativeAngleRangeFromParams(
+                            node.Params, "fineAngleStart", "fineAngleExtent", "fineAngleMargin", 5);
+                        var (fineSearchCenter, fineSearchMargin) = HalconFlowBridge.ResolveFineAngleSearchCenterMargin(
+                            matchDirection, fineRelStart, fineRelExtent);
+
                         string contourMode = Pfs(node.Params, "deformedContourMode", "first");
                         bool wantDeformed = !string.Equals(contourMode, "none", StringComparison.OrdinalIgnoreCase);
 
@@ -12541,8 +12560,8 @@ namespace CalibOperatorCLI_Example
                             deformId,
                             anchorRow,
                             anchorCol,
-                            anchorAng,
-                            Pf(node.Params, "fineAngleMargin", 5),
+                            poseAngle,
+                            fineSearchMargin,
                             Pf(node.Params, "fineMinScore", 0.45),
                             Pfi(node.Params, "fineNumLevels", 0),
                             Pf(node.Params, "fineGreediness", 0.75),
@@ -12555,7 +12574,9 @@ namespace CalibOperatorCLI_Example
                             fullImg,
                             rigidId,
                             Pf(node.Params, "fineEndScoreWeight", HalconFlowBridge.DefaultEndScoreWeight),
-                            Pf(node.Params, "fineEndArcFraction", HalconFlowBridge.DefaultEndArcFraction));
+                            Pf(node.Params, "fineEndArcFraction", HalconFlowBridge.DefaultEndArcFraction),
+                            angleSearchCenterDeg: fineSearchCenter,
+                            angleSearchMarginDeg: fineSearchMargin);
 
                         domainImg.RefreshProperties();
                         AppendLog(
@@ -12615,13 +12636,21 @@ namespace CalibOperatorCLI_Example
 
                         double coarseEndW = P(node.Params, "endScoreWeight", HalconFlowBridge.DefaultEndScoreWeight);
                         double coarseEndArc = P(node.Params, "endArcFraction", HalconFlowBridge.DefaultEndArcFraction);
+                        inputs.TryGetValue("MatchDirection", out var mdObj);
+                        double matchDirection = HalconFlowBridge.ResolveMatchDirectionInput(mdObj, 0);
+                        var (coarseAbsStart, coarseAbsExtent) = HalconFlowBridge.ResolveRelativeAngleRangeDeg(
+                            matchDirection,
+                            P(node.Params, "coarseAngleStart", -30),
+                            P(node.Params, "coarseAngleExtent", 60));
+                        var (fineRelStart, fineRelExtent) = HalconFlowBridge.ResolveFineRelativeAngleRangeFromParams(
+                            node.Params, "fineAngleStart", "fineAngleExtent", "fineAngleMargin", 5);
 
                         var result = HalconFlowBridge.CoarseFineShapeMatch(
                             matchImg,
                             rigidId,
                             deformId,
-                            P(node.Params, "coarseAngleStart", -30),
-                            P(node.Params, "coarseAngleExtent", 60),
+                            coarseAbsStart,
+                            coarseAbsExtent,
                             P(node.Params, "coarseMinScore", 0.4),
                             ResolveNumMatchesFromLattice(node, "coarseNumMatches"),
                             0.5,
@@ -12646,7 +12675,10 @@ namespace CalibOperatorCLI_Example
                             endScoreWeight: coarseEndW,
                             endArcFraction: coarseEndArc,
                             fineEndScoreWeight: Popt(node.Params, "fineEndScoreWeight", coarseEndW),
-                            fineEndArcFraction: Popt(node.Params, "fineEndArcFraction", coarseEndArc));
+                            fineEndArcFraction: Popt(node.Params, "fineEndArcFraction", coarseEndArc),
+                            fineAngleRelativeStartDeg: fineRelStart,
+                            fineAngleRelativeExtentDeg: fineRelExtent,
+                            matchDirectionDeg: matchDirection);
 
                         node.Outputs["Row"] = result.FineRows;
                         node.Outputs["Column"] = result.FineCols;
@@ -15173,6 +15205,20 @@ namespace CalibOperatorCLI_Example
             }
             finally
             {
+                string? dumpPath = Environment.GetEnvironmentVariable("FLOW_RUN_LOG_PATH");
+                if (!string.IsNullOrWhiteSpace(dumpPath))
+                {
+                    try
+                    {
+                        string text = GetFlowExecutionLogText();
+                        System.IO.File.WriteAllText(dumpPath, text, Encoding.UTF8);
+                    }
+                    catch
+                    {
+                        // ignored
+                    }
+                }
+
                 EndStandaloneDebugRunScope();
                 _isRunInProgress = false;
                 if (StopRunButton != null) StopRunButton.IsEnabled = false;
@@ -15633,12 +15679,12 @@ namespace CalibOperatorCLI_Example
                     if (residualSuccess > 0 || residualError > 0)
                         AppendLog($"========== loop 后续执行: success={residualSuccess}, error={residualError} ==========");
 
-                    bool ok = residualError == 0;
-                    StatusText.Text = ok
+                    bool loopExecOk = residualError == 0;
+                    StatusText.Text = loopExecOk
                         ? $"循环执行完成: {string.Join(" | ", loopSummaries)}"
                         : $"循环执行完成(含错误): {string.Join(" | ", loopSummaries)}，后续错误 {residualError}";
-                    StatusText.Foreground = new SolidColorBrush(ok ? Colors.LightGreen : Colors.Orange);
-                    return ok;
+                    StatusText.Foreground = new SolidColorBrush(loopExecOk ? Colors.LightGreen : Colors.Orange);
+                    return loopExecOk;
                 }
 
                 AppendLog($"共 {sorted.Count} 个节点待执行");

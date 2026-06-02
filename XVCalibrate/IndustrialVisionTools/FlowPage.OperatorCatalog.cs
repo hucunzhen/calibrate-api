@@ -3268,8 +3268,8 @@ namespace CalibOperatorCLI_Example
                 Category = "HALCON",
                 Params =
                 {
-                    new OperatorParam { Name = "angleStart", DisplayName = "AngleStart(°)", DefaultValue = "-30", Description = "起始角度(度)" },
-                    new OperatorParam { Name = "angleExtent", DisplayName = "AngleExtent(°)", DefaultValue = "60", Description = "角度范围(度)" },
+                    new OperatorParam { Name = "angleStart", DisplayName = "AngleStart(°)", DefaultValue = "-30", Description = "相对 MatchDirection 输入的起始偏移(度)；未连接时参考 0°" },
+                    new OperatorParam { Name = "angleExtent", DisplayName = "AngleExtent(°)", DefaultValue = "60", Description = "相对 MatchDirection 输入的角度搜索范围(度)" },
                     new OperatorParam { Name = "minScore", DisplayName = "MinScore", DefaultValue = "0.4", Description = "最低匹配分" },
                     new OperatorParam { Name = "numMatches", DisplayName = "NumMatches", DefaultValue = "0", Description = NumMatchesLatticeHint },
                     new OperatorParam { Name = "maxOverlap", DisplayName = "MaxOverlap", DefaultValue = "0.5", Description = "最大重叠度" },
@@ -3286,6 +3286,7 @@ namespace CalibOperatorCLI_Example
                 {
                     new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
                     new PortDef { Name = "ModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#9C27B0" },
+                    new PortDef { Name = "MatchDirection", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#FF5722", IsOptional = true },
                     new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#8BC34A" },
                     new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#03A9F4" },
                     new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF9800" },
@@ -3348,7 +3349,9 @@ namespace CalibOperatorCLI_Example
                 Category = "HALCON",
                 Params =
                 {
-                    new OperatorParam { Name = "fineAngleMargin", DisplayName = "精角度余量(°)", DefaultValue = "5", Description = "以粗角度为中心 ± 该值(度)；粗 SubPixel=none 时建议 ≥5" },
+                    new OperatorParam { Name = "fineAngleStart", DisplayName = "精 AngleStart(°)", DefaultValue = "", Description = "相对 MatchDirection 输入的起始偏移(度)；留空时由「精角度余量」推导(=-余量)" },
+                    new OperatorParam { Name = "fineAngleExtent", DisplayName = "精 AngleExtent(°)", DefaultValue = "", Description = "相对 MatchDirection 输入的角度搜索范围(度)；留空时由「精角度余量」推导(=2×余量)" },
+                    new OperatorParam { Name = "fineAngleMargin", DisplayName = "精角度余量(°)", DefaultValue = "5", Description = "未设 fineAngleStart/Extent 时：以 MatchDirection 为中心 ± 该值(度)；粗 SubPixel=none 时建议 ≥5" },
                     new OperatorParam { Name = "fineMinScore", DisplayName = "精 MinScore", DefaultValue = "0.45", Description = "可变形最低分" },
                     new OperatorParam { Name = "fineNumLevels", DisplayName = "精 NumLevels", DefaultValue = "0", Description = "可变形金字塔层数，0=与建模一致" },
                     new OperatorParam { Name = "fineGreediness", DisplayName = "精 Greediness", DefaultValue = "0.75", Description = "可变形贪心系数" },
@@ -3370,6 +3373,7 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "CoarseRow", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#8BC34A", IsOptional = true },
                     new PortDef { Name = "CoarseColumn", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#03A9F4", IsOptional = true },
                     new PortDef { Name = "CoarseAngle", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#FF9800", IsOptional = true },
+                    new PortDef { Name = "MatchDirection", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#FF5722", IsOptional = true },
                     new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF5722" },
@@ -3385,8 +3389,8 @@ namespace CalibOperatorCLI_Example
                 Category = "HALCON",
                 Params =
                 {
-                    new OperatorParam { Name = "coarseAngleStart", DisplayName = "粗 AngleStart(°)", DefaultValue = "-30", Description = "粗定位角度起点" },
-                    new OperatorParam { Name = "coarseAngleExtent", DisplayName = "粗 AngleExtent(°)", DefaultValue = "60", Description = "粗定位角度范围" },
+                    new OperatorParam { Name = "coarseAngleStart", DisplayName = "粗 AngleStart(°)", DefaultValue = "-30", Description = "相对 MatchDirection 输入的起始偏移(度)；未连接时参考 0°" },
+                    new OperatorParam { Name = "coarseAngleExtent", DisplayName = "粗 AngleExtent(°)", DefaultValue = "60", Description = "相对 MatchDirection 输入的角度搜索范围(度)" },
                     new OperatorParam { Name = "coarseMinScore", DisplayName = "粗 MinScore", DefaultValue = "0.4", Description = "粗匹配最低分" },
                     new OperatorParam { Name = "coarseNumMatches", DisplayName = "粗 NumMatches", DefaultValue = "0", Description = NumMatchesLatticeHint },
                     new OperatorParam { Name = "coarseGreediness", DisplayName = "粗 Greediness", DefaultValue = "0.85", Description = "粗定位贪心系数，略高可加速" },
@@ -3399,7 +3403,9 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "endArcFraction", DisplayName = "粗端部弧长占比", DefaultValue = "0.12", Description = "粗定位轮廓端部分段占比" },
                     new OperatorParam { Name = "fineEndScoreWeight", DisplayName = "精端部得分权重", DefaultValue = "0.8", Description = "精匹配 Score 端部修正权重，0=不修正；留空则与粗相同" },
                     new OperatorParam { Name = "fineEndArcFraction", DisplayName = "精端部弧长占比", DefaultValue = "0.12", Description = "精匹配端部分段占比；留空则与粗相同" },
-                    new OperatorParam { Name = "fineAngleMargin", DisplayName = "精角度余量(°)", DefaultValue = "5", Description = "以粗角度为中心 ± 该值(度)；粗 SubPixel=none 时建议 ≥5" },
+                    new OperatorParam { Name = "fineAngleStart", DisplayName = "精 AngleStart(°)", DefaultValue = "", Description = "相对 MatchDirection 输入的起始偏移(度)；留空时由「精角度余量」推导" },
+                    new OperatorParam { Name = "fineAngleExtent", DisplayName = "精 AngleExtent(°)", DefaultValue = "", Description = "相对 MatchDirection 输入的搜索范围(度)；留空时由「精角度余量」推导" },
+                    new OperatorParam { Name = "fineAngleMargin", DisplayName = "精角度余量(°)", DefaultValue = "5", Description = "未设 fineAngleStart/Extent 时：以 MatchDirection 为中心 ± 该值(度)" },
                     new OperatorParam { Name = "fineMinScore", DisplayName = "精 MinScore", DefaultValue = "0.45", Description = "可变形最低分" },
                     new OperatorParam { Name = "fineNumLevels", DisplayName = "精 NumLevels", DefaultValue = "0", Description = "可变形金字塔层数，0=与建模一致" },
                     new OperatorParam { Name = "fineGreediness", DisplayName = "精 Greediness", DefaultValue = "0.75", Description = "可变形贪心系数" },
@@ -3416,6 +3422,7 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
                     new PortDef { Name = "RigidModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#9C27B0" },
                     new PortDef { Name = "DeformableModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#7B1FA2" },
+                    new PortDef { Name = "MatchDirection", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#FF5722", IsOptional = true },
                     new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF5722" },

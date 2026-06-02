@@ -2317,6 +2317,77 @@ namespace CalibOperatorCLI_Example
             return Math.Max(1, fallbackWhenUnset);
         }
 
+        /// <summary>相对参考方向(°)的角范围 → HALCON 绝对 AngleStart / AngleExtent。</summary>
+        public static (double absoluteStartDeg, double absoluteExtentDeg) ResolveRelativeAngleRangeDeg(
+            double referenceDirectionDeg,
+            double relativeStartDeg,
+            double relativeExtentDeg)
+        {
+            return (referenceDirectionDeg + relativeStartDeg, Math.Max(0.01, relativeExtentDeg));
+        }
+
+        /// <summary>对称 ±margin(°) → 相对 start/extent。</summary>
+        public static (double relativeStartDeg, double relativeExtentDeg) FineAngleMarginToRelativeRange(double marginDeg)
+        {
+            double margin = Math.Max(0.01, marginDeg);
+            return (-margin, 2 * margin);
+        }
+
+        /// <summary>绝对角范围 → 精匹配内部使用的 (center, ±margin)。</summary>
+        public static (double centerDeg, double marginDeg) AbsoluteAngleRangeToCenterMargin(
+            double absoluteStartDeg,
+            double absoluteExtentDeg)
+        {
+            double extent = Math.Max(0.01, absoluteExtentDeg);
+            double margin = extent * 0.5;
+            return (absoluteStartDeg + margin, margin);
+        }
+
+        /// <summary>精匹配：相对参考方向的角范围 → (searchCenter, searchMargin)。</summary>
+        public static (double searchCenterDeg, double searchMarginDeg) ResolveFineAngleSearchCenterMargin(
+            double referenceDirectionDeg,
+            double relativeStartDeg,
+            double relativeExtentDeg)
+        {
+            var (absStart, absExtent) = ResolveRelativeAngleRangeDeg(
+                referenceDirectionDeg, relativeStartDeg, relativeExtentDeg);
+            return AbsoluteAngleRangeToCenterMargin(absStart, absExtent);
+        }
+
+        /// <summary>解析流程参数字典中的可选 double；键缺失或空白返回 false。</summary>
+        public static bool TryParseFlowParamDouble(IReadOnlyDictionary<string, string?>? paramBag, string key, out double value)
+        {
+            value = 0;
+            if (paramBag == null || !paramBag.TryGetValue(key, out string? raw) || string.IsNullOrWhiteSpace(raw))
+                return false;
+            return double.TryParse(raw.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+        }
+
+        /// <summary>读取 MatchDirection 输入（double / double[] 首元素）；未连接时返回 defaultDeg。</summary>
+        public static double ResolveMatchDirectionInput(object? value, double defaultDeg = 0)
+        {
+            return TryReadCoarseScalar(value, out double scalar) ? scalar : defaultDeg;
+        }
+
+        /// <summary>从流程参数解析精匹配相对角范围；未设 start/extent 时由 margin 推导。</summary>
+        public static (double relativeStartDeg, double relativeExtentDeg) ResolveFineRelativeAngleRangeFromParams(
+            IReadOnlyDictionary<string, string?>? paramBag,
+            string startKey,
+            string extentKey,
+            string marginKey,
+            double defaultMarginDeg = 5)
+        {
+            bool hasStart = TryParseFlowParamDouble(paramBag, startKey, out double relStart);
+            bool hasExtent = TryParseFlowParamDouble(paramBag, extentKey, out double relExtent);
+            double marginDeg = defaultMarginDeg;
+            if (paramBag != null && TryParseFlowParamDouble(paramBag, marginKey, out double parsedMargin))
+                marginDeg = parsedMargin;
+            var (marginStart, marginExtent) = FineAngleMarginToRelativeRange(marginDeg);
+            if (hasStart || hasExtent)
+                return (hasStart ? relStart : marginStart, hasExtent ? relExtent : marginExtent);
+            return (marginStart, marginExtent);
+        }
+
         /// <summary>
         /// FindShapeModel：在图像中查找形状模板（兼容旧签名，不返回 scale）。
         /// </summary>
