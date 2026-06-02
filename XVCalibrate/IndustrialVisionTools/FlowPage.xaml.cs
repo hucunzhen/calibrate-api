@@ -6904,6 +6904,37 @@ namespace CalibOperatorCLI_Example
             return sorted.Where(downstream.Contains).ToList();
         }
 
+        /// <summary>
+        /// 返回某个 flow_loop 的“本层”下游：遇到下一个 flow_loop 即截断，不继续跨层展开。
+        /// 用于多 loop 串联时避免上层 loop 误执行下层 loop 的循环体（如 flow_sink）。
+        /// </summary>
+        private List<FlowNode> GetOrderedLoopLocalDownstream(FlowNode loopNode)
+        {
+            var local = new HashSet<FlowNode>();
+            var visited = new HashSet<FlowNode> { loopNode };
+            var q = new Queue<FlowNode>();
+            q.Enqueue(loopNode);
+            while (q.Count > 0)
+            {
+                var cur = q.Dequeue();
+                foreach (var c in _connections)
+                {
+                    if (c.FromPort.Owner != cur)
+                        continue;
+                    var nxt = c.ToPort.Owner;
+                    if (!visited.Add(nxt))
+                        continue;
+                    if (string.Equals(nxt.Def.TypeId, "flow_loop", StringComparison.Ordinal) && nxt != loopNode)
+                        continue; // loop 边界：不跨到下一个 loop 内
+                    local.Add(nxt);
+                    q.Enqueue(nxt);
+                }
+            }
+
+            var sorted = TopologicalSort();
+            return sorted.Where(local.Contains).ToList();
+        }
+
 #if HALCON_ENABLED
         private static double[] CoerceCoarseShapeSeries(object? value, string portName)
         {
@@ -15276,15 +15307,17 @@ namespace CalibOperatorCLI_Example
                 if (flowLoops.Count > 0)
                 {
                     var loopSummaries = new List<string>();
+                    var crossLoopExecutedNodeIds = new HashSet<Guid>();
                     foreach (var loopNode in flowLoops)
                     {
                         var listPortMaps = BuildFlowLoopListPortMaps(loopNode.Params);
                         var downstream = GetDownstreamNodes(loopNode);
                         var preNodes = sorted
                             .Where(n => !downstream.Contains(n)
-                                        && !string.Equals(n.Def.TypeId, "flow_loop", StringComparison.Ordinal))
+                                        && !string.Equals(n.Def.TypeId, "flow_loop", StringComparison.Ordinal)
+                                        && !crossLoopExecutedNodeIds.Contains(n.Id))
                             .ToList();
-                        var postNodes = GetOrderedDownstreamOfNode(loopNode)
+                        var postNodes = GetOrderedLoopLocalDownstream(loopNode)
                             .Where(n => !string.Equals(n.Def.TypeId, "flow_loop", StringComparison.Ordinal))
                             .ToList();
 
@@ -15337,10 +15370,12 @@ namespace CalibOperatorCLI_Example
                                 {
                                     await ExecuteNodeForRunAsync(node, "LOOP-PRE");
                                     successCountPre++;
+                                    crossLoopExecutedNodeIds.Add(node.Id);
                                 }
                                 catch (FlowExecutionGracefulStopException ex)
                                 {
                                     MarkDownstreamNodesSkippedFrom(node, ex.Message, "LOOP-PRE-STOP");
+                                    crossLoopExecutedNodeIds.Add(node.Id);
                                     continue;
                                 }
                                 catch (Exception ex)
@@ -15467,10 +15502,12 @@ namespace CalibOperatorCLI_Example
                                 try
                                 {
                                     await ExecuteNodeForRunAsync(node, "LOOP-POST");
+                                    crossLoopExecutedNodeIds.Add(node.Id);
                                 }
                                 catch (FlowExecutionGracefulStopException ex)
                                 {
                                     MarkDownstreamNodesSkippedFrom(node, ex.Message, "LOOP-POST-STOP");
+                                    crossLoopExecutedNodeIds.Add(node.Id);
                                     continue;
                                 }
                                 catch (Exception ex)
@@ -15481,6 +15518,12 @@ namespace CalibOperatorCLI_Example
                                 }
                             }
                         }
+
+                        foreach (var n in perRoundNodes)
+                            crossLoopExecutedNodeIds.Add(n.Id);
+                        foreach (var n in orderedDeferred)
+                            crossLoopExecutedNodeIds.Add(n.Id);
+                        crossLoopExecutedNodeIds.Add(loopNode.Id);
 
                         string doneRounds = infiniteLoop
                             ? $"{completedRounds} 轮（已停止）"
@@ -15824,7 +15867,7 @@ namespace CalibOperatorCLI_Example
                             .Where(n => !downstream.Contains(n)
                                         && !string.Equals(n.Def.TypeId, "flow_loop", StringComparison.Ordinal))
                             .ToList();
-                        var postNodes = GetOrderedDownstreamOfNode(loopNode)
+                        var postNodes = GetOrderedLoopLocalDownstream(loopNode)
                             .Where(n => !string.Equals(n.Def.TypeId, "flow_loop", StringComparison.Ordinal))
                             .ToList();
                         var postLoopDeferred = ComputePostLoopDeferredNodes(postNodes);
