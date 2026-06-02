@@ -10881,6 +10881,8 @@ namespace CalibOperatorCLI_Example
                         {
                             if (ShouldEmitCalibrationOutput(node, "CalibrationJson", compositeInnerFlowBaseDir))
                                 node.Outputs["CalibrationJson"] = CalibAPI.NormalizeChessboardCalibrationJson(raw);
+                            if (inputs.TryGetValue("After", out var afterChess))
+                                node.Outputs["Out"] = afterChess;
                             node.ResultSummary = $"棋盘标定 JSON: {System.IO.Path.GetFileName(resolvedPath)}";
                             break;
                         }
@@ -10928,6 +10930,8 @@ namespace CalibOperatorCLI_Example
                             node.Outputs["Intrinsics"] = dto.Intrinsics.ToIntrinsics();
                         }
 
+                        if (inputs.TryGetValue("After", out var afterLoad))
+                            node.Outputs["Out"] = afterLoad;
                         node.ResultSummary = $"标定结果已加载: {System.IO.Path.GetFileName(resolvedPath)}";
                         break;
                     }

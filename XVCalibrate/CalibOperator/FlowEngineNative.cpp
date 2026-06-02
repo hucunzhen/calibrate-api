@@ -2395,6 +2395,9 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
             vs.str = std::move(calJsonField);
             out["CalibrationJson"] = vs;
         }
+        Value after = InputOf(e, n.id, "After");
+        if (after.kind != Value::Kind::None)
+            out["Out"] = after;
         return true;
     }
     if (n.type == "save_image") {

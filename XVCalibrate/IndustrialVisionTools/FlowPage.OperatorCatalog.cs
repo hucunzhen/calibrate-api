@@ -1774,7 +1774,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "load_calibration_result",
                 DisplayName = "读取标定结果",
-                Description = "从 JSON 恢复标定（由「保存标定结果」生成）。同一次运行中会在「保存标定结果」之后执行（先落盘再读取）。坐标转换可直连「标定」的 Transform，不必经本节点。仅连接需要的输出端口。",
+                Description = "从 JSON 恢复标定（由「保存标定结果」生成）。上游算子 Out → After 可排在任意算子之后读取；Out 透传 After 供下游继续。同一次运行中若存在「保存标定结果」，会先落盘再读取。坐标转换也可直连「标定」的 Transform。仅连接需要的输出端口。",
                 Category = "标定",
                 Params =
                 {
@@ -1782,11 +1782,13 @@ namespace CalibOperatorCLI_Example
                 },
                 Ports =
                 {
+                    new PortDef { Name = "After", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
                     new PortDef { Name = "CalibrationJson", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" },
                     new PortDef { Name = "Transform", Direction = PortDirection.Output, DataType = typeof(AffineTransform), ColorHex = "#E91E63" },
                     new PortDef { Name = "H", Direction = PortDirection.Output, DataType = typeof(HomographyTransform), ColorHex = "#E91E63" },
                     new PortDef { Name = "Poly", Direction = PortDirection.Output, DataType = typeof(Poly2DTransform), ColorHex = "#E91E63" },
-                    new PortDef { Name = "Intrinsics", Direction = PortDirection.Output, DataType = typeof(CameraIntrinsics), ColorHex = "#E91E63" }
+                    new PortDef { Name = "Intrinsics", Direction = PortDirection.Output, DataType = typeof(CameraIntrinsics), ColorHex = "#E91E63" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true }
                 }
             },
             new OperatorDef
