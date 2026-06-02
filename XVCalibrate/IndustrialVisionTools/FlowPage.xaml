@@ -57,7 +57,7 @@
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
                                                 <Border Background="#2D2D30" BorderBrush="#3C3C3C" BorderThickness="1"
-                                                        CornerRadius="4" Margin="0,0,0,3" Padding="8,6"
+                                                        CornerRadius="4" Margin="0,0,0,3" Padding="8,4"
                                                         HorizontalAlignment="Stretch"
                                                         MouseLeftButtonDown="OperatorItem_MouseLeftButtonDown"
                                                         Cursor="Hand"
@@ -76,13 +76,6 @@
                                                         <TextBlock Text="{Binding DisplayName}" Foreground="#DCDCDC"
                                                                    FontSize="12" FontWeight="SemiBold"
                                                                    TextWrapping="Wrap"/>
-                                                        <TextBlock Text="{Binding Description}" Foreground="#9A9A9A"
-                                                                   FontSize="10" Margin="0,3,0,0"
-                                                                   LineHeight="14"
-                                                                   TextWrapping="Wrap"
-                                                                   HorizontalAlignment="Stretch"
-                                                                   Visibility="{Binding Description, Converter={StaticResource NonEmptyStringToVisibility}}"
-                                                                   MaxWidth="{Binding RelativeSource={RelativeSource AncestorType=ScrollViewer, Mode=FindAncestor}, Path=ViewportWidth, Converter={StaticResource ToolboxDescMaxWidth}}"/>
                                                     </StackPanel>
                                                 </Border>
                                             </DataTemplate>
@@ -129,6 +122,16 @@
                         <StackPanel Orientation="Horizontal">
                             <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE9F5;" FontSize="14" VerticalAlignment="Center"/>
                             <TextBlock Text="Native" Foreground="#9CDCFE" Margin="6,0,0,0" VerticalAlignment="Center" FontSize="12"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource FlowToolbarPrimaryBtnStyle}"
+                            Margin="4,0,0,4"
+                            ToolTip="干跑：仅检查连线与执行顺序，不实际执行算子"
+                            Click="DryRun_Click"
+                            AutomationProperties.Name="干跑">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE9D9;" FontSize="14" VerticalAlignment="Center"/>
+                            <TextBlock Text="干跑" Foreground="#FFD580" Margin="6,0,0,0" VerticalAlignment="Center" FontSize="12"/>
                         </StackPanel>
                     </Button>
                     <Button x:Name="StopRunButton" Style="{StaticResource FlowToolbarPrimaryBtnStyle}"

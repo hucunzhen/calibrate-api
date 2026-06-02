@@ -250,7 +250,46 @@ namespace CalibOperatorCLI_Example
             if (PlcXinjeSession.Active != null)
                 return PlcXinjeSession.Active;
             throw new InvalidOperationException(
-                "PLC 未连接：请先执行「PLC连接」算子，或在 PLC 页点击连接后再运行 send_plc。");
+                "PLC 未连接：请先执行「发送PLC」算子（自动连接），或在 PLC 页点击连接。");
+        }
+
+        private XinJETcpNet EnsureFlowPlcConnectedFromNodeParams(IReadOnlyDictionary<string, string> paramBag)
+        {
+            if (_flowPlc != null && _flowPlcConnected)
+                return _flowPlc;
+            if (PlcXinjeSession.Active != null)
+                return PlcXinjeSession.Active;
+
+            string ip = (paramBag.GetValueOrDefault("ip", "192.168.6.6") ?? "192.168.6.6").Trim();
+            int port = int.TryParse(paramBag.GetValueOrDefault("port"), out var p) ? p : 502;
+
+            var cfg = LoadFlowPlcConfig();
+            byte station = (byte)Math.Clamp(cfg.ModbusStation, 0, 255);
+            string? stParam = paramBag.GetValueOrDefault("station");
+            if (!string.IsNullOrWhiteSpace(stParam) && byte.TryParse(stParam.Trim(), out var st))
+                station = st;
+
+            string series = cfg.GvarList?.PlcSeries ?? "XD";
+            string floatFmt = PlcXinjeHelper.ResolveFloatDataFormatString(cfg);
+            _flowPlc = PlcXinjeHelper.CreateClient(series, ip, port, station, floatFmt);
+            var conn = _flowPlc.ConnectServer();
+            if (!conn.IsSuccess)
+                throw new InvalidOperationException($"PLC连接失败: {conn.Message}");
+
+            _flowPlcConnected = true;
+            PlcXinjeSession.Register(_flowPlc, "Flow");
+            return _flowPlc;
+        }
+
+        private bool DisconnectFlowOwnedPlc()
+        {
+            if (_flowPlc == null)
+                return false;
+            PlcXinjeSession.ClearIfOwnedBy(_flowPlc);
+            try { _flowPlc.ConnectClose(); } catch { }
+            _flowPlc = null;
+            _flowPlcConnected = false;
+            return true;
         }
 
         private const int MaxFlowUndoSteps = 80;
@@ -480,6 +519,227 @@ namespace CalibOperatorCLI_Example
             infinite = false;
         }
 
+        private static readonly char[] FlowLoopItemPortSeparators = { ',', ';', '\r', '\n', '\t', ' ' };
+
+        private static readonly HashSet<string> FlowLoopReservedPortNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "After", "Out", "Index", "Count", "StepValue"
+        };
+
+        private static List<string> ParseFlowLoopItemPortNames(string? raw)
+        {
+            var names = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(raw))
+            {
+                foreach (var token in raw.Split(FlowLoopItemPortSeparators, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    string name = token.Trim();
+                    if (name.EndsWith("List", StringComparison.OrdinalIgnoreCase) && name.Length > 4)
+                        name = name[..^4].Trim();
+                    if (string.IsNullOrWhiteSpace(name) || FlowLoopReservedPortNames.Contains(name))
+                        continue;
+                    if (seen.Add(name))
+                        names.Add(name);
+                }
+            }
+
+            if (names.Count == 0)
+                names.Add("In");
+            return names;
+        }
+
+        private static List<(string InputPort, string OutputPort)> BuildFlowLoopListPortMaps(IReadOnlyDictionary<string, string> paramBag)
+        {
+            const string defaultItemPorts = "In,In2,In3,In4,CoarseRow,CoarseColumn,CoarseAngle,CoarseScale,CoarseScore";
+            string raw = paramBag.GetValueOrDefault("itemPorts", defaultItemPorts) ?? defaultItemPorts;
+            var names = ParseFlowLoopItemPortNames(raw);
+            return names.Select(n => ($"{n}List", n)).ToList();
+        }
+
+        private static string GetFlowLoopPortColorHex(string baseName)
+        {
+            if (baseName.StartsWith("CoarseRow", StringComparison.OrdinalIgnoreCase))
+                return "#8BC34A";
+            if (baseName.StartsWith("CoarseColumn", StringComparison.OrdinalIgnoreCase))
+                return "#03A9F4";
+            if (baseName.StartsWith("CoarseAngle", StringComparison.OrdinalIgnoreCase))
+                return "#FF9800";
+            if (baseName.StartsWith("CoarseScale", StringComparison.OrdinalIgnoreCase))
+                return "#26A69A";
+            if (baseName.StartsWith("CoarseScore", StringComparison.OrdinalIgnoreCase))
+                return "#FFEB3B";
+            if (baseName.StartsWith("In", StringComparison.OrdinalIgnoreCase))
+                return "#FF9800";
+            return "#90A4AE";
+        }
+
+        private static IReadOnlyList<PortDef> BuildFlowLoopDynamicPorts(FlowNode node)
+        {
+            var listPairs = BuildFlowLoopListPortMaps(node.Params);
+            var ports = new List<PortDef>(node.Def.Ports);
+            var inputNames = new HashSet<string>(ports.Where(p => p.Direction == PortDirection.Input).Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
+            var outputNames = new HashSet<string>(ports.Where(p => p.Direction == PortDirection.Output).Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
+            foreach (var (inputPort, outputPort) in listPairs)
+            {
+                string c = GetFlowLoopPortColorHex(outputPort);
+                if (inputNames.Add(inputPort))
+                {
+                    ports.Add(new PortDef
+                    {
+                        Name = inputPort,
+                        Direction = PortDirection.Input,
+                        DataType = typeof(object),
+                        ColorHex = c,
+                        IsOptional = true
+                    });
+                }
+
+                if (outputNames.Add(outputPort))
+                {
+                    ports.Add(new PortDef
+                    {
+                        Name = outputPort,
+                        Direction = PortDirection.Output,
+                        DataType = typeof(object),
+                        ColorHex = c,
+                        IsOptional = true
+                    });
+                }
+            }
+
+            return ports;
+        }
+
+        private static bool TryGetFlowLoopListLength(object? obj, out int length)
+        {
+            length = 0;
+            switch (obj)
+            {
+                case null:
+                    return false;
+                case CalibImage[] arrImg:
+                    length = arrImg.Length;
+                    return true;
+                case List<CalibImage> listImg:
+                    length = listImg.Count;
+                    return true;
+                case double[] arrD:
+                    length = arrD.Length;
+                    return true;
+                case List<double> listD:
+                    length = listD.Count;
+                    return true;
+                case float[] arrF:
+                    length = arrF.Length;
+                    return true;
+                case List<float> listF:
+                    length = listF.Count;
+                    return true;
+                case int[] arrI:
+                    length = arrI.Length;
+                    return true;
+                case List<int> listI:
+                    length = listI.Count;
+                    return true;
+                case long[] arrL:
+                    length = arrL.Length;
+                    return true;
+                case List<long> listL:
+                    length = listL.Count;
+                    return true;
+                case List<object?> listObj:
+                    length = listObj.Count;
+                    return true;
+                case object[] arrObj:
+                    length = arrObj.Length;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static bool TryGetFlowLoopListValueAt(object? obj, int index, out object? value)
+        {
+            value = null;
+            if (index < 0)
+                return false;
+            switch (obj)
+            {
+                case CalibImage[] arrImg when index < arrImg.Length:
+                    value = arrImg[index];
+                    return true;
+                case List<CalibImage> listImg when index < listImg.Count:
+                    value = listImg[index];
+                    return true;
+                case double[] arrD when index < arrD.Length:
+                    value = arrD[index];
+                    return true;
+                case List<double> listD when index < listD.Count:
+                    value = listD[index];
+                    return true;
+                case float[] arrF when index < arrF.Length:
+                    value = arrF[index];
+                    return true;
+                case List<float> listF when index < listF.Count:
+                    value = listF[index];
+                    return true;
+                case int[] arrI when index < arrI.Length:
+                    value = arrI[index];
+                    return true;
+                case List<int> listI when index < listI.Count:
+                    value = listI[index];
+                    return true;
+                case long[] arrL when index < arrL.Length:
+                    value = arrL[index];
+                    return true;
+                case List<long> listL when index < listL.Count:
+                    value = listL[index];
+                    return true;
+                case List<object?> listObj when index < listObj.Count:
+                    value = listObj[index];
+                    return true;
+                case object[] arrObj when index < arrObj.Length:
+                    value = arrObj[index];
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static Dictionary<string, int> CollectFlowLoopListLengths(
+            IReadOnlyDictionary<string, object?> inputs,
+            IReadOnlyList<(string InputPort, string OutputPort)> listPortMaps)
+        {
+            var map = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var (inputPort, _) in listPortMaps)
+            {
+                if (!inputs.TryGetValue(inputPort, out var obj) || !TryGetFlowLoopListLength(obj, out int len))
+                    continue;
+                map[inputPort] = len;
+            }
+
+            return map;
+        }
+
+        private static void ApplyFlowLoopListOutputs(
+            FlowNode loopNode,
+            IReadOnlyDictionary<string, object?> inputs,
+            int roundIndex,
+            IReadOnlyList<(string InputPort, string OutputPort)> listPortMaps)
+        {
+            foreach (var (inputPort, outputPort) in listPortMaps)
+            {
+                if (!inputs.TryGetValue(inputPort, out var obj))
+                    continue;
+                if (!TryGetFlowLoopListValueAt(obj, roundIndex, out var item))
+                    continue;
+                loopNode.Outputs[outputPort] = item;
+                if (string.Equals(outputPort, "In", StringComparison.Ordinal))
+                    loopNode.Outputs["Out"] = item;
+            }
+        }
+
         private static int ResolveLightControlValue(Dictionary<string, object?> inputs, IReadOnlyDictionary<string, string> parameters)
         {
             if (inputs.TryGetValue("Value", out var valObj) && valObj != null)
@@ -690,12 +950,171 @@ namespace CalibOperatorCLI_Example
             return node;
         }
 
+        private static readonly char[] CompositePortListSeparators = { ',', ';', '\r', '\n', '\t', ' ' };
+
+        private static IReadOnlyList<PortDef> GetNodePortDefinitions(FlowNode node)
+        {
+            if (string.Equals(node.Def.TypeId, "composite", StringComparison.Ordinal))
+                return BuildCompositeExternalPorts(node.Params);
+            if (string.Equals(node.Def.TypeId, "flow_loop", StringComparison.Ordinal))
+                return BuildFlowLoopDynamicPorts(node);
+            return node.Def.Ports;
+        }
+
+        private static List<PortDef> BuildCompositeExternalPorts(IReadOnlyDictionary<string, string> paramBag)
+        {
+            string? rawInputs = null;
+            if (paramBag.TryGetValue("inputPorts", out var vIn))
+                rawInputs = vIn;
+            string? rawOutputs = null;
+            if (paramBag.TryGetValue("outputPorts", out var vOut))
+                rawOutputs = vOut;
+
+            var inputNames = ParseCompositeExternalPortNames(rawInputs, isInput: true);
+            var outputNames = ParseCompositeExternalPortNames(rawOutputs, isInput: false);
+
+            var ports = new List<PortDef>(inputNames.Count + outputNames.Count);
+            foreach (string name in inputNames)
+            {
+                ports.Add(new PortDef
+                {
+                    Name = name,
+                    Direction = PortDirection.Input,
+                    DataType = typeof(object),
+                    ColorHex = "#607D8B"
+                });
+            }
+
+            for (int i = 0; i < outputNames.Count; i++)
+            {
+                ports.Add(new PortDef
+                {
+                    Name = outputNames[i],
+                    Direction = PortDirection.Output,
+                    DataType = typeof(object),
+                    ColorHex = i == 1 ? "#78909C" : "#607D8B"
+                });
+            }
+
+            return ports;
+        }
+
+        private static List<string> ParseCompositeExternalPortNames(string? raw, bool isInput)
+        {
+            var fallback = isInput
+                ? new[] { "In" }
+                : new[] { "Out", "Out2" };
+            var names = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            if (!string.IsNullOrWhiteSpace(raw))
+            {
+                var parts = raw.Split(CompositePortListSeparators, StringSplitOptions.RemoveEmptyEntries);
+                foreach (var p in parts)
+                {
+                    string name = p.Trim();
+                    if (name.Length == 0 || !seen.Add(name))
+                        continue;
+                    names.Add(name);
+                }
+            }
+
+            if (names.Count == 0)
+                names.AddRange(fallback);
+            return names;
+        }
+
+        private static string BuildPortSchemaSignature(IEnumerable<PortDef> ports) =>
+            string.Join("|", ports.Select(p => $"{p.Direction}:{p.Name}"));
+
+        private static string BuildCurrentNodeVisualPortSchemaSignature(FlowNode node) =>
+            string.Join("|", node.PortVisuals.Select(pv => $"{pv.Definition.Direction}:{pv.Definition.Name}"));
+
+        private static string BuildDesiredNodePortSchemaSignature(FlowNode node) =>
+            BuildPortSchemaSignature(GetNodePortDefinitions(node));
+
+        private static bool NodeUsesDynamicPorts(FlowNode node) =>
+            string.Equals(node.Def.TypeId, "composite", StringComparison.Ordinal)
+            || string.Equals(node.Def.TypeId, "flow_loop", StringComparison.Ordinal);
+
+        private void EnsureDynamicNodePortLayout(FlowNode node)
+        {
+            if (!NodeUsesDynamicPorts(node))
+                return;
+
+            string current = BuildCurrentNodeVisualPortSchemaSignature(node);
+            string desired = BuildDesiredNodePortSchemaSignature(node);
+            if (string.Equals(current, desired, StringComparison.Ordinal))
+            {
+                if (string.Equals(node.Def.TypeId, "composite", StringComparison.Ordinal))
+                    RefreshCompositeNodeCaption(node);
+                return;
+            }
+
+            RebuildNodeVisualAndReconnect(node);
+        }
+
+        private void RebuildNodeVisualAndReconnect(FlowNode node)
+        {
+            var affected = _connections
+                .Where(c => c.FromPort.Owner == node || c.ToPort.Owner == node)
+                .ToList();
+            var reconnect = new List<(Guid OtherNodeId, string OtherPort, PortDirection OtherDir, string ThisPort, PortDirection ThisDir)>();
+            foreach (var c in affected)
+            {
+                if (c.FromPort.Owner == node)
+                {
+                    reconnect.Add((c.ToPort.Owner.Id, c.ToPort.Definition.Name, PortDirection.Input, c.FromPort.Definition.Name, PortDirection.Output));
+                }
+                else
+                {
+                    reconnect.Add((c.FromPort.Owner.Id, c.FromPort.Definition.Name, PortDirection.Output, c.ToPort.Definition.Name, PortDirection.Input));
+                }
+
+                if (c.PathVisual != null)
+                    FlowCanvas.Children.Remove(c.PathVisual);
+                _connections.Remove(c);
+            }
+
+            if (node.Visual != null)
+                FlowCanvas.Children.Remove(node.Visual);
+            node.Visual = null;
+            node.CompositeCaptionText = null;
+            node.PortVisuals.Clear();
+
+            CreateNodeVisual(node);
+
+            foreach (var r in reconnect)
+            {
+                var thisPort = node.PortVisuals.FirstOrDefault(p =>
+                    p.Definition.Direction == r.ThisDir &&
+                    string.Equals(p.Definition.Name, r.ThisPort, StringComparison.Ordinal));
+                var otherNode = _nodes.FirstOrDefault(n => n.Id == r.OtherNodeId);
+                if (thisPort == null || otherNode == null)
+                    continue;
+                var otherPort = otherNode.PortVisuals.FirstOrDefault(p =>
+                    p.Definition.Direction == r.OtherDir &&
+                    string.Equals(p.Definition.Name, r.OtherPort, StringComparison.Ordinal));
+                if (otherPort == null)
+                    continue;
+
+                var from = thisPort.Definition.Direction == PortDirection.Output ? thisPort : otherPort;
+                var to = thisPort.Definition.Direction == PortDirection.Input ? thisPort : otherPort;
+                if (CanConnect(from, to))
+                    CreateConnectionCore(from, to, pushUndoSnapshot: false);
+            }
+
+            UpdatePortPositions(node);
+            UpdateAllConnections();
+        }
+
         private void CreateNodeVisual(FlowNode node)
         {
             var def = node.Def;
+            var ports = GetNodePortDefinitions(node);
             double w = def.DefaultWidth;
-            int inputCount = def.Ports.Count(p => p.Direction == PortDirection.Input);
-            int outputCount = def.Ports.Count(p => p.Direction == PortDirection.Output);
+            int inputCount = ports.Count(p => p.Direction == PortDirection.Input);
+            int outputCount = ports.Count(p => p.Direction == PortDirection.Output);
             int rowCount = Math.Max(inputCount, outputCount);
             if (rowCount == 0) rowCount = 1;
             string? capStrForHeight = null;
@@ -731,6 +1150,10 @@ namespace CalibOperatorCLI_Example
 
             var menuParams = new MenuItem { Header = "算子配置面板" };
             menuParams.Click += (s, e) => EditNodeParams(node);
+            var menuEnable = new MenuItem { Header = "启用节点" };
+            menuEnable.Click += (_, _) => SetNodeEnabledFromContextMenu(node, enabled: true);
+            var menuDisable = new MenuItem { Header = "禁用节点" };
+            menuDisable.Click += (_, _) => SetNodeEnabledFromContextMenu(node, enabled: false);
 
             var menuCompositeVars = new MenuItem { Header = "查看子流程变量" };
             menuCompositeVars.Click += (_, _) => ShowCompositeVariablesWindow(node);
@@ -747,6 +1170,8 @@ namespace CalibOperatorCLI_Example
             ctx.Items.Add(menuCopy);
             ctx.Items.Add(menuPaste);
             ctx.Items.Add(new Separator());
+            ctx.Items.Add(menuEnable);
+            ctx.Items.Add(menuDisable);
             ctx.Items.Add(menuParams);
             if (def.TypeId == "composite")
             {
@@ -758,6 +1183,9 @@ namespace CalibOperatorCLI_Example
             ctx.Items.Add(menuDelete);
             ctx.Opened += (_, _) =>
             {
+                bool enabled = IsNodeEnabled(node);
+                menuEnable.IsEnabled = !enabled;
+                menuDisable.IsEnabled = enabled;
                 menuPreviewPts.Items.Clear();
                 foreach (var kv in node.Outputs)
                 {
@@ -857,7 +1285,7 @@ namespace CalibOperatorCLI_Example
                 portsGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) });
             }
 
-            foreach (var portDef in def.Ports)
+            foreach (var portDef in ports)
             {
                 var portEllipse = new Ellipse
                 {
@@ -960,8 +1388,9 @@ namespace CalibOperatorCLI_Example
         private static double MeasureCompositeNodeMinHeight(FlowNode node)
         {
             var def = node.Def;
-            int inputCount = def.Ports.Count(p => p.Direction == PortDirection.Input);
-            int outputCount = def.Ports.Count(p => p.Direction == PortDirection.Output);
+            var ports = GetNodePortDefinitions(node);
+            int inputCount = ports.Count(p => p.Direction == PortDirection.Input);
+            int outputCount = ports.Count(p => p.Direction == PortDirection.Output);
             int rowCount = Math.Max(Math.Max(inputCount, outputCount), 1);
             bool showCap = node.Def.TypeId == "composite" && !string.IsNullOrWhiteSpace(FormatCompositeNodeSubtitleStatic(node));
             double minAutoHeight = 52 + rowCount * 18 + 18 + (showCap ? 16 : 0);
@@ -1260,8 +1689,12 @@ namespace CalibOperatorCLI_Example
         // ================================================================
 
         private void CreateConnection(PortVisual from, PortVisual to)
+            => CreateConnectionCore(from, to, pushUndoSnapshot: true);
+
+        private void CreateConnectionCore(PortVisual from, PortVisual to, bool pushUndoSnapshot)
         {
-            PushFlowUndoSnapshotBeforeChange();
+            if (pushUndoSnapshot)
+                PushFlowUndoSnapshotBeforeChange();
 
             // 确保 from 是 output，to 是 input
             var outPort = from.Definition.Direction == PortDirection.Output ? from : to;
@@ -1778,8 +2211,8 @@ namespace CalibOperatorCLI_Example
                     }
                 }
 
-                if (fn.Def.TypeId == "composite")
-                    RefreshCompositeNodeCaption(fn);
+                if (NodeUsesDynamicPorts(fn))
+                    EnsureDynamicNodePortLayout(fn);
 
                 mapOldIdToNode[nd.Id] = fn;
             }
@@ -1869,8 +2302,17 @@ namespace CalibOperatorCLI_Example
         {
             var defLookup = OperatorRegistry.ToDictionary(d => d.TypeId);
             var nodeLookup = new Dictionary<string, FlowNode>();
+            var deprecatedPlcNodes = new HashSet<string>();
+            int deprecatedPlcNodeCount = 0;
             foreach (var nd in data.Nodes)
             {
+                if (string.Equals(nd.TypeId, "plc_connect", StringComparison.Ordinal)
+                    || string.Equals(nd.TypeId, "plc_disconnect", StringComparison.Ordinal))
+                {
+                    deprecatedPlcNodes.Add(nd.Id);
+                    deprecatedPlcNodeCount++;
+                    continue;
+                }
                 if (!defLookup.TryGetValue(nd.TypeId, out var def))
                     throw new Exception($"未知算子类型: {nd.TypeId}");
                 Guid? restoreId = Guid.TryParse(nd.Id, out var gid) ? gid : null;
@@ -1885,14 +2327,16 @@ namespace CalibOperatorCLI_Example
                 }
 
                 // CreateNodeVisual 在合并 JSON 参数之前执行，组合算子副标题依赖 innerFlowPath/innerFlowJson，此处再刷新一次。
-                if (node.Def.TypeId == "composite")
-                    RefreshCompositeNodeCaption(node);
+                if (NodeUsesDynamicPorts(node))
+                    EnsureDynamicNodePortLayout(node);
 
                 nodeLookup[nd.Id] = node;
             }
 
             foreach (var cd in data.Connections)
             {
+                if (deprecatedPlcNodes.Contains(cd.FromNodeId) || deprecatedPlcNodes.Contains(cd.ToNodeId))
+                    continue;
                 if (!nodeLookup.TryGetValue(cd.FromNodeId, out var fromNode))
                     continue;
                 if (!nodeLookup.TryGetValue(cd.ToNodeId, out var toNode))
@@ -1907,6 +2351,9 @@ namespace CalibOperatorCLI_Example
                 if (fromPort != null && toPort != null && CanConnect(fromPort, toPort))
                     CreateConnection(fromPort, toPort);
             }
+
+            if (deprecatedPlcNodeCount > 0)
+                AppendLog($"[兼容迁移] 已忽略旧PLC算子 {deprecatedPlcNodeCount} 个（plc_connect/plc_disconnect）");
 
             FlowCanvas.UpdateLayout();
             foreach (var n in _nodes) UpdatePortPositions(n);
@@ -2350,6 +2797,88 @@ namespace CalibOperatorCLI_Example
                     inputs[pv.Definition.Name] = conn.FromPort.Owner.Outputs.GetValueOrDefault(conn.FromPort.Definition.Name);
             }
             return inputs;
+        }
+
+        private static bool TryParseBoolConfig(string? text, bool fallback)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return fallback;
+            string s = text.Trim();
+            if (bool.TryParse(s, out bool b))
+                return b;
+            if (int.TryParse(s, out int i))
+                return i != 0;
+            return s.ToLowerInvariant() switch
+            {
+                "on" or "yes" or "y" or "enable" or "enabled" or "启用" => true,
+                "off" or "no" or "n" or "disable" or "disabled" or "禁用" => false,
+                _ => fallback
+            };
+        }
+
+        private static bool IsNodeEnabled(FlowNode node)
+        {
+            bool enabled = TryParseBoolConfig(node.Params.GetValueOrDefault("enable"), true);
+            bool disabled = TryParseBoolConfig(node.Params.GetValueOrDefault("disable"), false);
+            return enabled && !disabled;
+        }
+
+        private void SetNodeEnabledFromContextMenu(FlowNode node, bool enabled)
+        {
+            PushFlowUndoSnapshotBeforeChange();
+            node.Params["enable"] = enabled ? "true" : "false";
+            node.Params["disable"] = enabled ? "false" : "true";
+            node.ErrorMessage = null;
+            node.ResultSummary = enabled ? "已启用" : "已禁用";
+            UpdateNodeSummary(node);
+            StatusText.Text = enabled
+                ? $"已启用: {node.Def.DisplayName}"
+                : $"已禁用: {node.Def.DisplayName}";
+            StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
+        }
+
+        private void ApplyDisabledNodePassthrough(FlowNode node, IReadOnlyDictionary<string, object?> inputs)
+        {
+            var ports = GetNodePortDefinitions(node);
+            object? primary = null;
+            if (!inputs.TryGetValue("In", out primary))
+            {
+                if (!inputs.TryGetValue("Image", out primary))
+                    primary = inputs.Values.FirstOrDefault(v => v != null);
+            }
+
+            foreach (var op in ports.Where(p => p.Direction == PortDirection.Output))
+            {
+                if (inputs.TryGetValue(op.Name, out var sameName))
+                {
+                    node.Outputs[op.Name] = sameName;
+                    continue;
+                }
+                if (string.Equals(op.Name, "Out", StringComparison.Ordinal))
+                {
+                    if (inputs.TryGetValue("In", out var inVal))
+                        node.Outputs[op.Name] = inVal;
+                    else if (inputs.TryGetValue("Image", out var imgVal))
+                        node.Outputs[op.Name] = imgVal;
+                    continue;
+                }
+                if (string.Equals(op.Name, "Image", StringComparison.Ordinal) && inputs.TryGetValue("In", out var inImage))
+                {
+                    node.Outputs[op.Name] = inImage;
+                    continue;
+                }
+                if (string.Equals(op.Name, "Out2", StringComparison.Ordinal) && primary != null)
+                {
+                    node.Outputs[op.Name] = primary;
+                }
+            }
+
+            if (node.Outputs.Count == 0 && primary != null)
+            {
+                var firstOut = ports.FirstOrDefault(p => p.Direction == PortDirection.Output);
+                if (firstOut != null)
+                    node.Outputs[firstOut.Name] = primary;
+            }
         }
 
         /// <summary>旧版霍夫线段输入端口名为 Image，现改为 Edge；加载流程时自动映射。</summary>
@@ -5607,7 +6136,7 @@ namespace CalibOperatorCLI_Example
                 consumed.Add((e.FromId, (e.FromPort ?? "").Trim()));
             }
 
-            foreach (var extDef in compositeNode.Def.Ports.Where(p => p.Direction == PortDirection.Output))
+            foreach (var extDef in BuildCompositeExternalPorts(compositeNode.Params).Where(p => p.Direction == PortDirection.Output))
             {
                 string ext = extDef.Name;
                 if (list.Any(b => string.Equals(b.External, ext, StringComparison.OrdinalIgnoreCase)))
@@ -6364,6 +6893,22 @@ namespace CalibOperatorCLI_Example
             return result;
         }
 
+        private int MarkDownstreamNodesSkippedFrom(FlowNode source, string reason, string stageTag)
+        {
+            _skipFlowRunNodeIds ??= new HashSet<Guid>();
+            var downstream = GetDownstreamNodes(source);
+            downstream.Remove(source);
+            int added = 0;
+            foreach (var dn in downstream)
+            {
+                if (_skipFlowRunNodeIds.Add(dn.Id))
+                    added++;
+            }
+
+            AppendLog($"[{stageTag}] {source.Def.DisplayName}: {reason}，后续分支已跳过 {added} 个节点", true);
+            return added;
+        }
+
         /// <summary>send_plc 下游子节点，按主流程拓扑序排列（不含 send_plc 自身）。</summary>
         private List<FlowNode> GetOrderedDownstreamOfNode(FlowNode source)
         {
@@ -6374,6 +6919,48 @@ namespace CalibOperatorCLI_Example
         }
 
 #if HALCON_ENABLED
+        private static double[] CoerceCoarseShapeSeries(object? value, string portName)
+        {
+            switch (value)
+            {
+                case null:
+                    throw new InvalidOperationException($"HALCON 粗形状Mask: 缺少 {portName}");
+                case double[] arr when arr.Length > 0:
+                    return arr;
+                case double d:
+                    return new[] { d };
+                case float f:
+                    return new[] { (double)f };
+                case int i:
+                    return new[] { (double)i };
+                case long l:
+                    return new[] { (double)l };
+                case List<double> listD when listD.Count > 0:
+                    return listD.ToArray();
+                case List<float> listF when listF.Count > 0:
+                    return listF.Select(x => (double)x).ToArray();
+                case List<int> listI when listI.Count > 0:
+                    return listI.Select(x => (double)x).ToArray();
+                case List<long> listL when listL.Count > 0:
+                    return listL.Select(x => (double)x).ToArray();
+                case List<object?> listObj when listObj.Count > 0:
+                {
+                    var data = new List<double>(listObj.Count);
+                    foreach (var item in listObj)
+                    {
+                        if (!HalconFlowBridge.TryReadCoarseScalar(item, out double scalar))
+                            throw new InvalidOperationException($"HALCON 粗形状Mask: {portName} 列表中含非数值项");
+                        data.Add(scalar);
+                    }
+
+                    return data.ToArray();
+                }
+                default:
+                    throw new InvalidOperationException(
+                        $"HALCON 粗形状Mask: {portName} 类型不支持（需 double/double[]/List<double> 等）");
+            }
+        }
+
         private static HalconCoarseMaskBatch BuildCoarseShapeMaskBatchForNode(
             FlowNode maskNode,
             IReadOnlyDictionary<string, object?> inputs)
@@ -6384,12 +6971,15 @@ namespace CalibOperatorCLI_Example
             if (rdModelId < 0)
                 throw new InvalidOperationException(
                     "HALCON 粗形状Mask: ModelId 须为有效的形状模板(.shm)，请接 create/load_shape_model");
-            if (inputs["CoarseRow"] is not double[] rdRows || inputs["CoarseColumn"] is not double[] rdCols)
-                throw new InvalidOperationException("HALCON 粗形状Mask: 请连接粗定位 CoarseRow/CoarseColumn");
+            double[] rdRows = CoerceCoarseShapeSeries(inputs.GetValueOrDefault("CoarseRow"), "CoarseRow");
+            double[] rdCols = CoerceCoarseShapeSeries(inputs.GetValueOrDefault("CoarseColumn"), "CoarseColumn");
             inputs.TryGetValue("CoarseAngle", out var rdAngObj);
-            double[]? rdAngles = rdAngObj as double[];
-            double[]? rdScores = inputs.TryGetValue("CoarseScore", out var rdScObj) && rdScObj is double[] rdScArr
-                ? rdScArr
+            double[]? rdAngles = rdAngObj == null ? null : CoerceCoarseShapeSeries(rdAngObj, "CoarseAngle");
+            double[]? rdScales = inputs.TryGetValue("CoarseScale", out var rdScaleObj) && rdScaleObj != null
+                ? CoerceCoarseShapeSeries(rdScaleObj, "CoarseScale")
+                : null;
+            double[]? rdScores = inputs.TryGetValue("CoarseScore", out var rdScObj) && rdScObj != null
+                ? CoerceCoarseShapeSeries(rdScObj, "CoarseScore")
                 : null;
 
             double maskErosionPx = double.TryParse(
@@ -6428,6 +7018,7 @@ namespace CalibOperatorCLI_Example
                     rdRows,
                     rdCols,
                     rdAngles,
+                    rdScales,
                     rdScores,
                     maskErosionPx,
                     contourLevel,
@@ -6479,6 +7070,7 @@ namespace CalibOperatorCLI_Example
             maskNode.Outputs["CoarseRowOut"] = batch.CoarseRows[index];
             maskNode.Outputs["CoarseColumnOut"] = batch.CoarseCols[index];
             maskNode.Outputs["CoarseAngleOut"] = batch.CoarseAngles[index];
+            maskNode.Outputs["CoarseScaleOut"] = index < batch.CoarseScales.Length ? batch.CoarseScales[index] : 1.0;
             maskNode.ResultSummary = $"Mask {index + 1}/{batch.Count}";
         }
 
@@ -6574,6 +7166,11 @@ namespace CalibOperatorCLI_Example
             {
                 ThrowIfExecutionCancelled();
                 var node = preNodes[i];
+                if (_skipFlowRunNodeIds != null && _skipFlowRunNodeIds.Contains(node.Id))
+                {
+                    AppendLog($"[MASK-PRE] 跳过: {node.Def.DisplayName}");
+                    continue;
+                }
                 StatusText.Text = $"Mask循环-前置 [{i + 1}/{preNodes.Count}] {node.Def.DisplayName}...";
                 AppendLog($"[MASK-PRE {i + 1}/{preNodes.Count}] 执行: {node.Def.DisplayName}");
                 await System.Threading.Tasks.Task.Yield();
@@ -6584,13 +7181,8 @@ namespace CalibOperatorCLI_Example
                 }
                 catch (FlowExecutionGracefulStopException ex)
                 {
-                    AppendLog($"[MASK-PRE][STOP] {node.Def.DisplayName}: {ex.Message}", true);
-                    if (ex.InnerException != null)
-                        AppendLog($"  {ex.InnerException.Message}", true);
-                    StatusText.Text = ex.Message;
-                    StatusText.Foreground = new SolidColorBrush(Colors.Orange);
-                    AppendLog("========== 执行中止 ==========");
-                    return false;
+                    MarkDownstreamNodesSkippedFrom(node, ex.Message, "MASK-PRE-STOP");
+                    continue;
                 }
             }
 
@@ -6625,6 +7217,11 @@ namespace CalibOperatorCLI_Example
                     {
                         ThrowIfExecutionCancelled();
                         var node = perRoundNodes[j];
+                    if (_skipFlowRunNodeIds != null && _skipFlowRunNodeIds.Contains(node.Id))
+                    {
+                        AppendLog($"[MASK] 跳过: {node.Def.DisplayName}");
+                        continue;
+                    }
                         node.Outputs.Clear();
                         node.ErrorMessage = null;
                         node.Executed = false;
@@ -6640,13 +7237,8 @@ namespace CalibOperatorCLI_Example
                         }
                         catch (FlowExecutionGracefulStopException ex)
                         {
-                            AppendLog($"[MASK][STOP] {node.Def.DisplayName}: {ex.Message}", true);
-                            if (ex.InnerException != null)
-                                AppendLog($"  {ex.InnerException.Message}", true);
-                            StatusText.Text = ex.Message;
-                            StatusText.Foreground = new SolidColorBrush(Colors.Orange);
-                            AppendLog("========== 执行中止 ==========");
-                            return false;
+                            MarkDownstreamNodesSkippedFrom(node, ex.Message, "MASK-STOP");
+                            continue;
                         }
 
                         if (fineAccumulators.TryGetValue(node.Id, out var acc))
@@ -6678,6 +7270,11 @@ namespace CalibOperatorCLI_Example
                 {
                     ThrowIfExecutionCancelled();
                     var node = orderedDeferred[j];
+                    if (_skipFlowRunNodeIds != null && _skipFlowRunNodeIds.Contains(node.Id))
+                    {
+                        AppendLog($"[MASK-POST] 跳过: {node.Def.DisplayName}");
+                        continue;
+                    }
                     node.Outputs.Clear();
                     node.ErrorMessage = null;
                     node.Executed = false;
@@ -6689,11 +7286,8 @@ namespace CalibOperatorCLI_Example
                     }
                     catch (FlowExecutionGracefulStopException ex)
                     {
-                        AppendLog($"[MASK-POST][STOP] {node.Def.DisplayName}: {ex.Message}", true);
-                        StatusText.Text = ex.Message;
-                        StatusText.Foreground = new SolidColorBrush(Colors.Orange);
-                        AppendLog("========== 执行中止 ==========");
-                        return false;
+                        MarkDownstreamNodesSkippedFrom(node, ex.Message, "MASK-POST-STOP");
+                        continue;
                     }
                 }
             }
@@ -7058,7 +7652,6 @@ namespace CalibOperatorCLI_Example
             sendPlc.Outputs["BatchCount"] = batchCount;
             sendPlc.Outputs["BatchBarId"] = barId;
             sendPlc.Outputs["BatchSegmentCount"] = segmentCount;
-            sendPlc.Outputs["HostWeldDoneSignaled"] = false;
 
             AppendLog(
                 $"[send_plc] 批次 {batchIndex + 1}/{batchCount} BarId={barId} 段={segmentCount} → 下游 {chain.Count} 节点");
@@ -7347,6 +7940,11 @@ namespace CalibOperatorCLI_Example
             node.ResultSummary = null;
             SetNodeStatus(node, true);
 
+            if (!IsNodeEnabled(node))
+            {
+                throw new FlowExecutionGracefulStopException($"节点已禁用，后续已停止: {node.Def.DisplayName}");
+            }
+
             try
             {
                 string? flowBaseDir = GetFlowBaseDirectory(compositeInnerFlowBaseDir);
@@ -7550,7 +8148,10 @@ namespace CalibOperatorCLI_Example
                                 imageList.Add(ci);
                         }
 
-                        node.Outputs["List"] = imageList;
+                        bool allImageOrNull = acc.All(item => item == null || item is CalibImage);
+                        node.Outputs["List"] = allImageOrNull
+                            ? imageList
+                            : new List<object?>(acc);
                         node.Outputs["Count"] = acc.Count;
                         if (inputs.TryGetValue("After", out var afterSink))
                             node.Outputs["Out"] = afterSink;
@@ -7612,20 +8213,49 @@ namespace CalibOperatorCLI_Example
 
                     case "flow_loop":
                     {
+                        var listPortMaps = BuildFlowLoopListPortMaps(node.Params);
                         ResolveFlowLoopSchedule(
                             node.Params.GetValueOrDefault("count"),
                             node.Params.GetValueOrDefault("stepValues"),
                             out var repeatCount,
                             out var infinite,
                             out var stepValues);
+                        var listLengths = CollectFlowLoopListLengths(inputs, listPortMaps);
+                        var activeListLengths = listLengths.Where(kv => kv.Value > 0).ToList();
+                        if (activeListLengths.Count > 0)
+                        {
+                            int firstLen = activeListLengths[0].Value;
+                            bool sameLen = activeListLengths.All(kv => kv.Value == firstLen);
+                            if (!sameLen)
+                            {
+                                string detail = string.Join(", ", activeListLengths.Select(kv => $"{kv.Key}={kv.Value}"));
+                                throw new InvalidOperationException($"循环: 多路列表长度不一致（非空端口：{detail}）");
+                            }
+
+                            repeatCount = firstLen;
+                            infinite = false;
+                            if (stepValues != null && stepValues.Length > 0 && stepValues.Length != repeatCount)
+                                throw new InvalidOperationException(
+                                    $"循环: stepValues 长度({stepValues.Length})与列表长度({repeatCount})不一致");
+                        }
+                        else if (listLengths.Count > 0)
+                        {
+                            // 多路列表均为空时按 0 轮处理，避免把空列表与有数据列表混接时误报。
+                            repeatCount = 0;
+                            infinite = false;
+                        }
+
                         if (inputs.TryGetValue("After", out var afterObj))
                             node.Outputs["Out"] = afterObj;
+                        ApplyFlowLoopListOutputs(node, inputs, 0, listPortMaps);
                         node.Outputs["Index"] = 0;
                         node.Outputs["Count"] = infinite ? -1 : repeatCount;
                         if (stepValues != null && stepValues.Length > 0)
                             node.Outputs["StepValue"] = stepValues[0];
                         node.ResultSummary = infinite
                             ? "Loop ∞（单节点试跑；全流程「运行」将无限重复下游，点「停止」结束）"
+                            : activeListLengths.Count > 0 || listLengths.Count > 0
+                                ? $"Loop x{repeatCount}（多路列表展开，试跑输出第 1 轮）"
                             : stepValues != null && stepValues.Length > 0
                                 ? $"Loop x{repeatCount}（StepValue 列表，试跑输出第 1 项={stepValues[0]:G}）"
                                 : $"Loop x{repeatCount}（单节点试跑；全流程「运行」才会重复执行下游 {repeatCount} 次）";
@@ -10462,14 +11092,16 @@ namespace CalibOperatorCLI_Example
                         int bit = int.TryParse(node.Params.GetValueOrDefault("bit"), out var sb) ? sb : 0;
                         FlowWritePlcBit(flagReg, bit, true);
                         node.Outputs["Signaled"] = true;
-                        node.ResultSummary = $"轨迹已下发通知 {flagReg}.bit{bit} = 1 (上位机→PLC)";
+                        bool disconnected = DisconnectFlowOwnedPlc();
+                        node.Outputs["Disconnected"] = disconnected;
+                        node.ResultSummary = $"轨迹已下发通知 {flagReg}.bit{bit} = 1 (上位机→PLC)"
+                            + (disconnected ? "，并已断开Flow PLC" : "（沿用外部连接，未主动断开）");
                         break;
                     }
 
                     case "plc_pou_enable":
                     {
-                        if (!_flowPlcConnected || _flowPlc == null)
-                            throw new InvalidOperationException("PLC POU使能: PLC 未连接，请先执行 PLC连接 算子");
+                        _ = RequireFlowPlcD();
 
                         bool enabled;
                         if (inputs.TryGetValue("Enable", out var enObj) && enObj is bool eb)
@@ -10536,6 +11168,7 @@ namespace CalibOperatorCLI_Example
                     case "send_plc":
                     case "send_plc_point":
                     {
+                        _ = EnsureFlowPlcConnectedFromNodeParams(node.Params);
                         bool sendAsPoint = node.Def.TypeId == "send_plc_point";
                         string sendPlcLogTag = sendAsPoint ? "send_plc_point" : "send_plc";
                         short gvarType = short.TryParse(
@@ -10640,20 +11273,6 @@ namespace CalibOperatorCLI_Example
                             "stack",
                             StringComparison.OrdinalIgnoreCase);
 
-                        string hostFlagReg = (node.Params.GetValueOrDefault("weldDoneHostRegister", "D804L") ?? "").Trim();
-                        bool setWeldDoneHostOnSend = SendPlcBatchPlanner.ParseBoolParam(
-                            node.Params.GetValueOrDefault("setWeldDoneHostOnSend"), false);
-                        bool setWeldDoneHostAfterAllBatches = SendPlcBatchPlanner.ParseBoolParam(
-                            node.Params.GetValueOrDefault("setWeldDoneHostAfterAllBatches"),
-                            defaultValue: separateBatchMode);
-                        int batchCount = barBatches?.Count ?? 0;
-                        bool signalHostAfterAll = SendPlcBatchPlanner.ShouldSignalHostAfterAllBatches(
-                            separateBatchMode,
-                            batchCount,
-                            setWeldDoneHostOnSend,
-                            setWeldDoneHostAfterAllBatches,
-                            !string.IsNullOrEmpty(hostFlagReg));
-
                         List<(int BarId, int SegmentCount)>? batchMeta = null;
                         if (barBatches != null && barBatches.Count > 0)
                         {
@@ -10668,34 +11287,20 @@ namespace CalibOperatorCLI_Example
                             gvarItems.Length,
                             writeCountPerBatch,
                             skipCountWrite,
-                            signalHostAfterAll);
-
-                        if (!SendPlcBatchPlanner.ValidateHostSignalLast(plan, out string? planErr))
-                            throw new InvalidOperationException($"发送PLC: 下发计划无效 — {planErr}");
+                            signalHostAfterAllBatches: false);
 
                         string resultMsg;
                         int n;
-                        bool hostSignaled = false;
                         int wordOff = 0;
                         var parts = new List<string>();
                         int execD800 = 0;
-                        int execD804Clear = 0;
-                        int execD804Set = 0;
                         int execGvarBatch = 0;
 
                         bool downstreamRanInsideBatchLoop = false;
                         foreach (var step in plan)
                         {
-                            if (step.Kind == PlcSendStepKind.SignalHostComplete)
-                                continue;
-
                             switch (step.Kind)
                             {
-                                case PlcSendStepKind.ClearHostFlag:
-                                    FlowWritePlcBit(hostFlagReg, 0, false);
-                                    execD804Clear++;
-                                    break;
-
                                 case PlcSendStepKind.WriteSegmentCount:
                                     var wrCount = plcD.Write(countReg, (short)step.SegmentCount);
                                     execD800++;
@@ -10763,21 +11368,6 @@ namespace CalibOperatorCLI_Example
                             }
                         }
 
-                        if (signalHostAfterAll)
-                        {
-                            try
-                            {
-                                FlowWritePlcBit(hostFlagReg, 0, true);
-                                hostSignaled = true;
-                                execD804Set++;
-                            }
-                            catch (Exception exBit)
-                            {
-                                throw new InvalidOperationException(
-                                    $"发送PLC: GVAR 与下游已执行，但置位 {hostFlagReg} 失败: {exBit.Message}");
-                            }
-                        }
-
                         if (barBatches != null && barBatches.Count > 0)
                         {
                             n = barBatches.Sum(b => b.Gvars.Length);
@@ -10795,72 +11385,22 @@ namespace CalibOperatorCLI_Example
 
                         int reportedBatches = execGvarBatch > 0 ? execGvarBatch : (gvarItems.Length > 0 ? 1 : 0);
                         string dispatchStats =
-                            $"批{reportedBatches} D800×{execD800} {hostFlagReg}清0×{execD804Clear} 置1×{execD804Set}";
+                            $"批{reportedBatches} D800×{execD800}";
                         int downChainN = ResolveSendPlcDownstreamChain(node).Count;
                         if (downChainN > 0)
                         {
                             dispatchStats += downstreamRanInsideBatchLoop
-                                ? $" 下游×{downChainN}节点/批→后{hostFlagReg}"
-                                : $" 下游×{downChainN}节点→后{hostFlagReg}";
-                        }
-                        else if (hostSignaled)
-                        {
-                            dispatchStats += $" →{hostFlagReg}";
+                                ? $" 下游×{downChainN}节点/批"
+                                : $" 下游×{downChainN}节点";
                         }
 
-                        AppendLog($"[{sendPlcLogTag}] {dispatchStats} | {SendPlcBatchPlanner.SummarizePlan(plan, hostFlagReg)} | src={gvarSource}");
-                        if (hostSignaled)
-                            resultMsg += $", 下游完成后→{hostFlagReg}=1";
+                        string planSummary = $"计划批={plan.Count(s => s.Kind == PlcSendStepKind.WriteGvarBatch)}, 计划D800={plan.Count(s => s.Kind == PlcSendStepKind.WriteSegmentCount)}";
+                        AppendLog($"[{sendPlcLogTag}] {dispatchStats} | {planSummary} | src={gvarSource}");
                         resultMsg += $" | {dispatchStats}";
 
                         node.Outputs["GvarSent"] = true;
-                        node.Outputs["HostWeldDoneSignaled"] = hostSignaled;
                         StatusText.Dispatcher.Invoke(() => StatusText.Text = $"发送成功: {resultMsg}");
                         node.ResultSummary = resultMsg;
-                        break;
-                    }
-
-                    case "plc_connect":
-                    {
-                        string ip = (node.Params.GetValueOrDefault("ip", "192.168.6.6") ?? "192.168.6.6").Trim();
-                        int port = int.TryParse(node.Params.GetValueOrDefault("port"), out var p) ? p : 502;
-
-                        if (_flowPlc != null)
-                        {
-                            try { _flowPlc.ConnectClose(); } catch { }
-                            _flowPlc = null;
-                        }
-
-                        var cfg = LoadFlowPlcConfig();
-                        byte station = (byte)Math.Clamp(cfg.ModbusStation, 0, 255);
-                        string? stParam = node.Params.GetValueOrDefault("station");
-                        if (!string.IsNullOrWhiteSpace(stParam) && byte.TryParse(stParam.Trim(), out var st))
-                            station = st;
-                        string series = cfg.GvarList?.PlcSeries ?? "XD";
-                        string floatFmt = PlcXinjeHelper.ResolveFloatDataFormatString(cfg);
-                        _flowPlc = PlcXinjeHelper.CreateClient(series, ip, port, station, floatFmt);
-                        var conn = _flowPlc.ConnectServer();
-                        if (!conn.IsSuccess)
-                            throw new InvalidOperationException($"PLC连接失败: {conn.Message}");
-
-                        _flowPlcConnected = true;
-                        PlcXinjeSession.Register(_flowPlc, "Flow");
-                        node.Outputs["Connected"] = true;
-                        node.ResultSummary = $"Connected {ip}:{port} XinJE/{series} st={station}";
-                        break;
-                    }
-
-                    case "plc_disconnect":
-                    {
-                        if (_flowPlc != null)
-                        {
-                            PlcXinjeSession.ClearIfOwnedBy(_flowPlc);
-                            try { _flowPlc.ConnectClose(); } catch { }
-                            _flowPlc = null;
-                        }
-                        _flowPlcConnected = false;
-                        node.Outputs["Disconnected"] = true;
-                        node.ResultSummary = "PLC disconnected";
                         break;
                     }
 
@@ -11592,8 +12132,18 @@ namespace CalibOperatorCLI_Example
                             bool.TryParse(p.GetValueOrDefault(key), out var v) ? v : def;
                         static string Psc(IReadOnlyDictionary<string, string> p, string key, string def) =>
                             string.IsNullOrWhiteSpace(p.GetValueOrDefault(key)) ? def : p[key]!.Trim();
+                        static double PcAlias(IReadOnlyDictionary<string, string> p, string primary, string legacy, double def)
+                        {
+                            if (double.TryParse(p.GetValueOrDefault(primary), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v1))
+                                return v1;
+                            if (double.TryParse(p.GetValueOrDefault(legacy), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v2))
+                                return v2;
+                            return def;
+                        }
 
-                        var (rows, cols, angles, scores) = HalconFlowBridge.CoarseShapeMatch(
+                        double coarseScaleMin = PcAlias(node.Params, "coarseScaleMin", "scaleMin", 1.0);
+                        double coarseScaleMax = PcAlias(node.Params, "coarseScaleMax", "scaleMax", 1.0);
+                        var (rows, cols, angles, scales, scores) = HalconFlowBridge.CoarseShapeMatch(
                             coarseImg, modelId,
                             Pc(node.Params, "angleStart", -30),
                             Pc(node.Params, "angleExtent", 60),
@@ -11604,13 +12154,19 @@ namespace CalibOperatorCLI_Example
                             Pic(node.Params, "numLevels", 0),
                             Pc(node.Params, "greediness", 0.85),
                             Pbc(node.Params, "allowRetry", false),
+                            coarseScaleMin,
+                            coarseScaleMax,
                             Pc(node.Params, "endScoreWeight", HalconFlowBridge.DefaultEndScoreWeight),
                             Pc(node.Params, "endArcFraction", HalconFlowBridge.DefaultEndArcFraction));
                         node.Outputs["Row"] = rows;
                         node.Outputs["Column"] = cols;
                         node.Outputs["Angle"] = angles;
+                        node.Outputs["Scale"] = scales;
                         node.Outputs["Score"] = scores;
-                        node.ResultSummary = $"HALCON 粗定位 {rows.Length} 个候选";
+                        if (scales.Length > 0)
+                            node.ResultSummary = $"HALCON 粗定位 {rows.Length} 个候选, 搜索缩放[{coarseScaleMin:F3},{coarseScaleMax:F3}] 命中[{scales.Min():F3},{scales.Max():F3}]";
+                        else
+                            node.ResultSummary = $"HALCON 粗定位 {rows.Length} 个候选, 搜索缩放[{coarseScaleMin:F3},{coarseScaleMax:F3}]";
                         break;
                     }
 
@@ -11756,6 +12312,14 @@ namespace CalibOperatorCLI_Example
                             string.IsNullOrWhiteSpace(p.GetValueOrDefault(key))
                                 ? fallback
                                 : (double.TryParse(p[key], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : fallback);
+                        static double PAlias(IReadOnlyDictionary<string, string> p, string primary, string legacy, double def)
+                        {
+                            if (double.TryParse(p.GetValueOrDefault(primary), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v1))
+                                return v1;
+                            if (double.TryParse(p.GetValueOrDefault(legacy), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v2))
+                                return v2;
+                            return def;
+                        }
 
                         double coarseEndW = P(node.Params, "endScoreWeight", HalconFlowBridge.DefaultEndScoreWeight);
                         double coarseEndArc = P(node.Params, "endArcFraction", HalconFlowBridge.DefaultEndArcFraction);
@@ -11773,6 +12337,8 @@ namespace CalibOperatorCLI_Example
                             Pi(node.Params, "coarseNumLevels", 0),
                             P(node.Params, "coarseGreediness", 0.85),
                             Pb(node.Params, "coarseAllowRetry", false),
+                            PAlias(node.Params, "coarseScaleMin", "scaleMin", 1.0),
+                            PAlias(node.Params, "coarseScaleMax", "scaleMax", 1.0),
                             P(node.Params, "fineAngleMargin", 5),
                             P(node.Params, "fineMinScore", 0.45),
                             Pi(node.Params, "fineNumLevels", 0),
@@ -11797,6 +12363,7 @@ namespace CalibOperatorCLI_Example
                         node.Outputs["CoarseRow"] = result.CoarseRows;
                         node.Outputs["CoarseColumn"] = result.CoarseCols;
                         node.Outputs["CoarseAngle"] = result.CoarseAngles;
+                        node.Outputs["CoarseScale"] = result.CoarseScales;
                         node.Outputs["CoarseScore"] = result.CoarseScores;
                         if (result.DeformedXld != null)
                             node.Outputs["DeformedXld"] = result.DeformedXld;
@@ -12654,12 +13221,27 @@ namespace CalibOperatorCLI_Example
                         if (!inputs.TryGetValue("ModelId", out var midObj))
                             throw new InvalidOperationException("HALCON 显示形状匹配: 缺少 ModelId");
                         long modelId = Convert.ToInt64(midObj);
-                        double[] rows = inputs.TryGetValue("Row", out var rowObj) && rowObj is double[] ra ? ra : Array.Empty<double>();
-                        double[] cols = inputs.TryGetValue("Column", out var colObj) && colObj is double[] ca ? ca : Array.Empty<double>();
-                        inputs.TryGetValue("Angle", out var angObj);
-                        double[] angles = angObj as double[] ?? Array.Empty<double>();
-                        inputs.TryGetValue("Score", out var scObj);
-                        double[] scores = scObj as double[] ?? Array.Empty<double>();
+                        static double[] ReadSeries(IReadOnlyDictionary<string, object?> src, string key)
+                        {
+                            if (!src.TryGetValue(key, out var obj) || obj == null)
+                                return Array.Empty<double>();
+                            try
+                            {
+                                return CoerceCoarseShapeSeries(obj, key);
+                            }
+                            catch
+                            {
+                                if (HalconFlowBridge.TryReadCoarseScalar(obj, out double scalar))
+                                    return new[] { scalar };
+                                return Array.Empty<double>();
+                            }
+                        }
+
+                        double[] rows = ReadSeries(inputs, "Row");
+                        double[] cols = ReadSeries(inputs, "Column");
+                        double[] angles = ReadSeries(inputs, "Angle");
+                        double[] scales = ReadSeries(inputs, "Scale");
+                        double[] scores = ReadSeries(inputs, "Score");
                         int[]? pickIndices = inputs.TryGetValue("ConsensusPickIndices", out var pickObj) && pickObj is int[] pickArr && pickArr.Length > 0
                             ? pickArr
                             : null;
@@ -12679,8 +13261,8 @@ namespace CalibOperatorCLI_Example
                                 && rows.Length < totalMatches;
                             if (!rowsAlreadyFromPick)
                             {
-                                SubsetShapeMatchesByIndices(rows, cols, angles, scores, pickIndices,
-                                    out rows, out cols, out angles, out scores);
+                                SubsetShapeMatchesByIndices(rows, cols, angles, scales, scores, pickIndices,
+                                    out rows, out cols, out angles, out scales, out scores);
                             }
 
                             HalconShapeMatchGridFilter.LogDisplayPickSubset(
@@ -12692,7 +13274,7 @@ namespace CalibOperatorCLI_Example
                         bool drawScores = !string.Equals(node.Params.GetValueOrDefault("drawScores", "true")?.Trim(), "false", StringComparison.OrdinalIgnoreCase);
                         string dispSlot = node.Id.ToString("D");
                         string dispTitle = $"{node.Def.DisplayName} [{node.Id.ToString("N")[..8]}]";
-                        ShowShapeMatchPreview(matchImg, modelId, rows, cols, angles, scores,
+                        ShowShapeMatchPreview(matchImg, modelId, rows, cols, angles, scales, scores,
                             dispSlot, dispTitle, contourLevel, crossHalf, strokeWidth, drawScores);
                         node.Outputs["Out"] = matchImg;
                         int n = Math.Min(rows.Length, cols.Length);
@@ -12708,6 +13290,12 @@ namespace CalibOperatorCLI_Example
                             : pickIndices != null
                                 ? $"已显示 {n}/{totalMatches} 个匹配{colNote}"
                                 : $"已显示 {n} 个匹配";
+                        if (scales.Length > 0)
+                        {
+                            double sMin = scales.Min();
+                            double sMax = scales.Max();
+                            node.ResultSummary += $", 缩放[{sMin:F3},{sMax:F3}]";
+                        }
                         break;
                     }
 
@@ -12785,7 +13373,8 @@ namespace CalibOperatorCLI_Example
         /// </summary>
         private void EditNodeParams(FlowNode node)
         {
-            if (node.Def.Params.Count == 0) return;
+            var editableParams = node.Def.Params;
+            if (editableParams.Count == 0) return;
 
             bool compositeUi = node.Def.TypeId == "composite";
 
@@ -12796,7 +13385,7 @@ namespace CalibOperatorCLI_Example
             {
                 Title = $"{node.Def.DisplayName} - 算子配置面板",
                 Width = compositeUi ? 680 : 520,
-                Height = compositeUi ? Math.Min(420 + node.Def.Params.Count * 72, 720) : Math.Min(80 + node.Def.Params.Count * 78, 620),
+                Height = compositeUi ? Math.Min(420 + editableParams.Count * 72, 720) : Math.Min(80 + editableParams.Count * 78, 620),
                 MinWidth = compositeUi ? 540 : 440,
                 MinHeight = compositeUi ? 360 : 220,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -12807,7 +13396,7 @@ namespace CalibOperatorCLI_Example
             var root = new DockPanel();
 
             var fieldsPanel = new StackPanel { Margin = new Thickness(12, 12, 12, 8) };
-            var inputs = new Control[node.Def.Params.Count];
+            var inputs = new Control[editableParams.Count];
 
             if (!string.IsNullOrWhiteSpace(node.Def.Description))
             {
@@ -12821,9 +13410,9 @@ namespace CalibOperatorCLI_Example
                 });
             }
 
-            for (int i = 0; i < node.Def.Params.Count; i++)
+            for (int i = 0; i < editableParams.Count; i++)
             {
-                var param = node.Def.Params[i];
+                var param = editableParams[i];
 
                 var paramBlock = new StackPanel { Margin = new Thickness(0, 6, 0, 10) };
                 var row = new DockPanel();
@@ -13067,10 +13656,13 @@ namespace CalibOperatorCLI_Example
 
             btnOk.Click += (_, _) =>
             {
+                string? oldDynamicPortSchema = NodeUsesDynamicPorts(node)
+                    ? BuildCurrentNodeVisualPortSchemaSignature(node)
+                    : null;
                 PushFlowUndoSnapshotBeforeChange();
-                for (int i = 0; i < node.Def.Params.Count; i++)
+                for (int i = 0; i < editableParams.Count; i++)
                 {
-                    var paramDef = node.Def.Params[i];
+                    var paramDef = editableParams[i];
                     string value = inputs[i] switch
                     {
                         ComboBox cb => cb.SelectedItem?.ToString() ?? paramDef.DefaultValue,
@@ -13083,8 +13675,14 @@ namespace CalibOperatorCLI_Example
                         value = FormatPathForFlowParam(value);
                     node.Params[paramDef.Name] = value;
                 }
-                if (node.Def.TypeId == "composite")
-                    RefreshCompositeNodeCaption(node);
+                if (NodeUsesDynamicPorts(node))
+                {
+                    string newDynamicPortSchema = BuildDesiredNodePortSchemaSignature(node);
+                    if (!string.Equals(oldDynamicPortSchema, newDynamicPortSchema, StringComparison.Ordinal))
+                        RebuildNodeVisualAndReconnect(node);
+                    else if (string.Equals(node.Def.TypeId, "composite", StringComparison.Ordinal))
+                        RefreshCompositeNodeCaption(node);
+                }
                 win.DialogResult = true;
                 win.Close();
             };
@@ -13505,17 +14103,20 @@ namespace CalibOperatorCLI_Example
             double[] rows,
             double[] cols,
             double[] angles,
+            double[] scales,
             double[] scores,
             int[] pickIndices,
             out double[] outRows,
             out double[] outCols,
             out double[] outAngles,
+            out double[] outScales,
             out double[] outScores)
         {
             int n = Math.Min(rows.Length, cols.Length);
             var or = new List<double>();
             var oc = new List<double>();
             var oa = new List<double>();
+            var oz = new List<double>();
             var os = new List<double>();
             foreach (int i in pickIndices)
             {
@@ -13525,12 +14126,15 @@ namespace CalibOperatorCLI_Example
                 oc.Add(cols[i]);
                 if (angles.Length > i)
                     oa.Add(angles[i]);
+                if (scales.Length > i)
+                    oz.Add(scales[i]);
                 if (scores.Length > i)
                     os.Add(scores[i]);
             }
             outRows = or.ToArray();
             outCols = oc.ToArray();
             outAngles = oa.ToArray();
+            outScales = oz.ToArray();
             outScores = os.ToArray();
         }
 
@@ -13540,6 +14144,7 @@ namespace CalibOperatorCLI_Example
             double[] rows,
             double[] cols,
             double[] angles,
+            double[] scales,
             double[] scores,
             string previewSlotKey,
             string titlePrefix,
@@ -13562,7 +14167,7 @@ namespace CalibOperatorCLI_Example
                 null,
                 null,
                 (drawBmp) => HalconShapeMatchVisualizer.DrawOnBitmap(
-                    drawBmp, modelId, rows, cols, angles, scores,
+                    drawBmp, modelId, rows, cols, angles, scales, scores,
                     contourLevel, crossHalf, strokeWidth, drawScores));
 #else
             if (n > 0)
@@ -14432,10 +15037,21 @@ namespace CalibOperatorCLI_Example
                     AppendLog($"检测到 load_image_dir(遍历): {loopNode.Def.DisplayName}，前置 {preNodes.Count} 节点，下游 {postNodes.Count} 节点");
 
                     int successCountPre = 0;
+                    int errorCountPre = 0;
                     for (int i = 0; i < preNodes.Count; i++)
                     {
                         ThrowIfExecutionCancelled();
                         var node = preNodes[i];
+                        if (_skipFlowRunNodeIds != null && _skipFlowRunNodeIds.Contains(node.Id))
+                        {
+                            AppendLog($"[LOOP-PRE] 跳过: {node.Def.DisplayName}");
+                            continue;
+                        }
+                        if (_skipFlowRunNodeIds != null && _skipFlowRunNodeIds.Contains(node.Id))
+                        {
+                            AppendLog($"[PRE] 跳过: {node.Def.DisplayName}");
+                            continue;
+                        }
                         StatusText.Text = $"执行前置 [{i + 1}/{preNodes.Count}] {node.Def.DisplayName}...";
                         AppendLog($"[PRE {i + 1}/{preNodes.Count}] 执行: {node.Def.DisplayName}");
                         await System.Threading.Tasks.Task.Yield();
@@ -14446,13 +15062,14 @@ namespace CalibOperatorCLI_Example
                         }
                         catch (FlowExecutionGracefulStopException ex)
                         {
-                            AppendLog($"[PRE][STOP] {node.Def.DisplayName}: {ex.Message}", true);
-                            if (ex.InnerException != null)
-                                AppendLog($"  {ex.InnerException.Message}", true);
-                            StatusText.Text = ex.Message;
-                            StatusText.Foreground = new SolidColorBrush(Colors.Orange);
-                            AppendLog("========== 执行中止 ==========");
-                            return false;
+                            MarkDownstreamNodesSkippedFrom(node, ex.Message, "PRE-STOP");
+                            continue;
+                        }
+                        catch (Exception ex)
+                        {
+                            errorCountPre++;
+                            AppendLog($"[PRE][ERROR] {node.Def.DisplayName}: {ex.Message}", true);
+                            continue;
                         }
                     }
 
@@ -14466,6 +15083,7 @@ namespace CalibOperatorCLI_Example
                         throw new InvalidOperationException($"加载图像目录(遍历): 无匹配图像 ({resolvedDir})，扩展名: {extSpec}");
 
                     int okImages = 0;
+                    int errorCountPost = 0;
                     for (int ii = 0; ii < paths.Count; ii++)
                     {
                         ThrowIfExecutionCancelled();
@@ -14498,6 +15116,11 @@ namespace CalibOperatorCLI_Example
                         {
                             ThrowIfExecutionCancelled();
                             var node = postNodes[j];
+                            if (_skipFlowRunNodeIds != null && _skipFlowRunNodeIds.Contains(node.Id))
+                            {
+                                AppendLog($"[IMG] 跳过: {node.Def.DisplayName}");
+                                continue;
+                            }
                             node.Outputs.Clear();
                             node.ErrorMessage = null;
                             node.Executed = false;
@@ -14509,13 +15132,14 @@ namespace CalibOperatorCLI_Example
                             }
                             catch (FlowExecutionGracefulStopException ex)
                             {
-                                AppendLog($"[IMG][STOP] {node.Def.DisplayName}: {ex.Message}", true);
-                                if (ex.InnerException != null)
-                                    AppendLog($"  {ex.InnerException.Message}", true);
-                                StatusText.Text = ex.Message;
-                                StatusText.Foreground = new SolidColorBrush(Colors.Orange);
-                                AppendLog("========== 执行中止 ==========");
-                                return false;
+                                MarkDownstreamNodesSkippedFrom(node, ex.Message, "IMG-STOP");
+                                continue;
+                            }
+                            catch (Exception ex)
+                            {
+                                errorCountPost++;
+                                AppendLog($"[IMG][ERROR] {node.Def.DisplayName}: {ex.Message}", true);
+                                continue;
                             }
                         }
                     }
@@ -14523,7 +15147,10 @@ namespace CalibOperatorCLI_Example
                     if (okImages <= 0)
                         throw new InvalidOperationException("加载图像目录(遍历): 未能成功解码任何图像");
 
-                    StatusText.Text = $"目录遍历完成: 前置 {successCountPre}/{preNodes.Count}, 有效图 {okImages}/{paths.Count}";
+                    StatusText.Text = $"目录遍历完成: 前置 {successCountPre}/{preNodes.Count}" +
+                                      (errorCountPre > 0 ? $"(错误{errorCountPre})" : "") +
+                                      $", 有效图 {okImages}/{paths.Count}" +
+                                      (errorCountPost > 0 ? $", 下游错误 {errorCountPost}" : "");
                     StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
                     AppendLog($"========== load_image_dir(遍历) 完成: images={okImages}/{paths.Count} ==========");
                     return true;
@@ -14539,10 +15166,16 @@ namespace CalibOperatorCLI_Example
                     AppendLog($"检测到 per_frame: {loopNode.Def.DisplayName}，前置 {preNodes.Count} 节点，下游 {postNodes.Count} 节点");
 
                     int successCountPre = 0;
+                    int errorCountPre = 0;
                     for (int i = 0; i < preNodes.Count; i++)
                     {
-                    ThrowIfExecutionCancelled();
+                        ThrowIfExecutionCancelled();
                         var node = preNodes[i];
+                        if (_skipFlowRunNodeIds != null && _skipFlowRunNodeIds.Contains(node.Id))
+                        {
+                            AppendLog($"[PRE] 跳过: {node.Def.DisplayName}");
+                            continue;
+                        }
                         StatusText.Text = $"执行前置 [{i + 1}/{preNodes.Count}] {node.Def.DisplayName}...";
                         AppendLog($"[PRE {i + 1}/{preNodes.Count}] 执行: {node.Def.DisplayName}");
                         await System.Threading.Tasks.Task.Yield();
@@ -14553,13 +15186,14 @@ namespace CalibOperatorCLI_Example
                         }
                         catch (FlowExecutionGracefulStopException ex)
                         {
-                            AppendLog($"[PRE][STOP] {node.Def.DisplayName}: {ex.Message}", true);
-                            if (ex.InnerException != null)
-                                AppendLog($"  {ex.InnerException.Message}", true);
-                            StatusText.Text = ex.Message;
-                            StatusText.Foreground = new SolidColorBrush(Colors.Orange);
-                            AppendLog("========== 执行中止 ==========");
-                            return false;
+                            MarkDownstreamNodesSkippedFrom(node, ex.Message, "PRE-STOP");
+                            continue;
+                        }
+                        catch (Exception ex)
+                        {
+                            errorCountPre++;
+                            AppendLog($"[PRE][ERROR] {node.Def.DisplayName}: {ex.Message}", true);
+                            continue;
                         }
                     }
 
@@ -14571,6 +15205,7 @@ namespace CalibOperatorCLI_Example
 
                     frameCount = Math.Max(1, frameCount);
                     int okFrames = 0;
+                    int errorCountPost = 0;
                     using var cam = new CameraService();
                     if (!cam.ConnectByIndex(deviceIndex))
                         throw new InvalidOperationException($"相机连接失败，deviceIndex={deviceIndex}");
@@ -14601,6 +15236,11 @@ namespace CalibOperatorCLI_Example
                         {
                             ThrowIfExecutionCancelled();
                             var node = postNodes[j];
+                            if (_skipFlowRunNodeIds != null && _skipFlowRunNodeIds.Contains(node.Id))
+                            {
+                                AppendLog($"[FRAME] 跳过: {node.Def.DisplayName}");
+                                continue;
+                            }
                             node.Outputs.Clear();
                             node.ErrorMessage = null;
                             node.Executed = false;
@@ -14612,13 +15252,14 @@ namespace CalibOperatorCLI_Example
                             }
                             catch (FlowExecutionGracefulStopException ex)
                             {
-                                AppendLog($"[FRAME][STOP] {node.Def.DisplayName}: {ex.Message}", true);
-                                if (ex.InnerException != null)
-                                    AppendLog($"  {ex.InnerException.Message}", true);
-                                StatusText.Text = ex.Message;
-                                StatusText.Foreground = new SolidColorBrush(Colors.Orange);
-                                AppendLog("========== 执行中止 ==========");
-                                return false;
+                                MarkDownstreamNodesSkippedFrom(node, ex.Message, "FRAME-STOP");
+                                continue;
+                            }
+                            catch (Exception ex)
+                            {
+                                errorCountPost++;
+                                AppendLog($"[FRAME][ERROR] {node.Def.DisplayName}: {ex.Message}", true);
+                                continue;
                             }
                         }
 
@@ -14629,7 +15270,10 @@ namespace CalibOperatorCLI_Example
                     if (okFrames <= 0)
                         throw new InvalidOperationException("per_frame 未抓到任何有效帧");
 
-                    StatusText.Text = $"per_frame 执行完成: 前置 {successCountPre}/{preNodes.Count}, 有效帧 {okFrames}/{frameCount}";
+                    StatusText.Text = $"per_frame 执行完成: 前置 {successCountPre}/{preNodes.Count}" +
+                                      (errorCountPre > 0 ? $"(错误{errorCountPre})" : "") +
+                                      $", 有效帧 {okFrames}/{frameCount}" +
+                                      (errorCountPost > 0 ? $", 下游错误 {errorCountPost}" : "");
                     StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
                     AppendLog($"========== per_frame 执行完成: frames={okFrames}/{frameCount} ==========");
                     return true;
@@ -14638,6 +15282,7 @@ namespace CalibOperatorCLI_Example
                 if (flowLoops.Count == 1)
                 {
                     var loopNode = flowLoops[0];
+                    var listPortMaps = BuildFlowLoopListPortMaps(loopNode.Params);
                     var downstream = GetDownstreamNodes(loopNode);
                     var preNodes = sorted.Where(n => !downstream.Contains(n)).ToList();
                     var postNodes = GetOrderedDownstreamOfNode(loopNode);
@@ -14665,7 +15310,11 @@ namespace CalibOperatorCLI_Example
                         AppendLog($"循环延后执行: {postLoopDeferred.Count} 个节点（如 Exposure Fusion）");
 
                     int successCountPre = 0;
+                    int errorCountPre = 0;
                     long completedRounds = 0;
+                    int errorCountPerRound = 0;
+                    int errorCountPostLoop = 0;
+                    IReadOnlyDictionary<string, object?> loopInputsForRounds = new Dictionary<string, object?>();
                     EnterFlowLoopSinkAccumulate();
                     try
                     {
@@ -14685,14 +15334,42 @@ namespace CalibOperatorCLI_Example
                         }
                         catch (FlowExecutionGracefulStopException ex)
                         {
-                            AppendLog($"[LOOP-PRE][STOP] {node.Def.DisplayName}: {ex.Message}", true);
-                            if (ex.InnerException != null)
-                                AppendLog($"  {ex.InnerException.Message}", true);
-                            StatusText.Text = ex.Message;
-                            StatusText.Foreground = new SolidColorBrush(Colors.Orange);
-                            AppendLog("========== 执行中止 ==========");
-                            return false;
+                            MarkDownstreamNodesSkippedFrom(node, ex.Message, "LOOP-PRE-STOP");
+                            continue;
                         }
+                        catch (Exception ex)
+                        {
+                            errorCountPre++;
+                            AppendLog($"[LOOP-PRE][ERROR] {node.Def.DisplayName}: {ex.Message}", true);
+                            continue;
+                        }
+                    }
+
+                    loopInputsForRounds = GetNodeInputs(loopNode);
+                    var listLengths = CollectFlowLoopListLengths(loopInputsForRounds, listPortMaps);
+                    var activeListLengths = listLengths.Where(kv => kv.Value > 0).ToList();
+                    if (activeListLengths.Count > 0)
+                    {
+                        int firstLen = activeListLengths[0].Value;
+                        bool sameLen = activeListLengths.All(kv => kv.Value == firstLen);
+                        if (!sameLen)
+                        {
+                            string detail = string.Join(", ", activeListLengths.Select(kv => $"{kv.Key}={kv.Value}"));
+                            throw new InvalidOperationException($"循环: 多路列表长度不一致（非空端口：{detail}）");
+                        }
+
+                        repeatCount = firstLen;
+                        infiniteLoop = false;
+                        if (stepValues != null && stepValues.Length > 0 && stepValues.Length != repeatCount)
+                            throw new InvalidOperationException(
+                                $"循环: stepValues 长度({stepValues.Length})与列表长度({repeatCount})不一致");
+                        AppendLog($"[LOOP] 列表驱动轮数={repeatCount}（非空端口：{string.Join(", ", activeListLengths.Select(kv => $"{kv.Key}:{kv.Value}"))}）");
+                    }
+                    else if (listLengths.Count > 0)
+                    {
+                        repeatCount = 0;
+                        infiniteLoop = false;
+                        AppendLog("[LOOP] 多路列表均为空，轮数=0");
                     }
 
                     long li = 0;
@@ -14704,7 +15381,8 @@ namespace CalibOperatorCLI_Example
                         loopNode.Outputs["Count"] = infiniteLoop ? -1 : repeatCount;
                         if (stepValues != null && li < stepValues.Length)
                             loopNode.Outputs["StepValue"] = stepValues[li];
-                        if (GetInputData(loopNode, "After") is { } afterVal)
+                        ApplyFlowLoopListOutputs(loopNode, loopInputsForRounds, (int)li, listPortMaps);
+                        if (!loopNode.Outputs.ContainsKey("Out") && GetInputData(loopNode, "After") is { } afterVal)
                             loopNode.Outputs["Out"] = afterVal;
                         loopNode.Executed = true;
                         loopNode.ErrorMessage = null;
@@ -14722,6 +15400,11 @@ namespace CalibOperatorCLI_Example
                         {
                             ThrowIfExecutionCancelled();
                             var node = perRoundNodes[j];
+                            if (_skipFlowRunNodeIds != null && _skipFlowRunNodeIds.Contains(node.Id))
+                            {
+                                AppendLog($"[LOOP] 跳过: {node.Def.DisplayName}");
+                                continue;
+                            }
                             node.Outputs.Clear();
                             node.ErrorMessage = null;
                             node.Executed = false;
@@ -14733,21 +15416,14 @@ namespace CalibOperatorCLI_Example
                             }
                             catch (FlowExecutionGracefulStopException ex)
                             {
-                                AppendLog($"[LOOP][STOP] {node.Def.DisplayName}: {ex.Message}", true);
-                                if (ex.InnerException != null)
-                                    AppendLog($"  {ex.InnerException.Message}", true);
-                                StatusText.Text = ex.Message;
-                                StatusText.Foreground = new SolidColorBrush(Colors.Orange);
-                                AppendLog("========== 执行中止 ==========");
-                                return false;
+                                MarkDownstreamNodesSkippedFrom(node, ex.Message, "LOOP-STOP");
+                                continue;
                             }
                             catch (Exception ex)
                             {
                                 AppendLog($"[LOOP][ERROR] {node.Def.DisplayName}: {ex.Message}", true);
-                                StatusText.Text = $"循环失败: {node.Def.DisplayName} - {ex.Message}";
-                                StatusText.Foreground = new SolidColorBrush(Colors.Red);
-                                AppendLog("========== 执行中止 ==========");
-                                return false;
+                                errorCountPerRound++;
+                                continue;
                             }
                         }
 
@@ -14773,6 +15449,11 @@ namespace CalibOperatorCLI_Example
                         {
                             ThrowIfExecutionCancelled();
                             var node = orderedDeferred[j];
+                            if (_skipFlowRunNodeIds != null && _skipFlowRunNodeIds.Contains(node.Id))
+                            {
+                                AppendLog($"[LOOP-POST] 跳过: {node.Def.DisplayName}");
+                                continue;
+                            }
                             node.Outputs.Clear();
                             node.ErrorMessage = null;
                             node.Executed = false;
@@ -14784,19 +15465,14 @@ namespace CalibOperatorCLI_Example
                             }
                             catch (FlowExecutionGracefulStopException ex)
                             {
-                                AppendLog($"[LOOP-POST][STOP] {node.Def.DisplayName}: {ex.Message}", true);
-                                StatusText.Text = ex.Message;
-                                StatusText.Foreground = new SolidColorBrush(Colors.Orange);
-                                AppendLog("========== 执行中止 ==========");
-                                return false;
+                                MarkDownstreamNodesSkippedFrom(node, ex.Message, "LOOP-POST-STOP");
+                                continue;
                             }
                             catch (Exception ex)
                             {
                                 AppendLog($"[LOOP-POST][ERROR] {node.Def.DisplayName}: {ex.Message}", true);
-                                StatusText.Text = $"循环后失败: {node.Def.DisplayName} - {ex.Message}";
-                                StatusText.Foreground = new SolidColorBrush(Colors.Red);
-                                AppendLog("========== 执行中止 ==========");
-                                return false;
+                                errorCountPostLoop++;
+                                continue;
                             }
                         }
                     }
@@ -14805,7 +15481,10 @@ namespace CalibOperatorCLI_Example
                         ? $"{completedRounds} 轮（已停止）"
                         : $"{completedRounds} 轮";
                     StatusText.Text = $"循环完成: 前置 {successCountPre}/{preNodes.Count}，{doneRounds} × 下游 {perRoundNodes.Count} 节点/轮"
-                        + (orderedDeferred.Count > 0 ? $"，延后 {orderedDeferred.Count}" : "");
+                        + (orderedDeferred.Count > 0 ? $"，延后 {orderedDeferred.Count}" : "")
+                        + (errorCountPre > 0 ? $"，前置错误 {errorCountPre}" : "")
+                        + (errorCountPerRound > 0 ? $"，轮内错误 {errorCountPerRound}" : "")
+                        + (errorCountPostLoop > 0 ? $"，延后错误 {errorCountPostLoop}" : "");
                     StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
                     AppendLog($"========== flow_loop 完成: {doneRounds}，下游 {perRoundNodes.Count} 节点/轮 ==========");
                     return true;
@@ -14813,6 +15492,8 @@ namespace CalibOperatorCLI_Example
 
                 AppendLog($"共 {sorted.Count} 个节点待执行");
                 int successCount = 0;
+                int errorCount = 0;
+                int stopSkipCount = 0;
                 for (int i = 0; i < sorted.Count; i++)
                 {
                     ThrowIfExecutionCancelled();
@@ -14838,10 +15519,8 @@ namespace CalibOperatorCLI_Example
                         AppendLog($"  -> [STOP] {node.Def.DisplayName}: {ex.Message}", true);
                         if (ex.InnerException != null)
                             AppendLog($"     {ex.InnerException.Message}", true);
-                        StatusText.Text = ex.Message;
-                        StatusText.Foreground = new SolidColorBrush(Colors.Orange);
-                        AppendLog("========== 执行中止 ==========");
-                        return false;
+                        stopSkipCount += MarkDownstreamNodesSkippedFrom(node, ex.Message, "NODE-STOP");
+                        continue;
                     }
                     catch (Exception ex)
                     {
@@ -14852,16 +15531,19 @@ namespace CalibOperatorCLI_Example
                         {
                             try { Console.Error.WriteLine(ex.ToString()); } catch { /* ignored */ }
                         }
-                        StatusText.Text = $"执行失败: {node.Def.DisplayName} - {ex.Message}";
-                        StatusText.Foreground = new SolidColorBrush(Colors.Red);
-                        AppendLog("========== 执行中止 ==========");
-                        return false;
+                        errorCount++;
+                        continue;
                     }
                 }
-                StatusText.Text = $"执行完成(托管回退): {successCount}/{sorted.Count} 个节点成功";
-                StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
-                AppendLog($"========== 执行完成(托管回退): {successCount}/{sorted.Count} ==========");
-                return true;
+                bool ok = errorCount == 0;
+                StatusText.Text = ok
+                    ? $"执行完成(托管回退): 成功 {successCount}, 跳过 {stopSkipCount}, 总计 {sorted.Count}"
+                    : $"执行完成(托管回退): 成功 {successCount}, 错误 {errorCount}, 跳过 {stopSkipCount}, 总计 {sorted.Count}";
+                StatusText.Foreground = new SolidColorBrush(ok ? Colors.LightGreen : Colors.Orange);
+                AppendLog(ok
+                    ? $"========== 执行完成(托管回退): {successCount}/{sorted.Count} =========="
+                    : $"========== 执行完成(托管回退): success={successCount}, errors={errorCount}, total={sorted.Count} ==========");
+                return ok;
             }
             catch (FlowExecutionGracefulStopException ex)
             {
@@ -15000,6 +15682,167 @@ namespace CalibOperatorCLI_Example
         private async void RunAllNative_Click(object sender, RoutedEventArgs e)
         {
             await RunAllAsync(clearLog: true, preferNativeEngine: true);
+        }
+
+        private bool ValidateDryRunRequiredInputs(IReadOnlyList<FlowNode> sorted, out List<string> errors)
+        {
+            errors = new List<string>();
+            foreach (var node in sorted)
+            {
+                if (!IsNodeEnabled(node))
+                    continue;
+                var ports = GetNodePortDefinitions(node);
+                foreach (var port in ports.Where(p => p.Direction == PortDirection.Input && !p.IsOptional))
+                {
+                    bool wired = _connections.Any(c =>
+                        c.ToPort.Owner == node &&
+                        string.Equals(c.ToPort.Definition.Name, port.Name, StringComparison.Ordinal));
+                    if (wired)
+                        continue;
+
+                    errors.Add($"{node.Def.DisplayName}.{port.Name} 未连接");
+                }
+            }
+
+            return errors.Count == 0;
+        }
+
+        private static string FormatNodeList(IReadOnlyList<FlowNode> nodes)
+            => nodes.Count == 0
+                ? "(无)"
+                : string.Join(" -> ", nodes.Select(n => n.Def.DisplayName));
+
+        private async System.Threading.Tasks.Task<bool> RunDryRunAsync(bool clearLog = true)
+        {
+            if (_isRunInProgress)
+            {
+                AppendLog("[WARN] 已有执行在进行中");
+                return false;
+            }
+
+            if (clearLog) LogBox.Text = "";
+            AppendLog("========== 干跑开始（不执行算子） ==========");
+            await System.Threading.Tasks.Task.Yield();
+
+            try
+            {
+                var sorted = TopologicalSort();
+                if (sorted.Count != _nodes.Count)
+                {
+                    StatusText.Text = "干跑失败: 检测到循环依赖";
+                    StatusText.Foreground = new SolidColorBrush(Colors.Red);
+                    AppendLog("[ERROR] 检测到循环依赖，无法给出执行顺序", true);
+                    return false;
+                }
+
+                if (!ValidateDryRunRequiredInputs(sorted, out var wireErrors))
+                {
+                    StatusText.Text = $"干跑失败: 必填输入未连接 ({wireErrors.Count})";
+                    StatusText.Foreground = new SolidColorBrush(Colors.Red);
+                    AppendLog($"[ERROR] 必填输入未连接，共 {wireErrors.Count} 处：", true);
+                    foreach (var e in wireErrors)
+                        AppendLog($"  - {e}", true);
+                    return false;
+                }
+
+                var perFrameLoops = sorted
+                    .Where(n => n.Def.TypeId == "camera_loop" &&
+                                string.Equals((n.Params.GetValueOrDefault("mode", "last_only") ?? "last_only").Trim(),
+                                    "per_frame", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                var dirEachLoops = sorted
+                    .Where(n => n.Def.TypeId == "load_image_dir" &&
+                                string.Equals((n.Params.GetValueOrDefault("mode", "each") ?? "each").Trim(),
+                                    "each", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                var flowLoops = sorted.Where(n => n.Def.TypeId == "flow_loop").ToList();
+                var maskEachNodes = sorted
+                    .Where(n => n.Def.TypeId == "halcon_coarse_shape_reduce_domain" &&
+                                GetDownstreamNodes(n).Count > 1 &&
+                                !string.Equals(n.Params.GetValueOrDefault("loopEmit", "true"), "false",
+                                    StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (perFrameLoops.Count > 1 || dirEachLoops.Count > 1 || flowLoops.Count > 1 || maskEachNodes.Count > 1)
+                {
+                    StatusText.Text = "干跑失败: 存在多个互斥循环入口";
+                    StatusText.Foreground = new SolidColorBrush(Colors.Red);
+                    AppendLog("[ERROR] 干跑失败：检测到多个同类循环入口节点", true);
+                    return false;
+                }
+
+                if ((dirEachLoops.Count == 1 && perFrameLoops.Count == 1)
+                    || (flowLoops.Count == 1 && (perFrameLoops.Count == 1 || dirEachLoops.Count == 1))
+                    || (maskEachNodes.Count == 1 && (flowLoops.Count == 1 || perFrameLoops.Count == 1 || dirEachLoops.Count == 1)))
+                {
+                    StatusText.Text = "干跑失败: 循环模式互斥配置冲突";
+                    StatusText.Foreground = new SolidColorBrush(Colors.Red);
+                    AppendLog("[ERROR] 干跑失败：flow_loop / per_frame / load_image_dir(each) / mask-loop 存在互斥冲突", true);
+                    return false;
+                }
+
+                if (maskEachNodes.Count == 1)
+                {
+                    var loopNode = maskEachNodes[0];
+                    var downstream = GetDownstreamNodes(loopNode);
+                    var preNodes = sorted.Where(n => !downstream.Contains(n)).ToList();
+                    var postNodes = GetOrderedDownstreamOfNode(loopNode);
+                    var postLoopDeferred = ComputePostLoopDeferredNodes(postNodes);
+                    var perRoundNodes = postNodes.Where(n => !postLoopDeferred.Contains(n)).ToList();
+                    var deferred = postNodes.Where(postLoopDeferred.Contains).ToList();
+                    AppendLog($"[DRY] 检测到粗形状Mask循环: {loopNode.Def.DisplayName}");
+                    AppendLog($"[DRY] 前置顺序: {FormatNodeList(preNodes)}");
+                    AppendLog($"[DRY] 每轮顺序: {FormatNodeList(perRoundNodes)}");
+                    if (deferred.Count > 0)
+                        AppendLog($"[DRY] 循环后顺序: {FormatNodeList(deferred)}");
+                }
+                else if (dirEachLoops.Count == 1 || perFrameLoops.Count == 1)
+                {
+                    var loopNode = dirEachLoops.Count == 1 ? dirEachLoops[0] : perFrameLoops[0];
+                    var downstream = GetDownstreamNodes(loopNode);
+                    var preNodes = sorted.Where(n => !downstream.Contains(n)).ToList();
+                    var postNodes = sorted.Where(n => downstream.Contains(n) && n != loopNode).ToList();
+                    AppendLog($"[DRY] 检测到帧/目录循环: {loopNode.Def.DisplayName}");
+                    AppendLog($"[DRY] 前置顺序: {FormatNodeList(preNodes)}");
+                    AppendLog($"[DRY] 每轮顺序: {FormatNodeList(postNodes)}");
+                }
+                else if (flowLoops.Count == 1)
+                {
+                    var loopNode = flowLoops[0];
+                    var downstream = GetDownstreamNodes(loopNode);
+                    var preNodes = sorted.Where(n => !downstream.Contains(n)).ToList();
+                    var postNodes = GetOrderedDownstreamOfNode(loopNode);
+                    var postLoopDeferred = ComputePostLoopDeferredNodes(postNodes);
+                    var perRoundNodes = postNodes.Where(n => !postLoopDeferred.Contains(n)).ToList();
+                    var deferred = postNodes.Where(postLoopDeferred.Contains).ToList();
+                    AppendLog($"[DRY] 检测到 flow_loop: {loopNode.Def.DisplayName}");
+                    AppendLog($"[DRY] 前置顺序: {FormatNodeList(preNodes)}");
+                    AppendLog($"[DRY] 每轮顺序: {FormatNodeList(perRoundNodes)}");
+                    if (deferred.Count > 0)
+                        AppendLog($"[DRY] 循环后顺序: {FormatNodeList(deferred)}");
+                }
+                else
+                {
+                    AppendLog($"[DRY] 线性执行顺序: {FormatNodeList(sorted)}");
+                }
+
+                StatusText.Text = $"干跑通过: 共 {_nodes.Count} 节点，{_connections.Count} 连线";
+                StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
+                AppendLog("========== 干跑完成（未实际执行） ==========");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"干跑失败: {ex.Message}";
+                StatusText.Foreground = new SolidColorBrush(Colors.Red);
+                AppendLog($"[ERROR] 干跑异常: {ex.Message}", true);
+                return false;
+            }
+        }
+
+        private async void DryRun_Click(object sender, RoutedEventArgs e)
+        {
+            await RunDryRunAsync(clearLog: true);
         }
 
         private void StopRun_Click(object sender, RoutedEventArgs e)

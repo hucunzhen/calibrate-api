@@ -26,6 +26,7 @@ namespace CalibOperatorCLI_Example
             double[] rows,
             double[] cols,
             double[] angles,
+            double[] scales,
             double[] scores,
             int contourLevel,
             float crossHalf,
@@ -68,6 +69,7 @@ namespace CalibOperatorCLI_Example
                 double matchRow = rows![m];
                 double matchCol = cols![m];
                 double angleDeg = angles != null && angles.Length > m ? angles[m] : 0;
+                double scale = scales != null && scales.Length > m ? scales[m] : 1.0;
 
                 foreach (Point2D[] contour in modelContours)
                 {
@@ -77,7 +79,7 @@ namespace CalibOperatorCLI_Example
                     var pts = new PointF[contour.Length];
                     for (int i = 0; i < contour.Length; i++)
                     {
-                        TransformModelPointToImage(contour[i], matchRow, matchCol, angleDeg, out double colImg, out double rowImg);
+                        TransformModelPointToImage(contour[i], matchRow, matchCol, angleDeg, scale, out double colImg, out double rowImg);
                         pts[i] = new PointF((float)colImg, (float)rowImg);
                     }
 
@@ -101,13 +103,21 @@ namespace CalibOperatorCLI_Example
             }
         }
 
-        private static void TransformModelPointToImage(Point2D modelPt, double matchRow, double matchCol, double angleDeg, out double colImg, out double rowImg)
+        private static void TransformModelPointToImage(
+            Point2D modelPt,
+            double matchRow,
+            double matchCol,
+            double angleDeg,
+            double scale,
+            out double colImg,
+            out double rowImg)
         {
             double a = angleDeg * Math.PI / 180.0;
             double c = Math.Cos(a);
             double s = Math.Sin(a);
-            double row = modelPt.Y;
-            double col = modelPt.X;
+            double z = Math.Abs(scale) > 1e-9 ? scale : 1.0;
+            double row = modelPt.Y * z;
+            double col = modelPt.X * z;
             rowImg = row * c - col * s + matchRow;
             colImg = row * s + col * c + matchCol;
         }

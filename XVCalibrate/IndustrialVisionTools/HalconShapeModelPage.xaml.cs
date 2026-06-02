@@ -2977,7 +2977,9 @@ namespace CalibOperatorCLI_Example
                             "least_squares",
                             findNumLevels,
                             greediness,
-                            ct);
+                            scaleMin: 1.0,
+                            scaleMax: 1.0,
+                            cancellationToken: ct);
                     }
 
                     ct.ThrowIfCancellationRequested();

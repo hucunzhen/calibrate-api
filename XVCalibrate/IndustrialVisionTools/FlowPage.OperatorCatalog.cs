@@ -1873,37 +1873,9 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
-                TypeId = "plc_connect",
-                DisplayName = "PLC连接",
-                Description = "连接 PLC (Modbus TCP)",
-                Category = "输出",
-                Params =
-                {
-                    new OperatorParam { Name = "ip", DisplayName = "IP", DefaultValue = "192.168.6.6", Description = "PLC IP 地址" },
-                    new OperatorParam { Name = "port", DisplayName = "端口", DefaultValue = "502", Description = "Modbus TCP 端口" },
-                    new OperatorParam { Name = "station", DisplayName = "站号", DefaultValue = "", Description = "留空则用 plc_config.json 的 ModbusStation（默认 0）；填 1~247 覆盖" }
-                },
-                Ports =
-                {
-                    new PortDef { Name = "Connected", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#607D8B" }
-                }
-            },
-            new OperatorDef
-            {
-                TypeId = "plc_disconnect",
-                DisplayName = "PLC断开",
-                Description = "断开 PLC 连接",
-                Category = "输出",
-                Ports =
-                {
-                    new PortDef { Name = "Disconnected", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#607D8B" }
-                }
-            },
-            new OperatorDef
-            {
                 TypeId = "plc_read_camera_capture",
                 DisplayName = "PLC 读相机拍照信号",
-                Description = "读取相机开始拍照位（默认 D1800L）。可将上游任意算子 Out 连到 After，保证在本算子之后再读 PLC。须先 PLC连接。",
+                Description = "读取相机开始拍照位（默认 D1800L）。可将上游任意算子 Out 连到 After，保证在本算子之后再读 PLC。",
                 Category = "输出",
                 Params =
                 {
@@ -1921,7 +1893,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "plc_wait_camera_capture",
                 DisplayName = "PLC 监听相机拍照",
-                Description = "阻塞轮询直到拍照位为 1。上游算子 Out → After 可排在任意算子之后执行；Out 透传 After 数据供下游继续。须先 PLC连接。",
+                Description = "阻塞轮询直到拍照位为 1。上游算子 Out → After 可排在任意算子之后执行；Out 透传 After 数据供下游继续。",
                 Category = "输出",
                 Params =
                 {
@@ -1949,7 +1921,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "plc_read_weld_done",
                 DisplayName = "PLC 读焊接完成",
-                Description = "读取 D803L（PLC→上位机，1=PLC 侧焊接完成）。须先 PLC连接。",
+                Description = "读取 D803L（PLC→上位机，1=PLC 侧焊接完成）。",
                 Category = "输出",
                 Params =
                 {
@@ -1964,7 +1936,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "plc_wait_weld_done",
                 DisplayName = "PLC 监听焊接完成",
-                Description = "阻塞轮询直到 D803L=1（PLC→上位机焊接完成）。建议接在「发送PLC」及「PLC 通知轨迹已下发」之后。须先 PLC连接。",
+                Description = "阻塞轮询直到 D803L=1（PLC→上位机焊接完成）。建议接在「发送PLC」及「PLC 通知轨迹已下发」之后。",
                 Category = "输出",
                 Params =
                 {
@@ -1991,7 +1963,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "plc_clear_weld_done",
                 DisplayName = "PLC 清焊接完成",
-                Description = "将焊接完成标志清 0（默认 D803L，PLC→上位机）。下一轮流程开始前应执行。须先 PLC连接。",
+                Description = "将焊接完成标志清 0（默认 D803L，PLC→上位机）。下一轮流程开始前应执行。",
                 Category = "输出",
                 Params =
                 {
@@ -2006,7 +1978,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "plc_set_weld_done_to_plc",
                 DisplayName = "PLC 通知轨迹已下发",
-                Description = "上位机→PLC：GVAR 下发后置 D804L=1（默认）。建议接在「发送PLC」与「PLC 监听焊接完成」之间。",
+                Description = "上位机→PLC：GVAR 下发后置 D804L=1（默认），并自动断开 Flow PLC 连接（替代旧 PLC断开 算子）。建议接在「发送PLC」与「PLC 监听焊接完成」之间。",
                 Category = "输出",
                 Params =
                 {
@@ -2022,7 +1994,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "plc_pou_enable",
                 DisplayName = "PLC POU使能",
-                Description = "写 POU 使能位到 PLC（默认 D801L.bit0=ON）。须先执行「PLC连接」。",
+                Description = "写 POU 使能位到 PLC（默认 D801L.bit0=ON）。",
                 Category = "输出",
                 Params =
                 {
@@ -2046,7 +2018,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "plc_set_segment_count",
                 DisplayName = "PLC 设置线段数量",
-                Description = "将待下发的线段条数写入 PLC（默认 D800，16 位整数）。须先执行「PLC连接」。可接数组长度或手动 segmentCount 参数。",
+                Description = "将待下发的线段条数写入 PLC（默认 D800，16 位整数）。可接数组长度或手动 segmentCount 参数。",
                 Category = "输出",
                 Params =
                 {
@@ -2063,10 +2035,13 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "send_plc",
                 DisplayName = "发送PLC",
-                Description = "与 PLC 页 Write All 相同：优先 GvarList；否则 Points3D/Points 生成 GVAR（相邻点→线段，closePolyline 默认补末点→首点闭合）。separate_batch=按条分批写 D800+GVAR；GvarSent 下游（POU/等待等）全部执行完后才置 D804L（setWeldDoneHostOnSend 或 setWeldDoneHostAfterAllBatches）。",
+                Description = "与 PLC 页 Write All 相同：执行时自动建立 Flow PLC 连接（支持 ip/port/station 覆盖）；优先 GvarList；否则 Points3D/Points 生成 GVAR（相邻点→线段，closePolyline 默认补末点→首点闭合）。separate_batch=按条分批写 D800+GVAR；下发完成通知请使用「PLC通知轨迹已下发」。",
                 Category = "输出",
                 Params =
                 {
+                    new OperatorParam { Name = "ip", DisplayName = "PLC IP", DefaultValue = "192.168.6.6", Description = "自动连接使用；留空按默认" },
+                    new OperatorParam { Name = "port", DisplayName = "PLC端口", DefaultValue = "502", Description = "自动连接使用；默认 502" },
+                    new OperatorParam { Name = "station", DisplayName = "PLC站号", DefaultValue = "", Description = "留空用 plc_config 的 ModbusStation；可覆盖为 1~247" },
                     new OperatorParam
                     {
                         Name = "splitByBar",
@@ -2120,23 +2095,6 @@ namespace CalibOperatorCLI_Example
                         Options = new List<string> { "true", "false" }
                     },
                     new OperatorParam { Name = "countRegister", DisplayName = "线段数量寄存器", DefaultValue = "D800", Description = "单次下发且 skipCountWrite=false 时写入；separate_batch 时每批写入当批段数" },
-                    new OperatorParam { Name = "weldDoneHostRegister", DisplayName = "下发完成标志", DefaultValue = "D804L", Description = "GvarSent 下游执行完后置 1；留空则不置位" },
-                    new OperatorParam
-                    {
-                        Name = "setWeldDoneHostOnSend",
-                        DisplayName = "发完自动置位",
-                        DefaultValue = "false",
-                        Description = "true=启用 D804 置位（在下游算子之后）",
-                        Options = new List<string> { "true", "false" }
-                    },
-                    new OperatorParam
-                    {
-                        Name = "setWeldDoneHostAfterAllBatches",
-                        DisplayName = "全部完成后置位",
-                        DefaultValue = "true",
-                        Description = "true=GVAR 与 GvarSent 下游完成后置 D804L（单次/分批均可；默认 true）；置位前会先清 0",
-                        Options = new List<string> { "true", "false" }
-                    },
                     new OperatorParam
                     {
                         Name = "runDownstreamPerBatch",
@@ -2153,7 +2111,6 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "Points3D", Direction = PortDirection.Input, DataType = typeof(CalibPoint3D[]), ColorHex = "#2196F3", IsOptional = true },
                     new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true },
                     new PortDef { Name = "GvarSent", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#FF9800", IsOptional = true },
-                    new PortDef { Name = "HostWeldDoneSignaled", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#673AB7", IsOptional = true },
                     new PortDef { Name = "BatchIndex", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FFC107", IsOptional = true },
                     new PortDef { Name = "BatchCount", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FFC107", IsOptional = true },
                     new PortDef { Name = "BatchBarId", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FFC107", IsOptional = true },
@@ -2164,10 +2121,13 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "send_plc_point",
                 DisplayName = "发送PLC(每点一点)",
-                Description = "与「发送PLC」相同下发逻辑。默认每点一条退化 GVAR(p0=p1)。asPolylineSegments=true 时改为相邻点连成线段并可闭合。GvarSent 下游全部执行完后才置 D804L。",
+                Description = "与「发送PLC」相同下发逻辑（执行时自动连接 PLC）。默认每点一条退化 GVAR(p0=p1)。asPolylineSegments=true 时改为相邻点连成线段并可闭合。下发完成通知请使用「PLC通知轨迹已下发」。",
                 Category = "输出",
                 Params =
                 {
+                    new OperatorParam { Name = "ip", DisplayName = "PLC IP", DefaultValue = "192.168.6.6", Description = "自动连接使用；留空按默认" },
+                    new OperatorParam { Name = "port", DisplayName = "PLC端口", DefaultValue = "502", Description = "自动连接使用；默认 502" },
+                    new OperatorParam { Name = "station", DisplayName = "PLC站号", DefaultValue = "", Description = "留空用 plc_config 的 ModbusStation；可覆盖为 1~247" },
                     new OperatorParam
                     {
                         Name = "splitByBar",
@@ -2223,9 +2183,6 @@ namespace CalibOperatorCLI_Example
                         Options = new List<string> { "true", "false" }
                     },
                     new OperatorParam { Name = "countRegister", DisplayName = "线段数量寄存器", DefaultValue = "D800", Description = "D800 等" },
-                    new OperatorParam { Name = "weldDoneHostRegister", DisplayName = "下发完成标志", DefaultValue = "D804L", Description = "发完后置位；留空不置位" },
-                    new OperatorParam { Name = "setWeldDoneHostOnSend", DisplayName = "发完自动置位", DefaultValue = "false", Options = new List<string> { "true", "false" } },
-                    new OperatorParam { Name = "setWeldDoneHostAfterAllBatches", DisplayName = "分批全部完成后置位", DefaultValue = "true", Options = new List<string> { "true", "false" } },
                     new OperatorParam { Name = "runDownstreamPerBatch", DisplayName = "每批执行下游", DefaultValue = "true", Options = new List<string> { "true", "false" } }
                 },
                 Ports =
@@ -2235,7 +2192,6 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "Points3D", Direction = PortDirection.Input, DataType = typeof(CalibPoint3D[]), ColorHex = "#2196F3", IsOptional = true },
                     new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true },
                     new PortDef { Name = "GvarSent", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#FF9800", IsOptional = true },
-                    new PortDef { Name = "HostWeldDoneSignaled", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#673AB7", IsOptional = true },
                     new PortDef { Name = "BatchIndex", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FFC107", IsOptional = true },
                     new PortDef { Name = "BatchCount", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FFC107", IsOptional = true },
                     new PortDef { Name = "BatchBarId", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FFC107", IsOptional = true },
@@ -2246,12 +2202,13 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "flow_loop",
                 DisplayName = "循环",
-                Description = "按次数或无限重复执行本算子下游连线上的全部算子（前置只执行一次）。填写 stepValues 时按列表长度固定循环，每轮输出 StepValue 一个值（可接光源控制 Value）。count≤0/inf/无限=无限循环。须用「运行」托管执行。",
+                Description = "按次数或无限重复执行本算子下游连线上的全部算子（前置只执行一次）。支持多路 List 输入按轮展开（如 InList/CoarseRowList/CoarseColumnList），每轮输出当前项并驱动下游。填写 stepValues 时每轮输出 StepValue。count≤0/inf/无限=无限循环。须用「运行」托管执行。",
                 Category = "流程",
                 Params =
                 {
                     new OperatorParam { Name = "count", DisplayName = "重复次数", DefaultValue = "3", Description = "正整数=固定次数；0/inf/无限=无限循环。填写 stepValues 时以列表长度为准，忽略 count" },
                     new OperatorParam { Name = "stepValues", DisplayName = "每轮数值列表", DefaultValue = "", Description = "固定次数时可选；分号/逗号/换行分隔，如 100;200;150。每轮输出 StepValue 一个值，长度=循环次数" },
+                    new OperatorParam { Name = "itemPorts", DisplayName = "列表端口名", DefaultValue = "In,In2,In3,In4,CoarseRow,CoarseColumn,CoarseAngle,CoarseScale,CoarseScore", Description = "可配置多路列表展开端口；逗号/分号/换行分隔，如 In,CoarseRow,CoarseColumn。将自动生成输入 XList 与输出 X 成对端口；可按需删减到任意数量。" },
                     new OperatorParam { Name = "intervalMs", DisplayName = "轮次间隔(ms)", DefaultValue = "0", Description = "每轮下游执行完后的等待时间，0=不等待" }
                 },
                 Ports =
@@ -3282,8 +3239,8 @@ namespace CalibOperatorCLI_Example
             new OperatorDef
             {
                 TypeId = "halcon_coarse_shape_match",
-                DisplayName = "HALCON 粗定位(刚性)",
-                Description = "FindShapeModel 全图刚性粗定位。输出接 halcon_fine_deformable_match 的 Coarse* 端口。与 halcon_find_shape_model 等价，参数名面向粗+精流程。",
+                DisplayName = "HALCON 粗定位(刚性/缩放)",
+                Description = "全图粗定位。默认刚性搜索；当 coarseScaleMin/Max ≠ 1 时使用缩放搜索（需 ScaledShape 模型）。输出接 halcon_fine_deformable_match 的 Coarse* 端口。",
                 Category = "HALCON",
                 Params =
                 {
@@ -3296,6 +3253,8 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "numLevels", DisplayName = "NumLevels", DefaultValue = "0", Description = "金字塔层数，0=模型默认" },
                     new OperatorParam { Name = "greediness", DisplayName = "Greediness", DefaultValue = "0.85", Description = "贪心系数" },
                     new OperatorParam { Name = "allowRetry", DisplayName = "失败重试", DefaultValue = "false", Description = "无结果时降分再搜" },
+                    new OperatorParam { Name = "coarseScaleMin", DisplayName = "粗 ScaleMin", DefaultValue = "1.0", Description = "粗匹配缩放下限；=1 时不缩放搜索（需 ScaledShape 模型才支持缩放）" },
+                    new OperatorParam { Name = "coarseScaleMax", DisplayName = "粗 ScaleMax", DefaultValue = "1.0", Description = "粗匹配缩放上限；=1 时不缩放搜索（需 ScaledShape 模型才支持缩放）" },
                     new OperatorParam { Name = "endScoreWeight", DisplayName = "端部得分权重", DefaultValue = "0.8", Description = "端部边缘对齐在分数中的权重，0=不修正；1=完全由端部决定。修正公式：score×(1-w+w×端部因子)" },
                     new OperatorParam { Name = "endArcFraction", DisplayName = "端部弧长占比", DefaultValue = "0.12", Description = "轮廓总长中两端各取的比例，用于端部边缘采样" }
                 },
@@ -3306,6 +3265,7 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#8BC34A" },
                     new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#03A9F4" },
                     new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF9800" },
+                    new PortDef { Name = "Scale", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#26A69A" },
                     new PortDef { Name = "Score", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FFEB3B" }
                 }
             },
@@ -3331,13 +3291,15 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "CoarseRow", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#8BC34A" },
                     new PortDef { Name = "CoarseColumn", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#03A9F4" },
                     new PortDef { Name = "CoarseAngle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF9800", IsOptional = true },
+                    new PortDef { Name = "CoarseScale", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#26A69A", IsOptional = true },
                     new PortDef { Name = "CoarseScore", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FFEB3B", IsOptional = true },
                     new PortDef { Name = "Mask", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FFB74D" },
                     new PortDef { Name = "MaskIndex", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FF7043" },
                     new PortDef { Name = "MaskCount", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FF7043" },
                     new PortDef { Name = "CoarseRowOut", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#8BC34A" },
                     new PortDef { Name = "CoarseColumnOut", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#03A9F4" },
-                    new PortDef { Name = "CoarseAngleOut", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF9800" }
+                    new PortDef { Name = "CoarseAngleOut", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#FF9800" },
+                    new PortDef { Name = "CoarseScaleOut", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#26A69A" }
                 }
             },
             new OperatorDef
@@ -3407,6 +3369,8 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "coarseSubPixel", DisplayName = "粗 SubPixel", DefaultValue = "none", Description = "粗定位亚像素：none 最快，interpolation 更准" },
                     new OperatorParam { Name = "coarseNumLevels", DisplayName = "粗 NumLevels", DefaultValue = "0", Description = "粗金字塔层数，0=用模型默认" },
                     new OperatorParam { Name = "coarseAllowRetry", DisplayName = "粗失败重试", DefaultValue = "false", Description = "无结果时是否降分再搜一次（会拖慢）" },
+                    new OperatorParam { Name = "coarseScaleMin", DisplayName = "粗 ScaleMin", DefaultValue = "1.0", Description = "粗匹配缩放下限；=1 时不缩放搜索（需 ScaledShape 模型）" },
+                    new OperatorParam { Name = "coarseScaleMax", DisplayName = "粗 ScaleMax", DefaultValue = "1.0", Description = "粗匹配缩放上限；=1 时不缩放搜索（需 ScaledShape 模型）" },
                     new OperatorParam { Name = "endScoreWeight", DisplayName = "粗端部得分权重", DefaultValue = "0.8", Description = "粗定位 CoarseScore 端部修正权重，0=不修正" },
                     new OperatorParam { Name = "endArcFraction", DisplayName = "粗端部弧长占比", DefaultValue = "0.12", Description = "粗定位轮廓端部分段占比" },
                     new OperatorParam { Name = "fineEndScoreWeight", DisplayName = "精端部得分权重", DefaultValue = "0.8", Description = "精匹配 Score 端部修正权重，0=不修正；留空则与粗相同" },
@@ -3435,6 +3399,7 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "CoarseRow", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#8BC34A" },
                     new PortDef { Name = "CoarseColumn", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#03A9F4" },
                     new PortDef { Name = "CoarseAngle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF9800" },
+                    new PortDef { Name = "CoarseScale", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#26A69A" },
                     new PortDef { Name = "CoarseScore", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FFEB3B" },
                     new PortDef { Name = "DeformedXld", Direction = PortDirection.Output, DataType = typeof(HalconXldContourBundle), ColorHex = "#E65100", IsOptional = true }
                 }
@@ -3925,7 +3890,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "halcon_display_shape_match",
                 DisplayName = "HALCON 显示形状匹配结果",
-                Description = "叠加 FindShapeModel 模板轮廓、十字与得分。可选接 ConsensusPickIndices（与 Row/Column 同源，一般为 Find 输出）仅显示格点筛选保留的匹配。",
+                Description = "叠加 FindShapeModel/FindScaledShapeModel 模板轮廓、十字与得分。可选接 Scale 显示缩放轮廓；可选接 ConsensusPickIndices（与 Row/Column 同源，一般为 Find 输出）仅显示格点筛选保留的匹配。",
                 Category = "HALCON",
                 Params =
                 {
@@ -3941,6 +3906,7 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "Row", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "Angle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
+                    new PortDef { Name = "Scale", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#26A69A", IsOptional = true },
                     new PortDef { Name = "Score", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FFC107", IsOptional = true },
                     new PortDef { Name = "ConsensusPickIndices", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#8BC34A", IsOptional = true },
                     new PortDef { Name = "GridCol", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#CDDC39", IsOptional = true },
@@ -3965,6 +3931,20 @@ namespace CalibOperatorCLI_Example
                 },
                 Params =
                 {
+                    new OperatorParam
+                    {
+                        Name = "inputPorts",
+                        DisplayName = "输入端口列表",
+                        DefaultValue = "In",
+                        Description = "可选；组合算子输入端口名列表，逗号/分号/换行分隔，如 In,In2,Trigger"
+                    },
+                    new OperatorParam
+                    {
+                        Name = "outputPorts",
+                        DisplayName = "输出端口列表",
+                        DefaultValue = "Out,Out2",
+                        Description = "可选；组合算子输出端口名列表，逗号/分号/换行分隔，如 Out,Out2,Debug"
+                    },
                     new OperatorParam
                     {
                         Name = "innerFlowPath",

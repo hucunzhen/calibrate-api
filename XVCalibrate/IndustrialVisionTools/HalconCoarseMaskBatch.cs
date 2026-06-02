@@ -21,6 +21,7 @@ namespace CalibOperatorCLI_Example
         public double[] CoarseRows { get; init; } = Array.Empty<double>();
         public double[] CoarseCols { get; init; } = Array.Empty<double>();
         public double[] CoarseAngles { get; init; } = Array.Empty<double>();
+        public double[] CoarseScales { get; init; } = Array.Empty<double>();
         public double[]? CoarseScores { get; init; }
 
         public int Count => Masks.Length;

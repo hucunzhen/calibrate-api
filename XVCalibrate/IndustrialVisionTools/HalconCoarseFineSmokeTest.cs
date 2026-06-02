@@ -62,7 +62,7 @@ namespace CalibOperatorCLI_Example
                     return 1;
 
                 var maskBatch = HalconFlowBridge.BuildCoarseShapeMaskBatch(
-                    img, rigidId, coarse.rows, coarse.cols, coarse.angles, coarse.scores, 2);
+                    img, rigidId, coarse.rows, coarse.cols, coarse.angles, coarse.scales, coarse.scores, 2);
                 Console.WriteLine($"  Mask: {maskBatch.Count} 张 [{sw.ElapsedMilliseconds}ms]");
                 if (maskBatch.Count > 0)
                 {

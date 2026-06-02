@@ -1286,19 +1286,21 @@ namespace CalibOperatorCLI_Example
             return idx;
         }
 
-        private static (double[] rows, double[] cols, double[] angles, double[] scores) ReorderMatchResultsByScore(
+        private static (double[] rows, double[] cols, double[] angles, double[] scales, double[] scores) ReorderMatchResultsByScore(
             double[] rows,
             double[] cols,
             double[] angles,
+            double[] scales,
             double[] scores)
         {
             if (scores.Length <= 1)
-                return (rows, cols, angles, scores);
+                return (rows, cols, angles, scales, scores);
 
             int[] order = SortIndicesByScoreDescending(scores);
             var rows2 = new double[order.Length];
             var cols2 = new double[order.Length];
             var angles2 = new double[order.Length];
+            var scales2 = new double[order.Length];
             var scores2 = new double[order.Length];
             for (int k = 0; k < order.Length; k++)
             {
@@ -1306,10 +1308,11 @@ namespace CalibOperatorCLI_Example
                 rows2[k] = rows[i];
                 cols2[k] = cols[i];
                 angles2[k] = angles[i];
+                scales2[k] = scales.Length > i ? scales[i] : 1.0;
                 scores2[k] = scores[i];
             }
 
-            return (rows2, cols2, angles2, scores2);
+            return (rows2, cols2, angles2, scales2, scores2);
         }
 
         private static Point2D[] OffsetContourToFullImage(Point2D[] contour, double rowOffset, double colOffset)
@@ -1503,10 +1506,16 @@ namespace CalibOperatorCLI_Example
             double[] angles,
             double[] scores,
             double endScoreWeight,
-            double endArcFraction = DefaultEndArcFraction) =>
-            AdjustCoarseShapeMatchScores(
-                inImg, rigidModelId, rows, cols, angles, scores,
+            double endArcFraction = DefaultEndArcFraction)
+        {
+            var scales = new double[rows.Length];
+            for (int i = 0; i < scales.Length; i++)
+                scales[i] = 1.0;
+            var adjusted = AdjustCoarseShapeMatchScores(
+                inImg, rigidModelId, rows, cols, angles, scales, scores,
                 endScoreWeight, endArcFraction, DefaultShapeMatchContourLevel);
+            return (adjusted.rows, adjusted.cols, adjusted.angles, adjusted.scores);
+        }
 
         /// <summary>对单次匹配结果按刚性模板端部对齐修正分数（粗/精匹配均可调用）。</summary>
         public static double ApplyEndScoreWeightAtPose(
@@ -1654,19 +1663,20 @@ namespace CalibOperatorCLI_Example
             }
         }
 
-        private static (double[] rows, double[] cols, double[] angles, double[] scores) AdjustCoarseShapeMatchScores(
+        private static (double[] rows, double[] cols, double[] angles, double[] scales, double[] scores) AdjustCoarseShapeMatchScores(
             CalibImage inImg,
             long rigidModelId,
             double[] rows,
             double[] cols,
             double[] angles,
+            double[] scales,
             double[] scores,
             double endScoreWeight,
             double endArcFraction,
             int contourLevel)
         {
             if (rows.Length == 0 || endScoreWeight <= 0)
-                return (rows, cols, angles, scores);
+                return (rows, cols, angles, scales, scores);
 
             HObject ho = CalibToHObject(inImg);
             try
@@ -1680,7 +1690,7 @@ namespace CalibOperatorCLI_Example
                         endScoreWeight, endArcFraction, contourLevel);
                 }
 
-                return ReorderMatchResultsByScore(rows, cols, angles, adjusted);
+                return ReorderMatchResultsByScore(rows, cols, angles, scales, adjusted);
             }
             finally
             {
@@ -1688,7 +1698,7 @@ namespace CalibOperatorCLI_Example
             }
         }
 
-        public static (double[] rows, double[] cols, double[] angles, double[] scores) CoarseShapeMatch(
+        public static (double[] rows, double[] cols, double[] angles, double[] scales, double[] scores) CoarseShapeMatch(
             CalibImage inImg,
             long rigidModelId,
             double angleStartDeg,
@@ -1700,18 +1710,24 @@ namespace CalibOperatorCLI_Example
             int numLevels,
             double greediness,
             bool allowRetry,
+            double coarseScaleMin = 1.0,
+            double coarseScaleMax = 1.0,
             double endScoreWeight = DefaultEndScoreWeight,
             double endArcFraction = DefaultEndArcFraction)
         {
             var raw = allowRetry
-                ? FindShapeModelWithFallback(inImg, rigidModelId, angleStartDeg, angleExtentDeg, minScore, numMatches, maxOverlap, subPixel, numLevels, greediness)
-                : FindShapeModel(inImg, rigidModelId, angleStartDeg, angleExtentDeg, minScore, numMatches, maxOverlap, subPixel, numLevels, greediness);
+                ? FindShapeModelWithScaleWithFallback(
+                    inImg, rigidModelId, angleStartDeg, angleExtentDeg, minScore, numMatches, maxOverlap, subPixel, numLevels, greediness,
+                    coarseScaleMin, coarseScaleMax)
+                : FindShapeModelWithScale(
+                    inImg, rigidModelId, angleStartDeg, angleExtentDeg, minScore, numMatches, maxOverlap, subPixel, numLevels, greediness,
+                    coarseScaleMin, coarseScaleMax);
 
             if (inImg == null || raw.scores.Length == 0)
                 return raw;
 
             return AdjustCoarseShapeMatchScores(
-                inImg, rigidModelId, raw.rows, raw.cols, raw.angles, raw.scores,
+                inImg, rigidModelId, raw.rows, raw.cols, raw.angles, raw.scales, raw.scores,
                 endScoreWeight, endArcFraction, DefaultShapeMatchContourLevel);
         }
 
@@ -1911,6 +1927,7 @@ namespace CalibOperatorCLI_Example
                 CoarseRows = coarseRows ?? Array.Empty<double>(),
                 CoarseCols = coarseCols ?? Array.Empty<double>(),
                 CoarseAngles = coarseAngles ?? Array.Empty<double>(),
+                CoarseScales = coarseRows != null ? Enumerable.Repeat(1.0, coarseRows.Length).ToArray() : Array.Empty<double>(),
                 FineRows = fineRows.ToArray(),
                 FineCols = fineCols.ToArray(),
                 FineAngles = fineAngles.ToArray(),
@@ -2004,6 +2021,7 @@ namespace CalibOperatorCLI_Example
                 CoarseRows = maskBatch.CoarseRows,
                 CoarseCols = maskBatch.CoarseCols,
                 CoarseAngles = maskBatch.CoarseAngles,
+                CoarseScales = maskBatch.CoarseScales,
                 CoarseScores = maskBatch.CoarseScores ?? Array.Empty<double>(),
                 FineRows = fineRows.ToArray(),
                 FineCols = fineCols.ToArray(),
@@ -2335,6 +2353,7 @@ namespace CalibOperatorCLI_Example
             double[] coarseRows,
             double[] coarseCols,
             double[] coarseAngles,
+            double[]? coarseScales,
             double[]? coarseScores,
             double fineAngleMarginDeg,
             double fineMinScore,
@@ -2400,6 +2419,7 @@ namespace CalibOperatorCLI_Example
                     double cRow = coarseRows[i];
                     double cCol = coarseCols[i];
                     double cAng = coarseAngles[i];
+                    double cScale = coarseScales != null && coarseScales.Length > i ? coarseScales[i] : 1.0;
                     bool wantDeformed = wantAnyDeformed && (!deformedFirstOnly || !deformedEmitted);
 
                     double fRow = 0, fCol = 0, fAng = 0, fScore = 0;
@@ -2427,7 +2447,7 @@ namespace CalibOperatorCLI_Example
                     }
                     else if (fineUseCoarseMask
                         && TryBuildCoarseCandidateMaskRegion(
-                            rigidModelId, cRow, cCol, cAng, fineMaskErosionPx, 1, 0, out HRegion? maskRegion))
+                            rigidModelId, cRow, cCol, cAng, cScale, fineMaskErosionPx, 1, 0, out HRegion? maskRegion))
                     {
                         try
                         {
@@ -2521,6 +2541,7 @@ namespace CalibOperatorCLI_Example
                 CoarseRows = coarseRows,
                 CoarseCols = coarseCols,
                 CoarseAngles = coarseAngles,
+                CoarseScales = coarseScales ?? Enumerable.Repeat(1.0, coarseRows.Length).ToArray(),
                 CoarseScores = coarseScores ?? Array.Empty<double>(),
                 FineRows = fineRows.ToArray(),
                 FineCols = fineCols.ToArray(),
@@ -2544,6 +2565,8 @@ namespace CalibOperatorCLI_Example
             int coarseNumLevels,
             double coarseGreediness,
             bool coarseAllowRetry,
+            double coarseScaleMin,
+            double coarseScaleMax,
             double fineAngleMarginDeg,
             double fineMinScore,
             int fineNumLevels,
@@ -2567,6 +2590,7 @@ namespace CalibOperatorCLI_Example
             var coarse = CoarseShapeMatch(
                 inImg, rigidModelId, coarseAngleStartDeg, coarseAngleExtentDeg,
                 coarseMinScore, coarseNumMatches, coarseMaxOverlap, subPixel, coarseNumLevels, coarseGreediness, coarseAllowRetry,
+                coarseScaleMin, coarseScaleMax,
                 endScoreWeight, endArcFraction);
 
             if (coarse.rows.Length == 0)
@@ -2574,7 +2598,7 @@ namespace CalibOperatorCLI_Example
 
             return FineDeformableShapeMatch(
                 inImg, rigidModelId, deformableModelId,
-                coarse.rows, coarse.cols, coarse.angles, coarse.scores,
+                coarse.rows, coarse.cols, coarse.angles, coarse.scales, coarse.scores,
                 fineAngleMarginDeg, fineMinScore, fineNumLevels, fineGreediness,
                 fineScaleMin, fineScaleMax, roiMarginPx, maxRoiHalfPx, maxFineMatches, deformedContourMode,
                 fineAllowFallback, rigidContourFallback,
@@ -2737,6 +2761,7 @@ namespace CalibOperatorCLI_Example
             double coarseRow,
             double coarseCol,
             double coarseAngleDeg,
+            double coarseScale,
             double erosionInsetPx,
             int contourLevel,
             double maskFillDilatePx,
@@ -2748,6 +2773,7 @@ namespace CalibOperatorCLI_Example
                 new[] { coarseRow },
                 new[] { coarseCol },
                 new[] { coarseAngleDeg },
+                new[] { coarseScale },
                 contourLevel,
                 erosionInsetPx,
                 maskFillDilatePx);
@@ -3602,18 +3628,20 @@ namespace CalibOperatorCLI_Example
             double[] rows,
             double[] cols,
             double[]? angles,
+            double[]? scales,
             int contourLevel,
             double erosionInsetPx,
             double maskFillDilatePx = 0) =>
             HalconRuntimeSettings.RunGeometrySafe(() =>
                 BuildShapeMatchFilledRegionsCore(
-                    modelId, rows, cols, angles, contourLevel, erosionInsetPx, maskFillDilatePx));
+                    modelId, rows, cols, angles, scales, contourLevel, erosionInsetPx, maskFillDilatePx));
 
         private static ShapeMatchRegionMask[] BuildShapeMatchFilledRegionsCore(
             long modelId,
             double[] rows,
             double[] cols,
             double[]? angles,
+            double[]? scales,
             int contourLevel,
             double erosionInsetPx,
             double maskFillDilatePx = 0)
@@ -3640,10 +3668,13 @@ namespace CalibOperatorCLI_Example
                 double matchRow = rows[m];
                 double matchCol = cols[m];
                 double angleDeg = angles != null && angles.Length > m ? angles[m] : 0;
+                double scale = scales != null && scales.Length > m ? scales[m] : 1.0;
                 double angleRad = angleDeg * Math.PI / 180.0;
 
                 HOperatorSet.HomMat2dIdentity(out HTuple hom);
                 HOperatorSet.HomMat2dRotate(hom, angleRad, 0, 0, out hom);
+                if (Math.Abs(scale - 1.0) > 1e-9)
+                    HOperatorSet.HomMat2dScale(hom, scale, scale, 0, 0, out hom);
                 HOperatorSet.HomMat2dTranslate(hom, matchRow, matchCol, out hom);
                 HOperatorSet.AffineTransContourXld(modelXld, out HObject transXld, hom);
 
@@ -3681,6 +3712,7 @@ namespace CalibOperatorCLI_Example
             double[] coarseRows,
             double[] coarseCols,
             double[]? coarseAngles,
+            double[]? coarseScales,
             double[]? coarseScores,
             double maskErosionPx,
             int contourLevel = 1,
@@ -3702,6 +3734,15 @@ namespace CalibOperatorCLI_Example
                     Array.Copy(coarseAngles, padded, Math.Min(coarseAngles.Length, n));
                 coarseAngles = padded;
             }
+            if (coarseScales == null || coarseScales.Length < n)
+            {
+                double[] padded = new double[n];
+                for (int i = 0; i < n; i++)
+                    padded[i] = 1.0;
+                if (coarseScales != null)
+                    Array.Copy(coarseScales, padded, Math.Min(coarseScales.Length, n));
+                coarseScales = padded;
+            }
 
             int emitCount = n;
             if (maxCandidates > 0)
@@ -3715,6 +3756,7 @@ namespace CalibOperatorCLI_Example
             var rows = new double[emitCount];
             var cols = new double[emitCount];
             var angles = new double[emitCount];
+            var scales = new double[emitCount];
             double[]? scores = coarseScores != null && coarseScores.Length >= n
                 ? new double[emitCount]
                 : null;
@@ -3727,6 +3769,7 @@ namespace CalibOperatorCLI_Example
                         coarseRows[i],
                         coarseCols[i],
                         coarseAngles[i],
+                        coarseScales[i],
                         maskErosionPx,
                         contourLevel,
                         maskFillDilatePx,
@@ -3743,6 +3786,7 @@ namespace CalibOperatorCLI_Example
                 rows[built] = coarseRows[i];
                 cols[built] = coarseCols[i];
                 angles[built] = coarseAngles[i];
+                scales[built] = coarseScales[i];
                 if (scores != null)
                     scores[built] = coarseScores![i];
                 built++;
@@ -3763,6 +3807,7 @@ namespace CalibOperatorCLI_Example
                 Array.Resize(ref rows, built);
                 Array.Resize(ref cols, built);
                 Array.Resize(ref angles, built);
+                Array.Resize(ref scales, built);
                 if (scores != null)
                     Array.Resize(ref scores, built);
             }
@@ -3777,6 +3822,7 @@ namespace CalibOperatorCLI_Example
                 CoarseRows = rows,
                 CoarseCols = cols,
                 CoarseAngles = angles,
+                CoarseScales = scales,
                 CoarseScores = scores
             };
         }
@@ -3788,13 +3834,14 @@ namespace CalibOperatorCLI_Example
             double[] coarseRows,
             double[] coarseCols,
             double[]? coarseAngles,
+            double[]? coarseScales,
             double[]? coarseScores,
             double maskErosionPx,
             int contourLevel = 1,
             int maxCandidates = 0,
             double maskFillDilatePx = 0)
             => BuildCoarseShapeMaskBatch(
-                image, rigidModelId, coarseRows, coarseCols, coarseAngles, coarseScores,
+                image, rigidModelId, coarseRows, coarseCols, coarseAngles, coarseScales, coarseScores,
                 maskErosionPx, contourLevel, maxCandidates, maskFillDilatePx);
 
         private static string DescribeCoarseMaskBatchFailure(
@@ -3881,6 +3928,7 @@ namespace CalibOperatorCLI_Example
             double coarseRow,
             double coarseCol,
             double coarseAngleDeg,
+            double coarseScale,
             double maskErosionPx,
             int contourLevel,
             double maskFillDilatePx,
@@ -3890,7 +3938,7 @@ namespace CalibOperatorCLI_Example
         {
             maskCalib = null;
             if (!TryBuildCoarseCandidateMaskRegion(
-                    rigidModelId, coarseRow, coarseCol, coarseAngleDeg, maskErosionPx, contourLevel, maskFillDilatePx,
+                    rigidModelId, coarseRow, coarseCol, coarseAngleDeg, coarseScale, maskErosionPx, contourLevel, maskFillDilatePx,
                     out HRegion? region))
                 return false;
 

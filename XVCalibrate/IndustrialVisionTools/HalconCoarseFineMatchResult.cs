@@ -11,6 +11,7 @@ namespace CalibOperatorCLI_Example
         public double[] CoarseRows { get; init; } = Array.Empty<double>();
         public double[] CoarseCols { get; init; } = Array.Empty<double>();
         public double[] CoarseAngles { get; init; } = Array.Empty<double>();
+        public double[] CoarseScales { get; init; } = Array.Empty<double>();
         public double[] CoarseScores { get; init; } = Array.Empty<double>();
 
         /// <summary>精匹配位置（失败时该候选不出现）。</summary>

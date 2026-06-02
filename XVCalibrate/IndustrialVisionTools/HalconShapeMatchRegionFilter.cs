@@ -70,7 +70,7 @@ namespace CalibOperatorCLI_Example
                 try
                 {
                     halconMasks = HalconFlowBridge.BuildShapeMatchFilledRegions(
-                        regionModelId, regionRows, regionCols, regionAngles, contourLevel, insetPx);
+                        regionModelId, regionRows, regionCols, regionAngles, scales: null, contourLevel, insetPx);
                     validRegion = CountValidHalconMasks(halconMasks);
                     if (validRegion > 0)
                         usedHalcon = true;

@@ -76,6 +76,11 @@ namespace CalibOperatorCLI_Example
                 // 初始化参数为默认值
                 foreach (var p in def.Params)
                     Params[p.Name] = p.DefaultValue;
+                // 全局执行开关（所有算子统一支持）
+                if (!Params.ContainsKey("enable"))
+                    Params["enable"] = "true";
+                if (!Params.ContainsKey("disable"))
+                    Params["disable"] = "false";
             }
         }
 

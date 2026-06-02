@@ -2318,7 +2318,7 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>
-        /// FindShapeModel：在图像中查找形状模板
+        /// FindShapeModel：在图像中查找形状模板（兼容旧签名，不返回 scale）。
         /// </summary>
         public static (double[] rows, double[] cols, double[] angles, double[] scores) FindShapeModel(
             CalibImage inImg,
@@ -2330,7 +2330,30 @@ namespace CalibOperatorCLI_Example
             double maxOverlap,
             string subPixel,
             int numLevels,
-            double greediness)
+            double greediness,
+            double scaleMin = 1.0,
+            double scaleMax = 1.0)
+        {
+            var result = FindShapeModelWithScale(
+                inImg, modelId, angleStartDeg, angleExtentDeg, minScore, numMatches, maxOverlap, subPixel, numLevels, greediness,
+                scaleMin, scaleMax);
+            return (result.rows, result.cols, result.angles, result.scores);
+        }
+
+        /// <summary>FindShapeModel / FindScaledShapeModel；返回 rows/cols/angles/scales/scores。</summary>
+        public static (double[] rows, double[] cols, double[] angles, double[] scales, double[] scores) FindShapeModelWithScale(
+            CalibImage inImg,
+            long modelId,
+            double angleStartDeg,
+            double angleExtentDeg,
+            double minScore,
+            int numMatches,
+            double maxOverlap,
+            string subPixel,
+            int numLevels,
+            double greediness,
+            double scaleMin = 1.0,
+            double scaleMax = 1.0)
         {
             long shapeId = ResolveRegisteredShapeModelId(modelId);
             if (shapeId < 0)
@@ -2345,34 +2368,74 @@ namespace CalibOperatorCLI_Example
                     ? "least_squares"
                     : subPixel;
 
-                HTuple hv_Row, hv_Column, hv_Angle, hv_Score;
-                shapeModel.FindShapeModel(
-                    hImg,
-                    angleStartDeg * Math.PI / 180.0,
-                    angleExtentDeg * Math.PI / 180.0,
-                    minScore,
-                    numMatches,
-                    maxOverlap,
-                    subPix,
-                    numLevels,
-                    greediness,
-                    out hv_Row,
-                    out hv_Column,
-                    out hv_Angle,
-                    out hv_Score);
+                HTuple hv_Row, hv_Column, hv_Angle, hv_Scale, hv_Score;
+                bool useScaled = Math.Abs(scaleMin - 1.0) > 1e-9 || Math.Abs(scaleMax - 1.0) > 1e-9;
+                if (!useScaled)
+                {
+                    shapeModel.FindShapeModel(
+                        hImg,
+                        angleStartDeg * Math.PI / 180.0,
+                        angleExtentDeg * Math.PI / 180.0,
+                        minScore,
+                        numMatches,
+                        maxOverlap,
+                        subPix,
+                        numLevels,
+                        greediness,
+                        out hv_Row,
+                        out hv_Column,
+                        out hv_Angle,
+                        out hv_Score);
+                    hv_Scale = new HTuple();
+                    for (int i = 0; i < hv_Row.Length; i++)
+                        hv_Scale = hv_Scale.TupleConcat(1.0);
+                }
+                else
+                {
+                    double sMin = Math.Max(0.01, Math.Min(scaleMin, scaleMax));
+                    double sMax = Math.Max(sMin, Math.Max(scaleMin, scaleMax));
+                    try
+                    {
+                        shapeModel.FindScaledShapeModel(
+                            hImg,
+                            angleStartDeg * Math.PI / 180.0,
+                            angleExtentDeg * Math.PI / 180.0,
+                            sMin,
+                            sMax,
+                            minScore,
+                            numMatches,
+                            maxOverlap,
+                            subPix,
+                            numLevels,
+                            greediness,
+                            out hv_Row,
+                            out hv_Column,
+                            out hv_Angle,
+                            out hv_Scale,
+                            out hv_Score);
+                    }
+                    catch (HOperatorException ex)
+                    {
+                        throw new InvalidOperationException(
+                            $"粗匹配缩放搜索失败：当前模型可能不是 ScaledShape（scaleMin={sMin:G4}, scaleMax={sMax:G4}）。请用 ScaledShape 重新建模或将 scale 设回 1。HALCON: {ex.Message}",
+                            ex);
+                    }
+                }
 
                 double[] rows = new double[hv_Row.Length];
                 double[] cols = new double[hv_Column.Length];
                 double[] angles = new double[hv_Angle.Length];
+                double[] scales = new double[hv_Row.Length];
                 double[] scores = new double[hv_Score.Length];
                 for (int i = 0; i < hv_Row.Length; i++)
                 {
                     rows[i] = hv_Row[i].D;
                     cols[i] = hv_Column[i].D;
                     angles[i] = hv_Angle[i].D * 180.0 / Math.PI;
+                    scales[i] = hv_Scale != null && hv_Scale.Length > i ? hv_Scale[i].D : 1.0;
                     scores[i] = hv_Score[i].D;
                 }
-                return (rows, cols, angles, scores);
+                return (rows, cols, angles, scales, scores);
             }
             finally
             {
@@ -2393,10 +2456,36 @@ namespace CalibOperatorCLI_Example
             string subPixel,
             int numLevels,
             double greediness,
+            double scaleMin = 1.0,
+            double scaleMax = 1.0,
+            CancellationToken cancellationToken = default)
+        {
+            var result = FindShapeModelWithScaleWithFallback(
+                inImg, modelId, angleStartDeg, angleExtentDeg, minScore, numMatches, maxOverlap, subPixel, numLevels, greediness,
+                scaleMin, scaleMax, cancellationToken);
+            return (result.rows, result.cols, result.angles, result.scores);
+        }
+
+        /// <summary>查找形状模板（含 scale）；若无结果则用更低 MinScore / Greediness 再试一次。</summary>
+        public static (double[] rows, double[] cols, double[] angles, double[] scales, double[] scores) FindShapeModelWithScaleWithFallback(
+            CalibImage inImg,
+            long modelId,
+            double angleStartDeg,
+            double angleExtentDeg,
+            double minScore,
+            int numMatches,
+            double maxOverlap,
+            string subPixel,
+            int numLevels,
+            double greediness,
+            double scaleMin = 1.0,
+            double scaleMax = 1.0,
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var first = FindShapeModel(inImg, modelId, angleStartDeg, angleExtentDeg, minScore, numMatches, maxOverlap, subPixel, numLevels, greediness);
+            var first = FindShapeModelWithScale(
+                inImg, modelId, angleStartDeg, angleExtentDeg, minScore, numMatches, maxOverlap, subPixel, numLevels, greediness,
+                scaleMin, scaleMax);
             if (first.rows.Length > 0)
                 return first;
 
@@ -2407,7 +2496,9 @@ namespace CalibOperatorCLI_Example
             if (Math.Abs(retryScore - minScore) < 1e-6 && Math.Abs(retryGreed - greediness) < 1e-6)
                 return first;
 
-            return FindShapeModel(inImg, modelId, angleStartDeg, angleExtentDeg, retryScore, numMatches, maxOverlap, subPixel, numLevels, retryGreed);
+            return FindShapeModelWithScale(
+                inImg, modelId, angleStartDeg, angleExtentDeg, retryScore, numMatches, maxOverlap, subPixel, numLevels, retryGreed,
+                scaleMin, scaleMax);
         }
 
         /// <summary>将已创建的模型写入 .shm 文件。</summary>
@@ -2737,7 +2828,7 @@ namespace CalibOperatorCLI_Example
             int h = image.Height;
 
             ShapeMatchRegionMask[] masks = BuildShapeMatchFilledRegions(
-                modelId, rows, cols, angles, contourLevel, erosionInsetPx);
+                modelId, rows, cols, angles, scales: null, contourLevel, erosionInsetPx);
             try
             {
                 int valid = 0;
