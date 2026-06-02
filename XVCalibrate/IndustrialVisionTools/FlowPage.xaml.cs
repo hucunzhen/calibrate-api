@@ -6905,12 +6905,16 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>
-        /// 返回某个 flow_loop 的“本层”下游：遇到下一个 flow_loop 即截断，不继续跨层展开。
-        /// 用于多 loop 串联时避免上层 loop 误执行下层 loop 的循环体（如 flow_sink）。
+        /// flow_loop 本层执行计划：
+        /// PostNodes=本层下游（遇到下一层 flow_loop 截断）；
+        /// ChildLoops=本层每轮需要触发的下一层 flow_loop（按拓扑序）。
         /// </summary>
-        private List<FlowNode> GetOrderedLoopLocalDownstream(FlowNode loopNode)
+        private (List<FlowNode> PostNodes, List<FlowNode> ChildLoops) GetOrderedLoopLocalPlan(
+            FlowNode loopNode,
+            IReadOnlyList<FlowNode> sorted)
         {
             var local = new HashSet<FlowNode>();
+            var childLoops = new HashSet<FlowNode>();
             var visited = new HashSet<FlowNode> { loopNode };
             var q = new Queue<FlowNode>();
             q.Enqueue(loopNode);
@@ -6925,14 +6929,19 @@ namespace CalibOperatorCLI_Example
                     if (!visited.Add(nxt))
                         continue;
                     if (string.Equals(nxt.Def.TypeId, "flow_loop", StringComparison.Ordinal) && nxt != loopNode)
-                        continue; // loop 边界：不跨到下一个 loop 内
+                    {
+                        childLoops.Add(nxt); // loop 边界：不跨进子 loop，由递归执行
+                        continue;
+                    }
+
                     local.Add(nxt);
                     q.Enqueue(nxt);
                 }
             }
 
-            var sorted = TopologicalSort();
-            return sorted.Where(local.Contains).ToList();
+            var postNodes = sorted.Where(local.Contains).ToList();
+            var orderedChildLoops = sorted.Where(childLoops.Contains).ToList();
+            return (postNodes, orderedChildLoops);
         }
 
 #if HALCON_ENABLED
@@ -7376,6 +7385,252 @@ namespace CalibOperatorCLI_Example
                     continue;
                 ApplyPointsSinkOutputs(n, n.PointsSinkAccumulator, new Dictionary<string, object?>());
             }
+        }
+
+        private async System.Threading.Tasks.Task<string> ExecuteManagedFlowLoopAsync(
+            FlowNode loopNode,
+            IReadOnlyList<FlowNode> sorted,
+            HashSet<Guid> executedNodeIds,
+            string scopeTag)
+        {
+            var listPortMaps = BuildFlowLoopListPortMaps(loopNode.Params);
+            var (postNodes, childLoops) = GetOrderedLoopLocalPlan(loopNode, sorted);
+            var predecessorSet = CollectPredecessorsIncludingSelf(loopNode);
+            var preNodes = sorted
+                .Where(n => predecessorSet.Contains(n)
+                            && n != loopNode
+                            && !string.Equals(n.Def.TypeId, "flow_loop", StringComparison.Ordinal)
+                            && !executedNodeIds.Contains(n.Id))
+                .ToList();
+
+            ResolveFlowLoopSchedule(
+                loopNode.Params.GetValueOrDefault("count"),
+                loopNode.Params.GetValueOrDefault("stepValues"),
+                out var repeatCount,
+                out var infiniteLoop,
+                out var stepValues);
+            int intervalMs = int.TryParse(loopNode.Params.GetValueOrDefault("intervalMs"), out var im) ? im : 0;
+            intervalMs = Math.Max(0, intervalMs);
+
+            string loopLabel = infiniteLoop ? "∞" : repeatCount.ToString(CultureInfo.InvariantCulture);
+            if (stepValues != null && stepValues.Length > 0)
+                AppendLog($"[{scopeTag}] flow_loop: {loopNode.Def.DisplayName} x{loopLabel}，StepValue=[{string.Join("; ", stepValues.Select(v => v.ToString("G", CultureInfo.InvariantCulture)))}]");
+            else
+                AppendLog($"[{scopeTag}] flow_loop: {loopNode.Def.DisplayName} x{loopLabel}，前置 {preNodes.Count} 节点，本层下游 {postNodes.Count} 节点，子循环 {childLoops.Count} 个");
+            if (infiniteLoop)
+                AppendLog($"[{scopeTag}] [LOOP] 无限循环：点击「停止」结束");
+
+            var postLoopDeferred = ComputePostLoopDeferredNodes(postNodes);
+            var perRoundNodes = postNodes.Where(n => !postLoopDeferred.Contains(n)).ToList();
+            if (postLoopDeferred.Count > 0)
+                AppendLog($"[{scopeTag}] 循环延后执行: {postLoopDeferred.Count} 个节点（如 Exposure Fusion）");
+
+            int successCountPre = 0;
+            int errorCountPre = 0;
+            long completedRounds = 0;
+            int errorCountPerRound = 0;
+            int errorCountPostLoop = 0;
+            IReadOnlyDictionary<string, object?> loopInputsForRounds = new Dictionary<string, object?>();
+            EnterFlowLoopSinkAccumulate();
+            try
+            {
+                // 仅清理“最近 loop”本层收集器，保证 flow_sink 作用域归属最近 flow_loop。
+                // 当最近 loop 再次进入时（例如被上层 loop 每轮触发），会在此处清空上次累积。
+                ResetFlowSinkAccumulators(perRoundNodes);
+
+                for (int i = 0; i < preNodes.Count; i++)
+                {
+                    ThrowIfExecutionCancelled();
+                    var node = preNodes[i];
+                    if (_skipFlowRunNodeIds != null && _skipFlowRunNodeIds.Contains(node.Id))
+                    {
+                        AppendLog($"[{scopeTag}][LOOP-PRE] 跳过: {node.Def.DisplayName}");
+                        continue;
+                    }
+
+                    StatusText.Text = $"循环-前置 [{i + 1}/{preNodes.Count}] {node.Def.DisplayName}...";
+                    AppendLog($"[{scopeTag}][LOOP-PRE {i + 1}/{preNodes.Count}] 执行: {node.Def.DisplayName}");
+                    await System.Threading.Tasks.Task.Yield();
+                    try
+                    {
+                        await ExecuteNodeForRunAsync(node, $"{scopeTag}-LOOP-PRE");
+                        successCountPre++;
+                        executedNodeIds.Add(node.Id);
+                    }
+                    catch (FlowExecutionGracefulStopException ex)
+                    {
+                        MarkDownstreamNodesSkippedFrom(node, ex.Message, $"{scopeTag}-LOOP-PRE-STOP");
+                        executedNodeIds.Add(node.Id);
+                        continue;
+                    }
+                    catch (Exception ex)
+                    {
+                        errorCountPre++;
+                        AppendLog($"[{scopeTag}][LOOP-PRE][ERROR] {node.Def.DisplayName}: {ex.Message}", true);
+                        continue;
+                    }
+                }
+
+                loopInputsForRounds = GetNodeInputs(loopNode);
+                var listLengths = CollectFlowLoopListLengths(loopInputsForRounds, listPortMaps);
+                var activeListLengths = listLengths.Where(kv => kv.Value > 0).ToList();
+                if (activeListLengths.Count > 0)
+                {
+                    int firstLen = activeListLengths[0].Value;
+                    bool sameLen = activeListLengths.All(kv => kv.Value == firstLen);
+                    if (!sameLen)
+                    {
+                        string detail = string.Join(", ", activeListLengths.Select(kv => $"{kv.Key}={kv.Value}"));
+                        throw new InvalidOperationException($"循环: 多路列表长度不一致（非空端口：{detail}）");
+                    }
+
+                    repeatCount = firstLen;
+                    infiniteLoop = false;
+                    if (stepValues != null && stepValues.Length > 0 && stepValues.Length != repeatCount)
+                        throw new InvalidOperationException(
+                            $"循环: stepValues 长度({stepValues.Length})与列表长度({repeatCount})不一致");
+                    AppendLog($"[{scopeTag}][LOOP] 列表驱动轮数={repeatCount}（非空端口：{string.Join(", ", activeListLengths.Select(kv => $"{kv.Key}:{kv.Value}"))}）");
+                }
+                else if (listLengths.Count > 0)
+                {
+                    repeatCount = 0;
+                    infiniteLoop = false;
+                    AppendLog($"[{scopeTag}][LOOP] 多路列表均为空，轮数=0");
+                }
+
+                long li = 0;
+                while (infiniteLoop || li < repeatCount)
+                {
+                    ThrowIfExecutionCancelled();
+                    loopNode.Outputs.Clear();
+                    loopNode.Outputs["Index"] = li > int.MaxValue ? int.MaxValue : (int)li;
+                    loopNode.Outputs["Count"] = infiniteLoop ? -1 : repeatCount;
+                    if (stepValues != null && li < stepValues.Length)
+                        loopNode.Outputs["StepValue"] = stepValues[li];
+                    ApplyFlowLoopListOutputs(loopNode, loopInputsForRounds, (int)li, listPortMaps);
+                    if (!loopNode.Outputs.ContainsKey("Out") && GetInputData(loopNode, "After") is { } afterVal)
+                        loopNode.Outputs["Out"] = afterVal;
+                    loopNode.Executed = true;
+                    loopNode.ErrorMessage = null;
+                    SetNodeStatus(loopNode, false);
+                    string roundTag = infiniteLoop
+                        ? $"loop {li + 1}/∞"
+                        : $"loop {li + 1}/{repeatCount}";
+                    if (stepValues != null && li < stepValues.Length)
+                        roundTag += $" v={stepValues[li]:G}";
+                    loopNode.ResultSummary = roundTag;
+                    UpdateNodeSummary(loopNode);
+
+                    AppendLog($"[{scopeTag}][LOOP {roundTag}] 开始本层下游 {perRoundNodes.Count} 节点");
+                    for (int j = 0; j < perRoundNodes.Count; j++)
+                    {
+                        ThrowIfExecutionCancelled();
+                        var node = perRoundNodes[j];
+                        if (_skipFlowRunNodeIds != null && _skipFlowRunNodeIds.Contains(node.Id))
+                        {
+                            AppendLog($"[{scopeTag}][LOOP] 跳过: {node.Def.DisplayName}");
+                            continue;
+                        }
+
+                        node.Outputs.Clear();
+                        node.ErrorMessage = null;
+                        node.Executed = false;
+                        StatusText.Text = $"循环[{roundTag}] [{j + 1}/{perRoundNodes.Count}] {node.Def.DisplayName}...";
+                        await System.Threading.Tasks.Task.Yield();
+                        try
+                        {
+                            await ExecuteNodeForRunAsync(node, $"{scopeTag}-L{li + 1}");
+                            executedNodeIds.Add(node.Id);
+                        }
+                        catch (FlowExecutionGracefulStopException ex)
+                        {
+                            MarkDownstreamNodesSkippedFrom(node, ex.Message, $"{scopeTag}-LOOP-STOP");
+                            executedNodeIds.Add(node.Id);
+                            continue;
+                        }
+                        catch (Exception ex)
+                        {
+                            AppendLog($"[{scopeTag}][LOOP][ERROR] {node.Def.DisplayName}: {ex.Message}", true);
+                            errorCountPerRound++;
+                            continue;
+                        }
+                    }
+
+                    // 子 flow_loop（最近边界）按每轮触发，形成“串联继续执行”语义。
+                    foreach (var childLoop in childLoops)
+                    {
+                        string childDone = await ExecuteManagedFlowLoopAsync(
+                            childLoop,
+                            sorted,
+                            executedNodeIds,
+                            $"{scopeTag}:{loopNode.Def.DisplayName}:{li + 1}");
+                        AppendLog($"[{scopeTag}][LOOP {roundTag}] 子循环完成: {childLoop.Def.DisplayName} -> {childDone}");
+                    }
+
+                    completedRounds++;
+                    li++;
+                    if (intervalMs > 0 && (infiniteLoop || li < repeatCount))
+                        await System.Threading.Tasks.Task.Delay(intervalMs, _runCts?.Token ?? System.Threading.CancellationToken.None);
+                }
+            }
+            finally
+            {
+                ExitFlowLoopSinkAccumulate();
+            }
+
+            RefreshPointsSinkMergedOutputs(perRoundNodes);
+
+            var orderedDeferred = postNodes.Where(postLoopDeferred.Contains).ToList();
+            if (orderedDeferred.Count > 0)
+            {
+                AppendLog($"[{scopeTag}][LOOP] 循环后执行 {orderedDeferred.Count} 个节点");
+                for (int j = 0; j < orderedDeferred.Count; j++)
+                {
+                    ThrowIfExecutionCancelled();
+                    var node = orderedDeferred[j];
+                    if (_skipFlowRunNodeIds != null && _skipFlowRunNodeIds.Contains(node.Id))
+                    {
+                        AppendLog($"[{scopeTag}][LOOP-POST] 跳过: {node.Def.DisplayName}");
+                        continue;
+                    }
+
+                    node.Outputs.Clear();
+                    node.ErrorMessage = null;
+                    node.Executed = false;
+                    StatusText.Text = $"循环后 [{j + 1}/{orderedDeferred.Count}] {node.Def.DisplayName}...";
+                    await System.Threading.Tasks.Task.Yield();
+                    try
+                    {
+                        await ExecuteNodeForRunAsync(node, $"{scopeTag}-LOOP-POST");
+                        executedNodeIds.Add(node.Id);
+                    }
+                    catch (FlowExecutionGracefulStopException ex)
+                    {
+                        MarkDownstreamNodesSkippedFrom(node, ex.Message, $"{scopeTag}-LOOP-POST-STOP");
+                        executedNodeIds.Add(node.Id);
+                        continue;
+                    }
+                    catch (Exception ex)
+                    {
+                        AppendLog($"[{scopeTag}][LOOP-POST][ERROR] {node.Def.DisplayName}: {ex.Message}", true);
+                        errorCountPostLoop++;
+                        continue;
+                    }
+                }
+            }
+
+            executedNodeIds.Add(loopNode.Id);
+            string doneRounds = infiniteLoop
+                ? $"{completedRounds} 轮（已停止）"
+                : $"{completedRounds} 轮";
+            StatusText.Text = $"循环完成: {loopNode.Def.DisplayName} 前置 {successCountPre}/{preNodes.Count}，{doneRounds} × 下游 {perRoundNodes.Count} 节点/轮"
+                + (orderedDeferred.Count > 0 ? $"，延后 {orderedDeferred.Count}" : "")
+                + (errorCountPre > 0 ? $"，前置错误 {errorCountPre}" : "")
+                + (errorCountPerRound > 0 ? $"，轮内错误 {errorCountPerRound}" : "")
+                + (errorCountPostLoop > 0 ? $"，延后错误 {errorCountPostLoop}" : "");
+            StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
+            AppendLog($"========== flow_loop 完成: {loopNode.Def.DisplayName}, {doneRounds}，下游 {perRoundNodes.Count} 节点/轮 ==========");
+            return doneRounds;
         }
 
         private static void AppendPointsSinkRound(
@@ -15307,239 +15562,79 @@ namespace CalibOperatorCLI_Example
                 if (flowLoops.Count > 0)
                 {
                     var loopSummaries = new List<string>();
-                    var crossLoopExecutedNodeIds = new HashSet<Guid>();
-                    foreach (var loopNode in flowLoops)
+                    var executedNodeIds = new HashSet<Guid>();
+                    var loopDownstreamMap = flowLoops.ToDictionary(
+                        l => l,
+                        l =>
+                        {
+                            var ds = GetDownstreamNodes(l);
+                            ds.Remove(l);
+                            return ds;
+                        });
+                    var rootLoops = flowLoops
+                        .Where(l => !flowLoops.Any(other => other != l && loopDownstreamMap[other].Contains(l)))
+                        .ToList();
+                    if (rootLoops.Count == 0)
+                        rootLoops = flowLoops;
+                    rootLoops = sorted.Where(rootLoops.Contains).ToList();
+
+                    foreach (var loopNode in rootLoops)
                     {
-                        var listPortMaps = BuildFlowLoopListPortMaps(loopNode.Params);
-                        var downstream = GetDownstreamNodes(loopNode);
-                        var preNodes = sorted
-                            .Where(n => !downstream.Contains(n)
-                                        && !string.Equals(n.Def.TypeId, "flow_loop", StringComparison.Ordinal)
-                                        && !crossLoopExecutedNodeIds.Contains(n.Id))
-                            .ToList();
-                        var postNodes = GetOrderedLoopLocalDownstream(loopNode)
-                            .Where(n => !string.Equals(n.Def.TypeId, "flow_loop", StringComparison.Ordinal))
-                            .ToList();
+                        string doneRounds = await ExecuteManagedFlowLoopAsync(loopNode, sorted, executedNodeIds, "ROOT");
+                        loopSummaries.Add($"{loopNode.Def.DisplayName}: {doneRounds}");
+                    }
 
-                        ResolveFlowLoopSchedule(
-                            loopNode.Params.GetValueOrDefault("count"),
-                            loopNode.Params.GetValueOrDefault("stepValues"),
-                            out var repeatCount,
-                            out var infiniteLoop,
-                            out var stepValues);
-                        int intervalMs = int.TryParse(loopNode.Params.GetValueOrDefault("intervalMs"), out var im) ? im : 0;
-                        intervalMs = Math.Max(0, intervalMs);
+                    int residualSuccess = 0;
+                    int residualError = 0;
+                    foreach (var node in sorted)
+                    {
+                        if (string.Equals(node.Def.TypeId, "flow_loop", StringComparison.Ordinal))
+                            continue;
+                        if (executedNodeIds.Contains(node.Id))
+                            continue;
+                        if (_skipFlowRunNodeIds.Contains(node.Id))
+                        {
+                            residualSuccess++;
+                            AppendLog($"[RESIDUAL] 跳过: {node.Def.DisplayName}（已在批内下游执行）");
+                            executedNodeIds.Add(node.Id);
+                            continue;
+                        }
 
-                        string loopLabel = infiniteLoop ? "∞" : repeatCount.ToString(CultureInfo.InvariantCulture);
-                        if (stepValues != null && stepValues.Length > 0)
-                            AppendLog($"检测到 flow_loop: {loopNode.Def.DisplayName} x{loopLabel}，StepValue=[{string.Join("; ", stepValues.Select(v => v.ToString("G", CultureInfo.InvariantCulture)))}]");
-                        else
-                            AppendLog($"检测到 flow_loop: {loopNode.Def.DisplayName} x{loopLabel}，前置 {preNodes.Count} 节点，下游 {postNodes.Count} 节点");
-                        if (infiniteLoop)
-                            AppendLog("[LOOP] 无限循环：点击「停止」结束");
-
-                        var postLoopDeferred = ComputePostLoopDeferredNodes(postNodes);
-                        var perRoundNodes = postNodes.Where(n => !postLoopDeferred.Contains(n)).ToList();
-                        if (postLoopDeferred.Count > 0)
-                            AppendLog($"循环延后执行: {postLoopDeferred.Count} 个节点（如 Exposure Fusion）");
-
-                        int successCountPre = 0;
-                        int errorCountPre = 0;
-                        long completedRounds = 0;
-                        int errorCountPerRound = 0;
-                        int errorCountPostLoop = 0;
-                        IReadOnlyDictionary<string, object?> loopInputsForRounds = new Dictionary<string, object?>();
-                        EnterFlowLoopSinkAccumulate();
+                        ThrowIfExecutionCancelled();
+                        StatusText.Text = $"执行后续 [{residualSuccess + residualError + 1}] {node.Def.DisplayName}...";
+                        AppendLog($"[RESIDUAL] 执行: {node.Def.DisplayName}");
+                        await System.Threading.Tasks.Task.Yield();
                         try
                         {
-                            ResetFlowSinkAccumulators(perRoundNodes);
-
-                            for (int i = 0; i < preNodes.Count; i++)
-                            {
-                                ThrowIfExecutionCancelled();
-                                var node = preNodes[i];
-                                if (_skipFlowRunNodeIds != null && _skipFlowRunNodeIds.Contains(node.Id))
-                                {
-                                    AppendLog($"[LOOP-PRE] 跳过: {node.Def.DisplayName}");
-                                    continue;
-                                }
-                                StatusText.Text = $"循环-前置 [{i + 1}/{preNodes.Count}] {node.Def.DisplayName}...";
-                                AppendLog($"[LOOP-PRE {i + 1}/{preNodes.Count}] 执行: {node.Def.DisplayName}");
-                                await System.Threading.Tasks.Task.Yield();
-                                try
-                                {
-                                    await ExecuteNodeForRunAsync(node, "LOOP-PRE");
-                                    successCountPre++;
-                                    crossLoopExecutedNodeIds.Add(node.Id);
-                                }
-                                catch (FlowExecutionGracefulStopException ex)
-                                {
-                                    MarkDownstreamNodesSkippedFrom(node, ex.Message, "LOOP-PRE-STOP");
-                                    crossLoopExecutedNodeIds.Add(node.Id);
-                                    continue;
-                                }
-                                catch (Exception ex)
-                                {
-                                    errorCountPre++;
-                                    AppendLog($"[LOOP-PRE][ERROR] {node.Def.DisplayName}: {ex.Message}", true);
-                                    continue;
-                                }
-                            }
-
-                            loopInputsForRounds = GetNodeInputs(loopNode);
-                            var listLengths = CollectFlowLoopListLengths(loopInputsForRounds, listPortMaps);
-                            var activeListLengths = listLengths.Where(kv => kv.Value > 0).ToList();
-                            if (activeListLengths.Count > 0)
-                            {
-                                int firstLen = activeListLengths[0].Value;
-                                bool sameLen = activeListLengths.All(kv => kv.Value == firstLen);
-                                if (!sameLen)
-                                {
-                                    string detail = string.Join(", ", activeListLengths.Select(kv => $"{kv.Key}={kv.Value}"));
-                                    throw new InvalidOperationException($"循环: 多路列表长度不一致（非空端口：{detail}）");
-                                }
-
-                                repeatCount = firstLen;
-                                infiniteLoop = false;
-                                if (stepValues != null && stepValues.Length > 0 && stepValues.Length != repeatCount)
-                                    throw new InvalidOperationException(
-                                        $"循环: stepValues 长度({stepValues.Length})与列表长度({repeatCount})不一致");
-                                AppendLog($"[LOOP] 列表驱动轮数={repeatCount}（非空端口：{string.Join(", ", activeListLengths.Select(kv => $"{kv.Key}:{kv.Value}"))}）");
-                            }
-                            else if (listLengths.Count > 0)
-                            {
-                                repeatCount = 0;
-                                infiniteLoop = false;
-                                AppendLog("[LOOP] 多路列表均为空，轮数=0");
-                            }
-
-                            long li = 0;
-                            while (infiniteLoop || li < repeatCount)
-                            {
-                                ThrowIfExecutionCancelled();
-                                loopNode.Outputs.Clear();
-                                loopNode.Outputs["Index"] = li > int.MaxValue ? int.MaxValue : (int)li;
-                                loopNode.Outputs["Count"] = infiniteLoop ? -1 : repeatCount;
-                                if (stepValues != null && li < stepValues.Length)
-                                    loopNode.Outputs["StepValue"] = stepValues[li];
-                                ApplyFlowLoopListOutputs(loopNode, loopInputsForRounds, (int)li, listPortMaps);
-                                if (!loopNode.Outputs.ContainsKey("Out") && GetInputData(loopNode, "After") is { } afterVal)
-                                    loopNode.Outputs["Out"] = afterVal;
-                                loopNode.Executed = true;
-                                loopNode.ErrorMessage = null;
-                                SetNodeStatus(loopNode, false);
-                                string roundTag = infiniteLoop
-                                    ? $"loop {li + 1}/∞"
-                                    : $"loop {li + 1}/{repeatCount}";
-                                if (stepValues != null && li < stepValues.Length)
-                                    roundTag += $" v={stepValues[li]:G}";
-                                loopNode.ResultSummary = roundTag;
-                                UpdateNodeSummary(loopNode);
-
-                                AppendLog($"[LOOP {roundTag}] 开始下游 {perRoundNodes.Count} 节点");
-                                for (int j = 0; j < perRoundNodes.Count; j++)
-                                {
-                                    ThrowIfExecutionCancelled();
-                                    var node = perRoundNodes[j];
-                                    if (_skipFlowRunNodeIds != null && _skipFlowRunNodeIds.Contains(node.Id))
-                                    {
-                                        AppendLog($"[LOOP] 跳过: {node.Def.DisplayName}");
-                                        continue;
-                                    }
-                                    node.Outputs.Clear();
-                                    node.ErrorMessage = null;
-                                    node.Executed = false;
-                                    StatusText.Text = $"循环[{roundTag}] [{j + 1}/{perRoundNodes.Count}] {node.Def.DisplayName}...";
-                                    await System.Threading.Tasks.Task.Yield();
-                                    try
-                                    {
-                                        await ExecuteNodeForRunAsync(node, $"L{li + 1}");
-                                    }
-                                    catch (FlowExecutionGracefulStopException ex)
-                                    {
-                                        MarkDownstreamNodesSkippedFrom(node, ex.Message, "LOOP-STOP");
-                                        continue;
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        AppendLog($"[LOOP][ERROR] {node.Def.DisplayName}: {ex.Message}", true);
-                                        errorCountPerRound++;
-                                        continue;
-                                    }
-                                }
-
-                                completedRounds++;
-                                li++;
-                                if (intervalMs > 0 && (infiniteLoop || li < repeatCount))
-                                    await System.Threading.Tasks.Task.Delay(intervalMs, _runCts?.Token ?? System.Threading.CancellationToken.None);
-                            }
+                            await ExecuteNodeForRunAsync(node, "LOOP-RESIDUAL");
+                            residualSuccess++;
+                            executedNodeIds.Add(node.Id);
                         }
-                        finally
+                        catch (FlowExecutionGracefulStopException ex)
                         {
-                            ExitFlowLoopSinkAccumulate();
+                            MarkDownstreamNodesSkippedFrom(node, ex.Message, "LOOP-RESIDUAL-STOP");
+                            executedNodeIds.Add(node.Id);
+                            continue;
                         }
-
-                        RefreshPointsSinkMergedOutputs(perRoundNodes);
-
-                        var orderedDeferred = postNodes.Where(postLoopDeferred.Contains).ToList();
-                        if (orderedDeferred.Count > 0)
+                        catch (Exception ex)
                         {
-                            AppendLog($"[LOOP] 循环后执行 {orderedDeferred.Count} 个节点");
-                            for (int j = 0; j < orderedDeferred.Count; j++)
-                            {
-                                ThrowIfExecutionCancelled();
-                                var node = orderedDeferred[j];
-                                if (_skipFlowRunNodeIds != null && _skipFlowRunNodeIds.Contains(node.Id))
-                                {
-                                    AppendLog($"[LOOP-POST] 跳过: {node.Def.DisplayName}");
-                                    continue;
-                                }
-                                node.Outputs.Clear();
-                                node.ErrorMessage = null;
-                                node.Executed = false;
-                                StatusText.Text = $"循环后 [{j + 1}/{orderedDeferred.Count}] {node.Def.DisplayName}...";
-                                await System.Threading.Tasks.Task.Yield();
-                                try
-                                {
-                                    await ExecuteNodeForRunAsync(node, "LOOP-POST");
-                                    crossLoopExecutedNodeIds.Add(node.Id);
-                                }
-                                catch (FlowExecutionGracefulStopException ex)
-                                {
-                                    MarkDownstreamNodesSkippedFrom(node, ex.Message, "LOOP-POST-STOP");
-                                    crossLoopExecutedNodeIds.Add(node.Id);
-                                    continue;
-                                }
-                                catch (Exception ex)
-                                {
-                                    AppendLog($"[LOOP-POST][ERROR] {node.Def.DisplayName}: {ex.Message}", true);
-                                    errorCountPostLoop++;
-                                    continue;
-                                }
-                            }
+                            residualError++;
+                            AppendLog($"[RESIDUAL][ERROR] {node.Def.DisplayName}: {ex.Message}", true);
+                            continue;
                         }
-
-                        foreach (var n in perRoundNodes)
-                            crossLoopExecutedNodeIds.Add(n.Id);
-                        foreach (var n in orderedDeferred)
-                            crossLoopExecutedNodeIds.Add(n.Id);
-                        crossLoopExecutedNodeIds.Add(loopNode.Id);
-
-                        string doneRounds = infiniteLoop
-                            ? $"{completedRounds} 轮（已停止）"
-                            : $"{completedRounds} 轮";
-                        loopSummaries.Add($"{loopNode.Def.DisplayName}: {doneRounds}");
-                        StatusText.Text = $"循环完成: {loopNode.Def.DisplayName} 前置 {successCountPre}/{preNodes.Count}，{doneRounds} × 下游 {perRoundNodes.Count} 节点/轮"
-                            + (orderedDeferred.Count > 0 ? $"，延后 {orderedDeferred.Count}" : "")
-                            + (errorCountPre > 0 ? $"，前置错误 {errorCountPre}" : "")
-                            + (errorCountPerRound > 0 ? $"，轮内错误 {errorCountPerRound}" : "")
-                            + (errorCountPostLoop > 0 ? $"，延后错误 {errorCountPostLoop}" : "");
-                        StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
-                        AppendLog($"========== flow_loop 完成: {loopNode.Def.DisplayName}, {doneRounds}，下游 {perRoundNodes.Count} 节点/轮 ==========");
                     }
+
                     if (loopSummaries.Count > 1)
                         AppendLog($"========== 多 flow_loop 完成: {string.Join(" | ", loopSummaries)} ==========");
-                    return true;
+                    if (residualSuccess > 0 || residualError > 0)
+                        AppendLog($"========== loop 后续执行: success={residualSuccess}, error={residualError} ==========");
+
+                    bool ok = residualError == 0;
+                    StatusText.Text = ok
+                        ? $"循环执行完成: {string.Join(" | ", loopSummaries)}"
+                        : $"循环执行完成(含错误): {string.Join(" | ", loopSummaries)}，后续错误 {residualError}";
+                    StatusText.Foreground = new SolidColorBrush(ok ? Colors.LightGreen : Colors.Orange);
+                    return ok;
                 }
 
                 AppendLog($"共 {sorted.Count} 个节点待执行");
@@ -15867,7 +15962,8 @@ namespace CalibOperatorCLI_Example
                             .Where(n => !downstream.Contains(n)
                                         && !string.Equals(n.Def.TypeId, "flow_loop", StringComparison.Ordinal))
                             .ToList();
-                        var postNodes = GetOrderedLoopLocalDownstream(loopNode)
+                        var plan = GetOrderedLoopLocalPlan(loopNode, sorted);
+                        var postNodes = plan.PostNodes
                             .Where(n => !string.Equals(n.Def.TypeId, "flow_loop", StringComparison.Ordinal))
                             .ToList();
                         var postLoopDeferred = ComputePostLoopDeferredNodes(postNodes);
