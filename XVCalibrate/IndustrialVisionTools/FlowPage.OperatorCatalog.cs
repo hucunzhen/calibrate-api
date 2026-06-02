@@ -1919,6 +1919,34 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "plc_connect",
+                DisplayName = "PLC连接",
+                Description = "连接 Flow 专用 PLC 会话（信捷 Modbus TCP）。后续 PLC 算子将复用该连接。",
+                Category = "输出",
+                Params =
+                {
+                    new OperatorParam { Name = "ip", DisplayName = "PLC IP", DefaultValue = "192.168.6.6", Description = "目标 PLC IP" },
+                    new OperatorParam { Name = "port", DisplayName = "PLC端口", DefaultValue = "502", Description = "默认 502" },
+                    new OperatorParam { Name = "station", DisplayName = "PLC站号", DefaultValue = "", Description = "留空用 plc_config 的 ModbusStation；可覆盖为 1~247" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Connected", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#4CAF50" }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "plc_disconnect",
+                DisplayName = "PLC断开",
+                Description = "断开 Flow 专用 PLC 会话。若当前连接来自 PLC 页会话，则不会主动断开。",
+                Category = "输出",
+                Ports =
+                {
+                    new PortDef { Name = "Disconnected", Direction = PortDirection.Output, DataType = typeof(bool), ColorHex = "#F44336" }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "plc_read_weld_done",
                 DisplayName = "PLC 读焊接完成",
                 Description = "读取 D803L（PLC→上位机，1=PLC 侧焊接完成）。",
@@ -1978,7 +2006,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "plc_set_weld_done_to_plc",
                 DisplayName = "PLC 通知轨迹已下发",
-                Description = "上位机→PLC：GVAR 下发后置 D804L=1（默认），并自动断开 Flow PLC 连接（替代旧 PLC断开 算子）。建议接在「发送PLC」与「PLC 监听焊接完成」之间。",
+                Description = "上位机→PLC：GVAR 下发后置 D804L=1（默认）。建议接在「发送PLC」与「PLC 监听焊接完成」之间。",
                 Category = "输出",
                 Params =
                 {
@@ -2035,13 +2063,10 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "send_plc",
                 DisplayName = "发送PLC",
-                Description = "与 PLC 页 Write All 相同：执行时自动建立 Flow PLC 连接（支持 ip/port/station 覆盖）；优先 GvarList；否则 Points3D/Points 生成 GVAR（相邻点→线段，closePolyline 默认补末点→首点闭合）。separate_batch=按条分批写 D800+GVAR；下发完成通知请使用「PLC通知轨迹已下发」。",
+                Description = "与 PLC 页 Write All 相同：须先 PLC连接；优先 GvarList；否则 Points3D/Points 生成 GVAR（相邻点→线段，closePolyline 默认补末点→首点闭合）。separate_batch=按条分批写 D800+GVAR；下发完成通知请使用「PLC通知轨迹已下发」。",
                 Category = "输出",
                 Params =
                 {
-                    new OperatorParam { Name = "ip", DisplayName = "PLC IP", DefaultValue = "192.168.6.6", Description = "自动连接使用；留空按默认" },
-                    new OperatorParam { Name = "port", DisplayName = "PLC端口", DefaultValue = "502", Description = "自动连接使用；默认 502" },
-                    new OperatorParam { Name = "station", DisplayName = "PLC站号", DefaultValue = "", Description = "留空用 plc_config 的 ModbusStation；可覆盖为 1~247" },
                     new OperatorParam
                     {
                         Name = "splitByBar",
@@ -2121,13 +2146,10 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "send_plc_point",
                 DisplayName = "发送PLC(每点一点)",
-                Description = "与「发送PLC」相同下发逻辑（执行时自动连接 PLC）。默认每点一条退化 GVAR(p0=p1)。asPolylineSegments=true 时改为相邻点连成线段并可闭合。下发完成通知请使用「PLC通知轨迹已下发」。",
+                Description = "与「发送PLC」相同下发逻辑（须先 PLC连接）。默认每点一条退化 GVAR(p0=p1)。asPolylineSegments=true 时改为相邻点连成线段并可闭合。下发完成通知请使用「PLC通知轨迹已下发」。",
                 Category = "输出",
                 Params =
                 {
-                    new OperatorParam { Name = "ip", DisplayName = "PLC IP", DefaultValue = "192.168.6.6", Description = "自动连接使用；留空按默认" },
-                    new OperatorParam { Name = "port", DisplayName = "PLC端口", DefaultValue = "502", Description = "自动连接使用；默认 502" },
-                    new OperatorParam { Name = "station", DisplayName = "PLC站号", DefaultValue = "", Description = "留空用 plc_config 的 ModbusStation；可覆盖为 1~247" },
                     new OperatorParam
                     {
                         Name = "splitByBar",
