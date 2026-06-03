@@ -1,0 +1,229 @@
+{
+  "Nodes": [
+    {
+      "Id": "b2000001-0001-4001-8001-000000000009",
+      "TypeId": "halcon_fine_deformable_match",
+      "X": 429.34006170034473,
+      "Y": 89.06574215481493,
+      "Params": {
+        "fineAngleStart": "-3",
+        "fineAngleExtent": "6",
+        "fineAngleMargin": "1",
+        "fineMinScore": "0.45",
+        "fineNumLevels": "0",
+        "fineGreediness": "0.75",
+        "fineScaleMin": "0.9",
+        "fineScaleMax": "1.1",
+        "deformedContourMode": "first",
+        "fineAllowFallback": "false",
+        "roiMarginPx": "12",
+        "maxRoiHalfPx": "120",
+        "fineEndScoreWeight": "0",
+        "fineEndArcFraction": "0.4",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "b2000001-0001-4001-8001-00000000000d",
+      "TypeId": "halcon_load_deformable_model",
+      "X": 185.40950968231942,
+      "Y": 130.59197828154493,
+      "Params": {
+        "filePath": "..\\cali\\deformable_model_3.dfm",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "e2000001-0001-4001-8001-00000000001a",
+      "TypeId": "halcon_xld_sample_points",
+      "X": 400.1144637309091,
+      "Y": 308.2435277050382,
+      "Params": {
+        "spacing": "4",
+        "maxBars": "0",
+        "contourOrder": "list",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "e2000001-0001-4001-8001-00000000001c",
+      "TypeId": "polyline_simplify_dp",
+      "X": 704.4625943630087,
+      "Y": 302.6639952706669,
+      "Params": {
+        "epsilon": "2.0",
+        "closed": "true",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "e300274f-4e3a-40b9-b52a-26d739c861a4",
+      "TypeId": "composite_bind_in",
+      "X": 0,
+      "Y": 58.46280360454375,
+      "Params": {
+        "externalPort": "In",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "85b82c7a-d22c-451f-8e64-238b9ee819cd",
+      "TypeId": "display",
+      "X": 1023.6839261198979,
+      "Y": 0,
+      "Params": {
+        "dotRadius": "1",
+        "pointLineJoin": "auto",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "598a6b65-9b4d-4cff-b190-7255aef4f01d",
+      "TypeId": "composite_bind_in",
+      "X": 0,
+      "Y": 194.56327117017224,
+      "Params": {
+        "externalPort": "In2",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "f2ce0478-f0ff-4b82-833e-66e3376ffc47",
+      "TypeId": "composite_bind_in",
+      "X": 0,
+      "Y": 309.93156553970323,
+      "Params": {
+        "externalPort": "In3",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "b026b60b-d0be-4bfd-a07f-aebfd1097ef7",
+      "TypeId": "composite_bind_in",
+      "X": 0,
+      "Y": 425.4506777017773,
+      "Params": {
+        "externalPort": "In4",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "642cada0-85b1-4ec6-8cdc-4ecd817148d7",
+      "TypeId": "composite_bind_out",
+      "X": 946.6521297898228,
+      "Y": 211.91037021836465,
+      "Params": {
+        "externalPort": "Out",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "6f05597b-4abc-4424-a65c-2e7d160020ae",
+      "TypeId": "composite_bind_out",
+      "X": 932.0364288886867,
+      "Y": 387.2987810319959,
+      "Params": {
+        "externalPort": "Out2",
+        "enable": "true",
+        "disable": "false"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-00000000000d",
+      "FromPort": "ModelId",
+      "ToNodeId": "b2000001-0001-4001-8001-000000000009",
+      "ToPort": "DeformableModelId"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000009",
+      "FromPort": "DeformedXld",
+      "ToNodeId": "e2000001-0001-4001-8001-00000000001a",
+      "ToPort": "Xld"
+    },
+    {
+      "FromNodeId": "e2000001-0001-4001-8001-00000000001a",
+      "FromPort": "Points",
+      "ToNodeId": "e2000001-0001-4001-8001-00000000001c",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "e2000001-0001-4001-8001-00000000001c",
+      "FromPort": "Out",
+      "ToNodeId": "85b82c7a-d22c-451f-8e64-238b9ee819cd",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "e300274f-4e3a-40b9-b52a-26d739c861a4",
+      "FromPort": "Out",
+      "ToNodeId": "b2000001-0001-4001-8001-000000000009",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "598a6b65-9b4d-4cff-b190-7255aef4f01d",
+      "FromPort": "Out",
+      "ToNodeId": "b2000001-0001-4001-8001-000000000009",
+      "ToPort": "CoarseRow"
+    },
+    {
+      "FromNodeId": "f2ce0478-f0ff-4b82-833e-66e3376ffc47",
+      "FromPort": "Out",
+      "ToNodeId": "b2000001-0001-4001-8001-000000000009",
+      "ToPort": "CoarseColumn"
+    },
+    {
+      "FromNodeId": "b026b60b-d0be-4bfd-a07f-aebfd1097ef7",
+      "FromPort": "Out",
+      "ToNodeId": "b2000001-0001-4001-8001-000000000009",
+      "ToPort": "CoarseAngle"
+    },
+    {
+      "FromNodeId": "e2000001-0001-4001-8001-00000000001a",
+      "FromPort": "BarIds",
+      "ToNodeId": "e2000001-0001-4001-8001-00000000001c",
+      "ToPort": "BarIds"
+    },
+    {
+      "FromNodeId": "e2000001-0001-4001-8001-00000000001c",
+      "FromPort": "OutBarIds",
+      "ToNodeId": "85b82c7a-d22c-451f-8e64-238b9ee819cd",
+      "ToPort": "BarIds"
+    },
+    {
+      "FromNodeId": "e2000001-0001-4001-8001-00000000001c",
+      "FromPort": "Out",
+      "ToNodeId": "642cada0-85b1-4ec6-8cdc-4ecd817148d7",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "e2000001-0001-4001-8001-00000000001c",
+      "FromPort": "OutBarIds",
+      "ToNodeId": "6f05597b-4abc-4424-a65c-2e7d160020ae",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "e300274f-4e3a-40b9-b52a-26d739c861a4",
+      "FromPort": "Out",
+      "ToNodeId": "85b82c7a-d22c-451f-8e64-238b9ee819cd",
+      "ToPort": "Image"
+    }
+  ],
+  "Meta": {
+    "standaloneDebugImagePath": "preview.22png.png",
+    "latticeGridRows": "8",
+    "latticeGridCols": "2",
+    "mode": "pipeline-A",
+    "note": "\u6A21\u5F0FA\u9010\u6761\u4E32\u884C\uFF1AMask\u6BCF\u8F6E \u7CBE\u5339\u914D\u2192XLD\u2192\u7B80\u5316\u2192\u6807\u5B9A\u2192send_plc\u2192D804L\u2192POU\u2192\u7B49D803\u710A\u5B8C\uFF1B\u65E0points_sink\u3002\u710A\u5B8C\u624D\u8FDB\u5165\u4E0B\u4E00\u8F6EMask\u3002"
+  }
+}

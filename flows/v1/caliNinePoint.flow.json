@@ -1,0 +1,239 @@
+{
+  "Nodes": [
+    {
+      "Id": "307a2dfa-6cc1-4e0e-a515-51c0504d79fc",
+      "TypeId": "load_image",
+      "X": 0,
+      "Y": 331,
+      "Params": {
+        "filePath": "C:\\Users\\DYF\\Desktop\\flows\\halcon\\preview6.png",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "62879182-0f97-45ea-800c-48cf296b72f1",
+      "TypeId": "calibrate",
+      "X": 812,
+      "Y": 252,
+      "Params": {
+        "worldPointsFile": "C:\\Users\\DYF\\Desktop\\flows\\flow_output.txt",
+        "worldPoints": "426.6,48.853;473.1,48.853;519.6,48.853;426.6,82.853;473.1,82.853;519.6,82.853;426.6,116.853;473.1,116.853;519.6,116.853;",
+        "pixelPickMode": "\u5339\u914D\u68C0\u6D4B\u70B9",
+        "confirmCorrespondence": "true",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "91090304-28ba-437e-b090-e4c52c2e6dee",
+      "TypeId": "save_calibration_result",
+      "X": 1111,
+      "Y": 237,
+      "Params": {
+        "filePath": "C:\\Users\\DYF\\Desktop\\flows\\halcon\\calibration_nine_point.json",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "80267716-fe83-4376-98cb-75e7e904c45a",
+      "TypeId": "img_to_world",
+      "X": 1082,
+      "Y": 473,
+      "Params": {
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "7caa3be5-5003-4181-b717-d7da90c662f8",
+      "TypeId": "halcon_load_shape_model",
+      "X": 25,
+      "Y": 111,
+      "Params": {
+        "filePath": "C:\\Users\\DYF\\Desktop\\flows\\halcon\\cali_board.shm",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "ea7a0590-9d04-429d-abb3-57fa53a37e9a",
+      "TypeId": "halcon_find_shape_model",
+      "X": 292,
+      "Y": 74,
+      "Params": {
+        "angleStart": "-30",
+        "angleExtent": "360",
+        "minScore": "0.4",
+        "numMatches": "1",
+        "maxOverlap": "0.5",
+        "subPixel": "interpolation",
+        "numLevels": "0",
+        "greediness": "0.75",
+        "endScoreWeight": "0",
+        "endArcFraction": "0.12",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "7021184f-9f6b-41d6-ad3f-abfeded95cca",
+      "TypeId": "halcon_mask_image_by_shape_match",
+      "X": 415,
+      "Y": 246,
+      "Params": {
+        "contourLevel": "1",
+        "insetPx": "-10",
+        "maskRegionMode": "\u4FDD\u7559mask\u533A\u57DF",
+        "maxMatchCount": "100",
+        "maskMin": "1",
+        "maskMax": "255",
+        "preserveColor": "true",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "86d6dc96-7418-43a9-b8b1-9f406c210279",
+      "TypeId": "halcon_load_shape_model",
+      "X": 416,
+      "Y": 477,
+      "Params": {
+        "filePath": "C:\\Users\\DYF\\Desktop\\flows\\halcon\\cali_board_circle.shm",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "39396aba-0320-437f-a655-1c2c510ffe6f",
+      "TypeId": "halcon_find_shape_model",
+      "X": 563,
+      "Y": 51,
+      "Params": {
+        "angleStart": "-30",
+        "angleExtent": "60",
+        "minScore": "0.85",
+        "numMatches": "0",
+        "maxOverlap": "0.5",
+        "subPixel": "interpolation",
+        "numLevels": "0",
+        "greediness": "0.75",
+        "endScoreWeight": "0",
+        "endArcFraction": "0.12",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "88df7662-0b2e-4e0d-86dd-f8c505c24cdb",
+      "TypeId": "halcon_shape_match_centers",
+      "X": 871,
+      "Y": 60,
+      "Params": {
+        "sortMode": "grid",
+        "enable": "true",
+        "disable": "false"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "62879182-0f97-45ea-800c-48cf296b72f1",
+      "FromPort": "Transform",
+      "ToNodeId": "91090304-28ba-437e-b090-e4c52c2e6dee",
+      "ToPort": "Transform"
+    },
+    {
+      "FromNodeId": "62879182-0f97-45ea-800c-48cf296b72f1",
+      "FromPort": "Transform",
+      "ToNodeId": "80267716-fe83-4376-98cb-75e7e904c45a",
+      "ToPort": "Transform"
+    },
+    {
+      "FromNodeId": "7caa3be5-5003-4181-b717-d7da90c662f8",
+      "FromPort": "ModelId",
+      "ToNodeId": "ea7a0590-9d04-429d-abb3-57fa53a37e9a",
+      "ToPort": "ModelId"
+    },
+    {
+      "FromNodeId": "307a2dfa-6cc1-4e0e-a515-51c0504d79fc",
+      "FromPort": "Image",
+      "ToNodeId": "ea7a0590-9d04-429d-abb3-57fa53a37e9a",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "ea7a0590-9d04-429d-abb3-57fa53a37e9a",
+      "FromPort": "Row",
+      "ToNodeId": "7021184f-9f6b-41d6-ad3f-abfeded95cca",
+      "ToPort": "Row"
+    },
+    {
+      "FromNodeId": "307a2dfa-6cc1-4e0e-a515-51c0504d79fc",
+      "FromPort": "Image",
+      "ToNodeId": "7021184f-9f6b-41d6-ad3f-abfeded95cca",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "ea7a0590-9d04-429d-abb3-57fa53a37e9a",
+      "FromPort": "Column",
+      "ToNodeId": "7021184f-9f6b-41d6-ad3f-abfeded95cca",
+      "ToPort": "Column"
+    },
+    {
+      "FromNodeId": "ea7a0590-9d04-429d-abb3-57fa53a37e9a",
+      "FromPort": "Angle",
+      "ToNodeId": "7021184f-9f6b-41d6-ad3f-abfeded95cca",
+      "ToPort": "Angle"
+    },
+    {
+      "FromNodeId": "7caa3be5-5003-4181-b717-d7da90c662f8",
+      "FromPort": "ModelId",
+      "ToNodeId": "7021184f-9f6b-41d6-ad3f-abfeded95cca",
+      "ToPort": "ModelId"
+    },
+    {
+      "FromNodeId": "86d6dc96-7418-43a9-b8b1-9f406c210279",
+      "FromPort": "ModelId",
+      "ToNodeId": "39396aba-0320-437f-a655-1c2c510ffe6f",
+      "ToPort": "ModelId"
+    },
+    {
+      "FromNodeId": "7021184f-9f6b-41d6-ad3f-abfeded95cca",
+      "FromPort": "Out",
+      "ToNodeId": "39396aba-0320-437f-a655-1c2c510ffe6f",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "39396aba-0320-437f-a655-1c2c510ffe6f",
+      "FromPort": "Row",
+      "ToNodeId": "88df7662-0b2e-4e0d-86dd-f8c505c24cdb",
+      "ToPort": "Row"
+    },
+    {
+      "FromNodeId": "39396aba-0320-437f-a655-1c2c510ffe6f",
+      "FromPort": "Column",
+      "ToNodeId": "88df7662-0b2e-4e0d-86dd-f8c505c24cdb",
+      "ToPort": "Column"
+    },
+    {
+      "FromNodeId": "88df7662-0b2e-4e0d-86dd-f8c505c24cdb",
+      "FromPort": "Points",
+      "ToNodeId": "80267716-fe83-4376-98cb-75e7e904c45a",
+      "ToPort": "Pixel"
+    },
+    {
+      "FromNodeId": "88df7662-0b2e-4e0d-86dd-f8c505c24cdb",
+      "FromPort": "Points",
+      "ToNodeId": "62879182-0f97-45ea-800c-48cf296b72f1",
+      "ToPort": "ImagePts"
+    },
+    {
+      "FromNodeId": "307a2dfa-6cc1-4e0e-a515-51c0504d79fc",
+      "FromPort": "Image",
+      "ToNodeId": "62879182-0f97-45ea-800c-48cf296b72f1",
+      "ToPort": "Image"
+    }
+  ],
+  "Meta": null
+}

@@ -1,0 +1,300 @@
+{
+  "Nodes": [
+    {
+      "Id": "d5e6f7a8-9b0c-4d1e-8f2a-3b4c5d6e7f8a",
+      "TypeId": "plc_wait_weld_done",
+      "X": 874,
+      "Y": 412,
+      "Params": {
+        "flagRegister": "",
+        "bit": "0",
+        "timeoutMs": "600000",
+        "pollIntervalMs": "50",
+        "clearAfter": "true",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "190efde3-f5c0-46ba-b0ea-da6b49752bb8",
+      "TypeId": "plc_connect",
+      "X": 0,
+      "Y": 109,
+      "Params": {
+        "ip": "192.168.6.6",
+        "port": "502",
+        "station": "0",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "c89e74f7-8c8d-4cae-bfd9-a24b1c203aa4",
+      "TypeId": "if_gate",
+      "X": 201,
+      "Y": 110,
+      "Params": {
+        "op": "\u003E",
+        "threshold": "0",
+        "epsilon": "1e-6",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "5314bfb3-9dbb-4a46-b022-59ef0ea1f2ec",
+      "TypeId": "route_true",
+      "X": 405,
+      "Y": 109,
+      "Params": {
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "78222510-71d2-4938-b91c-e6c39e30aefa",
+      "TypeId": "plc_wait_camera_capture",
+      "X": 197,
+      "Y": 236,
+      "Params": {
+        "signalRegister": "",
+        "bit": "0",
+        "timeoutMs": "60000",
+        "pollIntervalMs": "20",
+        "clearAfter": "true",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "55d4b1c2-be25-439c-8648-abf5d7881038",
+      "TypeId": "if_gate",
+      "X": 614,
+      "Y": 98,
+      "Params": {
+        "op": "\u003E",
+        "threshold": "0",
+        "epsilon": "1e-6",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "ae3ea651-1a1b-47a3-b3ef-0c017aaaba51",
+      "TypeId": "route_true",
+      "X": 625,
+      "Y": 218,
+      "Params": {
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "3caa064d-d6b1-4880-a709-518d8ea3213b",
+      "TypeId": "plc_pou_enable",
+      "X": 1108,
+      "Y": 210,
+      "Params": {
+        "enableRegister": "D801L",
+        "enable": "ON",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "dd0a36b7-d7b0-45f2-a08c-3ecc47c5ef96",
+      "TypeId": "send_plc_point",
+      "X": 878,
+      "Y": 206,
+      "Params": {
+        "splitByBar": "none",
+        "expectedBatchCount": "0",
+        "barGvarLayout": "overwrite",
+        "usePlcPageGvar": "false",
+        "gvarStartRegister": "D30000",
+        "baseRegister": "",
+        "gvarType": "1",
+        "zDefault": "0",
+        "asPolylineSegments": "false",
+        "closePolyline": "true",
+        "maxSegmentCount": "1024",
+        "skipCountWrite": "false",
+        "countRegister": "D800",
+        "runDownstreamPerBatch": "true",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "5d6d2665-ffd4-416d-a8b8-5a62de997b19",
+      "TypeId": "plc_wait_camera_capture",
+      "X": 874,
+      "Y": 512,
+      "Params": {
+        "signalRegister": "",
+        "bit": "0",
+        "timeoutMs": "60000",
+        "pollIntervalMs": "20",
+        "clearAfter": "true",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "cd949a1f-9527-4014-b4a6-66c1e8ba1523",
+      "TypeId": "camera_snap",
+      "X": 1116,
+      "Y": 509,
+      "Params": {
+        "deviceIndex": "0",
+        "targetWidth": "0",
+        "targetHeight": "0",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "8547de50-b896-4776-a2f8-9725d8952396",
+      "TypeId": "save_image",
+      "X": 1389,
+      "Y": 502,
+      "Params": {
+        "filePath": "flow_output.bmp",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "0828a74d-df70-44dc-8bc1-43c1f46ba8dc",
+      "TypeId": "weld_trajectory_world",
+      "X": 381.0037748908032,
+      "Y": 354.96705945775983,
+      "Params": {
+        "pattern": "\u4E5D\u5BAB\u683C (3\u00D73)",
+        "centerX": "473.100",
+        "centerY": "82.853",
+        "centerZ": "451.5",
+        "stepXmm": "38",
+        "stepYmm": "24",
+        "stepMm": "20",
+        "armMm": "50",
+        "legXmm": "50",
+        "legYmm": "50",
+        "angleDeg": "0",
+        "gridCols": "3",
+        "gridRows": "3",
+        "samplesPerSegment": "1",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "c9c2dbec-e036-4154-82fd-a731d3d9864e",
+      "TypeId": "save_text",
+      "X": 572,
+      "Y": 541,
+      "Params": {
+        "filePath": "C:\\Users\\DYF\\Desktop\\flows\\flow_output.txt",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "b91f77dd-65ad-4029-8e65-c42f83ea002c",
+      "TypeId": "points_to_text",
+      "X": 619,
+      "Y": 381,
+      "Params": {
+        "lineSeparator": "lf",
+        "enable": "true",
+        "disable": "false"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "190efde3-f5c0-46ba-b0ea-da6b49752bb8",
+      "FromPort": "Connected",
+      "ToNodeId": "c89e74f7-8c8d-4cae-bfd9-a24b1c203aa4",
+      "ToPort": "Value"
+    },
+    {
+      "FromNodeId": "c89e74f7-8c8d-4cae-bfd9-a24b1c203aa4",
+      "FromPort": "True",
+      "ToNodeId": "5314bfb3-9dbb-4a46-b022-59ef0ea1f2ec",
+      "ToPort": "Condition"
+    },
+    {
+      "FromNodeId": "78222510-71d2-4938-b91c-e6c39e30aefa",
+      "FromPort": "Triggered",
+      "ToNodeId": "5314bfb3-9dbb-4a46-b022-59ef0ea1f2ec",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "5314bfb3-9dbb-4a46-b022-59ef0ea1f2ec",
+      "FromPort": "Out",
+      "ToNodeId": "55d4b1c2-be25-439c-8648-abf5d7881038",
+      "ToPort": "Value"
+    },
+    {
+      "FromNodeId": "55d4b1c2-be25-439c-8648-abf5d7881038",
+      "FromPort": "True",
+      "ToNodeId": "ae3ea651-1a1b-47a3-b3ef-0c017aaaba51",
+      "ToPort": "Condition"
+    },
+    {
+      "FromNodeId": "dd0a36b7-d7b0-45f2-a08c-3ecc47c5ef96",
+      "FromPort": "GvarSent",
+      "ToNodeId": "3caa064d-d6b1-4880-a709-518d8ea3213b",
+      "ToPort": "Enable"
+    },
+    {
+      "FromNodeId": "ae3ea651-1a1b-47a3-b3ef-0c017aaaba51",
+      "FromPort": "Out",
+      "ToNodeId": "dd0a36b7-d7b0-45f2-a08c-3ecc47c5ef96",
+      "ToPort": "Points3D"
+    },
+    {
+      "FromNodeId": "0828a74d-df70-44dc-8bc1-43c1f46ba8dc",
+      "FromPort": "Points3D",
+      "ToNodeId": "ae3ea651-1a1b-47a3-b3ef-0c017aaaba51",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "d5e6f7a8-9b0c-4d1e-8f2a-3b4c5d6e7f8a",
+      "FromPort": "Done",
+      "ToNodeId": "5d6d2665-ffd4-416d-a8b8-5a62de997b19",
+      "ToPort": "After"
+    },
+    {
+      "FromNodeId": "5d6d2665-ffd4-416d-a8b8-5a62de997b19",
+      "FromPort": "Triggered",
+      "ToNodeId": "cd949a1f-9527-4014-b4a6-66c1e8ba1523",
+      "ToPort": "After"
+    },
+    {
+      "FromNodeId": "cd949a1f-9527-4014-b4a6-66c1e8ba1523",
+      "FromPort": "Image",
+      "ToNodeId": "8547de50-b896-4776-a2f8-9725d8952396",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "3caa064d-d6b1-4880-a709-518d8ea3213b",
+      "FromPort": "Enabled",
+      "ToNodeId": "d5e6f7a8-9b0c-4d1e-8f2a-3b4c5d6e7f8a",
+      "ToPort": "After"
+    },
+    {
+      "FromNodeId": "b91f77dd-65ad-4029-8e65-c42f83ea002c",
+      "FromPort": "Text",
+      "ToNodeId": "c9c2dbec-e036-4154-82fd-a731d3d9864e",
+      "ToPort": "Text"
+    },
+    {
+      "FromNodeId": "0828a74d-df70-44dc-8bc1-43c1f46ba8dc",
+      "FromPort": "Points",
+      "ToNodeId": "b91f77dd-65ad-4029-8e65-c42f83ea002c",
+      "ToPort": "Points"
+    }
+  ],
+  "Meta": null
+}
