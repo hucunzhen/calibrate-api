@@ -6,7 +6,7 @@
       "X": 0,
       "Y": 331,
       "Params": {
-        "filePath": "C:\\Users\\DYF\\Desktop\\flows\\halcon\\preview6.png",
+        "filePath": "models\\calibration_nine_point.bmp",
         "enable": "true",
         "disable": "false"
       }
@@ -17,7 +17,7 @@
       "X": 812,
       "Y": 252,
       "Params": {
-        "worldPointsFile": "C:\\Users\\DYF\\Desktop\\flows\\flow_output.txt",
+        "worldPointsFile": "models\\world_pos.txt",
         "worldPoints": "426.6,48.853;473.1,48.853;519.6,48.853;426.6,82.853;473.1,82.853;519.6,82.853;426.6,116.853;473.1,116.853;519.6,116.853;",
         "pixelPickMode": "\u5339\u914D\u68C0\u6D4B\u70B9",
         "confirmCorrespondence": "true",
@@ -31,17 +31,7 @@
       "X": 1111,
       "Y": 237,
       "Params": {
-        "filePath": "C:\\Users\\DYF\\Desktop\\flows\\halcon\\calibration_nine_point.json",
-        "enable": "true",
-        "disable": "false"
-      }
-    },
-    {
-      "Id": "80267716-fe83-4376-98cb-75e7e904c45a",
-      "TypeId": "img_to_world",
-      "X": 1082,
-      "Y": 473,
-      "Params": {
+        "filePath": "models\\calibration_nine_point.json",
         "enable": "true",
         "disable": "false"
       }
@@ -49,10 +39,10 @@
     {
       "Id": "7caa3be5-5003-4181-b717-d7da90c662f8",
       "TypeId": "halcon_load_shape_model",
-      "X": 25,
-      "Y": 111,
+      "X": 0,
+      "Y": 145,
       "Params": {
-        "filePath": "C:\\Users\\DYF\\Desktop\\flows\\halcon\\cali_board.shm",
+        "filePath": "models\\cali_board.shm",
         "enable": "true",
         "disable": "false"
       }
@@ -60,8 +50,8 @@
     {
       "Id": "ea7a0590-9d04-429d-abb3-57fa53a37e9a",
       "TypeId": "halcon_find_shape_model",
-      "X": 292,
-      "Y": 74,
+      "X": 232,
+      "Y": 10,
       "Params": {
         "angleStart": "-30",
         "angleExtent": "360",
@@ -80,8 +70,8 @@
     {
       "Id": "7021184f-9f6b-41d6-ad3f-abfeded95cca",
       "TypeId": "halcon_mask_image_by_shape_match",
-      "X": 415,
-      "Y": 246,
+      "X": 398,
+      "Y": 157,
       "Params": {
         "contourLevel": "1",
         "insetPx": "-10",
@@ -100,7 +90,7 @@
       "X": 416,
       "Y": 477,
       "Params": {
-        "filePath": "C:\\Users\\DYF\\Desktop\\flows\\halcon\\cali_board_circle.shm",
+        "filePath": "models\\cali_board_circle.shm",
         "enable": "true",
         "disable": "false"
       }
@@ -108,8 +98,8 @@
     {
       "Id": "39396aba-0320-437f-a655-1c2c510ffe6f",
       "TypeId": "halcon_find_shape_model",
-      "X": 563,
-      "Y": 51,
+      "X": 625,
+      "Y": 75,
       "Params": {
         "angleStart": "-30",
         "angleExtent": "60",
@@ -142,12 +132,6 @@
       "FromNodeId": "62879182-0f97-45ea-800c-48cf296b72f1",
       "FromPort": "Transform",
       "ToNodeId": "91090304-28ba-437e-b090-e4c52c2e6dee",
-      "ToPort": "Transform"
-    },
-    {
-      "FromNodeId": "62879182-0f97-45ea-800c-48cf296b72f1",
-      "FromPort": "Transform",
-      "ToNodeId": "80267716-fe83-4376-98cb-75e7e904c45a",
       "ToPort": "Transform"
     },
     {
@@ -215,12 +199,6 @@
       "FromPort": "Column",
       "ToNodeId": "88df7662-0b2e-4e0d-86dd-f8c505c24cdb",
       "ToPort": "Column"
-    },
-    {
-      "FromNodeId": "88df7662-0b2e-4e0d-86dd-f8c505c24cdb",
-      "FromPort": "Points",
-      "ToNodeId": "80267716-fe83-4376-98cb-75e7e904c45a",
-      "ToPort": "Pixel"
     },
     {
       "FromNodeId": "88df7662-0b2e-4e0d-86dd-f8c505c24cdb",

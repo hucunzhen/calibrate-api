@@ -30,7 +30,7 @@
       "X": 185.40950968231942,
       "Y": 130.59197828154493,
       "Params": {
-        "filePath": "..\\cali\\deformable_model_3.dfm",
+        "filePath": "models\\deformable_model_3.dfm",
         "enable": "true",
         "disable": "false"
       }

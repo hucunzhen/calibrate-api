@@ -55,7 +55,7 @@
       "X": 0,
       "Y": 290.3296,
       "Params": {
-        "filePath": "..\\cali\\shape_model_fixed.shm",
+        "filePath": "models\\shape_model_fixed.shm",
         "enable": "true",
         "disable": "false"
       }
@@ -208,7 +208,7 @@
       "X": 0,
       "Y": 449.3296,
       "Params": {
-        "filePath": "..\\cali\\shape_mode_outlinel.shm",
+        "filePath": "models\\shape_mode_outlinel.shm",
         "enable": "true",
         "disable": "false"
       }

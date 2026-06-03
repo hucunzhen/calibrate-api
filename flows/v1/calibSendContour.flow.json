@@ -158,7 +158,7 @@
       "X": 1389,
       "Y": 502,
       "Params": {
-        "filePath": "flow_output.bmp",
+        "filePath": "models\\calibration_nine_point.bmp",
         "enable": "true",
         "disable": "false"
       }
@@ -193,7 +193,7 @@
       "X": 572,
       "Y": 541,
       "Params": {
-        "filePath": "C:\\Users\\DYF\\Desktop\\flows\\flow_output.txt",
+        "filePath": "models\\world_pos.txt",
         "enable": "true",
         "disable": "false"
       }

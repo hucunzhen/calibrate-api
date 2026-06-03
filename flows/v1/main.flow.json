@@ -50,7 +50,7 @@
       "X": 801,
       "Y": 345,
       "Params": {
-        "filePath": "..\\halcon\\calibration_nine_point.json",
+        "filePath": "models\\calibration_nine_point.json",
         "enable": "true",
         "disable": "false"
       }
@@ -160,18 +160,6 @@
         "deviceIndex": "0",
         "targetWidth": "0",
         "targetHeight": "0",
-        "enableUndistort": "true",
-        "enablePerspective": "true",
-        "calibrationJsonFile": "..\\cali\\calibration_result.json",
-        "undistortAlpha": "-1",
-        "viewIndex": "0",
-        "cols": "11",
-        "rows": "8",
-        "squareSizeMm": "5",
-        "pxPerMm": "32",
-        "perspectiveOutputFrame": "plane",
-        "perspectiveOutputScale": "board_pixels",
-        "assumeUndistorted": "auto",
         "enable": "true",
         "disable": "false"
       }
