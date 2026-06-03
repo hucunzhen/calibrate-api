@@ -15,6 +15,7 @@ namespace CalibOperatorCLI_Example
         public ControllerLightPage()
         {
             InitializeComponent();
+            EnsureControllerLightUiPersist();
             Loaded += OnLoaded;
             Unloaded += (_, _) => _session.Dispose();
         }

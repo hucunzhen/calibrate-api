@@ -60,24 +60,123 @@ namespace CalibOperatorCLI_Example
             _samTrainPage = new SamTrainPage();
             _halconShapeModelPage = new HalconShapeModelPage();
 
-            NavigateTo(_flowHostPage);
-            HighlightTab("Flow");
+            RestoreLastNavigationTab();
             TryRestoreFlowSessionOnStartup();
         }
 
         protected override void OnClosed(EventArgs e)
         {
-            _halconShapeModelPage.SaveSession();
-            SaveFlowSession();
+            SaveCurrentPageSession();
+            SaveNavigationTab();
             base.OnClosed(e);
             try { CameraService.FinalizeSDK(); } catch { /* ignored */ }
         }
 
         private void NavigateTo(Page page)
         {
-            if (MainFrame.Content == _halconShapeModelPage && !ReferenceEquals(page, _halconShapeModelPage))
-                _halconShapeModelPage.SaveSession();
+            SaveCurrentPageSession();
             MainFrame.Navigate(page);
+            SaveNavigationTab(page);
+        }
+
+        private void SaveCurrentPageSession()
+        {
+            switch (MainFrame.Content)
+            {
+                case PlcPage:
+                    _plcPage.SaveSession();
+                    break;
+                case ControllerLightPage:
+                    _controllerLightPage.SaveSession();
+                    break;
+                case HistogramPage:
+                    _histogramPage.SaveSession();
+                    break;
+                case FlowHostPage:
+                    _flowHostPage.ActiveFlowOrFirst()?.SaveToolbarDefaultsToStore();
+                    SaveFlowSession();
+                    break;
+                case YoloSegTrainPage:
+                    _yoloSegTrainPage.SaveSession();
+                    break;
+                case HalconDlSegPage:
+                    _halconDlSegPage.SaveSession();
+                    break;
+                case SamTrainPage:
+                    _samTrainPage.SaveSession();
+                    break;
+                case HalconShapeModelPage:
+                    _halconShapeModelPage.SaveSession();
+                    break;
+            }
+        }
+
+        private static string TabKeyFromPage(Page page) => page switch
+        {
+            PlcPage => "Plc",
+            ControllerLightPage => "Controller",
+            FlowHostPage => "Flow",
+            HistogramPage => "Histogram",
+            YoloSegTrainPage => "YoloSeg",
+            HalconDlSegPage => "HalconDlSeg",
+            SamTrainPage => "SamOnnx",
+            HalconShapeModelPage => "HalconShapeModel",
+            _ => "Flow"
+        };
+
+        private void SaveNavigationTab(Page? activePage = null)
+        {
+            try
+            {
+                Page page = activePage ?? (MainFrame.Content as Page) ?? _flowHostPage;
+                var s = new AppNavigationUiSettings { LastTab = TabKeyFromPage(page) };
+                s.Save();
+            }
+            catch
+            {
+                // 非关键
+            }
+        }
+
+        private void RestoreLastNavigationTab()
+        {
+            string tab = AppNavigationUiSettings.Load().LastTab;
+            switch (tab)
+            {
+                case "Plc":
+                    NavigateTo(_plcPage);
+                    HighlightTab("Plc");
+                    break;
+                case "Controller":
+                    NavigateTo(_controllerLightPage);
+                    HighlightTab("Controller");
+                    break;
+                case "Histogram":
+                    NavigateTo(_histogramPage);
+                    HighlightTab("Histogram");
+                    break;
+                case "YoloSeg":
+                    NavigateTo(_yoloSegTrainPage);
+                    HighlightTab("YoloSeg");
+                    break;
+                case "HalconDlSeg":
+                    NavigateTo(_halconDlSegPage);
+                    HighlightTab("HalconDlSeg");
+                    break;
+                case "SamOnnx":
+                    NavigateTo(_samTrainPage);
+                    HighlightTab("SamOnnx");
+                    break;
+                case "HalconShapeModel":
+                    NavigateTo(_halconShapeModelPage);
+                    HighlightTab("HalconShapeModel");
+                    _halconShapeModelPage.RestoreSessionOnShow();
+                    break;
+                default:
+                    NavigateTo(_flowHostPage);
+                    HighlightTab("Flow");
+                    break;
+            }
         }
 
         private void HighlightTab(string tab)

@@ -156,7 +156,7 @@
       "X": 34,
       "Y": 124,
       "Params": {
-        "filePath": "..\\..\\..\\data\\Image_20260518154103272.bmp",
+        "filePath": "..\\..\\..\\data\\Image_20260602183733207.bmp",
         "enable": "true",
         "disable": "false"
       }
@@ -169,6 +169,25 @@
       "Params": {
         "alpha": "-1",
         "calibrationJsonFile": "models\\calibration_result.json",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "d9c4fe17-2593-48ed-aac4-66be79e0145d",
+      "TypeId": "chessboard_perspective_warp_image",
+      "X": 209,
+      "Y": 437,
+      "Params": {
+        "calibrationJsonFile": "models\\calibration_result.json",
+        "viewIndex": "0",
+        "cols": "11",
+        "rows": "8",
+        "squareSizeMm": "5",
+        "pxPerMm": "32",
+        "perspectiveOutputFrame": "plane",
+        "perspectiveOutputScale": "board_pixels",
+        "assumeUndistorted": "true",
         "enable": "true",
         "disable": "false"
       }
@@ -285,6 +304,12 @@
     },
     {
       "FromNodeId": "8fb1448d-aaf4-4b76-96eb-22b30a78d0f8",
+      "FromPort": "Out",
+      "ToNodeId": "d9c4fe17-2593-48ed-aac4-66be79e0145d",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "d9c4fe17-2593-48ed-aac4-66be79e0145d",
       "FromPort": "Out",
       "ToNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
       "ToPort": "In"

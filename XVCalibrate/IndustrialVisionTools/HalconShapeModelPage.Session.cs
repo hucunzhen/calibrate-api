@@ -81,8 +81,44 @@ namespace CalibOperatorCLI_Example
 
         private void AttachSessionPersistHandlers()
         {
+            foreach (string name in HalconShapeModelUiSettings.PersistControlNameList)
+            {
+                if (FindName(name) is System.Windows.Controls.TextBox tb)
+                {
+                    tb.LostFocus += (_, _) => ScheduleSessionPersist();
+                    tb.TextChanged += (_, _) => ScheduleSessionPersist();
+                }
+                else if (FindName(name) is System.Windows.Controls.CheckBox cb)
+                {
+                    cb.Checked += (_, _) => ScheduleSessionPersist();
+                    cb.Unchecked += (_, _) => ScheduleSessionPersist();
+                }
+                else if (FindName(name) is System.Windows.Controls.ComboBox cmb)
+                {
+                    cmb.SelectionChanged += (_, _) => ScheduleSessionPersist();
+                }
+                else if (FindName(name) is System.Windows.Controls.RadioButton rb)
+                {
+                    rb.Checked += (_, _) => ScheduleSessionPersist();
+                }
+            }
+
             TxtCalibrationJsonPath.LostFocus += (_, _) => ScheduleSessionPersist();
+            TxtUndistortAlpha.LostFocus += (_, _) => ScheduleSessionPersist();
+            TxtCalibViewIndex.LostFocus += (_, _) => ScheduleSessionPersist();
+            TxtCalibBoardCols.LostFocus += (_, _) => ScheduleSessionPersist();
+            TxtCalibBoardRows.LostFocus += (_, _) => ScheduleSessionPersist();
+            TxtCalibSquareSizeMm.LostFocus += (_, _) => ScheduleSessionPersist();
+            TxtCalibPxPerMm.LostFocus += (_, _) => ScheduleSessionPersist();
+
+            ChkEnableUndistort.Checked += OnCameraCorrectionSettingChanged;
+            ChkEnableUndistort.Unchecked += OnCameraCorrectionSettingChanged;
+            ChkEnablePerspective.Checked += OnCameraCorrectionSettingChanged;
+            ChkEnablePerspective.Unchecked += OnCameraCorrectionSettingChanged;
+            CmbPerspectiveOutputFrame.SelectionChanged += (_, _) => ScheduleSessionPersist();
         }
+
+        private void OnCameraCorrectionSettingChanged(object sender, RoutedEventArgs e) => ScheduleSessionPersist();
 
         private void ScheduleSessionPersist()
         {
@@ -122,7 +158,92 @@ namespace CalibOperatorCLI_Example
                 CalibrationJsonPath = TxtCalibrationJsonPath?.Text?.Trim() ?? "",
             };
             CaptureRoiIntoSettings(s);
+            CaptureCameraCorrectionIntoSettings(s);
+            s.Controls = PageUiBinder.Capture(this, HalconShapeModelUiSettings.PersistControlNameList);
             s.Save();
+        }
+
+        private void CaptureCameraCorrectionIntoSettings(HalconShapeModelUiSettings s)
+        {
+            s.EnableUndistort = ChkEnableUndistort?.IsChecked == true;
+            s.UndistortAlpha = TxtUndistortAlpha?.Text?.Trim() ?? "-1";
+            s.EnablePerspective = ChkEnablePerspective?.IsChecked == true;
+            if (int.TryParse(TxtCalibViewIndex?.Text?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int vi))
+                s.CalibViewIndex = vi;
+            if (int.TryParse(TxtCalibBoardCols?.Text?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int cols))
+                s.CalibBoardCols = cols;
+            if (int.TryParse(TxtCalibBoardRows?.Text?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int rows))
+                s.CalibBoardRows = rows;
+            s.CalibSquareSizeMm = TxtCalibSquareSizeMm?.Text?.Trim() ?? "25";
+            s.CalibPxPerMm = TxtCalibPxPerMm?.Text?.Trim() ?? "1";
+            s.PerspectiveOutputFrame = GetPerspectiveOutputFrameTag();
+        }
+
+        private string GetPerspectiveOutputFrameTag()
+        {
+            if (CmbPerspectiveOutputFrame?.SelectedItem is System.Windows.Controls.ComboBoxItem item
+                && item.Tag is string tag
+                && !string.IsNullOrWhiteSpace(tag))
+                return tag.Trim();
+            return "board";
+        }
+
+        private void ApplyCameraCorrectionFromSettings(HalconShapeModelUiSettings s)
+        {
+            if (ChkEnableUndistort != null)
+                ChkEnableUndistort.IsChecked = s.EnableUndistort;
+            if (!string.IsNullOrWhiteSpace(s.UndistortAlpha))
+                TxtUndistortAlpha.Text = s.UndistortAlpha;
+            if (ChkEnablePerspective != null)
+                ChkEnablePerspective.IsChecked = s.EnablePerspective;
+            TxtCalibViewIndex.Text = s.CalibViewIndex.ToString(CultureInfo.InvariantCulture);
+            TxtCalibBoardCols.Text = (s.CalibBoardCols > 0 ? s.CalibBoardCols : 9).ToString(CultureInfo.InvariantCulture);
+            TxtCalibBoardRows.Text = (s.CalibBoardRows > 0 ? s.CalibBoardRows : 6).ToString(CultureInfo.InvariantCulture);
+            if (!string.IsNullOrWhiteSpace(s.CalibSquareSizeMm))
+                TxtCalibSquareSizeMm.Text = s.CalibSquareSizeMm;
+            if (!string.IsNullOrWhiteSpace(s.CalibPxPerMm))
+                TxtCalibPxPerMm.Text = s.CalibPxPerMm;
+            SelectPerspectiveOutputFrame(s.PerspectiveOutputFrame);
+        }
+
+        private void ApplyExtraControlsFromSettings(HalconShapeModelUiSettings s)
+        {
+            if (s.Controls == null || s.Controls.Count == 0)
+                return;
+            PageUiBinder.Apply(this, s.Controls, HalconShapeModelUiSettings.PersistControlNameList);
+        }
+
+        private void SelectPerspectiveOutputFrame(string? tag)
+        {
+            if (CmbPerspectiveOutputFrame == null || string.IsNullOrWhiteSpace(tag))
+                return;
+            string want = tag.Trim();
+            foreach (var item in CmbPerspectiveOutputFrame.Items)
+            {
+                if (item is System.Windows.Controls.ComboBoxItem cbi
+                    && string.Equals(cbi.Tag as string, want, StringComparison.OrdinalIgnoreCase))
+                {
+                    CmbPerspectiveOutputFrame.SelectedItem = cbi;
+                    return;
+                }
+            }
+        }
+
+        private void TryReapplyCameraCorrectionAfterSessionRestore()
+        {
+            if (_rawCalibImage == null)
+                return;
+            if (ChkEnableUndistort?.IsChecked != true && ChkEnablePerspective?.IsChecked != true)
+                return;
+            try
+            {
+                TryApplyCameraCorrections(logSuccess: false);
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"[相机矫正] 会话恢复后应用失败: {ex.Message}");
+                CommitCalibImageToUi(_rawCalibImage, disposeIncoming: false);
+            }
         }
 
         private void ApplySessionFromSettingsIfNeeded(bool forceReload)
@@ -131,7 +252,14 @@ namespace CalibOperatorCLI_Example
             if (string.IsNullOrWhiteSpace(s.ImagePath))
             {
                 if (!TryRefreshDisplayFromMemory())
+                {
                     AppendLog($"[会话] 无上次图像（配置: {HalconShapeModelUiSettings.HintPath}）");
+                    return;
+                }
+
+                ApplyCameraCorrectionFromSettings(s);
+                ApplyExtraControlsFromSettings(s);
+                TryReapplyCameraCorrectionAfterSessionRestore();
                 return;
             }
 
@@ -148,7 +276,10 @@ namespace CalibOperatorCLI_Example
 
             if (!forceReload && displayReady && sameImage)
             {
+                ApplyCameraCorrectionFromSettings(s);
                 ApplyRoiFromSettings(s);
+                ApplyExtraControlsFromSettings(s);
+                TryReapplyCameraCorrectionAfterSessionRestore();
                 return;
             }
 
@@ -182,9 +313,11 @@ namespace CalibOperatorCLI_Example
             {
                 if (!string.IsNullOrWhiteSpace(s.CalibrationJsonPath))
                     TxtCalibrationJsonPath.Text = s.CalibrationJsonPath;
+                ApplyCameraCorrectionFromSettings(s);
 
                 LoadImage(imagePath, clearRoi: false);
                 ApplyRoiFromSettings(s);
+                ApplyExtraControlsFromSettings(s);
                 AppendLog($"已恢复上次会话: {IoPath.GetFileName(imagePath)}（ROI={s.RoiMode}）");
             }
             catch (Exception ex)

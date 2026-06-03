@@ -106,6 +106,7 @@ namespace CalibOperatorCLI_Example
             SetFlowMeta(MetaStandaloneDebugImage, stored);
             if (StandaloneDebugImageBox != null)
                 StandaloneDebugImageBox.Text = stored;
+            SaveToolbarDefaultsToStore();
         }
 
         /// <summary>运行前在 UI 线程准备；返回 null 表示非子流程调试或无需注入。</summary>

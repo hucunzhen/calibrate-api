@@ -3,7 +3,7 @@
     {
       "Id": "b2000001-0001-4001-8001-000000000010",
       "TypeId": "halcon_coarse_shape_match",
-      "X": 284.8800000000001,
+      "X": 285.8800000000001,
       "Y": 19.80000000000001,
       "Params": {
         "angleStart": "-3",
@@ -31,7 +31,7 @@
       "Params": {
         "loopEmit": "true",
         "candidateIndex": "9",
-        "maskErosionPx": "40",
+        "maskErosionPx": "10",
         "maskFillDilatePx": "0",
         "contourLevel": "1",
         "maxCandidates": "0",
@@ -217,11 +217,11 @@
       "Id": "cd4f2e2f-ebe2-4efa-aa0c-bc9e661fb5be",
       "TypeId": "halcon_coarse_shape_match",
       "X": 233,
-      "Y": 318.3296,
+      "Y": 317.3296,
       "Params": {
-        "angleStart": "-90",
-        "angleExtent": "180",
-        "minScore": "0.3",
+        "angleStart": "-3",
+        "angleExtent": "360",
+        "minScore": "0.1",
         "numMatches": "0",
         "maxOverlap": "0.5",
         "subPixel": "none",

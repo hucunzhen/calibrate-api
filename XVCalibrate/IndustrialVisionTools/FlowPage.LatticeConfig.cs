@@ -96,7 +96,10 @@ namespace CalibOperatorCLI_Example
             SetFlowMeta(MetaLatticeGridCols, LatticeGridColsBox.Text.Trim());
         }
 
-        private void LatticeGridConfig_LostFocus(object sender, RoutedEventArgs e) =>
+        private void LatticeGridConfig_LostFocus(object sender, RoutedEventArgs e)
+        {
             PersistLatticeConfigFromUi();
+            SaveToolbarDefaultsToStore();
+        }
     }
 }

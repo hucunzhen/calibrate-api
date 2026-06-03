@@ -36,6 +36,7 @@ namespace CalibOperatorCLI_Example
         public YoloSegTrainPage()
         {
             InitializeComponent();
+            EnsureYoloSegUiPersist();
             Loaded += (_, _) => RefreshAnnotClassCombo();
             AppendLog("提示：默认使用 YOLO11 预训练名（如 yolo11m-seg.pt）；请先 pip install -U -r YoloSeg_Tools/requirements-yolo-seg.txt。");
         }

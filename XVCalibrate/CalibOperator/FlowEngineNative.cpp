@@ -68,6 +68,8 @@ struct NativeFlowEngineImpl {
     std::string lastReportJson;
     /// 主流程所在目录（LoadFromFile / LoadFromJson 设置）；解析相对 innerFlowPath、标定路径等。
     std::string flowRootDir;
+    /// composite 展开时记录 composite 节点 Id → 子流程标签（文件名或 embedded）。
+    std::unordered_map<std::string, std::string> compositeExpandLabels;
 };
 
 static bool FlowPathIsAbsolute(const std::string& p) {
@@ -797,6 +799,17 @@ static bool ExpandOneComposite(NativeFlowEngineImpl* e, size_t compositeIdx, std
 
     const std::string prefix = comp.id + "__";
 
+    {
+        std::string label;
+        if (!path.empty()) {
+            size_t slash = path.find_last_of("/\\");
+            label = slash == std::string::npos ? path : path.substr(slash + 1);
+        } else {
+            label = "embedded";
+        }
+        e->compositeExpandLabels[comp.id] = label;
+    }
+
     std::vector<NodeDef> newNodes;
     std::vector<ConnDef> newConns;
     newNodes.reserve(e->nodes.size() + innerNodes.size());
@@ -1090,6 +1103,7 @@ static const NodeDef* FindNode(const NativeFlowEngineImpl* e, const std::string&
 }
 
 static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& err);
+static std::string BuildFlowNodeFailureSummary(const NativeFlowEngineImpl* e, const NodeDef& n, const std::string& err);
 
 static bool RunLoadImageDirEach(NativeFlowEngineImpl* e, const std::string& loopId, NativeFlowRunResult& rr) {
     const NodeDef* loopNode = FindNode(e, loopId);
@@ -1111,7 +1125,7 @@ static bool RunLoadImageDirEach(NativeFlowEngineImpl* e, const std::string& loop
         std::string err;
         if (!ExecuteNode(e, *n, err)) {
             e->nodeErrors[id] = err;
-            e->lastError = n->type + ": " + err;
+            e->lastError = BuildFlowNodeFailureSummary(e, *n, err);
             rr.executedNodes = executed;
             rr.success = 0;
             return false;
@@ -1151,7 +1165,7 @@ static bool RunLoadImageDirEach(NativeFlowEngineImpl* e, const std::string& loop
             std::string err;
             if (!ExecuteNode(e, *n, err)) {
                 e->nodeErrors[id] = err;
-                e->lastError = n->type + ": " + err;
+                e->lastError = BuildFlowNodeFailureSummary(e, *n, err);
                 rr.executedNodes = executed;
                 rr.success = 0;
                 return false;
@@ -2430,7 +2444,28 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
     return false;
 }
 
+static std::string BuildFlowNodeFailureSummary(const NativeFlowEngineImpl* e, const NodeDef& n, const std::string& err) {
+    const size_t sep = n.id.find("__");
+    if (sep != std::string::npos && sep > 0) {
+        const std::string compId = n.id.substr(0, sep);
+        const std::string innerId = n.id.substr(sep + 2);
+        std::ostringstream oss;
+        oss << "组合子流程失败: 内部算子 " << n.type << " (innerId=" << innerId << ")";
+        if (e) {
+            auto it = e->compositeExpandLabels.find(compId);
+            if (it != e->compositeExpandLabels.end() && !it->second.empty())
+                oss << ", 子流程=" << it->second;
+        }
+        oss << ": " << err;
+        return oss.str();
+    }
+    if (!err.empty() && err.rfind(n.type, 0) == 0)
+        return err;
+    return n.type + ": " + err;
+}
+
 static bool LoadFlowFromCvFileStorage(NativeFlowEngineImpl* e, cv::FileStorage& fs, std::string& err) {
+    e->compositeExpandLabels.clear();
     if (!ReadFlowGraph(fs, e->nodes, e->conns, err))
         return false;
     return ExpandAllCompositeNodes(e, err);
@@ -2530,7 +2565,7 @@ NativeFlowRunResult FlowEngine_Run(NativeFlowEngineHandle handle) {
             ok ? "" : " (failed)");
         if (!ok) {
             e->nodeErrors[id] = err;
-            e->lastError = n->type + ": " + err;
+            e->lastError = BuildFlowNodeFailureSummary(e, *n, err);
             break;
         }
         rr.executedNodes++;

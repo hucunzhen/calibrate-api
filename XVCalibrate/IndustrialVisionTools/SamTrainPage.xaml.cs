@@ -19,6 +19,7 @@ namespace CalibOperatorCLI_Example
         public SamTrainPage()
         {
             InitializeComponent();
+            EnsureSamUiPersist();
             // ComboBox 初始选中会在 InitializeComponent 内触发 SelectionChanged，此时靠后的 TxtQuantPrefix 可能尚未赋值，需在事件内判空。
             Loaded += (_, _) => SyncQuantPrefixFromModelType();
             AppendLog("提示：SAM 导出需 PyTorch、onnx、segment-anything；详见 SAM_Tools/requirements-onnx.txt。");

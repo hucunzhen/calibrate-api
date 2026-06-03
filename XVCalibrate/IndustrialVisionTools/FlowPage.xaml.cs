@@ -2735,6 +2735,7 @@ namespace CalibOperatorCLI_Example
                 CurrentFlowFilePath = System.IO.Path.GetFullPath(filePath);
                 FlowLoaded?.Invoke(CurrentFlowFilePath);
                 ApplyFlowMetaFromData(data);
+                ApplyToolbarDefaultsFromStore();
                 UpdateLatticeConfigUi();
                 UpdateStandaloneDebugUi();
                 if (IsStandaloneDebugActive)
@@ -2796,6 +2797,7 @@ namespace CalibOperatorCLI_Example
                 ClearCanvasCore();
                 CurrentFlowFilePath = null;
                 _flowMeta.Clear();
+                ApplyToolbarDefaultsFromStore();
                 UpdateLatticeConfigUi();
                 UpdateStandaloneDebugUi();
                 _flowUndoStack.Clear();
@@ -6470,12 +6472,72 @@ namespace CalibOperatorCLI_Example
             }
         }
 
+        private static string FormatCompositeInnerNodeIdentity(FlowNode inner) =>
+            $"「{inner.Def.DisplayName}」({inner.Def.TypeId}, {inner.Id:N[..8]})";
+
+        private static void RethrowCompositeInnerNodeFailure(
+            FlowNode inner,
+            string? compositeFlowLabel,
+            Exception ex,
+            int? maskLoopRoundIndex = null)
+        {
+            string msg = ex.Message ?? ex.GetType().Name;
+            if (msg.StartsWith("组合算子子流程失败:", StringComparison.Ordinal))
+                throw new InvalidOperationException(msg, ex);
+
+            string roundPart = maskLoopRoundIndex.HasValue
+                ? $" [Mask 第 {maskLoopRoundIndex.Value + 1} 轮]"
+                : "";
+            string flowPart = string.IsNullOrWhiteSpace(compositeFlowLabel)
+                ? ""
+                : $" 子流程={compositeFlowLabel}";
+            throw new InvalidOperationException(
+                $"组合算子子流程失败:{flowPart}{roundPart} 内部算子 {FormatCompositeInnerNodeIdentity(inner)}: {msg}",
+                ex);
+        }
+
+        private void ExecuteCompositeInnerNode(
+            FlowNode inner,
+            Dictionary<string, object?> innerInputs,
+            Dictionary<string, object?> compositeInputs,
+            string? compositeInnerFlowBaseDir,
+            string? compositeFlowLabel,
+            int? maskLoopRoundIndex = null)
+        {
+            try
+            {
+                ExecuteNode(inner, innerInputs, compositeInputs, compositeInnerFlowBaseDir);
+            }
+            catch (Exception ex)
+            {
+                RethrowCompositeInnerNodeFailure(inner, compositeFlowLabel, ex, maskLoopRoundIndex);
+            }
+        }
+
         /// <param name="innerFlowResolveBaseDir">当前组合嵌套在上层子流程内时，为其 innerFlowPath 相对路径提供基准目录（通常为上层子流程 .flow.json 所在文件夹）。</param>
         private void ExecuteCompositeSubFlow(FlowNode compositeNode, Dictionary<string, object?> compositeInputs, string? innerFlowResolveBaseDir = null)
         {
             string path = compositeNode.Params.GetValueOrDefault("innerFlowPath", "")?.Trim() ?? "";
             string embedded = compositeNode.Params.GetValueOrDefault("innerFlowJson", "") ?? "";
             string bindRaw = compositeNode.Params.GetValueOrDefault("bindingsJson", "") ?? "";
+
+            string? compositeFlowLabel = null;
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                try
+                {
+                    compositeFlowLabel = System.IO.Path.GetFileName(
+                        ResolveCompositeFlowPath(path, innerFlowResolveBaseDir));
+                }
+                catch
+                {
+                    compositeFlowLabel = path;
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(embedded.Trim()))
+            {
+                compositeFlowLabel = "内嵌 JSON";
+            }
 
             string jsonText;
             string? baseDirForNestedComposites;
@@ -6610,7 +6672,7 @@ namespace CalibOperatorCLI_Example
                         if (!strictCompositeInputBinding)
                             AutoFillUnboundCompositeInnerInputs(inner, innerInputs, compositeInputs, innerIsSource);
                         var swInner = Stopwatch.StartNew();
-                        ExecuteNode(inner, innerInputs, compositeInputs, baseDirForNestedComposites);
+                        ExecuteCompositeInnerNode(inner, innerInputs, compositeInputs, baseDirForNestedComposites, compositeFlowLabel);
                         swInner.Stop();
                         LogOperatorTiming(inner, swInner.Elapsed.TotalMilliseconds, "composite");
                     }
@@ -6664,7 +6726,7 @@ namespace CalibOperatorCLI_Example
                                 if (!strictCompositeInputBinding)
                                     AutoFillUnboundCompositeInnerInputs(inner, innerInputs, compositeInputs, innerIsSource);
                                 var swInner = Stopwatch.StartNew();
-                                ExecuteNode(inner, innerInputs, compositeInputs, baseDirForNestedComposites);
+                                ExecuteCompositeInnerNode(inner, innerInputs, compositeInputs, baseDirForNestedComposites, compositeFlowLabel, mi);
                                 swInner.Stop();
                                 LogOperatorTiming(inner, swInner.Elapsed.TotalMilliseconds, "composite");
 
@@ -6700,7 +6762,7 @@ namespace CalibOperatorCLI_Example
                         if (!strictCompositeInputBinding)
                             AutoFillUnboundCompositeInnerInputs(inner, innerInputs, compositeInputs, innerIsSource);
                         var swInner = Stopwatch.StartNew();
-                        ExecuteNode(inner, innerInputs, compositeInputs, baseDirForNestedComposites);
+                        ExecuteCompositeInnerNode(inner, innerInputs, compositeInputs, baseDirForNestedComposites, compositeFlowLabel);
                         swInner.Stop();
                         LogOperatorTiming(inner, swInner.Elapsed.TotalMilliseconds, "composite");
                     }
@@ -6720,16 +6782,13 @@ namespace CalibOperatorCLI_Example
                         if (!strictCompositeInputBinding)
                             AutoFillUnboundCompositeInnerInputs(inner, innerInputs, compositeInputs, innerIsSource);
                         var swInner = Stopwatch.StartNew();
-                        ExecuteNode(inner, innerInputs, compositeInputs, baseDirForNestedComposites);
+                        ExecuteCompositeInnerNode(inner, innerInputs, compositeInputs, baseDirForNestedComposites, compositeFlowLabel);
                         swInner.Stop();
                         LogOperatorTiming(inner, swInner.Elapsed.TotalMilliseconds, "composite");
                     }
                 }
 
-                string? flowLabel = !string.IsNullOrWhiteSpace(path)
-                    ? System.IO.Path.GetFileName(path)
-                    : (!string.IsNullOrWhiteSpace(embedded.Trim()) ? "内嵌 JSON" : null);
-                compositeNode.LastCompositeRun = CaptureCompositeRunSnapshot(sorted, compositeInputs, flowLabel);
+                compositeNode.LastCompositeRun = CaptureCompositeRunSnapshot(sorted, compositeInputs, compositeFlowLabel);
                 LogCompositeContourPipelineDigest(compositeNode);
             }
             finally

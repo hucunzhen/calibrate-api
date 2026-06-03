@@ -37,6 +37,7 @@ namespace CalibOperatorCLI_Example
             Gvar3DHost.Content = _gvar3D;
             LoadConfig();
             ApplyConfigToUI();
+            EnsurePlcUiPersist();
             Log("PLC Communication Page Loaded (D=XinJETcpNet, HD=ModbusTcp)");
         }
 

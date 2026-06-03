@@ -35,6 +35,47 @@ namespace CalibOperatorCLI_Example
         public HalconShapeModelRoiPathDto? RingOuterPath { get; set; }
         public HalconShapeModelRoiPathDto? RingInnerPath { get; set; }
 
+        /// <summary>相机矫正：内参去畸变。</summary>
+        public bool EnableUndistort { get; set; }
+
+        public string UndistortAlpha { get; set; } = "-1";
+
+        /// <summary>相机矫正：棋盘平面透视。</summary>
+        public bool EnablePerspective { get; set; }
+
+        public int CalibViewIndex { get; set; }
+
+        public int CalibBoardCols { get; set; } = 9;
+
+        public int CalibBoardRows { get; set; } = 6;
+
+        public string CalibSquareSizeMm { get; set; } = "25";
+
+        public string CalibPxPerMm { get; set; } = "1";
+
+        /// <summary>board | local | plane，对应透视输出范围 ComboBox Tag。</summary>
+        public string PerspectiveOutputFrame { get; set; } = "board";
+
+        /// <summary>模板创建/匹配等侧栏控件（按 x:Name 序列化）。</summary>
+        public Dictionary<string, string> Controls { get; set; } = new();
+
+        private static readonly string[] PersistControlNames =
+        {
+            "CmbTemplateSource", "CmbModelKind", "CmbGenContourMode", "TxtMinContourPoints", "ChkLargestContourOnly",
+            "CmbTrimMode", "TxtTrimEpsilon", "TxtTrimEndsPx", "TxtTrimMinLength", "ChkTrimClosed",
+            "RbGradientOutward", "RbGradientInward", "CmbRingInnerGradientMode",
+            "RbInnerGradientOutward", "RbInnerGradientInward", "RbNextSegmentLine", "RbNextSegmentArc",
+            "TxtEdgeAlpha", "TxtEdgeLow", "TxtEdgeHigh", "TxtScaleMin", "TxtScaleMax", "TxtScaleStep",
+            "TxtMinGray", "TxtMaxGray", "TxtPolygonCloseDist",
+            "TxtNumLevels", "TxtAngleStart", "TxtAngleExtent", "TxtAngleStep", "TxtContrast", "TxtMinContrast",
+            "CmbOptimization", "CmbMetric",
+            "TxtFindNumMatches", "TxtFindMinScore", "TxtFindGreediness", "TxtFindNumLevels", "TxtFindMaxOverlap",
+            "ChkFindApplyGridFilter", "TxtFindGridRows", "TxtFindGridCols", "TxtFindMinScoreKeep",
+            "TxtFindGridAngleDeg", "TxtFindMaxAngleDev", "ChkFindAutoRetry"
+        };
+
+        internal static IReadOnlyList<string> PersistControlNameList => PersistControlNames;
+
         private static string ConfigPath => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             AppProduct.AppDataFolderName,

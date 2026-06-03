@@ -278,7 +278,10 @@ namespace CalibOperatorCLI_Example
             try
             {
                 if (TryApplyCameraCorrections(logSuccess: true))
+                {
                     FitImageToView();
+                    PersistSessionChange();
+                }
             }
             catch (Exception ex)
             {

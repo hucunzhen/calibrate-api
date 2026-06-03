@@ -54,6 +54,7 @@ namespace CalibOperatorCLI_Example
         public HistogramPage()
         {
             InitializeComponent();
+            EnsureHistogramUiPersist();
             _tooltip = new TextBlock
             {
                 Background = new SolidColorBrush(Color.FromArgb(0xDD, 0x33, 0x33, 0x33)),
@@ -82,6 +83,7 @@ namespace CalibOperatorCLI_Example
             try
             {
                 LoadImage(dlg.FileName);
+                PersistHistogramUi();
                 StatusText.Text = $"Loaded: {IoPath.GetFileName(dlg.FileName)} ({_imgWidth}x{_imgHeight})";
             }
             catch (Exception ex)
@@ -92,6 +94,7 @@ namespace CalibOperatorCLI_Example
 
         private void LoadImage(string path)
         {
+            _loadedImagePath = path;
             var bmp = new BitmapImage();
             bmp.BeginInit();
             bmp.UriSource = new Uri(path);

@@ -94,6 +94,8 @@ namespace CalibOperatorCLI_Example
             }
         }
 
+        internal void SaveSession() => PersistUiFromControls();
+
         private void PersistUiFromControls()
         {
             if (_suppressUiPersist)

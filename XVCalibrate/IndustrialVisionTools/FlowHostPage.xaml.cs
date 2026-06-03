@@ -138,6 +138,7 @@ namespace CalibOperatorCLI_Example
         private FlowPage WireFlowPage(TabItem ownerTab)
         {
             var fp = new FlowPage();
+            fp.Loaded += (_, _) => fp.ApplyToolbarDefaultsFromStore();
             fp.FlowLoaded += path =>
             {
                 SetTabHeader(ownerTab, path);
