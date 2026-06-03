@@ -1756,8 +1756,17 @@ namespace CalibOperatorCLI_Example
                 case int i:
                     scalar = i;
                     return true;
+                case long l:
+                    scalar = l;
+                    return true;
                 case double[] arr when arr.Length > 0:
                     scalar = arr[0];
+                    return true;
+                case float[] arrF when arrF.Length > 0:
+                    scalar = arrF[0];
+                    return true;
+                case int[] arrI when arrI.Length > 0:
+                    scalar = arrI[0];
                     return true;
                 default:
                     return false;
@@ -2155,10 +2164,11 @@ namespace CalibOperatorCLI_Example
                     try
                     {
                         if (!TryFindDeformableInMaskedImage(
-                                searchImg, deformableModelId, anchorRow, anchorCol, searchCenter,
+                                searchImg, deformableModelId, anchorRow, anchorCol, poseAngleDeg,
                                 searchMargin, fineMinScore, fineNumLevels, fineGreediness,
                                 scaleOpt, wantDeformed, fineAllowFallback, cropRow1, cropCol1,
-                                out fineRow, out fineCol, out fineScore, out deformedContour))
+                                out fineRow, out fineCol, out fineScore, out deformedContour,
+                                searchCenter))
                             return false;
 
                         fineAngleDeg = searchCenter;
@@ -2383,8 +2393,7 @@ namespace CalibOperatorCLI_Example
             double endScoreWeight = DefaultEndScoreWeight,
             double endArcFraction = DefaultEndArcFraction,
             double fineAngleRelativeStartDeg = double.NaN,
-            double fineAngleRelativeExtentDeg = double.NaN,
-            double matchDirectionDeg = 0)
+            double fineAngleRelativeExtentDeg = double.NaN)
         {
             if (coarseRows == null || coarseCols == null || coarseAngles == null
                 || coarseRows.Length == 0 || coarseRows.Length != coarseCols.Length || coarseRows.Length != coarseAngles.Length)
@@ -2395,9 +2404,6 @@ namespace CalibOperatorCLI_Example
                 (fineAngleRelativeStartDeg, fineAngleRelativeExtentDeg) =
                     FineAngleMarginToRelativeRange(fineAngleMarginDeg);
             }
-
-            var (fineSearchCenter, fineSearchMargin) = ResolveFineAngleSearchCenterMargin(
-                matchDirectionDeg, fineAngleRelativeStartDeg, fineAngleRelativeExtentDeg);
 
             double[] scoresForSort = coarseScores != null && coarseScores.Length == coarseRows.Length
                 ? coarseScores
@@ -2443,6 +2449,8 @@ namespace CalibOperatorCLI_Example
                     double cAng = coarseAngles[i];
                     double cScale = coarseScales != null && coarseScales.Length > i ? coarseScales[i] : 1.0;
                     bool wantDeformed = wantAnyDeformed && (!deformedFirstOnly || !deformedEmitted);
+                    var (fineSearchCenter, fineSearchMargin) = ResolveFineAngleSearchCenterMargin(
+                        cAng, fineAngleRelativeStartDeg, fineAngleRelativeExtentDeg);
 
                     double fRow = 0, fCol = 0, fAng = 0, fScore = 0;
                     Point2D[]? deformed = null;
@@ -2609,8 +2617,7 @@ namespace CalibOperatorCLI_Example
             double fineEndScoreWeight = double.NaN,
             double fineEndArcFraction = double.NaN,
             double fineAngleRelativeStartDeg = double.NaN,
-            double fineAngleRelativeExtentDeg = double.NaN,
-            double matchDirectionDeg = 0)
+            double fineAngleRelativeExtentDeg = double.NaN)
         {
             double fineWeight = double.IsNaN(fineEndScoreWeight) ? endScoreWeight : fineEndScoreWeight;
             double fineArc = double.IsNaN(fineEndArcFraction) ? endArcFraction : fineEndArcFraction;
@@ -2637,8 +2644,7 @@ namespace CalibOperatorCLI_Example
                 fineAllowFallback, rigidContourFallback,
                 endScoreWeight: fineWeight, endArcFraction: fineArc,
                 fineAngleRelativeStartDeg: fineAngleRelativeStartDeg,
-                fineAngleRelativeExtentDeg: fineAngleRelativeExtentDeg,
-                matchDirectionDeg: matchDirectionDeg);
+                fineAngleRelativeExtentDeg: fineAngleRelativeExtentDeg);
         }
 
         /// <summary>由粗位姿与刚性模板估计精匹配旋转矩形 ROI 半长（行/列方向，像素）。</summary>
@@ -2942,10 +2948,11 @@ namespace CalibOperatorCLI_Example
             }
 
             if (!TryFindDeformableInMaskedImage(
-                    hMasked, deformableModelId, coarseRow, coarseCol, searchCenter,
+                    hMasked, deformableModelId, coarseRow, coarseCol, poseAngleDeg,
                     searchMargin, fineMinScore, fineNumLevels, fineGreediness,
                     scaleOpt, wantDeformed, fineAllowFallback, 0, 0,
-                    out fineRow, out fineCol, out fineScore, out deformedContour))
+                    out fineRow, out fineCol, out fineScore, out deformedContour,
+                    searchCenter))
                 return false;
 
             fineAngleDeg = searchCenter;
@@ -3003,7 +3010,7 @@ namespace CalibOperatorCLI_Example
             long deformableModelId,
             double coarseRow,
             double coarseCol,
-            double coarseAngleDeg,
+            double poseAngleDeg,
             double fineAngleMarginDeg,
             double fineMinScore,
             int fineNumLevels,
@@ -3016,16 +3023,18 @@ namespace CalibOperatorCLI_Example
             out double fineRow,
             out double fineCol,
             out double fineScore,
-            out Point2D[]? deformedContour)
+            out Point2D[]? deformedContour,
+            double angleSearchCenterDeg = double.NaN)
         {
             double marginDeg = Math.Max(3.0, fineAngleMarginDeg);
+            double searchAngleDeg = double.IsNaN(angleSearchCenterDeg) ? poseAngleDeg : angleSearchCenterDeg;
             HalconDeformableModelSubtype subtype = HalconDeformableModelRegistry.GetSubtype(deformableModelId);
             FineRoiCropMode crop = subtype == HalconDeformableModelSubtype.PlanarUncalib
                 ? FineRoiCropMode.CropRectangle2AlignAxis
                 : FineRoiCropMode.CropRectangle2;
 
             if (RunDeformableFindOnSearchImage(
-                    hMasked, deformableModelId, coarseRow, coarseCol, coarseAngleDeg,
+                    hMasked, deformableModelId, coarseRow, coarseCol, searchAngleDeg,
                     marginDeg, fineMinScore, fineNumLevels, fineGreediness, scaleOpt,
                     crop, wantDeformed, coordOffsetRow, coordOffsetCol,
                     out fineRow, out fineCol, out fineScore, out deformedContour))
@@ -3038,7 +3047,7 @@ namespace CalibOperatorCLI_Example
             double retryGreed = Math.Max(0.5, fineGreediness * 0.85);
             double retryMargin = Math.Max(marginDeg, 8.0);
             return RunDeformableFindOnSearchImage(
-                hMasked, deformableModelId, coarseRow, coarseCol, coarseAngleDeg,
+                hMasked, deformableModelId, coarseRow, coarseCol, searchAngleDeg,
                 retryMargin, retryScore, fineNumLevels, retryGreed, scaleOpt,
                 crop, wantDeformed, coordOffsetRow, coordOffsetCol,
                 out fineRow, out fineCol, out fineScore, out deformedContour);
@@ -3488,8 +3497,7 @@ namespace CalibOperatorCLI_Example
 
             HDeformableModel model = HalconDeformableModelRegistry.Get(deformableModelId);
             double marginRad = angleMarginDeg * Math.PI / 180.0;
-            bool alignAxisCrop = cropMode == FineRoiCropMode.CropRectangle2AlignAxis;
-            double searchAngleDeg = alignAxisCrop ? 0.0 : coarseAngleDeg;
+            double searchAngleDeg = coarseAngleDeg;
             double angleStartRad = searchAngleDeg * Math.PI / 180.0 - marginRad;
             double angleExtentRad = 2 * marginRad;
             HalconDeformableModelSubtype subtype = HalconDeformableModelRegistry.GetSubtype(deformableModelId);

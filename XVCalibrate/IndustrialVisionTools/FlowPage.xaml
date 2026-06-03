@@ -209,6 +209,15 @@
                             <TextBlock Text="新建流程" Margin="6,0,0,0" VerticalAlignment="Center" FontSize="12"/>
                         </StackPanel>
                     </Button>
+                    <Button Style="{StaticResource FlowToolbarPrimaryBtnStyle}" Margin="6,0,0,4"
+                            ToolTip="打开帮助文档（flows/README_workflow_guide.md 或同目录 README）"
+                            Click="OpenFlowHelp_Click"
+                            AutomationProperties.Name="帮助">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE946;" FontSize="14" VerticalAlignment="Center"/>
+                            <TextBlock Text="帮助" Foreground="#D4E8FF" Margin="6,0,0,0" VerticalAlignment="Center" FontSize="12"/>
+                        </StackPanel>
+                    </Button>
                     <Separator Width="1" Background="#555" Margin="10,4,10,8"/>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
                                 Margin="0,4,8,4"

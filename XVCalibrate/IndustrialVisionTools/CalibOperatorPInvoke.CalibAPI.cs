@@ -482,7 +482,7 @@ namespace CalibOperatorPInvoke
         /// <summary>透视展开到棋盘平面（鸟瞰），使用 CalibrationJson 内参 + extrinsicsPerView[viewIndex]。</summary>
         public static CalibImage WarpToChessboardPlane(CalibImage src, string calibrationJson, int viewIndex,
             int boardCols, int boardRows, double squareSizeMm, double pxPerMm = 1.0, int perspectiveOutputMode = 0,
-            bool assumeUndistortedInput = false, int outputSizeMode = 1)
+            bool assumeUndistortedInput = false, int outputSizeMode = 0)
         {
             if (src == null) throw new ArgumentNullException(nameof(src));
             string calNorm = NormalizeChessboardCalibrationJson(calibrationJson);

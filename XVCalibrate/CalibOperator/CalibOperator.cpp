@@ -5579,9 +5579,12 @@ int WarpImageToChessboardPlane(const Image* src, Image* dst,
     };
 
     std::vector<cv::Point2f> srcCorners = imgAll;
+    bool usedDetectedCorners = false;
     std::vector<cv::Point2f> detected;
-    if (DetectChessboardCornersOnMat(m, boardCols, boardRows, detected) == 0)
+    if (DetectChessboardCornersOnMat(m, boardCols, boardRows, detected) == 0) {
         srcCorners = detected;
+        usedDetectedCorners = true;
+    }
 
     std::vector<cv::Point2f> srcPts;
     BoardOuterQuadFromCorners(srcCorners, boardCols, boardRows, srcPts);
@@ -5594,7 +5597,8 @@ int WarpImageToChessboardPlane(const Image* src, Image* dst,
 
     int outW = (int)std::lround((boardCols - 1) * squareSizeMm * pxPerMm);
     int outH = (int)std::lround((boardRows - 1) * squareSizeMm * pxPerMm);
-    if (outputSizeMode == 1) {
+    // board_pixels: 按图中棋盘边长定尺寸；未检测到角点时不应使用外参投影边长（随 viewIndex 变化），回退 metric
+    if (outputSizeMode == 1 && usedDetectedCorners) {
         const double horiz = 0.5 * ((double)edgeLen(srcPts[0], srcPts[1]) + (double)edgeLen(srcPts[3], srcPts[2]));
         const double vert = 0.5 * ((double)edgeLen(srcPts[0], srcPts[3]) + (double)edgeLen(srcPts[1], srcPts[2]));
         const double scaleW = horiz / (double)(boardCols - 1);

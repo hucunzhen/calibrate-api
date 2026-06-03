@@ -562,6 +562,42 @@ namespace CalibOperatorCLI_Example
             return names.Select(n => ($"{n}List", n)).ToList();
         }
 
+        private static readonly HashSet<string> ListPickReservedPortNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "AtIndex", "Index", "Count"
+        };
+
+        private static List<string> ParseListPickItemPortNames(string? raw)
+        {
+            var names = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(raw))
+            {
+                foreach (var token in raw.Split(FlowLoopItemPortSeparators, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    string name = token.Trim();
+                    if (name.EndsWith("List", StringComparison.OrdinalIgnoreCase) && name.Length > 4)
+                        name = name[..^4].Trim();
+                    if (string.IsNullOrWhiteSpace(name) || ListPickReservedPortNames.Contains(name))
+                        continue;
+                    if (seen.Add(name))
+                        names.Add(name);
+                }
+            }
+
+            if (names.Count == 0)
+                names.Add("In");
+            return names;
+        }
+
+        private static List<(string InputPort, string OutputPort)> BuildListPickListPortMaps(IReadOnlyDictionary<string, string> paramBag)
+        {
+            const string defaultItemPorts = "In,In2,In3";
+            string raw = paramBag.GetValueOrDefault("itemPorts", defaultItemPorts) ?? defaultItemPorts;
+            var names = ParseListPickItemPortNames(raw);
+            return names.Select(n => ($"{n}List", n)).ToList();
+        }
+
         private static string GetFlowLoopPortColorHex(string baseName)
         {
             if (baseName.StartsWith("CoarseRow", StringComparison.OrdinalIgnoreCase))
@@ -582,6 +618,43 @@ namespace CalibOperatorCLI_Example
         private static IReadOnlyList<PortDef> BuildFlowLoopDynamicPorts(FlowNode node)
         {
             var listPairs = BuildFlowLoopListPortMaps(node.Params);
+            var ports = new List<PortDef>(node.Def.Ports);
+            var inputNames = new HashSet<string>(ports.Where(p => p.Direction == PortDirection.Input).Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
+            var outputNames = new HashSet<string>(ports.Where(p => p.Direction == PortDirection.Output).Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
+            foreach (var (inputPort, outputPort) in listPairs)
+            {
+                string c = GetFlowLoopPortColorHex(outputPort);
+                if (inputNames.Add(inputPort))
+                {
+                    ports.Add(new PortDef
+                    {
+                        Name = inputPort,
+                        Direction = PortDirection.Input,
+                        DataType = typeof(object),
+                        ColorHex = c,
+                        IsOptional = true
+                    });
+                }
+
+                if (outputNames.Add(outputPort))
+                {
+                    ports.Add(new PortDef
+                    {
+                        Name = outputPort,
+                        Direction = PortDirection.Output,
+                        DataType = typeof(object),
+                        ColorHex = c,
+                        IsOptional = true
+                    });
+                }
+            }
+
+            return ports;
+        }
+
+        private static IReadOnlyList<PortDef> BuildListPickDynamicPorts(FlowNode node)
+        {
+            var listPairs = BuildListPickListPortMaps(node.Params);
             var ports = new List<PortDef>(node.Def.Ports);
             var inputNames = new HashSet<string>(ports.Where(p => p.Direction == PortDirection.Input).Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
             var outputNames = new HashSet<string>(ports.Where(p => p.Direction == PortDirection.Output).Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
@@ -659,6 +732,12 @@ namespace CalibOperatorCLI_Example
                 case object[] arrObj:
                     length = arrObj.Length;
                     return true;
+                case Point2D[] arrPts:
+                    length = arrPts.Length;
+                    return true;
+                case List<Point2D> listPts:
+                    length = listPts.Count;
+                    return true;
                 default:
                     return false;
             }
@@ -707,8 +786,90 @@ namespace CalibOperatorCLI_Example
                 case object[] arrObj when index < arrObj.Length:
                     value = arrObj[index];
                     return true;
+                case Point2D[] arrPts when index < arrPts.Length:
+                    value = arrPts[index];
+                    return true;
+                case List<Point2D> listPts when index < listPts.Count:
+                    value = listPts[index];
+                    return true;
                 default:
                     return false;
+            }
+        }
+
+        private static int ResolveListPickIndex(IReadOnlyDictionary<string, object?> inputs, IReadOnlyDictionary<string, string> paramBag)
+        {
+            if (inputs.TryGetValue("AtIndex", out var idxObj) && idxObj != null)
+            {
+                switch (idxObj)
+                {
+                    case int i:
+                        return i;
+                    case long l:
+                        return l > int.MaxValue ? int.MaxValue : l < int.MinValue ? int.MinValue : (int)l;
+                    case double d:
+                        return (int)d;
+                    case float f:
+                        return (int)f;
+                }
+            }
+
+            if (int.TryParse(
+                    paramBag.GetValueOrDefault("index", "0"),
+                    System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out int parsed))
+                return parsed;
+            return 0;
+        }
+
+        private static void ApplyListPickOutputs(
+            FlowNode node,
+            IReadOnlyDictionary<string, object?> inputs,
+            int pickIndex,
+            IReadOnlyList<(string InputPort, string OutputPort)> listPortMaps)
+        {
+            var connected = new List<(string InputPort, string OutputPort, int Length)>();
+            foreach (var (inputPort, outputPort) in listPortMaps)
+            {
+                if (!inputs.TryGetValue(inputPort, out var obj) || obj == null)
+                    continue;
+                if (!TryGetFlowLoopListLength(obj, out int len))
+                    throw new InvalidOperationException($"列表取项: {inputPort} 不是支持的列表类型");
+                connected.Add((inputPort, outputPort, len));
+            }
+
+            if (connected.Count == 0)
+                throw new InvalidOperationException("列表取项: 至少连接一路列表输入（如 InList）");
+
+            var activeLengths = connected.Where(c => c.Length > 0).Select(c => c.Length).ToList();
+            int listCount = activeLengths.Count > 0 ? activeLengths[0] : 0;
+            if (activeLengths.Count > 1 && !activeLengths.All(l => l == listCount))
+            {
+                string detail = string.Join(", ", connected.Select(c => $"{c.InputPort}={c.Length}"));
+                throw new InvalidOperationException($"列表取项: 多路列表长度不一致（{detail}）");
+            }
+
+            node.Outputs["Count"] = listCount;
+            node.Outputs["Index"] = pickIndex;
+
+            if (listCount == 0)
+            {
+                foreach (var (_, outputPort, _) in connected)
+                    node.Outputs[outputPort] = null;
+                return;
+            }
+
+            if (pickIndex < 0 || pickIndex >= listCount)
+                throw new InvalidOperationException($"列表取项: 索引 {pickIndex} 超出范围 [0, {listCount - 1}]");
+
+            foreach (var (inputPort, outputPort, _) in connected)
+            {
+                if (!inputs.TryGetValue(inputPort, out var obj))
+                    continue;
+                if (!TryGetFlowLoopListValueAt(obj, pickIndex, out var item))
+                    throw new InvalidOperationException($"列表取项: 无法读取 {inputPort}[{pickIndex}]");
+                node.Outputs[outputPort] = item;
             }
         }
 
@@ -963,6 +1124,8 @@ namespace CalibOperatorCLI_Example
                 return BuildCompositeExternalPorts(node.Params);
             if (string.Equals(node.Def.TypeId, "flow_loop", StringComparison.Ordinal))
                 return BuildFlowLoopDynamicPorts(node);
+            if (string.Equals(node.Def.TypeId, "list_pick", StringComparison.Ordinal))
+                return BuildListPickDynamicPorts(node);
             return node.Def.Ports;
         }
 
@@ -1040,7 +1203,8 @@ namespace CalibOperatorCLI_Example
 
         private static bool NodeUsesDynamicPorts(FlowNode node) =>
             string.Equals(node.Def.TypeId, "composite", StringComparison.Ordinal)
-            || string.Equals(node.Def.TypeId, "flow_loop", StringComparison.Ordinal);
+            || string.Equals(node.Def.TypeId, "flow_loop", StringComparison.Ordinal)
+            || string.Equals(node.Def.TypeId, "list_pick", StringComparison.Ordinal);
 
         private void EnsureDynamicNodePortLayout(FlowNode node)
         {
@@ -2006,6 +2170,105 @@ namespace CalibOperatorCLI_Example
         // ================================================================
         // 工具栏按钮
         // ================================================================
+
+        private void OpenFlowHelp_Click(object sender, RoutedEventArgs e)
+        {
+            string? readme = ResolveFlowHelpReadmePath(CurrentFlowFilePath);
+            if (readme == null)
+            {
+                MessageBox.Show(
+                    "未找到帮助文档。\n\n请在 flow 同目录放置 README.md，或打开仓库 flows/ 下的示例 flow。\n索引：flows/README.md",
+                    "帮助",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = readme,
+                    UseShellExecute = true
+                });
+                StatusText.Text = $"帮助: {System.IO.Path.GetFileName(readme)}";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"无法打开帮助文档:\n{readme}\n\n{ex.Message}", "帮助", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        /// <summary>flows 部署指南 → 当前 flow 同目录 README.md → flows 索引。</summary>
+        private static string? ResolveFlowHelpReadmePath(string? flowFilePath)
+        {
+            static string? FirstExistingReadme(string dir)
+            {
+                if (string.IsNullOrWhiteSpace(dir) || !System.IO.Directory.Exists(dir))
+                    return null;
+                string direct = System.IO.Path.Combine(dir, "README.md");
+                if (System.IO.File.Exists(direct))
+                    return direct;
+                if (string.Equals(System.IO.Path.GetFileName(dir), "halcon", StringComparison.OrdinalIgnoreCase))
+                {
+                    var halconDocs = System.IO.Directory.GetFiles(dir, "README*.md");
+                    if (halconDocs.Length > 0)
+                        return halconDocs[0];
+                }
+                return null;
+            }
+
+            static string? FindFlowsRootGuide(string? startDir)
+            {
+                string? dir = startDir;
+                for (int i = 0; i < 8 && !string.IsNullOrEmpty(dir); i++)
+                {
+                    if (string.Equals(System.IO.Path.GetFileName(dir), "flows", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string guide = System.IO.Path.Combine(dir, "README_workflow_guide.md");
+                        if (System.IO.File.Exists(guide))
+                            return guide;
+                        string index = System.IO.Path.Combine(dir, "README.md");
+                        if (System.IO.File.Exists(index))
+                            return index;
+                        return null;
+                    }
+                    dir = System.IO.Path.GetDirectoryName(dir);
+                }
+                return null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(flowFilePath))
+            {
+                string flowDir = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(flowFilePath)) ?? "";
+                var flowsGuide = FindFlowsRootGuide(flowDir);
+                if (flowsGuide != null)
+                    return flowsGuide;
+
+                string? dir = flowDir;
+                for (int i = 0; i < 6 && !string.IsNullOrEmpty(dir); i++)
+                {
+                    var found = FirstExistingReadme(dir);
+                    if (found != null)
+                        return found;
+                    dir = System.IO.Path.GetDirectoryName(dir);
+                }
+            }
+
+            string? probe = System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+            for (int i = 0; i < 8 && !string.IsNullOrEmpty(probe); i++)
+            {
+                string flowsGuide = System.IO.Path.Combine(probe, "flows", "README_workflow_guide.md");
+                if (System.IO.File.Exists(flowsGuide))
+                    return flowsGuide;
+                string flowsIndex = System.IO.Path.Combine(probe, "flows", "README.md");
+                if (System.IO.File.Exists(flowsIndex))
+                    return flowsIndex;
+                probe = System.IO.Path.GetDirectoryName(probe);
+            }
+
+            return null;
+        }
 
         // ================================================================
         // 保存 / 加载流程编排
@@ -6384,6 +6647,7 @@ namespace CalibOperatorCLI_Example
                                 MergeCompositeExternalInputs(inner, innerInputs, compositeInputs, spec);
                                 if (inner.Def.TypeId == "halcon_fine_deformable_match")
                                 {
+                                    ApplyMaskBatchCoarsePoseToFineInputs(innerInputs, batch, mi);
                                     if (!innerInputs.ContainsKey("FullImage") && batch.SourceImage != null)
                                         innerInputs["FullImage"] = batch.SourceImage;
                                     if (!innerInputs.ContainsKey("RigidModelId")
@@ -7061,9 +7325,11 @@ namespace CalibOperatorCLI_Example
         private Dictionary<string, object?> BuildFineDeformableMaskLoopInputs(
             FlowNode fineNode,
             IReadOnlyDictionary<string, object?> maskNodeInputs,
-            HalconCoarseMaskBatch batch)
+            HalconCoarseMaskBatch batch,
+            int maskIndex)
         {
             var inputs = GetNodeInputs(fineNode);
+            ApplyMaskBatchCoarsePoseToFineInputs(inputs, batch, maskIndex);
             if (!inputs.ContainsKey("FullImage") && batch.SourceImage != null)
                 inputs["FullImage"] = batch.SourceImage;
             if (!inputs.ContainsKey("RigidModelId") && maskNodeInputs.TryGetValue("ModelId", out var modelId))
@@ -7074,6 +7340,20 @@ namespace CalibOperatorCLI_Example
             }
 
             return inputs;
+        }
+
+        private static void ApplyMaskBatchCoarsePoseToFineInputs(
+            IDictionary<string, object?> inputs,
+            HalconCoarseMaskBatch batch,
+            int maskIndex)
+        {
+            if (maskIndex < 0 || maskIndex >= batch.Count)
+                return;
+            inputs["CoarseRow"] = batch.CoarseRows[maskIndex];
+            inputs["CoarseColumn"] = batch.CoarseCols[maskIndex];
+            inputs["CoarseAngle"] = batch.CoarseAngles[maskIndex];
+            if (maskIndex < batch.CoarseScales.Length)
+                inputs["CoarseScale"] = batch.CoarseScales[maskIndex];
         }
 
         private static long ResolveFineMatchRigidModelId(IReadOnlyDictionary<string, object?> inputs)
@@ -7262,7 +7542,7 @@ namespace CalibOperatorCLI_Example
                         try
                         {
                             Dictionary<string, object?>? loopInputs = node.Def.TypeId == "halcon_fine_deformable_match"
-                                ? BuildFineDeformableMaskLoopInputs(node, maskInputs, batch)
+                                ? BuildFineDeformableMaskLoopInputs(node, maskInputs, batch, mi)
                                 : null;
                             await ExecuteNodeForRunAsync(node, $"M{mi + 1}", loopInputs);
                         }
@@ -8102,12 +8382,13 @@ namespace CalibOperatorCLI_Example
         private static int ParsePerspectiveOutputScale(IReadOnlyDictionary<string, string?> paramBag)
         {
             if (!paramBag.TryGetValue("perspectiveOutputScale", out var raw) || string.IsNullOrWhiteSpace(raw))
-                return 1;
+                return 0;
             var t = raw.Trim();
-            return string.Equals(t, "metric", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(t, "mm", StringComparison.OrdinalIgnoreCase)
-                ? 0
-                : 1;
+            return string.Equals(t, "board_pixels", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(t, "pixels", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(t, "image", StringComparison.OrdinalIgnoreCase)
+                ? 1
+                : 0;
         }
 
         private static bool ParseAssumeUndistortedForWarp(IReadOnlyDictionary<string, string?> paramBag, bool undistortEnabledInSameNode)
@@ -8132,7 +8413,7 @@ namespace CalibOperatorCLI_Example
                 || string.Equals(t, "yes", StringComparison.OrdinalIgnoreCase);
         }
 
-        /// <summary>加载图/相机取图：按参数对图像做内参去畸变与棋盘透视展开。</summary>
+        /// <summary>标定图像矫正：按参数对图像做内参去畸变与棋盘透视展开。</summary>
         private CalibImage ApplyOptionalCameraCorrection(
             FlowNode node,
             Dictionary<string, object?> inputs,
@@ -8234,31 +8515,42 @@ namespace CalibOperatorCLI_Example
                             ? ""
                             : ResolveCompositeFlowPath(configuredPath, compositeInnerFlowBaseDir);
 
+                        CalibImage? loaded = null;
                         if (!string.IsNullOrWhiteSpace(resolvedPath))
                         {
                             if (!System.IO.File.Exists(resolvedPath))
                                 throw new System.IO.FileNotFoundException($"加载图像失败，文件不存在: {resolvedPath}");
-                            var img = ApplyOptionalCameraCorrection(node, inputs, CalibAPI.LoadImage(resolvedPath), compositeInnerFlowBaseDir);
-                            node.Outputs["Image"] = img;
-                            break;
-                        }
-
-                        var dlg = new OpenFileDialog
-                        {
-                            Filter = "图像文件|*.bmp;*.png;*.jpg;*.tif|所有文件|*.*",
-                            Title = "选择图像文件"
-                        };
-                        if (dlg.ShowDialog() == true)
-                        {
-                            string storedPath = FormatPathForFlowParam(dlg.FileName, compositeInnerFlowBaseDir);
-                            node.Params["filePath"] = storedPath;
-                            var img = ApplyOptionalCameraCorrection(node, inputs, CalibAPI.LoadImage(dlg.FileName), compositeInnerFlowBaseDir);
-                            node.Outputs["Image"] = img;
+                            loaded = CalibAPI.LoadImage(resolvedPath);
                         }
                         else
                         {
-                            node.ErrorMessage = "用户取消";
+                            var dlg = new OpenFileDialog
+                            {
+                                Filter = "图像文件|*.bmp;*.png;*.jpg;*.tif|所有文件|*.*",
+                                Title = "选择图像文件"
+                            };
+                            if (dlg.ShowDialog() == true)
+                            {
+                                string storedPath = FormatPathForFlowParam(dlg.FileName, compositeInnerFlowBaseDir);
+                                node.Params["filePath"] = storedPath;
+                                loaded = CalibAPI.LoadImage(dlg.FileName);
+                            }
+                            else
+                            {
+                                node.ErrorMessage = "用户取消";
+                                break;
+                            }
                         }
+
+                        node.Outputs["Image"] = loaded;
+                        if (inputs.TryGetValue("After", out var afterLoad))
+                            node.Outputs["Out"] = afterLoad;
+                        string fileLabel = !string.IsNullOrWhiteSpace(resolvedPath)
+                            ? System.IO.Path.GetFileName(resolvedPath)
+                            : System.IO.Path.GetFileName(node.Params.GetValueOrDefault("filePath", "") ?? "");
+                        node.ResultSummary = inputs.ContainsKey("After")
+                            ? $"Loaded {fileLabel}（After 上游已执行）"
+                            : $"Loaded {fileLabel}";
                         break;
                     }
 
@@ -8291,7 +8583,7 @@ namespace CalibOperatorCLI_Example
                         else if (idx >= paths.Count)
                             idx = paths.Count - 1;
 
-                        var img = ApplyOptionalCameraCorrection(node, inputs, CalibAPI.LoadImage(paths[idx]), compositeInnerFlowBaseDir);
+                        var img = CalibAPI.LoadImage(paths[idx]);
                         node.Outputs["Image"] = img;
                         node.Outputs["Count"] = paths.Count;
                         node.Outputs["Path"] = paths[idx];
@@ -8369,11 +8661,7 @@ namespace CalibOperatorCLI_Example
                         int deviceIndex = int.TryParse(node.Params.GetValueOrDefault("deviceIndex"), out var di) ? di : 0;
                         int targetWidth = int.TryParse(node.Params.GetValueOrDefault("targetWidth"), out var tw) ? tw : 0;
                         int targetHeight = int.TryParse(node.Params.GetValueOrDefault("targetHeight"), out var th) ? th : 0;
-                        var img = ApplyOptionalCameraCorrection(
-                            node,
-                            inputs,
-                            GrabOneCameraFrameOrThrow(deviceIndex, targetWidth, targetHeight),
-                            compositeInnerFlowBaseDir);
+                        var img = GrabOneCameraFrameOrThrow(deviceIndex, targetWidth, targetHeight);
                         node.Outputs["Image"] = img;
                         if (inputs.TryGetValue("After", out var afterSnap))
                             node.Outputs["Out"] = afterSnap;
@@ -8485,6 +8773,24 @@ namespace CalibOperatorCLI_Example
                         var fused = FuseExposureCalibImages(images, mode);
                         node.Outputs["Image"] = fused;
                         node.ResultSummary = $"{mode} x{images.Count} → {fused.GetNativeStruct().width}x{fused.GetNativeStruct().height}";
+                        break;
+                    }
+
+                    case "list_pick":
+                    {
+                        var listPortMaps = BuildListPickListPortMaps(node.Params);
+                        int pickIndex = ResolveListPickIndex(inputs, node.Params);
+                        ApplyListPickOutputs(node, inputs, pickIndex, listPortMaps);
+                        int count = node.Outputs.TryGetValue("Count", out var cObj) && cObj is int ci ? ci : 0;
+                        var picked = listPortMaps
+                            .Where(m => node.Outputs.ContainsKey(m.OutputPort))
+                            .Select(m => m.OutputPort)
+                            .ToList();
+                        node.ResultSummary = count == 0
+                            ? "empty list"
+                            : picked.Count == 0
+                                ? $"idx={pickIndex}/{count - 1}"
+                                : $"idx={pickIndex}/{count - 1} → {string.Join(", ", picked)}";
                         break;
                     }
 
@@ -10469,6 +10775,29 @@ namespace CalibOperatorCLI_Example
                         break;
                     }
 
+                    case "calibration_correct_image":
+                    {
+                        if (inputs["Image"] is not CalibImage srcImg)
+                            throw new InvalidOperationException("标定图像矫正: 缺少 Image");
+                        bool undistort = ParseFlowBoolParam(node.Params, "enableUndistort");
+                        bool perspective = ParseFlowBoolParam(node.Params, "enablePerspective");
+                        if (!undistort && !perspective)
+                        {
+                            node.Outputs["Out"] = srcImg;
+                            node.ResultSummary = "未启用矫正（透传）";
+                            break;
+                        }
+
+                        var corrected = ApplyOptionalCameraCorrection(node, inputs, srcImg, compositeInnerFlowBaseDir);
+                        node.Outputs["Out"] = corrected;
+                        node.ResultSummary = undistort && perspective
+                            ? "undistort + perspective"
+                            : undistort
+                                ? "undistort"
+                                : "perspective";
+                        break;
+                    }
+
                     case "intrinsics_undistort_image":
                     {
                         var srcImg = inputs["Image"] as CalibImage;
@@ -12440,10 +12769,10 @@ namespace CalibOperatorCLI_Example
 
                         double coarseScaleMin = PcAlias(node.Params, "coarseScaleMin", "scaleMin", 1.0);
                         double coarseScaleMax = PcAlias(node.Params, "coarseScaleMax", "scaleMax", 1.0);
-                        inputs.TryGetValue("MatchDirection", out var mdObj);
-                        double matchDirection = HalconFlowBridge.ResolveMatchDirectionInput(mdObj, 0);
+                        inputs.TryGetValue("CoarseAngle", out var caRefObj);
+                        double angleRef = HalconFlowBridge.TryReadCoarseScalar(caRefObj, out double refAng) ? refAng : 0;
                         var (coarseAbsStart, coarseAbsExtent) = HalconFlowBridge.ResolveRelativeAngleRangeDeg(
-                            matchDirection,
+                            angleRef,
                             Pc(node.Params, "angleStart", -30),
                             Pc(node.Params, "angleExtent", 60));
                         var (rows, cols, angles, scales, scores) = HalconFlowBridge.CoarseShapeMatch(
@@ -12531,12 +12860,10 @@ namespace CalibOperatorCLI_Example
                         inputs.TryGetValue("CoarseRow", out var crObj);
                         inputs.TryGetValue("CoarseColumn", out var ccObj);
                         inputs.TryGetValue("CoarseAngle", out var caObj);
-                        inputs.TryGetValue("MatchDirection", out var mdObj);
                         double anchorRow = HalconFlowBridge.TryReadCoarseScalar(crObj, out double ar) ? ar : double.NaN;
                         double anchorCol = HalconFlowBridge.TryReadCoarseScalar(ccObj, out double ac) ? ac : double.NaN;
                         bool hasCoarseAngle = HalconFlowBridge.TryReadCoarseScalar(caObj, out double anchorAng);
-                        double matchDirection = HalconFlowBridge.ResolveMatchDirectionInput(mdObj, 0);
-                        double poseAngle = hasCoarseAngle ? anchorAng : matchDirection;
+                        double poseAngle = hasCoarseAngle ? anchorAng : 0;
 
                         static double Pf(IReadOnlyDictionary<string, string> p, string key, double def) =>
                             double.TryParse(p.GetValueOrDefault(key), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : def;
@@ -12550,7 +12877,7 @@ namespace CalibOperatorCLI_Example
                         var (fineRelStart, fineRelExtent) = HalconFlowBridge.ResolveFineRelativeAngleRangeFromParams(
                             node.Params, "fineAngleStart", "fineAngleExtent", "fineAngleMargin", 5);
                         var (fineSearchCenter, fineSearchMargin) = HalconFlowBridge.ResolveFineAngleSearchCenterMargin(
-                            matchDirection, fineRelStart, fineRelExtent);
+                            poseAngle, fineRelStart, fineRelExtent);
 
                         string contourMode = Pfs(node.Params, "deformedContourMode", "first");
                         bool wantDeformed = !string.Equals(contourMode, "none", StringComparison.OrdinalIgnoreCase);
@@ -12592,8 +12919,12 @@ namespace CalibOperatorCLI_Example
                             node.Outputs["DeformedXld"] = fineResult.DeformedXld;
 
                         node.ResultSummary = fineResult.FineCount == 0
-                            ? "精匹配无结果"
-                            : $"精 1 个 sc={fineResult.FineScores[0]:F3}";
+                            ? hasCoarseAngle
+                                ? $"精匹配无结果 (CoarseAngle={anchorAng:G}°)"
+                                : "精匹配无结果"
+                            : hasCoarseAngle
+                                ? $"精 1 sc={fineResult.FineScores[0]:F3} coarseAng={anchorAng:G}°"
+                                : $"精 1 个 sc={fineResult.FineScores[0]:F3}";
                         break;
 #else
                         throw new InvalidOperationException("HALCON 可变形精匹配: 需要 HALCON 支持编译");
@@ -12636,10 +12967,8 @@ namespace CalibOperatorCLI_Example
 
                         double coarseEndW = P(node.Params, "endScoreWeight", HalconFlowBridge.DefaultEndScoreWeight);
                         double coarseEndArc = P(node.Params, "endArcFraction", HalconFlowBridge.DefaultEndArcFraction);
-                        inputs.TryGetValue("MatchDirection", out var mdObj);
-                        double matchDirection = HalconFlowBridge.ResolveMatchDirectionInput(mdObj, 0);
                         var (coarseAbsStart, coarseAbsExtent) = HalconFlowBridge.ResolveRelativeAngleRangeDeg(
-                            matchDirection,
+                            0,
                             P(node.Params, "coarseAngleStart", -30),
                             P(node.Params, "coarseAngleExtent", 60));
                         var (fineRelStart, fineRelExtent) = HalconFlowBridge.ResolveFineRelativeAngleRangeFromParams(
@@ -12677,8 +13006,7 @@ namespace CalibOperatorCLI_Example
                             fineEndScoreWeight: Popt(node.Params, "fineEndScoreWeight", coarseEndW),
                             fineEndArcFraction: Popt(node.Params, "fineEndArcFraction", coarseEndArc),
                             fineAngleRelativeStartDeg: fineRelStart,
-                            fineAngleRelativeExtentDeg: fineRelExtent,
-                            matchDirectionDeg: matchDirection);
+                            fineAngleRelativeExtentDeg: fineRelExtent);
 
                         node.Outputs["Row"] = result.FineRows;
                         node.Outputs["Column"] = result.FineCols;
@@ -13848,7 +14176,7 @@ namespace CalibOperatorCLI_Example
                     };
                 }
                 else if (param.Name == "calibrationJsonFile"
-                    && node.Def.TypeId is "load_image" or "load_image_dir" or "camera_snap"
+                    && node.Def.TypeId is "calibration_correct_image"
                         or "intrinsics_undistort_image" or "chessboard_perspective_warp_image")
                 {
                     browseBtn = new Button
@@ -15421,8 +15749,7 @@ namespace CalibOperatorCLI_Example
                         CalibImage? frame = null;
                         try
                         {
-                            var loopInputs = GetNodeInputs(loopNode);
-                            frame = ApplyOptionalCameraCorrection(loopNode, loopInputs, CalibAPI.LoadImage(path), compositeInnerFlowBaseDir: null);
+                            frame = CalibAPI.LoadImage(path);
                         }
                         catch (Exception ex)
                         {

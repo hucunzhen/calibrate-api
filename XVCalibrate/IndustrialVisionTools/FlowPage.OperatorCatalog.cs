@@ -83,20 +83,23 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "load_image",
                 DisplayName = "加载图像",
-                Description = "从文件或相机加载图像",
+                Description = "从文件加载图像。可选 After 输入：接在上游算子 Out 之后，先执行上游再加载；Out 透传 After 供下游继续。",
                 Category = "输入",
-                Params = FlowCameraCorrectionOperatorParams.With(
+                Params =
+                {
                     new OperatorParam
                     {
                         Name = "filePath",
                         DisplayName = "图像路径",
                         DefaultValue = "",
                         Description = "可选；填写后自动加载（相对路径相对当前 .flow.json 目录）；留空则弹窗选择"
-                    }),
+                    }
+                },
                 Ports =
                 {
-                    new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
-                    new PortDef { Name = "Image", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" }
+                    new PortDef { Name = "After", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Image", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true }
                 }
             },
             new OperatorDef
@@ -105,7 +108,8 @@ namespace CalibOperatorCLI_Example
                 DisplayName = "加载图像目录",
                 Description = "扫描目录下图像（非递归），按文件名排序；each=运行流程时对每张图各驱动下游执行一遍；single=始终只加载序号所指的一张",
                 Category = "输入",
-                Params = FlowCameraCorrectionOperatorParams.With(
+                Params =
+                {
                     new OperatorParam
                     {
                         Name = "mode",
@@ -134,10 +138,10 @@ namespace CalibOperatorCLI_Example
                         DisplayName = "序号",
                         DefaultValue = "0",
                         Description = "single 模式或单节点调试时：排序后的文件索引（从 0 起）；each 模式下「运行」时忽略此项"
-                    }),
+                    }
+                },
                 Ports =
                 {
-                    new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
                     new PortDef { Name = "Image", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Count", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#607D8B" },
                     new PortDef { Name = "Path", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#9CCC65" }
@@ -185,14 +189,15 @@ namespace CalibOperatorCLI_Example
                 DisplayName = "相机取一帧",
                 Description = "从相机抓取单帧图像。上游算子 Out → After 可排在任意算子之后取图；Out 透传 After 供下游继续。",
                 Category = "输入",
-                Params = FlowCameraCorrectionOperatorParams.With(
+                Params =
+                {
                     new OperatorParam { Name = "deviceIndex", DisplayName = "设备索引", DefaultValue = "0", Description = "相机枚举索引，从0开始" },
                     new OperatorParam { Name = "targetWidth", DisplayName = "目标宽度", DefaultValue = "0", Description = "预留参数，当前未缩放（填0即可）" },
-                    new OperatorParam { Name = "targetHeight", DisplayName = "目标高度", DefaultValue = "0", Description = "预留参数，当前未缩放（填0即可）" }),
+                    new OperatorParam { Name = "targetHeight", DisplayName = "目标高度", DefaultValue = "0", Description = "预留参数，当前未缩放（填0即可）" }
+                },
                 Ports =
                 {
                     new PortDef { Name = "After", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
-                    new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
                     new PortDef { Name = "Image", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true }
                 }
@@ -2246,6 +2251,24 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "list_pick",
+                DisplayName = "列表取项",
+                Description = "多路列表输入，按索引同时输出每路当前项（InList→In）。itemPorts 配置端口名，自动生成 XList 输入与 X 输出；可与 flow_loop 的 Index 或 AtIndex 输入联动取对应轮次数据。",
+                Category = "流程",
+                Params =
+                {
+                    new OperatorParam { Name = "itemPorts", DisplayName = "列表端口名", DefaultValue = "In,In2,In3", Description = "逗号/分号/换行分隔，如 In,CoarseRow,CoarseColumn。每路生成输入 XList 与输出 X 成对端口" },
+                    new OperatorParam { Name = "index", DisplayName = "索引", DefaultValue = "0", Description = "取第几项（0 起）；连接 AtIndex 输入时以输入为准" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "AtIndex", Direction = PortDirection.Input, DataType = typeof(int), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Index", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#607D8B" },
+                    new PortDef { Name = "Count", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#607D8B" }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "flow_sink",
                 DisplayName = "循环收集",
                 Description = "接在循环下游：每轮将 In 追加到列表（如多曝光采图）。输出 ImageList 供 Exposure Fusion 等使用。循环结束后才执行仅依赖收集结果的算子（如曝光融合）。须用「运行」托管执行。",
@@ -2426,7 +2449,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "chessboard_calibrate_intrinsics",
                 DisplayName = "棋盘格内参标定",
-                Description = "由多张棋盘格图像通过 OpenCV calibrateCamera 最小化重投影误差，同时优化求解：相机内参 fx/fy/cx/cy、畸变系数，以及每张成功视图的外参 rvec/tvec（棋盘坐标系→相机坐标系）。输出均为标定计算结果。至少需 3 张成功检出棋盘的视图。完整结果见 CalibrationJson；内参/外参如何用见 test_images/intrinsics_extrinsics_usage.txt 与 chessboard_intrinsics_extrinsics_usage.flow.json。",
+                Description = "由多张棋盘格图像通过 OpenCV calibrateCamera 最小化重投影误差，同时优化求解：相机内参 fx/fy/cx/cy、畸变系数，以及每张成功视图的外参 rvec/tvec（棋盘坐标系→相机坐标系）。输出均为标定计算结果。至少需 3 张成功检出棋盘的视图。完整结果见 CalibrationJson。帮助：flows/chessboard/README.md",
                 Category = "标定",
                 Params =
                 {
@@ -2464,6 +2487,20 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "calibration_correct_image",
+                DisplayName = "标定图像矫正",
+                Description = "对输入图像按参数做内参去畸变与/或棋盘透视展开（原 load_image / camera_snap 内置选项已拆出）。须连接 CalibrationJson 或填写 calibrationJsonFile。帮助：flows/chessboard/README.md",
+                Category = "标定",
+                Params = FlowCameraCorrectionOperatorParams.CoreOnly(),
+                Ports =
+                {
+                    new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "intrinsics_undistort_image",
                 DisplayName = "内参畸变矫正",
                 Description = "使用棋盘格标定得到的针孔内参 fx/fy/cx/cy 与畸变系数 k1..k3/p1/p2，对输入图像做 OpenCV cv::undistort 去畸变。连接 Intrinsics 或 CalibrationJson（来自「棋盘格内参标定」）。",
@@ -2485,7 +2522,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "chessboard_perspective_warp_image",
                 DisplayName = "棋盘透视展开",
-                Description = "整图透视展开到标定棋盘平面（鸟瞰）：使用 CalibrationJson 内参 + extrinsicsPerView[viewIndex]，按棋盘列/行/方格尺寸做单应 warp。常与「内参畸变矫正」串联（先去畸变再展开）。viewIndex 与标定成功图像顺序一致。",
+                Description = "整图透视展开到标定棋盘平面（鸟瞰）：使用 CalibrationJson 内参 + extrinsicsPerView[viewIndex]。输出尺度 metric 时各角度尺寸一致。常与「内参畸变矫正」串联。帮助：flows/chessboard/README.md",
                 Category = "标定",
                 Params =
                 {
@@ -2507,9 +2544,9 @@ namespace CalibOperatorCLI_Example
                     {
                         Name = "perspectiveOutputScale",
                         DisplayName = "输出尺度",
-                        DefaultValue = "board_pixels",
-                        Description = "board_pixels=按棋盘边长；metric=按 mm/pxPerMm",
-                        Options = new List<string> { "board_pixels", "metric" }
+                        DefaultValue = "metric",
+                        Description = "metric=固定 (cols-1)×squareSizeMm×pxPerMm，各 viewIndex/角度输出尺寸一致；board_pixels=按图中棋盘边长（随距离/倾角变化）",
+                        Options = new List<string> { "metric", "board_pixels" }
                     },
                     new OperatorParam
                     {
@@ -3268,8 +3305,8 @@ namespace CalibOperatorCLI_Example
                 Category = "HALCON",
                 Params =
                 {
-                    new OperatorParam { Name = "angleStart", DisplayName = "AngleStart(°)", DefaultValue = "-30", Description = "相对 MatchDirection 输入的起始偏移(度)；未连接时参考 0°" },
-                    new OperatorParam { Name = "angleExtent", DisplayName = "AngleExtent(°)", DefaultValue = "60", Description = "相对 MatchDirection 输入的角度搜索范围(度)" },
+                    new OperatorParam { Name = "angleStart", DisplayName = "AngleStart(°)", DefaultValue = "-30", Description = "相对 CoarseAngle 输入的起始偏移(度)；未连接时参考 0°" },
+                    new OperatorParam { Name = "angleExtent", DisplayName = "AngleExtent(°)", DefaultValue = "60", Description = "相对 CoarseAngle 输入的角度搜索范围(度)" },
                     new OperatorParam { Name = "minScore", DisplayName = "MinScore", DefaultValue = "0.4", Description = "最低匹配分" },
                     new OperatorParam { Name = "numMatches", DisplayName = "NumMatches", DefaultValue = "0", Description = NumMatchesLatticeHint },
                     new OperatorParam { Name = "maxOverlap", DisplayName = "MaxOverlap", DefaultValue = "0.5", Description = "最大重叠度" },
@@ -3286,7 +3323,7 @@ namespace CalibOperatorCLI_Example
                 {
                     new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
                     new PortDef { Name = "ModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#9C27B0" },
-                    new PortDef { Name = "MatchDirection", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#FF5722", IsOptional = true },
+                    new PortDef { Name = "CoarseAngle", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#FF9800", IsOptional = true },
                     new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#8BC34A" },
                     new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#03A9F4" },
                     new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF9800" },
@@ -3349,9 +3386,9 @@ namespace CalibOperatorCLI_Example
                 Category = "HALCON",
                 Params =
                 {
-                    new OperatorParam { Name = "fineAngleStart", DisplayName = "精 AngleStart(°)", DefaultValue = "", Description = "相对 MatchDirection 输入的起始偏移(度)；留空时由「精角度余量」推导(=-余量)" },
-                    new OperatorParam { Name = "fineAngleExtent", DisplayName = "精 AngleExtent(°)", DefaultValue = "", Description = "相对 MatchDirection 输入的角度搜索范围(度)；留空时由「精角度余量」推导(=2×余量)" },
-                    new OperatorParam { Name = "fineAngleMargin", DisplayName = "精角度余量(°)", DefaultValue = "5", Description = "未设 fineAngleStart/Extent 时：以 MatchDirection 为中心 ± 该值(度)；粗 SubPixel=none 时建议 ≥5" },
+                    new OperatorParam { Name = "fineAngleStart", DisplayName = "精 AngleStart(°)", DefaultValue = "", Description = "相对 CoarseAngle 输入的起始偏移(度)；留空时由「精角度余量」推导(=-余量)" },
+                    new OperatorParam { Name = "fineAngleExtent", DisplayName = "精 AngleExtent(°)", DefaultValue = "", Description = "相对 CoarseAngle 输入的角度搜索范围(度)；留空时由「精角度余量」推导(=2×余量)" },
+                    new OperatorParam { Name = "fineAngleMargin", DisplayName = "精角度余量(°)", DefaultValue = "5", Description = "未设 fineAngleStart/Extent 时：以 CoarseAngle 为中心 ± 该值(度)；粗 SubPixel=none 时建议 ≥5" },
                     new OperatorParam { Name = "fineMinScore", DisplayName = "精 MinScore", DefaultValue = "0.45", Description = "可变形最低分" },
                     new OperatorParam { Name = "fineNumLevels", DisplayName = "精 NumLevels", DefaultValue = "0", Description = "可变形金字塔层数，0=与建模一致" },
                     new OperatorParam { Name = "fineGreediness", DisplayName = "精 Greediness", DefaultValue = "0.75", Description = "可变形贪心系数" },
@@ -3373,7 +3410,6 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "CoarseRow", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#8BC34A", IsOptional = true },
                     new PortDef { Name = "CoarseColumn", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#03A9F4", IsOptional = true },
                     new PortDef { Name = "CoarseAngle", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#FF9800", IsOptional = true },
-                    new PortDef { Name = "MatchDirection", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#FF5722", IsOptional = true },
                     new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF5722" },
@@ -3389,8 +3425,8 @@ namespace CalibOperatorCLI_Example
                 Category = "HALCON",
                 Params =
                 {
-                    new OperatorParam { Name = "coarseAngleStart", DisplayName = "粗 AngleStart(°)", DefaultValue = "-30", Description = "相对 MatchDirection 输入的起始偏移(度)；未连接时参考 0°" },
-                    new OperatorParam { Name = "coarseAngleExtent", DisplayName = "粗 AngleExtent(°)", DefaultValue = "60", Description = "相对 MatchDirection 输入的角度搜索范围(度)" },
+                    new OperatorParam { Name = "coarseAngleStart", DisplayName = "粗 AngleStart(°)", DefaultValue = "-30", Description = "全图粗搜起始角(度)，相对图像 0°" },
+                    new OperatorParam { Name = "coarseAngleExtent", DisplayName = "粗 AngleExtent(°)", DefaultValue = "60", Description = "全图粗搜角度范围(度)" },
                     new OperatorParam { Name = "coarseMinScore", DisplayName = "粗 MinScore", DefaultValue = "0.4", Description = "粗匹配最低分" },
                     new OperatorParam { Name = "coarseNumMatches", DisplayName = "粗 NumMatches", DefaultValue = "0", Description = NumMatchesLatticeHint },
                     new OperatorParam { Name = "coarseGreediness", DisplayName = "粗 Greediness", DefaultValue = "0.85", Description = "粗定位贪心系数，略高可加速" },
@@ -3403,9 +3439,9 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "endArcFraction", DisplayName = "粗端部弧长占比", DefaultValue = "0.12", Description = "粗定位轮廓端部分段占比" },
                     new OperatorParam { Name = "fineEndScoreWeight", DisplayName = "精端部得分权重", DefaultValue = "0.8", Description = "精匹配 Score 端部修正权重，0=不修正；留空则与粗相同" },
                     new OperatorParam { Name = "fineEndArcFraction", DisplayName = "精端部弧长占比", DefaultValue = "0.12", Description = "精匹配端部分段占比；留空则与粗相同" },
-                    new OperatorParam { Name = "fineAngleStart", DisplayName = "精 AngleStart(°)", DefaultValue = "", Description = "相对 MatchDirection 输入的起始偏移(度)；留空时由「精角度余量」推导" },
-                    new OperatorParam { Name = "fineAngleExtent", DisplayName = "精 AngleExtent(°)", DefaultValue = "", Description = "相对 MatchDirection 输入的搜索范围(度)；留空时由「精角度余量」推导" },
-                    new OperatorParam { Name = "fineAngleMargin", DisplayName = "精角度余量(°)", DefaultValue = "5", Description = "未设 fineAngleStart/Extent 时：以 MatchDirection 为中心 ± 该值(度)" },
+                    new OperatorParam { Name = "fineAngleStart", DisplayName = "精 AngleStart(°)", DefaultValue = "", Description = "相对各粗候选角度的起始偏移(度)；留空时由「精角度余量」推导" },
+                    new OperatorParam { Name = "fineAngleExtent", DisplayName = "精 AngleExtent(°)", DefaultValue = "", Description = "相对各粗候选角度的搜索范围(度)；留空时由「精角度余量」推导" },
+                    new OperatorParam { Name = "fineAngleMargin", DisplayName = "精角度余量(°)", DefaultValue = "5", Description = "未设 fineAngleStart/Extent 时：以各粗候选 CoarseAngle 为中心 ± 该值(度)" },
                     new OperatorParam { Name = "fineMinScore", DisplayName = "精 MinScore", DefaultValue = "0.45", Description = "可变形最低分" },
                     new OperatorParam { Name = "fineNumLevels", DisplayName = "精 NumLevels", DefaultValue = "0", Description = "可变形金字塔层数，0=与建模一致" },
                     new OperatorParam { Name = "fineGreediness", DisplayName = "精 Greediness", DefaultValue = "0.75", Description = "可变形贪心系数" },
@@ -3422,7 +3458,6 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
                     new PortDef { Name = "RigidModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#9C27B0" },
                     new PortDef { Name = "DeformableModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#7B1FA2" },
-                    new PortDef { Name = "MatchDirection", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#FF5722", IsOptional = true },
                     new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF5722" },
@@ -4049,7 +4084,7 @@ namespace CalibOperatorCLI_Example
         };
     }
 
-    /// <summary>加载图像/相机取图共用的内参+透视矫正参数。</summary>
+    /// <summary>内参+透视矫正参数，用于「标定图像矫正」算子。</summary>
     internal static class FlowCameraCorrectionOperatorParams
     {
         public static readonly FlowPage.OperatorParam[] Core =
@@ -4059,7 +4094,7 @@ namespace CalibOperatorCLI_Example
                 Name = "enableUndistort",
                 DisplayName = "内参畸变矫正",
                 DefaultValue = "false",
-                Description = "取图后自动 cv::undistort；需 calibrationJsonFile 或 CalibrationJson 端口",
+                Description = "对 Image 做 cv::undistort；需 CalibrationJson 端口或 calibrationJsonFile 参数",
                 Options = new List<string> { "false", "true" }
             },
             new FlowPage.OperatorParam
@@ -4095,9 +4130,9 @@ namespace CalibOperatorCLI_Example
             {
                 Name = "perspectiveOutputScale",
                 DisplayName = "输出尺度",
-                DefaultValue = "board_pixels",
-                Description = "board_pixels=按图像边长+方格比例定尺寸(推荐)；metric=按 mm 与 pxPerMm",
-                Options = new List<string> { "board_pixels", "metric" }
+                DefaultValue = "metric",
+                Description = "metric=固定物理尺寸，各角度一致；board_pixels=按图中棋盘边长（随距离/倾角变化）",
+                Options = new List<string> { "metric", "board_pixels" }
             },
             new FlowPage.OperatorParam
             {
@@ -4116,5 +4151,7 @@ namespace CalibOperatorCLI_Example
             list.AddRange(Core);
             return list;
         }
+
+        public static List<FlowPage.OperatorParam> CoreOnly() => new List<FlowPage.OperatorParam>(Core);
     }
 }

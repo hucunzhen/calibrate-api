@@ -2363,12 +2363,6 @@ namespace CalibOperatorCLI_Example
             return double.TryParse(raw.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
         }
 
-        /// <summary>读取 MatchDirection 输入（double / double[] 首元素）；未连接时返回 defaultDeg。</summary>
-        public static double ResolveMatchDirectionInput(object? value, double defaultDeg = 0)
-        {
-            return TryReadCoarseScalar(value, out double scalar) ? scalar : defaultDeg;
-        }
-
         /// <summary>从流程参数解析精匹配相对角范围；未设 start/extent 时由 margin 推导。</summary>
         public static (double relativeStartDeg, double relativeExtentDeg) ResolveFineRelativeAngleRangeFromParams(
             IReadOnlyDictionary<string, string?>? paramBag,
