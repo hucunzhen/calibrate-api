@@ -3,12 +3,12 @@
     {
       "Id": "925e8678-f199-43cc-ab65-a59b8999ae65",
       "TypeId": "composite",
-      "X": 299,
-      "Y": 110,
+      "X": 294,
+      "Y": 107,
       "Params": {
         "inputPorts": "In",
         "outputPorts": "Out,Out2,Out3,Out4",
-        "innerFlowPath": "..\\halcon\\halcon_coarse_shape_match.flow.json",
+        "innerFlowPath": "halcon_coarse_shape_match.flow.json",
         "innerFlowJson": "",
         "bindingsJson": "{}",
         "enable": "true",
@@ -23,7 +23,7 @@
       "Params": {
         "inputPorts": "In,In2,In3,In4",
         "outputPorts": "Out,Out2",
-        "innerFlowPath": "..\\halcon\\halcon_fine_shape_match.flow.json",
+        "innerFlowPath": "halcon_fine_shape_match.flow.json",
         "innerFlowJson": "",
         "bindingsJson": "{}",
         "enable": "true",

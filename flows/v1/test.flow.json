@@ -8,7 +8,7 @@
       "Params": {
         "inputPorts": "In",
         "outputPorts": "Out,Out2,Out3,Out4",
-        "innerFlowPath": "..\\halcon\\halcon_coarse_shape_match.flow.json",
+        "innerFlowPath": "halcon_coarse_shape_match.flow.json",
         "innerFlowJson": "",
         "bindingsJson": "{}",
         "enable": "true",
@@ -23,7 +23,7 @@
       "Params": {
         "inputPorts": "In,In2,In3,In4",
         "outputPorts": "Out,Out2",
-        "innerFlowPath": "..\\halcon\\halcon_fine_shape_match.flow.json",
+        "innerFlowPath": "halcon_fine_shape_match.flow.json",
         "innerFlowJson": "",
         "bindingsJson": "{}",
         "enable": "true",
@@ -156,7 +156,7 @@
       "X": 34,
       "Y": 124,
       "Params": {
-        "filePath": "..\\..\\data\\Image_20260602183733207.bmp",
+        "filePath": "..\\..\\..\\data\\Image_20260518154103272.bmp",
         "enable": "true",
         "disable": "false"
       }
@@ -168,7 +168,7 @@
       "Y": 281,
       "Params": {
         "alpha": "-1",
-        "calibrationJsonFile": "..\\cali\\calibration_result.json",
+        "calibrationJsonFile": "models\\calibration_result.json",
         "enable": "true",
         "disable": "false"
       }
