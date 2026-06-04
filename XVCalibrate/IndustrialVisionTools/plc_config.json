@@ -71,7 +71,8 @@
     "RunStartStop": "M500",
     "RunStatus": "M510",
     "ManualStopSafePos": "M300",
-    "ManualPhotoPos": "M301"
+    "ManualPhotoPos": "M301",
+    "ManualLaserWeldPos": "M302"
   },
 
   "GvarList": {

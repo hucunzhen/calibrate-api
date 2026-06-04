@@ -147,12 +147,13 @@ namespace CalibOperatorCLI_Example
             ApplyRegToolTip(BtnReadStopSafePos, "StopSafePosX", "读取停机安全位 XYZ");
             ApplyRegToolTip(BtnManualStopSafePos, "ManualStopSafePos", "脉冲触发：手动运动到停机安全位");
             ApplyRegToolTip(BtnManualPhotoPos, "ManualPhotoPos", "脉冲触发：手动运动到拍照位");
+            ApplyRegToolTip(BtnManualLaserWeldPos, "ManualLaserWeldPos", "脉冲触发：手动运动到激光焊接位");
             ApplyRegToolTip(TxtPhotoPosX, "PhotoPosX", "拍照位 X");
             ApplyRegToolTip(TxtPhotoPosY, "PhotoPosY", "拍照位 Y");
             ApplyRegToolTip(TxtPhotoPosZ, "PhotoPosZ", "拍照位 Z");
-            ApplyRegToolTip(TxtLaserRelX, "LaserRelPosX", "激光相对 X");
-            ApplyRegToolTip(TxtLaserRelY, "LaserRelPosY", "激光相对 Y");
-            ApplyRegToolTip(TxtLaserRelZ, "LaserRelPosZ", "激光相对 Z");
+            ApplyRegToolTip(TxtLaserRelX, "LaserRelPosX", "激光焊接位 X");
+            ApplyRegToolTip(TxtLaserRelY, "LaserRelPosY", "激光焊接位 Y");
+            ApplyRegToolTip(TxtLaserRelZ, "LaserRelPosZ", "激光焊接位 Z");
             ApplyRegToolTip(TxtWeldSpeed, "WeldSpeed", "焊接速度");
             ApplyRegToolTip(TxtReturnSafeSpeed, "ReturnSafeSpeed", "返回安全点速度");
             ApplyRegToolTip(TxtPhotoApproachSpeed, "PhotoApproachSpeed", "到拍照点速度");
@@ -1070,6 +1071,9 @@ namespace CalibOperatorCLI_Example
         private void BtnManualPhotoPos_Click(object sender, RoutedEventArgs e)
             => PulseCoil("ManualPhotoPos", "手动→拍照位");
 
+        private void BtnManualLaserWeldPos_Click(object sender, RoutedEventArgs e)
+            => PulseCoil("ManualLaserWeldPos", "手动→激光焊接位");
+
         private void BtnReadStopSafePos_Click(object sender, RoutedEventArgs e)
         {
             if (!CheckPlcConnected()) return;
@@ -1101,11 +1105,11 @@ namespace CalibOperatorCLI_Example
                 "TxtPhotoPosX", "TxtPhotoPosY", "TxtPhotoPosZ");
 
         private void BtnReadLaserRelPos_Click(object sender, RoutedEventArgs e) =>
-            ReadCoordTriple("LaserRelPosX", "LaserRelPosY", "LaserRelPosZ", "激光相对位",
+            ReadCoordTriple("LaserRelPosX", "LaserRelPosY", "LaserRelPosZ", "激光焊接位",
                 TxtLaserRelX, TxtLaserRelY, TxtLaserRelZ);
 
         private void BtnWriteLaserRelPos_Click(object sender, RoutedEventArgs e) =>
-            WriteCoordTriple("LaserRelPosX", "LaserRelPosY", "LaserRelPosZ", "激光相对位",
+            WriteCoordTriple("LaserRelPosX", "LaserRelPosY", "LaserRelPosZ", "激光焊接位",
                 "TxtLaserRelX", "TxtLaserRelY", "TxtLaserRelZ");
 
         private void BtnReadMotionSpeed_Click(object sender, RoutedEventArgs e)

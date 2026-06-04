@@ -280,7 +280,8 @@
                                 <TextBlock Style="{StaticResource PlcSubTitle}" Text="位置与速度"/>
                                 <WrapPanel Margin="0,0,0,8">
                                     <Button x:Name="BtnManualStopSafePos" Content="手动→安全位" Width="108" Height="28" Margin="0,0,8,8" Click="BtnManualStopSafePos_Click" Foreground="#455A64" FontWeight="SemiBold"/>
-                                    <Button x:Name="BtnManualPhotoPos" Content="手动→拍照位" Width="108" Height="28" Margin="0,0,16,8" Click="BtnManualPhotoPos_Click" Foreground="#5E35B1" FontWeight="SemiBold"/>
+                                    <Button x:Name="BtnManualPhotoPos" Content="手动→拍照位" Width="108" Height="28" Margin="0,0,8,8" Click="BtnManualPhotoPos_Click" Foreground="#5E35B1" FontWeight="SemiBold"/>
+                                    <Button x:Name="BtnManualLaserWeldPos" Content="手动→激光焊接位" Width="120" Height="28" Margin="0,0,16,8" Click="BtnManualLaserWeldPos_Click" Foreground="#E65100" FontWeight="SemiBold"/>
                                 </WrapPanel>
                                 <WrapPanel Margin="0,0,0,8">
                                     <TextBlock Text="停机安全" FontWeight="SemiBold" Foreground="#455A64" VerticalAlignment="Center" Margin="0,0,8,8"/>
@@ -305,7 +306,7 @@
                                     <Button x:Name="BtnWritePhotoPos" Content="写" Width="36" Height="24" Margin="0,0,16,8" Click="BtnWritePhotoPos_Click" Foreground="#5E35B1" FontWeight="SemiBold"/>
                                 </WrapPanel>
                                 <WrapPanel Margin="0,0,0,8">
-                                    <TextBlock Text="激光相对" FontWeight="SemiBold" Foreground="#E65100" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                                    <TextBlock Text="激光焊接位" FontWeight="SemiBold" Foreground="#E65100" VerticalAlignment="Center" Margin="0,0,8,8"/>
                                     <TextBlock x:Name="LblLaserRelX" Text="X" Foreground="#D32F2F" VerticalAlignment="Center" Margin="0,0,2,8"/>
                                     <TextBox x:Name="TxtLaserRelX" Width="68" Height="24" Margin="0,0,6,8"/>
                                     <TextBlock x:Name="LblLaserRelY" Text="Y" Foreground="#1976D2" VerticalAlignment="Center" Margin="0,0,2,8"/>
