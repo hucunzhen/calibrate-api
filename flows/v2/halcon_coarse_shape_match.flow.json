@@ -1,0 +1,563 @@
+{
+  "Nodes": [
+    {
+      "Id": "b2000001-0001-4001-8001-000000000010",
+      "TypeId": "halcon_coarse_shape_match",
+      "X": 285.8800000000001,
+      "Y": 19.80000000000001,
+      "Params": {
+        "angleStart": "-3",
+        "angleExtent": "6",
+        "minScore": "0.3",
+        "numMatches": "0",
+        "maxOverlap": "0.5",
+        "subPixel": "none",
+        "numLevels": "0",
+        "greediness": "0.01",
+        "allowRetry": "false",
+        "coarseScaleMin": "1",
+        "coarseScaleMax": "1",
+        "endScoreWeight": "0",
+        "endArcFraction": "0.7",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "e1000001-0001-4001-8001-000000000011",
+      "TypeId": "halcon_coarse_shape_reduce_domain",
+      "X": 1047,
+      "Y": 40,
+      "Params": {
+        "loopEmit": "true",
+        "candidateIndex": "9",
+        "maskErosionPx": "10",
+        "maskFillDilatePx": "0",
+        "contourLevel": "1",
+        "maxCandidates": "0",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "e1000001-0001-4001-8001-000000000016",
+      "TypeId": "halcon_reduce_domain_by_mask",
+      "X": 1273.1045918367345,
+      "Y": 0,
+      "Params": {
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "b2000001-0001-4001-8001-00000000000c",
+      "TypeId": "halcon_load_shape_model",
+      "X": 0,
+      "Y": 290.3296,
+      "Params": {
+        "filePath": "models\\shape_model_fixed.shm",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "e300274f-4e3a-40b9-b52a-26d739c861a4",
+      "TypeId": "composite_bind_in",
+      "X": 11,
+      "Y": 104,
+      "Params": {
+        "externalPort": "In",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "aed55a5c-a7ff-465f-99ef-132724859ec0",
+      "TypeId": "halcon_chain_strip_bootstrap",
+      "X": 530.8800000000001,
+      "Y": 181,
+      "Params": {
+        "gridRows": "",
+        "gridCols": "",
+        "debugLog": "auto",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "2d4af07d-ab9f-42c8-88ee-22f93cb8297c",
+      "TypeId": "halcon_chain_strip_pick_uv_grid",
+      "X": 803.8800000000001,
+      "Y": 20,
+      "Params": {
+        "gridRows": "",
+        "gridCols": "",
+        "minScoreKeep": "0",
+        "snapTolerancePx": "0",
+        "uvProjectionSvg": "",
+        "debugLog": "auto",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "0ad0f54e-4421-488b-a93c-adc4abd5546c",
+      "TypeId": "halcon_display_shape_match",
+      "X": 1000,
+      "Y": 288,
+      "Params": {
+        "contourLevel": "1",
+        "crossHalf": "14",
+        "strokeWidth": "2.5",
+        "drawScores": "true",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "64492d93-69ae-402b-a49c-1134423c4c72",
+      "TypeId": "composite_bind_out",
+      "X": 1520,
+      "Y": 120,
+      "Params": {
+        "externalPort": "Out",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "29a929b1-b38d-471e-a25e-76e761911009",
+      "TypeId": "composite_bind_out",
+      "X": 1523,
+      "Y": 241,
+      "Params": {
+        "externalPort": "Out2",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "75cc5ea1-ec28-4e3e-b433-13159a0d067b",
+      "TypeId": "composite_bind_out",
+      "X": 1520,
+      "Y": 347,
+      "Params": {
+        "externalPort": "Out3",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "4aa4eb0e-d9de-4222-ac66-c9916fb60886",
+      "TypeId": "composite_bind_out",
+      "X": 1521,
+      "Y": 450,
+      "Params": {
+        "externalPort": "Out4",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "ca72ec0f-33d2-4339-b8f0-e498b73b204e",
+      "TypeId": "flow_sink",
+      "X": 1324,
+      "Y": 120,
+      "Params": {
+        "acceptNull": "false",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "45d16c9a-79d9-411e-a0d3-295baa8d29ef",
+      "TypeId": "flow_sink",
+      "X": 1318,
+      "Y": 240,
+      "Params": {
+        "acceptNull": "false",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "b829cbe2-04c3-48c2-ba0d-062398b60533",
+      "TypeId": "flow_sink",
+      "X": 1314,
+      "Y": 336,
+      "Params": {
+        "acceptNull": "false",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "7553f43e-965c-4f2e-8faf-0569a1425142",
+      "TypeId": "flow_sink",
+      "X": 1306,
+      "Y": 447,
+      "Params": {
+        "acceptNull": "false",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "a9cfad60-5ae8-431e-9872-29c4e72b825b",
+      "TypeId": "halcon_load_shape_model",
+      "X": 0,
+      "Y": 449.3296,
+      "Params": {
+        "filePath": "models\\shape_mode_outlinel.shm",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "cd4f2e2f-ebe2-4efa-aa0c-bc9e661fb5be",
+      "TypeId": "halcon_coarse_shape_match",
+      "X": 233,
+      "Y": 317.3296,
+      "Params": {
+        "angleStart": "-3",
+        "angleExtent": "360",
+        "minScore": "0.1",
+        "numMatches": "0",
+        "maxOverlap": "0.5",
+        "subPixel": "none",
+        "numLevels": "0",
+        "greediness": "0.01",
+        "allowRetry": "false",
+        "coarseScaleMin": "1",
+        "coarseScaleMax": "1",
+        "endScoreWeight": "0",
+        "endArcFraction": "0.7",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "1e9ee9a0-caa2-45f4-90ac-51c870d4af97",
+      "TypeId": "list_pick",
+      "X": 400,
+      "Y": 527,
+      "Params": {
+        "itemPorts": "In",
+        "index": "0",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "99ce69f7-d262-4468-bbbc-889844c5f1e1",
+      "TypeId": "halcon_display_shape_match",
+      "X": 660,
+      "Y": 381,
+      "Params": {
+        "contourLevel": "1",
+        "crossHalf": "14",
+        "strokeWidth": "2.5",
+        "drawScores": "true",
+        "enable": "true",
+        "disable": "false"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-00000000000c",
+      "FromPort": "ModelId",
+      "ToNodeId": "b2000001-0001-4001-8001-000000000010",
+      "ToPort": "ModelId"
+    },
+    {
+      "FromNodeId": "e1000001-0001-4001-8001-000000000011",
+      "FromPort": "Mask",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000016",
+      "ToPort": "Mask"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-00000000000c",
+      "FromPort": "ModelId",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000011",
+      "ToPort": "ModelId"
+    },
+    {
+      "FromNodeId": "e300274f-4e3a-40b9-b52a-26d739c861a4",
+      "FromPort": "Out",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000011",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "e300274f-4e3a-40b9-b52a-26d739c861a4",
+      "FromPort": "Out",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000016",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "e300274f-4e3a-40b9-b52a-26d739c861a4",
+      "FromPort": "Out",
+      "ToNodeId": "b2000001-0001-4001-8001-000000000010",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Row",
+      "ToNodeId": "aed55a5c-a7ff-465f-99ef-132724859ec0",
+      "ToPort": "Row"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Column",
+      "ToNodeId": "aed55a5c-a7ff-465f-99ef-132724859ec0",
+      "ToPort": "Column"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Angle",
+      "ToNodeId": "aed55a5c-a7ff-465f-99ef-132724859ec0",
+      "ToPort": "Angle"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Score",
+      "ToNodeId": "aed55a5c-a7ff-465f-99ef-132724859ec0",
+      "ToPort": "Score"
+    },
+    {
+      "FromNodeId": "aed55a5c-a7ff-465f-99ef-132724859ec0",
+      "FromPort": "BootstrapPickIndices",
+      "ToNodeId": "2d4af07d-ab9f-42c8-88ee-22f93cb8297c",
+      "ToPort": "BootstrapPickIndices"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Row",
+      "ToNodeId": "2d4af07d-ab9f-42c8-88ee-22f93cb8297c",
+      "ToPort": "Row"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Column",
+      "ToNodeId": "2d4af07d-ab9f-42c8-88ee-22f93cb8297c",
+      "ToPort": "Column"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Angle",
+      "ToNodeId": "2d4af07d-ab9f-42c8-88ee-22f93cb8297c",
+      "ToPort": "Angle"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Score",
+      "ToNodeId": "2d4af07d-ab9f-42c8-88ee-22f93cb8297c",
+      "ToPort": "Score"
+    },
+    {
+      "FromNodeId": "aed55a5c-a7ff-465f-99ef-132724859ec0",
+      "FromPort": "ChainBootstrapAngle",
+      "ToNodeId": "2d4af07d-ab9f-42c8-88ee-22f93cb8297c",
+      "ToPort": "ChainBootstrapAngle"
+    },
+    {
+      "FromNodeId": "aed55a5c-a7ff-465f-99ef-132724859ec0",
+      "FromPort": "PcaChainAngle",
+      "ToNodeId": "2d4af07d-ab9f-42c8-88ee-22f93cb8297c",
+      "ToPort": "PcaChainAngle"
+    },
+    {
+      "FromNodeId": "2d4af07d-ab9f-42c8-88ee-22f93cb8297c",
+      "FromPort": "Row",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000011",
+      "ToPort": "CoarseRow"
+    },
+    {
+      "FromNodeId": "2d4af07d-ab9f-42c8-88ee-22f93cb8297c",
+      "FromPort": "Column",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000011",
+      "ToPort": "CoarseColumn"
+    },
+    {
+      "FromNodeId": "2d4af07d-ab9f-42c8-88ee-22f93cb8297c",
+      "FromPort": "Angle",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000011",
+      "ToPort": "CoarseAngle"
+    },
+    {
+      "FromNodeId": "2d4af07d-ab9f-42c8-88ee-22f93cb8297c",
+      "FromPort": "Score",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000011",
+      "ToPort": "CoarseScore"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-00000000000c",
+      "FromPort": "ModelId",
+      "ToNodeId": "0ad0f54e-4421-488b-a93c-adc4abd5546c",
+      "ToPort": "ModelId"
+    },
+    {
+      "FromNodeId": "e300274f-4e3a-40b9-b52a-26d739c861a4",
+      "FromPort": "Out",
+      "ToNodeId": "0ad0f54e-4421-488b-a93c-adc4abd5546c",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Row",
+      "ToNodeId": "0ad0f54e-4421-488b-a93c-adc4abd5546c",
+      "ToPort": "Row"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Column",
+      "ToNodeId": "0ad0f54e-4421-488b-a93c-adc4abd5546c",
+      "ToPort": "Column"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Angle",
+      "ToNodeId": "0ad0f54e-4421-488b-a93c-adc4abd5546c",
+      "ToPort": "Angle"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Score",
+      "ToNodeId": "0ad0f54e-4421-488b-a93c-adc4abd5546c",
+      "ToPort": "Score"
+    },
+    {
+      "FromNodeId": "e1000001-0001-4001-8001-000000000016",
+      "FromPort": "Out",
+      "ToNodeId": "ca72ec0f-33d2-4339-b8f0-e498b73b204e",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "e1000001-0001-4001-8001-000000000011",
+      "FromPort": "CoarseRowOut",
+      "ToNodeId": "45d16c9a-79d9-411e-a0d3-295baa8d29ef",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "ca72ec0f-33d2-4339-b8f0-e498b73b204e",
+      "FromPort": "List",
+      "ToNodeId": "64492d93-69ae-402b-a49c-1134423c4c72",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "45d16c9a-79d9-411e-a0d3-295baa8d29ef",
+      "FromPort": "List",
+      "ToNodeId": "29a929b1-b38d-471e-a25e-76e761911009",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "e1000001-0001-4001-8001-000000000011",
+      "FromPort": "CoarseColumnOut",
+      "ToNodeId": "b829cbe2-04c3-48c2-ba0d-062398b60533",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "b829cbe2-04c3-48c2-ba0d-062398b60533",
+      "FromPort": "List",
+      "ToNodeId": "75cc5ea1-ec28-4e3e-b433-13159a0d067b",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "e1000001-0001-4001-8001-000000000011",
+      "FromPort": "CoarseAngleOut",
+      "ToNodeId": "7553f43e-965c-4f2e-8faf-0569a1425142",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "7553f43e-965c-4f2e-8faf-0569a1425142",
+      "FromPort": "List",
+      "ToNodeId": "4aa4eb0e-d9de-4222-ac66-c9916fb60886",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Scale",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000011",
+      "ToPort": "CoarseScale"
+    },
+    {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Scale",
+      "ToNodeId": "0ad0f54e-4421-488b-a93c-adc4abd5546c",
+      "ToPort": "Scale"
+    },
+    {
+      "FromNodeId": "a9cfad60-5ae8-431e-9872-29c4e72b825b",
+      "FromPort": "ModelId",
+      "ToNodeId": "cd4f2e2f-ebe2-4efa-aa0c-bc9e661fb5be",
+      "ToPort": "ModelId"
+    },
+    {
+      "FromNodeId": "e300274f-4e3a-40b9-b52a-26d739c861a4",
+      "FromPort": "Out",
+      "ToNodeId": "cd4f2e2f-ebe2-4efa-aa0c-bc9e661fb5be",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "cd4f2e2f-ebe2-4efa-aa0c-bc9e661fb5be",
+      "FromPort": "Angle",
+      "ToNodeId": "1e9ee9a0-caa2-45f4-90ac-51c870d4af97",
+      "ToPort": "InList"
+    },
+    {
+      "FromNodeId": "e300274f-4e3a-40b9-b52a-26d739c861a4",
+      "FromPort": "Out",
+      "ToNodeId": "99ce69f7-d262-4468-bbbc-889844c5f1e1",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "a9cfad60-5ae8-431e-9872-29c4e72b825b",
+      "FromPort": "ModelId",
+      "ToNodeId": "99ce69f7-d262-4468-bbbc-889844c5f1e1",
+      "ToPort": "ModelId"
+    },
+    {
+      "FromNodeId": "cd4f2e2f-ebe2-4efa-aa0c-bc9e661fb5be",
+      "FromPort": "Row",
+      "ToNodeId": "99ce69f7-d262-4468-bbbc-889844c5f1e1",
+      "ToPort": "Row"
+    },
+    {
+      "FromNodeId": "cd4f2e2f-ebe2-4efa-aa0c-bc9e661fb5be",
+      "FromPort": "Column",
+      "ToNodeId": "99ce69f7-d262-4468-bbbc-889844c5f1e1",
+      "ToPort": "Column"
+    },
+    {
+      "FromNodeId": "cd4f2e2f-ebe2-4efa-aa0c-bc9e661fb5be",
+      "FromPort": "Angle",
+      "ToNodeId": "99ce69f7-d262-4468-bbbc-889844c5f1e1",
+      "ToPort": "Angle"
+    },
+    {
+      "FromNodeId": "cd4f2e2f-ebe2-4efa-aa0c-bc9e661fb5be",
+      "FromPort": "Scale",
+      "ToNodeId": "99ce69f7-d262-4468-bbbc-889844c5f1e1",
+      "ToPort": "Scale"
+    },
+    {
+      "FromNodeId": "cd4f2e2f-ebe2-4efa-aa0c-bc9e661fb5be",
+      "FromPort": "Score",
+      "ToNodeId": "99ce69f7-d262-4468-bbbc-889844c5f1e1",
+      "ToPort": "Score"
+    },
+    {
+      "FromNodeId": "1e9ee9a0-caa2-45f4-90ac-51c870d4af97",
+      "FromPort": "In",
+      "ToNodeId": "b2000001-0001-4001-8001-000000000010",
+      "ToPort": "CoarseAngle"
+    }
+  ],
+  "Meta": {
+    "standaloneDebugImagePath": "..\\..\\data\\Image_20260602183730305.bmp",
+    "latticeGridRows": "8",
+    "latticeGridCols": "2",
+    "mode": "pipeline-A",
+    "note": "\u6A21\u5F0FA\u9010\u6761\u4E32\u884C\uFF1AMask\u6BCF\u8F6E \u7CBE\u5339\u914D\u2192XLD\u2192\u7B80\u5316\u2192\u6807\u5B9A\u2192send_plc\u2192D804L\u2192POU\u2192\u7B49D803\u710A\u5B8C\uFF1B\u65E0points_sink\u3002\u710A\u5B8C\u624D\u8FDB\u5165\u4E0B\u4E00\u8F6EMask\u3002"
+  }
+}

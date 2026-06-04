@@ -1,0 +1,263 @@
+{
+  "Nodes": [
+    {
+      "Id": "307a2dfa-6cc1-4e0e-a515-51c0504d79fc",
+      "TypeId": "load_image",
+      "X": 38,
+      "Y": 293,
+      "Params": {
+        "filePath": "models\\calibration_nine_point.bmp",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "62879182-0f97-45ea-800c-48cf296b72f1",
+      "TypeId": "calibrate",
+      "X": 812,
+      "Y": 252,
+      "Params": {
+        "worldPointsFile": "models\\world_pos.txt",
+        "worldPoints": "426.6,48.853;473.1,48.853;519.6,48.853;426.6,82.853;473.1,82.853;519.6,82.853;426.6,116.853;473.1,116.853;519.6,116.853;",
+        "pixelPickMode": "\u5339\u914D\u68C0\u6D4B\u70B9",
+        "confirmCorrespondence": "true",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "91090304-28ba-437e-b090-e4c52c2e6dee",
+      "TypeId": "save_calibration_result",
+      "X": 1111,
+      "Y": 237,
+      "Params": {
+        "filePath": "models\\calibration_nine_point.json",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "7caa3be5-5003-4181-b717-d7da90c662f8",
+      "TypeId": "halcon_load_shape_model",
+      "X": 11,
+      "Y": 145,
+      "Params": {
+        "filePath": "models\\cali_board.shm",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "ea7a0590-9d04-429d-abb3-57fa53a37e9a",
+      "TypeId": "halcon_find_shape_model",
+      "X": 232,
+      "Y": 10,
+      "Params": {
+        "angleStart": "-30",
+        "angleExtent": "60",
+        "minScore": "0.4",
+        "numMatches": "1",
+        "maxOverlap": "0.5",
+        "subPixel": "interpolation",
+        "numLevels": "0",
+        "greediness": "0.75",
+        "endScoreWeight": "0",
+        "endArcFraction": "0.12",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "7021184f-9f6b-41d6-ad3f-abfeded95cca",
+      "TypeId": "halcon_mask_image_by_shape_match",
+      "X": 398,
+      "Y": 157,
+      "Params": {
+        "contourLevel": "1",
+        "insetPx": "-10",
+        "maskRegionMode": "\u4FDD\u7559mask\u533A\u57DF",
+        "maxMatchCount": "100",
+        "maskMin": "1",
+        "maskMax": "255",
+        "preserveColor": "true",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "86d6dc96-7418-43a9-b8b1-9f406c210279",
+      "TypeId": "halcon_load_shape_model",
+      "X": 664,
+      "Y": 504,
+      "Params": {
+        "filePath": "models\\cali_board_circle.shm",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "39396aba-0320-437f-a655-1c2c510ffe6f",
+      "TypeId": "halcon_find_shape_model",
+      "X": 625,
+      "Y": 75,
+      "Params": {
+        "angleStart": "-30",
+        "angleExtent": "60",
+        "minScore": "0.85",
+        "numMatches": "0",
+        "maxOverlap": "0.5",
+        "subPixel": "interpolation",
+        "numLevels": "0",
+        "greediness": "0.75",
+        "endScoreWeight": "0",
+        "endArcFraction": "0.12",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "88df7662-0b2e-4e0d-86dd-f8c505c24cdb",
+      "TypeId": "halcon_shape_match_centers",
+      "X": 871,
+      "Y": 60,
+      "Params": {
+        "sortMode": "grid",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "68c5580f-7356-41b3-9581-4d7108ccb3c6",
+      "TypeId": "intrinsics_undistort_image",
+      "X": 127,
+      "Y": 454,
+      "Params": {
+        "alpha": "-1",
+        "calibrationJsonFile": "chessboard\\calibration_result.json",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "86cbd60b-a843-4e35-b812-eaef11b12007",
+      "TypeId": "chessboard_perspective_warp_image",
+      "X": 353,
+      "Y": 352,
+      "Params": {
+        "calibrationJsonFile": "chessboard\\calibration_result.json",
+        "viewIndex": "0",
+        "cols": "11",
+        "rows": "8",
+        "squareSizeMm": "5",
+        "pxPerMm": "32",
+        "perspectiveOutputFrame": "plane",
+        "perspectiveOutputScale": "board_pixels",
+        "assumeUndistorted": "true",
+        "enable": "true",
+        "disable": "false"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "62879182-0f97-45ea-800c-48cf296b72f1",
+      "FromPort": "Transform",
+      "ToNodeId": "91090304-28ba-437e-b090-e4c52c2e6dee",
+      "ToPort": "Transform"
+    },
+    {
+      "FromNodeId": "7caa3be5-5003-4181-b717-d7da90c662f8",
+      "FromPort": "ModelId",
+      "ToNodeId": "ea7a0590-9d04-429d-abb3-57fa53a37e9a",
+      "ToPort": "ModelId"
+    },
+    {
+      "FromNodeId": "ea7a0590-9d04-429d-abb3-57fa53a37e9a",
+      "FromPort": "Row",
+      "ToNodeId": "7021184f-9f6b-41d6-ad3f-abfeded95cca",
+      "ToPort": "Row"
+    },
+    {
+      "FromNodeId": "ea7a0590-9d04-429d-abb3-57fa53a37e9a",
+      "FromPort": "Column",
+      "ToNodeId": "7021184f-9f6b-41d6-ad3f-abfeded95cca",
+      "ToPort": "Column"
+    },
+    {
+      "FromNodeId": "ea7a0590-9d04-429d-abb3-57fa53a37e9a",
+      "FromPort": "Angle",
+      "ToNodeId": "7021184f-9f6b-41d6-ad3f-abfeded95cca",
+      "ToPort": "Angle"
+    },
+    {
+      "FromNodeId": "7caa3be5-5003-4181-b717-d7da90c662f8",
+      "FromPort": "ModelId",
+      "ToNodeId": "7021184f-9f6b-41d6-ad3f-abfeded95cca",
+      "ToPort": "ModelId"
+    },
+    {
+      "FromNodeId": "86d6dc96-7418-43a9-b8b1-9f406c210279",
+      "FromPort": "ModelId",
+      "ToNodeId": "39396aba-0320-437f-a655-1c2c510ffe6f",
+      "ToPort": "ModelId"
+    },
+    {
+      "FromNodeId": "7021184f-9f6b-41d6-ad3f-abfeded95cca",
+      "FromPort": "Out",
+      "ToNodeId": "39396aba-0320-437f-a655-1c2c510ffe6f",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "39396aba-0320-437f-a655-1c2c510ffe6f",
+      "FromPort": "Row",
+      "ToNodeId": "88df7662-0b2e-4e0d-86dd-f8c505c24cdb",
+      "ToPort": "Row"
+    },
+    {
+      "FromNodeId": "39396aba-0320-437f-a655-1c2c510ffe6f",
+      "FromPort": "Column",
+      "ToNodeId": "88df7662-0b2e-4e0d-86dd-f8c505c24cdb",
+      "ToPort": "Column"
+    },
+    {
+      "FromNodeId": "88df7662-0b2e-4e0d-86dd-f8c505c24cdb",
+      "FromPort": "Points",
+      "ToNodeId": "62879182-0f97-45ea-800c-48cf296b72f1",
+      "ToPort": "ImagePts"
+    },
+    {
+      "FromNodeId": "307a2dfa-6cc1-4e0e-a515-51c0504d79fc",
+      "FromPort": "Image",
+      "ToNodeId": "68c5580f-7356-41b3-9581-4d7108ccb3c6",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "68c5580f-7356-41b3-9581-4d7108ccb3c6",
+      "FromPort": "Out",
+      "ToNodeId": "86cbd60b-a843-4e35-b812-eaef11b12007",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "86cbd60b-a843-4e35-b812-eaef11b12007",
+      "FromPort": "Out",
+      "ToNodeId": "ea7a0590-9d04-429d-abb3-57fa53a37e9a",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "86cbd60b-a843-4e35-b812-eaef11b12007",
+      "FromPort": "Out",
+      "ToNodeId": "7021184f-9f6b-41d6-ad3f-abfeded95cca",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "86cbd60b-a843-4e35-b812-eaef11b12007",
+      "FromPort": "Out",
+      "ToNodeId": "62879182-0f97-45ea-800c-48cf296b72f1",
+      "ToPort": "Image"
+    }
+  ],
+  "Meta": {
+    "latticeGridRows": "8",
+    "latticeGridCols": "2"
+  }
+}

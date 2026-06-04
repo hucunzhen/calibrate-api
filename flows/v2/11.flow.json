@@ -1,0 +1,55 @@
+{
+  "Nodes": [
+    {
+      "Id": "ef5035f7-aecb-47b9-be60-936adbcbb83e",
+      "TypeId": "load_image",
+      "X": 214.9981909884886,
+      "Y": 176.50199943377572,
+      "Params": {
+        "filePath": "D:\\work\\calibrate-api\\flows\\v1\\models\\calibration_nine_point - \u526F\u672C.bmp",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "ffb46911-309f-4385-a5f7-49c9883941e9",
+      "TypeId": "image_flip",
+      "X": 579.1189841449595,
+      "Y": 129.8720322945856,
+      "Params": {
+        "flipMode": "vertical",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "033854fe-7e0c-4ef3-b227-d00b96800dc2",
+      "TypeId": "save_image",
+      "X": 895.1189841449595,
+      "Y": 135.8720322945856,
+      "Params": {
+        "filePath": "models\\calibration_nine_point.bmp",
+        "enable": "true",
+        "disable": "false"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "ef5035f7-aecb-47b9-be60-936adbcbb83e",
+      "FromPort": "Image",
+      "ToNodeId": "ffb46911-309f-4385-a5f7-49c9883941e9",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "ffb46911-309f-4385-a5f7-49c9883941e9",
+      "FromPort": "Out",
+      "ToNodeId": "033854fe-7e0c-4ef3-b227-d00b96800dc2",
+      "ToPort": "Image"
+    }
+  ],
+  "Meta": {
+    "latticeGridRows": "8",
+    "latticeGridCols": "2"
+  }
+}
