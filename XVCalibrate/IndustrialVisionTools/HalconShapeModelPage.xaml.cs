@@ -867,10 +867,8 @@ namespace CalibOperatorCLI_Example
             via = default;
             if (!IsTangentJoinEnabled() || path.VertexCount < 2)
                 return false;
-            if (!RoiContourPathTangent.TryGetIncomingTravelTangent(path, out double tx, out double ty))
-                return false;
-            return RoiContourPathTangent.TryComputeArcViaTangentAtStart(
-                start, tx, ty, end, sideHint, _tangentArcPreferLeft, out via);
+            return RoiContourPathTangent.TryComputeArcViaTangentAtStartFromPath(
+                path, start, end, sideHint, _tangentArcPreferLeft, out via);
         }
 
         private void UpdateTangentFlipButtonVisibility()
@@ -912,9 +910,11 @@ namespace CalibOperatorCLI_Example
                 return;
             }
 
+            Point mouse = _polygonCursorImage ?? end;
+            RoiContourPathTangent.TryGetIncomingLineAnchor(path, out Point lineAnchor);
             if (!RoiContourPathTangent.TryGetIncomingTravelTangent(path, out double tx, out double ty)
                 || !RoiContourPathTangent.TryComputeTangentArcBothSides(
-                    start, tx, ty, end, out _, out _, out bool hasL, out bool hasR))
+                    start, tx, ty, end, mouse, lineAnchor, out _, out _, out bool hasL, out bool hasR))
             {
                 AppendLog("当前无法计算相切双弧");
                 return;
@@ -946,12 +946,13 @@ namespace CalibOperatorCLI_Example
             drewAlt = false;
             HideRubberAltLine();
 
+            RoiContourPathTangent.TryGetIncomingLineAnchor(path, out Point lineAnchor);
             if (IsTangentJoinEnabled()
                 && RoiContourPathTangent.TryGetIncomingTravelTangent(path, out double tx, out double ty)
                 && RoiContourPathTangent.TryComputeTangentArcBothSides(
-                    start, tx, ty, end, out Point viaL, out Point viaR, out bool hasL, out bool hasR)
+                    start, tx, ty, end, cursor, lineAnchor, out Point viaL, out Point viaR, out bool hasL, out bool hasR)
                 && RoiContourPathTangent.TryComputeArcViaTangentAtStart(
-                    start, tx, ty, end, cursor, _tangentArcPreferLeft, out Point viaSel))
+                    start, tx, ty, end, cursor, lineAnchor, _tangentArcPreferLeft, out Point viaSel))
             {
                 foreach (var p in RoiContourPath.SampleArc(start, viaSel, end, PreviewArcSegments))
                     primary.Add(p);
@@ -997,14 +998,7 @@ namespace CalibOperatorCLI_Example
                 || path.EdgeKinds[^1] != RoiEdgeKind.Arc)
                 return false;
 
-            Point origin = path.Vertices[^1];
-            if (!RoiContourPathTangent.TryGetOutgoingTravelTangent(path, out double tx, out double ty))
-                return false;
-
-            if (!RoiContourPathTangent.TryProjectPointOntoTangentRay(origin, tx, ty, pick, minStepPx: 2.0, out placed))
-                return false;
-
-            return true;
+            return RoiContourPathTangent.TryProjectTangentLineEndAfterArc(path, pick, minStepPx: 2.0, out placed);
         }
 
         private bool TryCommitArcDraftClick(
