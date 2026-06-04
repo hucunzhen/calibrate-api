@@ -52,7 +52,7 @@ namespace CalibOperatorCLI_Example
         private List<Point>? _cachedRingOuterFlat;
         private List<Point>? _cachedRingInnerFlat;
         private bool _ringFlatDirty = true;
-        private const double DefaultPolygonCloseDistance = 12;
+        private const double DefaultPolygonCloseDistance = 6;
         private const int PolygonPreviewMoveIntervalMs = 16;
         private const int PreviewArcSegments = 12;
         private const int ClosedArcSegments = 24;
@@ -152,6 +152,92 @@ namespace CalibOperatorCLI_Example
             {
                 MessageBox.Show($"加载图像失败:\n{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private void BtnCameraGrab_Click(object sender, RoutedEventArgs e)
+        {
+            int deviceIndex = 0;
+            if (TxtCameraDeviceIndex != null
+                && int.TryParse(TxtCameraDeviceIndex.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int di))
+                deviceIndex = Math.Max(0, di);
+
+            try
+            {
+                using var cam = new CameraService();
+                if (!cam.ConnectByIndex(deviceIndex))
+                {
+                    var devs = CameraService.EnumDevices();
+                    throw new InvalidOperationException(
+                        devs.Count == 0
+                            ? "未发现相机设备"
+                            : $"相机连接失败（deviceIndex={deviceIndex}，共 {devs.Count} 台）");
+                }
+
+                CalibImage? frame = cam.GrabOneFrame(0, 0);
+                if (frame == null)
+                    throw new InvalidOperationException($"相机取图失败: {cam.LastError ?? "未知错误"}");
+
+                try
+                {
+                    LoadImageFromCalibImage(frame, clearRoi: true);
+                    AppendLog($"摄像头取一帧 OK: dev={deviceIndex} ({_imgWidth}x{_imgHeight})");
+                }
+                finally
+                {
+                    frame.Dispose();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"摄像头取图失败:\n{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppendLog($"[相机] {ex.Message}");
+            }
+        }
+
+        /// <summary>从 CalibImage（文件或相机）建立 _rawCalibImage 并刷新显示。</summary>
+        private void LoadImageFromCalibImage(CalibImage frame, bool clearRoi = true)
+        {
+            if (frame == null) throw new ArgumentNullException(nameof(frame));
+            frame.RefreshProperties();
+
+            CalibImage gray = frame.Channels == 1
+                ? CalibAPI.DuplicateImage(frame)
+                : HalconFlowBridge.ToSingleChannelGray(frame);
+
+            _loadedImagePath = null;
+            _imgWidth = gray.Width;
+            _imgHeight = gray.Height;
+            var gn = gray.GetNativeStruct();
+            _grayPixels = new byte[_imgWidth * _imgHeight];
+            System.Runtime.InteropServices.Marshal.Copy(gn.data, _grayPixels, 0, _grayPixels.Length);
+
+            _currentImage?.Dispose();
+            _currentImage = CalibAPI.DuplicateImage(gray);
+            gray.Dispose();
+
+            _rawCalibImage?.Dispose();
+            _rawCalibImage = CalibAPI.DuplicateImage(_currentImage);
+
+            try
+            {
+                TryApplyCameraCorrections(logSuccess: true);
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"[相机矫正] {ex.Message}，显示原图");
+                CommitCalibImageToUi(_rawCalibImage, disposeIncoming: false);
+            }
+
+            if (clearRoi)
+                ClearRoiState();
+            else
+            {
+                _workingContours = null;
+                UpdateContourStats();
+            }
+
+            FitImageToView();
+            FlushSessionPersist();
         }
 
         private void LoadImage(string path, bool clearRoi = true)

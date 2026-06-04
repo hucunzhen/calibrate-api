@@ -56,6 +56,9 @@ namespace CalibOperatorCLI_Example
         /// <summary>board | local | plane，对应透视输出范围 ComboBox Tag。</summary>
         public string PerspectiveOutputFrame { get; set; } = "board";
 
+        /// <summary>海康相机枚举索引（摄像头取一帧）。</summary>
+        public string CameraDeviceIndex { get; set; } = "0";
+
         /// <summary>模板创建/匹配等侧栏控件（按 x:Name 序列化）。</summary>
         public Dictionary<string, string> Controls { get; set; } = new();
 
@@ -66,7 +69,7 @@ namespace CalibOperatorCLI_Example
             "RbGradientOutward", "RbGradientInward", "CmbRingInnerGradientMode",
             "RbInnerGradientOutward", "RbInnerGradientInward", "RbNextSegmentLine", "RbNextSegmentArc",
             "TxtEdgeAlpha", "TxtEdgeLow", "TxtEdgeHigh", "TxtScaleMin", "TxtScaleMax", "TxtScaleStep",
-            "TxtMinGray", "TxtMaxGray", "TxtPolygonCloseDist",
+            "TxtMinGray", "TxtMaxGray", "TxtPolygonCloseDist", "TxtCameraDeviceIndex",
             "TxtNumLevels", "TxtAngleStart", "TxtAngleExtent", "TxtAngleStep", "TxtContrast", "TxtMinContrast",
             "CmbOptimization", "CmbMetric",
             "TxtFindNumMatches", "TxtFindMinScore", "TxtFindGreediness", "TxtFindNumLevels", "TxtFindMaxOverlap",

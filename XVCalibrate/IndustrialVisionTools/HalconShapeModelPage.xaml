@@ -21,6 +21,8 @@
                 <Border Grid.Row="0" Background="#2D2D2D" Margin="8" Padding="6">
                     <StackPanel Orientation="Horizontal">
                     <Button x:Name="BtnLoadImage" Content="加载图像" Width="80" Height="28" Margin="0,0,8,0" Click="BtnLoadImage_Click"/>
+                    <Button x:Name="BtnCameraGrab" Content="摄像头取一帧" Width="100" Height="28" Margin="0,0,8,0"
+                            Click="BtnCameraGrab_Click" ToolTip="海康相机同步抓一帧（设备索引见右侧「相机矫正」）"/>
                     <Button x:Name="BtnClearRoi" Content="清除ROI" Width="80" Height="28" Margin="0,0,8,0" Click="BtnClearRoi_Click"/>
                     <Button x:Name="BtnResetView" Content="重置视图" Width="70" Height="28" Margin="0,0,8,0" Click="BtnResetView_Click"/>
                     <Separator Width="1" Background="#555" Margin="4,2"/>
@@ -117,6 +119,17 @@
                         <TextBlock FontWeight="Bold" Text="相机矫正" Margin="0,0,0,6"/>
                         <TextBlock Text="加载图像后按棋盘标定 JSON 做内参去畸变与/或平面透视展开；创建/匹配均使用矫正后图像。"
                                    FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="72"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="设备索引" VerticalAlignment="Center"
+                                       ToolTip="相机枚举序号，从 0 开始"/>
+                            <TextBox x:Name="TxtCameraDeviceIndex" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
+                        </Grid>
+                        <Button x:Name="BtnCameraGrabPanel" Content="摄像头取一帧" Height="28" Margin="0,0,0,8"
+                                Click="BtnCameraGrab_Click"/>
                         <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="72"/>
@@ -394,7 +407,7 @@
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Text="起点容差" VerticalAlignment="Center"
                                        ToolTip="单击位置距起点小于该值(像素)时视为点击起点并闭合"/>
-                            <TextBox x:Name="TxtPolygonCloseDist" Grid.Column="1" Text="12" Height="24" VerticalContentAlignment="Center"/>
+                            <TextBox x:Name="TxtPolygonCloseDist" Grid.Column="1" Text="6" Height="24" VerticalContentAlignment="Center"/>
                         </Grid>
                         <TextBlock Text="多边形≥3点后，须单击第一个顶点（起点）闭合；下一段可选直线或圆弧" FontSize="10" Foreground="#888"
                                    TextWrapping="Wrap" Margin="0,6,0,0"/>

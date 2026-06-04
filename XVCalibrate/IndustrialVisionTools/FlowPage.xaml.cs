@@ -3037,7 +3037,7 @@ namespace CalibOperatorCLI_Example
             var conn = _connections.FirstOrDefault(c => c.ToPort == inPort);
             if (conn == null) return null;
 
-            return conn.FromPort.Owner.Outputs.GetValueOrDefault(conn.FromPort.Definition.Name);
+            return GetUpstreamOutputValue(conn.FromPort.Owner, conn.FromPort.Definition.Name);
         }
 
         /// <summary>
@@ -3050,7 +3050,8 @@ namespace CalibOperatorCLI_Example
             {
                 var conn = _connections.FirstOrDefault(c => c.ToPort == pv);
                 if (conn != null)
-                    inputs[pv.Definition.Name] = conn.FromPort.Owner.Outputs.GetValueOrDefault(conn.FromPort.Definition.Name);
+                    inputs[pv.Definition.Name] = GetUpstreamOutputValue(
+                        conn.FromPort.Owner, conn.FromPort.Definition.Name);
             }
             return inputs;
         }
@@ -3137,13 +3138,19 @@ namespace CalibOperatorCLI_Example
             }
         }
 
-        /// <summary>旧版霍夫线段输入端口名为 Image，现改为 Edge；加载流程时自动映射。</summary>
-        private static string NormalizeHoughLinesInputPort(FlowNode toNode, string? toPort)
+        /// <summary>加载流程时兼容旧版/别名输入端口名。</summary>
+        private static string NormalizeFlowInputPortName(FlowNode toNode, string? toPort)
         {
-            if (toNode.Def.TypeId == "hough_lines" && string.Equals(toPort, "Image", StringComparison.Ordinal))
+            if (toNode.Def.TypeId == "hough_lines" && string.Equals(toPort, "Image", StringComparison.OrdinalIgnoreCase))
                 return "Edge";
+            if (toNode.Def.TypeId == "save_image" && string.Equals(toPort, "In", StringComparison.OrdinalIgnoreCase))
+                return "Image";
             return toPort ?? "";
         }
+
+        /// <summary>旧版霍夫线段输入端口名为 Image，现改为 Edge；加载流程时自动映射。</summary>
+        private static string NormalizeHoughLinesInputPort(FlowNode toNode, string? toPort) =>
+            NormalizeFlowInputPortName(toNode, toPort);
 
         /// <summary>
         /// 高亮/恢复节点边框（执行状态可视化）
@@ -6473,7 +6480,7 @@ namespace CalibOperatorCLI_Example
         }
 
         private static string FormatCompositeInnerNodeIdentity(FlowNode inner) =>
-            $"「{inner.Def.DisplayName}」({inner.Def.TypeId}, {inner.Id:N[..8]})";
+            $"「{inner.Def.DisplayName}」({inner.Def.TypeId}, {inner.Id.ToString("N")[..8]})";
 
         private static void RethrowCompositeInnerNodeFailure(
             FlowNode inner,
@@ -8604,6 +8611,8 @@ namespace CalibOperatorCLI_Example
                         node.Outputs["Image"] = loaded;
                         if (inputs.TryGetValue("After", out var afterLoad))
                             node.Outputs["Out"] = afterLoad;
+                        else if (loaded != null)
+                            node.Outputs["Out"] = loaded;
                         string fileLabel = !string.IsNullOrWhiteSpace(resolvedPath)
                             ? System.IO.Path.GetFileName(resolvedPath)
                             : System.IO.Path.GetFileName(node.Params.GetValueOrDefault("filePath", "") ?? "");
@@ -8952,32 +8961,32 @@ namespace CalibOperatorCLI_Example
 
                     case "image_flip":
                     {
-                        var srcImg = inputs["In"] as CalibImage;
-                        if (srcImg == null) throw new InvalidOperationException("图像翻转: 缺少输入图像");
+                        var srcImg = TryResolveCalibImageInput(inputs)
+                            ?? throw new InvalidOperationException("图像翻转: 缺少输入图像");
                         string flipMode = node.Params.GetValueOrDefault("flipMode", "horizontal") ?? "horizontal";
                         var flipped = CalibImageTransform.Flip(srcImg, flipMode);
-                        node.Outputs["Out"] = flipped;
+                        PublishCalibImageOutputs(node, flipped);
                         node.ResultSummary = $"flip {flipMode.Trim()} → {flipped.Width}x{flipped.Height}";
                         break;
                     }
 
                     case "image_rotate":
                     {
-                        var srcImg = inputs["In"] as CalibImage;
-                        if (srcImg == null) throw new InvalidOperationException("图像旋转: 缺少输入图像");
+                        var srcImg = TryResolveCalibImageInput(inputs)
+                            ?? throw new InvalidOperationException("图像旋转: 缺少输入图像");
                         double angleDeg = CalibImageTransform.ParseAngleDegrees(node.Params.GetValueOrDefault("angleDeg"), 90);
                         string expandRaw = node.Params.GetValueOrDefault("expandCanvas", "true") ?? "true";
                         bool expand = !string.Equals(expandRaw.Trim(), "false", StringComparison.OrdinalIgnoreCase) && expandRaw.Trim() != "0";
                         var rotated = CalibImageTransform.Rotate(srcImg, angleDeg, expand);
-                        node.Outputs["Out"] = rotated;
+                        PublishCalibImageOutputs(node, rotated);
                         node.ResultSummary = $"rotate CW {angleDeg:G}° → {rotated.Width}x{rotated.Height}";
                         break;
                     }
 
                     case "image_resize":
                     {
-                        var srcImg = inputs["In"] as CalibImage;
-                        if (srcImg == null) throw new InvalidOperationException("图像缩放: 缺少输入图像");
+                        var srcImg = TryResolveCalibImageInput(inputs)
+                            ?? throw new InvalidOperationException("图像缩放: 缺少输入图像");
                         string mode = node.Params.GetValueOrDefault("mode", "factor") ?? "factor";
                         double scale = CalibImageTransform.ParseScale(node.Params.GetValueOrDefault("scale"), 1.0);
                         int tw = CalibImageTransform.ParsePositiveOrZeroInt(node.Params.GetValueOrDefault("width"));
@@ -8987,7 +8996,7 @@ namespace CalibOperatorCLI_Example
                         bool keepAspect = !string.Equals(keepRaw.Trim(), "false", StringComparison.OrdinalIgnoreCase) && keepRaw.Trim() != "0";
                         string interp = node.Params.GetValueOrDefault("interpolation", "linear") ?? "linear";
                         var resized = CalibImageTransform.Resize(srcImg, mode, scale, tw, th, maxSide, keepAspect, interp);
-                        node.Outputs["Out"] = resized;
+                        PublishCalibImageOutputs(node, resized);
                         node.ResultSummary = $"resize {mode} {srcImg.Width}x{srcImg.Height} → {resized.Width}x{resized.Height}";
                         break;
                     }
@@ -11415,8 +11424,8 @@ namespace CalibOperatorCLI_Example
 
                     case "save_image":
                     {
-                        var inputImg = inputs["Image"] as CalibImage;
-                        if (inputImg == null) throw new InvalidOperationException("保存图像: 缺少输入图像");
+                        var inputImg = TryResolveCalibImageInput(inputs)
+                            ?? throw new InvalidOperationException("保存图像: 缺少输入图像");
 
                         var pathParam = node.Params.GetValueOrDefault("filePath", "flow_output.bmp");
                         if (string.IsNullOrWhiteSpace(pathParam))
@@ -11426,11 +11435,12 @@ namespace CalibOperatorCLI_Example
                         if (!string.IsNullOrWhiteSpace(dir))
                             System.IO.Directory.CreateDirectory(dir);
 
-                        var ok = CalibAPI.SaveImage(resolvedPath, inputImg);
+                        var toSave = CalibAPI.DuplicateImage(inputImg);
+                        var ok = CalibAPI.SaveImage(resolvedPath, toSave);
                         if (!ok) throw new InvalidOperationException($"保存图像失败: {resolvedPath}");
 
-                        node.Outputs["Out"] = inputImg;
-                        node.ResultSummary = $"Saved: {System.IO.Path.GetFileName(resolvedPath)}";
+                        node.Outputs["Out"] = toSave;
+                        node.ResultSummary = $"Saved: {System.IO.Path.GetFileName(resolvedPath)} ({toSave.Width}x{toSave.Height})";
                         break;
                     }
 

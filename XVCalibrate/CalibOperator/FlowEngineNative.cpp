@@ -913,11 +913,32 @@ static Value InputOf(NativeFlowEngineImpl* e, const std::string& nodeId, const s
             auto nit = e->outputs.find(c.fromNodeId);
             if (nit == e->outputs.end()) continue;
             auto pit = nit->second.find(c.fromPort);
-            if (pit == nit->second.end()) continue;
-            return pit->second;
+            if (pit != nit->second.end()) return pit->second;
+            static const char* altOut[] = {"Out", "Image", "In", nullptr};
+            for (int i = 0; altOut[i]; ++i) {
+                if (c.fromPort == altOut[i]) continue;
+                auto ait = nit->second.find(altOut[i]);
+                if (ait != nit->second.end() && ait->second.kind == Value::Kind::Image)
+                    return ait->second;
+            }
         }
     }
     return Value{};
+}
+
+static Value InputImagePort(NativeFlowEngineImpl* e, const std::string& nodeId) {
+    static const char* names[] = {"Image", "In", "Out", nullptr};
+    for (int i = 0; names[i]; ++i) {
+        Value v = InputOf(e, nodeId, names[i]);
+        if (v.kind == Value::Kind::Image) return v;
+    }
+    return Value{};
+}
+
+static void SetCalibImageOutputs(std::unordered_map<std::string, Value>& out, const cv::Mat& m) {
+    Value v = MakeImage(m);
+    out["Out"] = v;
+    out["Image"] = v;
 }
 
 static std::vector<std::string> TopoSort(NativeFlowEngineImpl* e) {
@@ -1212,7 +1233,7 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         if (path.empty()) { err = "load_image: filePath empty"; return false; }
         cv::Mat img = cv::imread(path, cv::IMREAD_UNCHANGED);
         if (img.empty()) { err = "load_image: failed to read " + path; return false; }
-        out["Image"] = MakeImage(img.channels() == 1 ? img : EnsureBgr(img));
+        SetCalibImageOutputs(out, img.channels() == 1 ? img : EnsureBgr(img));
         return true;
     }
     if (n.type == "load_image_dir") {
@@ -1249,13 +1270,53 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         return true;
     }
     if (n.type == "grayscale") {
-        Value vin = InputOf(e, n.id, "In");
+        Value vin = InputImagePort(e, n.id);
         if (vin.kind != Value::Kind::Image) { err = "grayscale: missing In"; return false; }
         out["Out"] = MakeImage(EnsureGray(vin.img));
         return true;
     }
+    if (n.type == "image_rotate") {
+        Value vin = InputImagePort(e, n.id);
+        if (vin.kind != Value::Kind::Image) { err = "image_rotate: missing In"; return false; }
+        cv::Mat src = vin.img;
+        if (src.empty()) { err = "image_rotate: empty image"; return false; }
+        double angleDeg = ToDouble(NodeParam(n, "angleDeg", "90"), 90.0);
+        while (angleDeg < 0.0) angleDeg += 360.0;
+        while (angleDeg >= 360.0) angleDeg -= 360.0;
+        std::string expandRaw = NodeParam(n, "expandCanvas", "true");
+        bool expand = !(expandRaw == "0" || expandRaw == "false" || expandRaw == "False");
+        cv::Mat dst;
+        if (std::abs(angleDeg) < 1e-3 || std::abs(angleDeg - 360.0) < 1e-3) {
+            dst = src.clone();
+        } else if (std::abs(angleDeg - 90.0) < 1e-3) {
+            cv::rotate(src, dst, cv::ROTATE_90_CLOCKWISE);
+        } else if (std::abs(angleDeg - 180.0) < 1e-3) {
+            cv::rotate(src, dst, cv::ROTATE_180);
+        } else if (std::abs(angleDeg - 270.0) < 1e-3) {
+            cv::rotate(src, dst, cv::ROTATE_90_COUNTERCLOCKWISE);
+        } else {
+            double rad = angleDeg * CV_PI / 180.0;
+            int sw = src.cols, sh = src.rows;
+            int dw = sw, dh = sh;
+            if (expand) {
+                double absCos = std::abs(std::cos(rad));
+                double absSin = std::abs(std::sin(rad));
+                dw = std::max(1, (int)std::ceil(sw * absCos + sh * absSin));
+                dh = std::max(1, (int)std::ceil(sw * absSin + sh * absCos));
+            }
+            cv::Point2f center(sw * 0.5f, sh * 0.5f);
+            cv::Mat rotMat = cv::getRotationMatrix2D(center, -angleDeg, 1.0);
+            if (expand) {
+                rotMat.at<double>(0, 2) += (dw - sw) * 0.5;
+                rotMat.at<double>(1, 2) += (dh - sh) * 0.5;
+            }
+            cv::warpAffine(src, dst, rotMat, cv::Size(dw, dh), cv::INTER_LINEAR, cv::BORDER_CONSTANT);
+        }
+        SetCalibImageOutputs(out, dst);
+        return true;
+    }
     if (n.type == "image_resize") {
-        Value vin = InputOf(e, n.id, "In");
+        Value vin = InputImagePort(e, n.id);
         if (vin.kind != Value::Kind::Image) { err = "image_resize: missing In"; return false; }
         cv::Mat src = vin.img;
         if (src.empty()) { err = "image_resize: empty image"; return false; }
@@ -1296,7 +1357,7 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         else if (interp == "bicubic") interpFlag = cv::INTER_CUBIC;
         cv::Mat dst;
         cv::resize(src, dst, cv::Size(dw, dh), 0, 0, interpFlag);
-        out["Out"] = MakeImage(dst);
+        SetCalibImageOutputs(out, dst);
         return true;
     }
     if (n.type == "clahe") {
@@ -2415,7 +2476,7 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         return true;
     }
     if (n.type == "save_image") {
-        Value img = InputOf(e, n.id, "Image");
+        Value img = InputImagePort(e, n.id);
         if (img.kind != Value::Kind::Image) { err = "save_image: missing Image"; return false; }
         std::string path = NodeParam(n, "filePath", "flow_output.bmp");
         std::string wp = path;
