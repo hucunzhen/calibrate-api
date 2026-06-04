@@ -121,6 +121,8 @@ namespace CalibOperatorCLI_Example
         private List<FlowNode>? _sendPlcDownstreamChainCache;
         /// <summary>flow_loop / Mask 循环嵌套深度；&gt;0 时 flow_sink / points_sink 跨轮累积。</summary>
         private int _flowLoopSinkAccumulateDepth;
+        /// <summary>最近一次 camera_snap / load_image 的全图，供精匹配 FullImage（域内图 In 无法单独做透视 .dfm 变形轮廓）。</summary>
+        private CalibImage? _recentFullFrameForHalconFineMatch;
 
         private bool FlowLoopSinkAccumulateActive => _flowLoopSinkAccumulateDepth > 0;
 
@@ -6269,6 +6271,19 @@ namespace CalibOperatorCLI_Example
             return result;
         }
 
+        private static object? GetInnerUpstreamOutputValue(FlowNode fromNode, string preferredPortName)
+        {
+            if (fromNode.Outputs.TryGetValue(preferredPortName, out var direct) && direct != null)
+                return direct;
+
+            if (string.Equals(preferredPortName, "Xld", StringComparison.OrdinalIgnoreCase)
+                && fromNode.Outputs.TryGetValue("DeformedXld", out var deformed)
+                && deformed != null)
+                return deformed;
+
+            return fromNode.Outputs.GetValueOrDefault(preferredPortName);
+        }
+
         private static Dictionary<string, object?> BuildInnerInputsFromEdges(
             Guid innerId,
             List<(Guid FromId, string FromPort, Guid ToId, string ToPort)> edges,
@@ -6279,9 +6294,58 @@ namespace CalibOperatorCLI_Example
             {
                 if (e.ToId != innerId) continue;
                 if (!idMap.TryGetValue(e.FromId, out var fromNode)) continue;
-                inputs[e.ToPort] = fromNode.Outputs.GetValueOrDefault(e.FromPort);
+                inputs[e.ToPort] = GetInnerUpstreamOutputValue(fromNode, e.FromPort);
             }
             return inputs;
+        }
+
+        private void RememberRecentFullFrameForHalconFine(CalibImage? img)
+        {
+            if (img == null || img.Width <= 0 || img.Height <= 0)
+                return;
+            _recentFullFrameForHalconFineMatch?.Dispose();
+            _recentFullFrameForHalconFineMatch = CalibAPI.DuplicateImage(img);
+        }
+
+        /// <summary>透视 .dfm 精匹配需在全图 ROI 上搜；loop 仅传入域内图 In 时自动补 FullImage。</summary>
+        private void TryAttachFineMatchFullImage(
+            IDictionary<string, object?> inputs,
+            IReadOnlyDictionary<string, object?>? compositeInputs)
+        {
+            if (inputs.TryGetValue("FullImage", out var existing) && existing is CalibImage full && full.Width > 0)
+                return;
+
+            if (compositeInputs != null)
+            {
+                foreach (string key in new[] { "FullImage", "Image", "In" })
+                {
+                    if (!compositeInputs.TryGetValue(key, out var obj) || obj is not CalibImage candidate || candidate.Width <= 0)
+                        continue;
+                    if (inputs.TryGetValue("In", out var domainObj) && domainObj is CalibImage domain
+                        && domain.Width > 0 && domain.Height > 0)
+                    {
+                        long candPx = (long)candidate.Width * candidate.Height;
+                        long domPx = (long)domain.Width * domain.Height;
+                        if (candPx <= domPx * 105 / 100)
+                            continue;
+                    }
+
+                    inputs["FullImage"] = candidate;
+                    return;
+                }
+            }
+
+            if (_recentFullFrameForHalconFineMatch != null)
+                inputs["FullImage"] = _recentFullFrameForHalconFineMatch;
+        }
+
+        /// <summary>主流程拍照/读图后供嵌套精组合使用 FullImage（透视 .dfm）。</summary>
+        private void InjectRecentFullFrameForFineComposite(IDictionary<string, object?> compositeInputs)
+        {
+            if (_recentFullFrameForHalconFineMatch == null)
+                return;
+            if (!compositeInputs.ContainsKey("FullImage"))
+                compositeInputs["FullImage"] = _recentFullFrameForHalconFineMatch;
         }
 
         private static void MergeCompositeExternalInputs(
@@ -6524,6 +6588,8 @@ namespace CalibOperatorCLI_Example
         /// <param name="innerFlowResolveBaseDir">当前组合嵌套在上层子流程内时，为其 innerFlowPath 相对路径提供基准目录（通常为上层子流程 .flow.json 所在文件夹）。</param>
         private void ExecuteCompositeSubFlow(FlowNode compositeNode, Dictionary<string, object?> compositeInputs, string? innerFlowResolveBaseDir = null)
         {
+            InjectRecentFullFrameForFineComposite(compositeInputs);
+
             string path = compositeNode.Params.GetValueOrDefault("innerFlowPath", "")?.Trim() ?? "";
             string embedded = compositeNode.Params.GetValueOrDefault("innerFlowJson", "") ?? "";
             string bindRaw = compositeNode.Params.GetValueOrDefault("bindingsJson", "") ?? "";
@@ -6716,6 +6782,7 @@ namespace CalibOperatorCLI_Example
                                 MergeCompositeExternalInputs(inner, innerInputs, compositeInputs, spec);
                                 if (inner.Def.TypeId == "halcon_fine_deformable_match")
                                 {
+                                    TryAttachFineMatchFullImage(innerInputs, compositeInputs);
                                     ApplyMaskBatchCoarsePoseToFineInputs(innerInputs, batch, mi);
                                     if (!innerInputs.ContainsKey("FullImage") && batch.SourceImage != null)
                                         innerInputs["FullImage"] = batch.SourceImage;
@@ -6785,6 +6852,8 @@ namespace CalibOperatorCLI_Example
                     {
                         var innerInputs = BuildInnerInputsFromEdges(inner.Id, edges, idMap);
                         MergeCompositeExternalInputs(inner, innerInputs, compositeInputs, spec);
+                        if (inner.Def.TypeId == "halcon_fine_deformable_match")
+                            TryAttachFineMatchFullImage(innerInputs, compositeInputs);
                         bool innerIsSource = !edges.Any(e => e.ToId == inner.Id);
                         if (!strictCompositeInputBinding)
                             AutoFillUnboundCompositeInnerInputs(inner, innerInputs, compositeInputs, innerIsSource);
@@ -7214,7 +7283,11 @@ namespace CalibOperatorCLI_Example
             return result;
         }
 
-        private int MarkDownstreamNodesSkippedFrom(FlowNode source, string reason, string stageTag)
+        private int MarkDownstreamNodesSkippedFrom(
+            FlowNode source,
+            string reason,
+            string stageTag,
+            FlowExecutionGracefulStopException? stopEx = null)
         {
             _skipFlowRunNodeIds ??= new HashSet<Guid>();
             var downstream = GetDownstreamNodes(source);
@@ -7227,6 +7300,15 @@ namespace CalibOperatorCLI_Example
             }
 
             AppendLog($"[{stageTag}] {source.Def.DisplayName}: {reason}，后续分支已跳过 {added} 个节点", true);
+            string? detail = !string.IsNullOrWhiteSpace(source.ErrorMessage)
+                ? source.ErrorMessage
+                : stopEx?.InnerException?.Message;
+            if (!string.IsNullOrWhiteSpace(detail)
+                && !reason.Contains(detail, StringComparison.Ordinal))
+            {
+                AppendLog($"[{stageTag}] {source.Def.DisplayName}: 详情: {detail}", true);
+            }
+
             return added;
         }
 
@@ -7895,7 +7977,7 @@ namespace CalibOperatorCLI_Example
                         }
                         catch (FlowExecutionGracefulStopException ex)
                         {
-                            MarkDownstreamNodesSkippedFrom(node, ex.Message, $"{scopeTag}-LOOP-STOP");
+                            MarkDownstreamNodesSkippedFrom(node, ex.Message, $"{scopeTag}-LOOP-STOP", ex);
                             executedNodeIds.Add(node.Id);
                             continue;
                         }
@@ -8608,6 +8690,7 @@ namespace CalibOperatorCLI_Example
                             }
                         }
 
+                        RememberRecentFullFrameForHalconFine(loaded);
                         node.Outputs["Image"] = loaded;
                         if (inputs.TryGetValue("After", out var afterLoad))
                             node.Outputs["Out"] = afterLoad;
@@ -8730,6 +8813,7 @@ namespace CalibOperatorCLI_Example
                         int targetWidth = int.TryParse(node.Params.GetValueOrDefault("targetWidth"), out var tw) ? tw : 0;
                         int targetHeight = int.TryParse(node.Params.GetValueOrDefault("targetHeight"), out var th) ? th : 0;
                         var img = GrabOneCameraFrameOrThrow(deviceIndex, targetWidth, targetHeight);
+                        RememberRecentFullFrameForHalconFine(img);
                         node.Outputs["Image"] = img;
                         if (inputs.TryGetValue("After", out var afterSnap))
                             node.Outputs["Out"] = afterSnap;
@@ -12919,7 +13003,9 @@ namespace CalibOperatorCLI_Example
                     {
 #if HALCON_ENABLED
                         if (inputs["In"] is not CalibImage domainImg)
-                            throw new InvalidOperationException("HALCON 可变形精匹配: 缺少 In（接 halcon_reduce_domain_by_mask 的 Out）");
+                            throw new InvalidOperationException(
+                                "HALCON 可变形精匹配: 缺少 In（接 halcon_reduce_domain_by_mask 的 Out）。" +
+                                "若在 flow_loop 中由列表驱动，请确认粗/Mask 本轮有候选且 InList 已正确连线。");
                         long deformId = HalconFlowBridge.ResolveRegisteredDeformableModelId(
                             Convert.ToInt64(inputs["DeformableModelId"]));
                         if (deformId < 0)

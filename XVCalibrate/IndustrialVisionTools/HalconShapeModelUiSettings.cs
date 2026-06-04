@@ -19,6 +19,9 @@ namespace CalibOperatorCLI_Example
     {
         public string ImagePath { get; set; } = "";
         public string CalibrationJsonPath { get; set; } = "";
+
+        /// <summary>九点标定结果 calibration_result.json（含 affine，用于几何测量 mm 显示）。</summary>
+        public string NinePointCalibrationPath { get; set; } = "";
         /// <summary>none | rect | circle | polygon | ring</summary>
         public string RoiMode { get; set; } = "none";
 
@@ -67,7 +70,7 @@ namespace CalibOperatorCLI_Example
             "CmbTemplateSource", "CmbModelKind", "CmbGenContourMode", "TxtMinContourPoints", "ChkLargestContourOnly",
             "CmbTrimMode", "TxtTrimEpsilon", "TxtTrimEndsPx", "TxtTrimMinLength", "ChkTrimClosed",
             "RbGradientOutward", "RbGradientInward", "CmbRingInnerGradientMode",
-            "RbInnerGradientOutward", "RbInnerGradientInward", "RbNextSegmentLine", "RbNextSegmentArc",
+            "RbInnerGradientOutward", "RbInnerGradientInward", "RbNextSegmentLine", "RbNextSegmentArc", "ChkTangentJoin",
             "TxtEdgeAlpha", "TxtEdgeLow", "TxtEdgeHigh", "TxtScaleMin", "TxtScaleMax", "TxtScaleStep",
             "TxtMinGray", "TxtMaxGray", "TxtPolygonCloseDist", "TxtCameraDeviceIndex",
             "TxtNumLevels", "TxtAngleStart", "TxtAngleExtent", "TxtAngleStep", "TxtContrast", "TxtMinContrast",

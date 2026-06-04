@@ -44,6 +44,15 @@ namespace CalibOperatorCLI_Example
                     TxtCalibrationJsonPath.Text = guess;
             }
 
+#if HALCON_ENABLED
+            if (TxtNinePointCalibPath != null && string.IsNullOrWhiteSpace(TxtNinePointCalibPath.Text))
+            {
+                string? nineGuess = CalibrationResultFileLoader.TryGuessDefaultPath();
+                if (!string.IsNullOrWhiteSpace(nineGuess))
+                    TxtNinePointCalibPath.Text = nineGuess;
+            }
+#endif
+
             ApplySessionFromSettingsIfNeeded(forceReload: true);
 
             if (_imgWidth > 0)
@@ -57,6 +66,7 @@ namespace CalibOperatorCLI_Example
 
             _uiReady = true;
             _suppressSessionPersist = false;
+            UpdateTangentFlipButtonVisibility();
         }
 
         private void HalconShapeModelPage_Unloaded(object sender, RoutedEventArgs e)
@@ -110,6 +120,11 @@ namespace CalibOperatorCLI_Example
             TxtCalibBoardRows.LostFocus += (_, _) => ScheduleSessionPersist();
             TxtCalibSquareSizeMm.LostFocus += (_, _) => ScheduleSessionPersist();
             TxtCalibPxPerMm.LostFocus += (_, _) => ScheduleSessionPersist();
+            if (TxtNinePointCalibPath != null)
+            {
+                TxtNinePointCalibPath.LostFocus += (_, _) => ScheduleSessionPersist();
+                TxtNinePointCalibPath.TextChanged += (_, _) => ScheduleSessionPersist();
+            }
 
             ChkEnableUndistort.Checked += OnCameraCorrectionSettingChanged;
             ChkEnableUndistort.Unchecked += OnCameraCorrectionSettingChanged;
@@ -156,6 +171,7 @@ namespace CalibOperatorCLI_Example
             {
                 ImagePath = imagePath,
                 CalibrationJsonPath = TxtCalibrationJsonPath?.Text?.Trim() ?? "",
+                NinePointCalibrationPath = TxtNinePointCalibPath?.Text?.Trim() ?? "",
             };
             CaptureRoiIntoSettings(s);
             CaptureCameraCorrectionIntoSettings(s);
@@ -313,6 +329,8 @@ namespace CalibOperatorCLI_Example
             {
                 if (!string.IsNullOrWhiteSpace(s.CalibrationJsonPath))
                     TxtCalibrationJsonPath.Text = s.CalibrationJsonPath;
+                if (!string.IsNullOrWhiteSpace(s.NinePointCalibrationPath))
+                    TxtNinePointCalibPath.Text = s.NinePointCalibrationPath;
                 ApplyCameraCorrectionFromSettings(s);
 
                 LoadImage(imagePath, clearRoi: false);

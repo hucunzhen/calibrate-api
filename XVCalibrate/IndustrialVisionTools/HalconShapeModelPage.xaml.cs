@@ -37,6 +37,8 @@ namespace CalibOperatorCLI_Example
         private readonly RoiContourPath _roiPath = new RoiContourPath();
         /// <summary>圆弧模式：已点终点，等待弧上经过点。</summary>
         private Point? _arcDraftEnd;
+        /// <summary>相切圆弧：true=切线左侧鼓出，false=右侧，null=随鼠标位置。</summary>
+        private bool? _tangentArcPreferLeft;
         private bool _hasRoi;
         private Rect _roiRectImage;
 
@@ -75,6 +77,20 @@ namespace CalibOperatorCLI_Example
 
         /// <summary>预览/修剪后的轮廓，创建 XLD 模型时优先使用。</summary>
         private HalconXldContourBundle? _workingContours;
+
+#if HALCON_ENABLED
+        /// <summary>几何来源为 RoiPolyline 时，可编辑的闭合路径（顶点+直线/圆弧段）。</summary>
+        private RoiContourPath? _geometryRoiPath;
+
+        /// <summary>由 <see cref="_geometryRoiPath"/> 采样得到的轮廓缓存。</summary>
+        private Point2D[]? _geometryRoiPolylineContour;
+
+        private bool _suppressGeomPathSegmentUi;
+
+        private string? _ninePointCalibPathCached;
+        private AffineTransform? _ninePointAffineCached;
+        private string? _ninePointAffineLoadError;
+#endif
 
 #if HALCON_ENABLED
         /// <summary>EdgesSubPix 原始 XLD（含 edge_direction），仅「手绘 ROI 边线」模式使用。</summary>
@@ -776,26 +792,36 @@ namespace CalibOperatorCLI_Example
             Point last = path.VertexCount > 0 ? path.Vertices[^1] : default;
 
             if (_arcDraftEnd is Point end)
-            {
-                Point via = _polygonCursorImage ?? end;
-                foreach (var p in RoiContourPath.SampleArc(last, via, end, PreviewArcSegments))
-                    rubber.Add(p);
-            }
+                FillArcRubberPolylines(path, last, end, _polygonCursorImage ?? end, rubber, out _);
             else if (_polygonCursorImage is Point cursor && path.VertexCount > 0)
             {
-                rubber.Add(last);
-                rubber.Add(cursor);
+                if (IsTangentJoinEnabled() && IsNextSegmentArc() && path.VertexCount >= 2)
+                    FillArcRubberPolylines(path, last, cursor, cursor, rubber, out _);
+                else
+                {
+                    HideRubberAltLine();
+                    rubber.Add(last);
+                    if (TryAddTangentLineSegment(path, cursor, out Point onRay))
+                        rubber.Add(onRay);
+                    else
+                        rubber.Add(cursor);
+                }
             }
+            else
+                HideRubberAltLine();
 
             if (rubber.Count < 2)
             {
                 PolygonRubberLine.Visibility = Visibility.Collapsed;
                 PolygonRubberLine.Points.Clear();
+                HideRubberAltLine();
+                UpdateTangentFlipButtonVisibility();
                 return;
             }
 
             PolygonRubberLine.Visibility = Visibility.Visible;
             PolygonRubberLine.Points = new PointCollection(rubber);
+            UpdateTangentFlipButtonVisibility();
         }
 
 #if HALCON_ENABLED
@@ -834,9 +860,217 @@ namespace CalibOperatorCLI_Example
 
         private bool IsNextSegmentArc() => RbNextSegmentArc?.IsChecked == true;
 
+        private bool IsTangentJoinEnabled() => ChkTangentJoin?.IsChecked == true;
+
+        private bool TryResolveArcViaForDraft(RoiContourPath path, Point start, Point end, Point sideHint, out Point via)
+        {
+            via = default;
+            if (!IsTangentJoinEnabled() || path.VertexCount < 2)
+                return false;
+            if (!RoiContourPathTangent.TryGetIncomingTravelTangent(path, out double tx, out double ty))
+                return false;
+            return RoiContourPathTangent.TryComputeArcViaTangentAtStart(
+                start, tx, ty, end, sideHint, _tangentArcPreferLeft, out via);
+        }
+
+        private void UpdateTangentFlipButtonVisibility()
+        {
+            if (BtnTangentFlipSide == null)
+                return;
+
+            bool drawingPath = RbPolygonMode?.IsChecked == true || IsRingModeActive();
+            bool show = IsTangentJoinEnabled() && IsNextSegmentArc() && drawingPath
+                && (_arcDraftEnd != null
+                    || (drawingPath && (IsRingModeActive()
+                        ? GetActiveRingPath().VertexCount
+                        : _roiPath.VertexCount) >= 2));
+            BtnTangentFlipSide.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void TangentJoin_Changed(object sender, RoutedEventArgs e)
+        {
+            if (!IsLoaded) return;
+            UpdateTangentFlipButtonVisibility();
+            UpdatePolygonRubberVisual();
+            if (IsRingModeActive())
+                UpdateRingRubberVisual();
+        }
+
+        private void BtnTangentFlipSide_Click(object sender, RoutedEventArgs e) => FlipTangentArcSide();
+
+        private void FlipTangentArcSide()
+        {
+            RoiContourPath path = IsRingModeActive() ? GetActiveRingPath() : _roiPath;
+            if (!IsTangentJoinEnabled() || path.VertexCount < 2)
+                return;
+
+            Point start = path.Vertices[^1];
+            Point end = _arcDraftEnd ?? (_polygonCursorImage ?? start);
+            if (Dist(start, end) < 1e-3)
+            {
+                AppendLog("请先点击圆弧终点");
+                return;
+            }
+
+            if (!RoiContourPathTangent.TryGetIncomingTravelTangent(path, out double tx, out double ty)
+                || !RoiContourPathTangent.TryComputeTangentArcBothSides(
+                    start, tx, ty, end, out _, out _, out bool hasL, out bool hasR))
+            {
+                AppendLog("当前无法计算相切双弧");
+                return;
+            }
+
+            if (!hasL || !hasR)
+            {
+                AppendLog("仅存在一种相切圆弧解");
+                return;
+            }
+
+            if (!_tangentArcPreferLeft.HasValue)
+                _tangentArcPreferLeft = RoiContourPathTangent.TangentSideSign(tx, ty, start, _polygonCursorImage ?? end) >= 0;
+            _tangentArcPreferLeft = !_tangentArcPreferLeft.Value;
+            AppendLog(_tangentArcPreferLeft.Value ? "相切弧：切线左侧 (鼓出)" : "相切弧：切线右侧 (鼓出)");
+            UpdatePolygonRubberVisual();
+            if (IsRingModeActive())
+                UpdateRingRubberVisual();
+        }
+
+        private void FillArcRubberPolylines(
+            RoiContourPath path,
+            Point start,
+            Point end,
+            Point cursor,
+            List<Point> primary,
+            out bool drewAlt)
+        {
+            drewAlt = false;
+            HideRubberAltLine();
+
+            if (IsTangentJoinEnabled()
+                && RoiContourPathTangent.TryGetIncomingTravelTangent(path, out double tx, out double ty)
+                && RoiContourPathTangent.TryComputeTangentArcBothSides(
+                    start, tx, ty, end, out Point viaL, out Point viaR, out bool hasL, out bool hasR)
+                && RoiContourPathTangent.TryComputeArcViaTangentAtStart(
+                    start, tx, ty, end, cursor, _tangentArcPreferLeft, out Point viaSel))
+            {
+                foreach (var p in RoiContourPath.SampleArc(start, viaSel, end, PreviewArcSegments))
+                    primary.Add(p);
+
+                if (hasL && hasR && PolygonRubberAltLine != null)
+                {
+                    bool selLeft = Dist(viaSel, viaL) <= Dist(viaSel, viaR);
+                    Point viaAlt = selLeft ? viaR : viaL;
+                    var alt = new List<Point>();
+                    foreach (var p in RoiContourPath.SampleArc(start, viaAlt, end, PreviewArcSegments))
+                        alt.Add(p);
+                    if (alt.Count >= 2)
+                    {
+                        PolygonRubberAltLine.Visibility = Visibility.Visible;
+                        PolygonRubberAltLine.Points = new PointCollection(alt);
+                        drewAlt = true;
+                    }
+                }
+
+                return;
+            }
+
+            Point via = cursor;
+            if (TryResolveArcViaForDraft(path, start, end, cursor, out Point viaTan))
+                via = viaTan;
+            foreach (var p in RoiContourPath.SampleArc(start, via, end, PreviewArcSegments))
+                primary.Add(p);
+        }
+
+        private void HideRubberAltLine()
+        {
+            if (PolygonRubberAltLine == null)
+                return;
+            PolygonRubberAltLine.Visibility = Visibility.Collapsed;
+            PolygonRubberAltLine.Points.Clear();
+        }
+
+        private bool TryAddTangentLineSegment(RoiContourPath path, Point pick, out Point placed)
+        {
+            placed = pick;
+            if (!IsTangentJoinEnabled() || path.VertexCount < 2
+                || path.EdgeKinds.Count == 0
+                || path.EdgeKinds[^1] != RoiEdgeKind.Arc)
+                return false;
+
+            Point origin = path.Vertices[^1];
+            if (!RoiContourPathTangent.TryGetOutgoingTravelTangent(path, out double tx, out double ty))
+                return false;
+
+            if (!RoiContourPathTangent.TryProjectPointOntoTangentRay(origin, tx, ty, pick, minStepPx: 2.0, out placed))
+                return false;
+
+            return true;
+        }
+
+        private bool TryCommitArcDraftClick(
+            RoiContourPath path,
+            Point draftEnd,
+            Point clickPt,
+            string logPrefix,
+            bool closingToStart)
+        {
+            Point arcStart = path.Vertices[^1];
+            Point arcEnd = closingToStart ? path.Vertices[0] : draftEnd;
+
+            if (TryResolveArcViaForDraft(path, arcStart, arcEnd, clickPt, out Point viaTan))
+            {
+                if (closingToStart)
+                {
+                    if (!RoiContourPath.IsValidArcVia(arcStart, viaTan, arcEnd))
+                        return false;
+                    try
+                    {
+                        path.CloseLoop(RoiEdgeKind.Arc, viaTan);
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        MessageBox.Show(ex.Message, "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                        return false;
+                    }
+
+                    return true;
+                }
+
+                path.AddArcSegment(arcEnd, viaTan);
+                CancelArcDraft();
+                AppendLog($"{logPrefix} 圆弧段已添加(与上段相切)，顶点数 {path.VertexCount}");
+                return true;
+            }
+
+            if (closingToStart)
+                return false;
+
+            path.AddArcSegment(draftEnd, clickPt);
+            CancelArcDraft();
+            AppendLog($"{logPrefix} 圆弧段已添加，顶点数 {path.VertexCount}");
+            return true;
+        }
+
+        private void AddLineSegmentWithOptionalTangent(RoiContourPath path, Point imgPt, string logPrefix)
+        {
+            if (TryAddTangentLineSegment(path, imgPt, out Point onRay))
+            {
+                path.AddLineSegment(onRay);
+                AppendLog($"{logPrefix} 直线段(沿弧切线) → 顶点 {path.VertexCount}");
+            }
+            else
+            {
+                path.AddLineSegment(imgPt);
+                AppendLog($"{logPrefix} 直线段 → 顶点 {path.VertexCount}");
+            }
+        }
+
         private void CancelArcDraft()
         {
             _arcDraftEnd = null;
+            _tangentArcPreferLeft = null;
+            HideRubberAltLine();
+            UpdateTangentFlipButtonVisibility();
         }
 
         private void InvalidatePolygonFlatCache()
@@ -903,26 +1137,36 @@ namespace CalibOperatorCLI_Example
             Point last = _roiPath.Vertices[^1];
 
             if (_arcDraftEnd is Point end)
-            {
-                Point via = _polygonCursorImage ?? end;
-                foreach (var p in RoiContourPath.SampleArc(last, via, end, PreviewArcSegments))
-                    rubber.Add(p);
-            }
+                FillArcRubberPolylines(_roiPath, last, end, _polygonCursorImage ?? end, rubber, out _);
             else if (_polygonCursorImage is Point cursor)
             {
-                rubber.Add(last);
-                rubber.Add(cursor);
+                if (IsTangentJoinEnabled() && IsNextSegmentArc() && _roiPath.VertexCount >= 2)
+                    FillArcRubberPolylines(_roiPath, last, cursor, cursor, rubber, out _);
+                else
+                {
+                    HideRubberAltLine();
+                    rubber.Add(last);
+                    if (TryAddTangentLineSegment(_roiPath, cursor, out Point onRay))
+                        rubber.Add(onRay);
+                    else
+                        rubber.Add(cursor);
+                }
             }
+            else
+                HideRubberAltLine();
 
             if (rubber.Count < 2)
             {
                 PolygonRubberLine.Visibility = Visibility.Collapsed;
                 PolygonRubberLine.Points.Clear();
+                HideRubberAltLine();
+                UpdateTangentFlipButtonVisibility();
                 return;
             }
 
             PolygonRubberLine.Visibility = Visibility.Visible;
             PolygonRubberLine.Points = new PointCollection(rubber);
+            UpdateTangentFlipButtonVisibility();
         }
 
         private static bool PointsNear(Point a, Point b, double eps = 1e-6) => Dist(a, b) < eps;
@@ -958,10 +1202,19 @@ namespace CalibOperatorCLI_Example
             return FinishPolygonRoiClosed("直线");
         }
 
-        private bool TryClosePolygonWithArc(Point via)
+        private bool TryClosePolygonWithArc(Point viaOrSideHint)
         {
             if (_roiPath.VertexCount < 3)
                 return false;
+
+            bool usedTangent = false;
+            Point via = viaOrSideHint;
+            if (TryResolveArcViaForDraft(
+                    _roiPath, _roiPath.Vertices[^1], _roiPath.Vertices[0], viaOrSideHint, out Point viaTan))
+            {
+                via = viaTan;
+                usedTangent = true;
+            }
 
             if (!RoiContourPath.IsValidArcVia(_roiPath.Vertices[^1], via, _roiPath.Vertices[0]))
             {
@@ -980,7 +1233,7 @@ namespace CalibOperatorCLI_Example
                 return false;
             }
 
-            return FinishPolygonRoiClosed("圆弧");
+            return FinishPolygonRoiClosed(usedTangent ? "圆弧相切" : "圆弧");
         }
 
         private bool FinishPolygonRoiClosed(string closingKindLabel)
@@ -1058,11 +1311,15 @@ namespace CalibOperatorCLI_Example
             return true;
         }
 
-        private bool TryCloseActiveRingWithArc(Point via)
+        private bool TryCloseActiveRingWithArc(Point viaOrSideHint)
         {
             var path = GetActiveRingPath();
             if (path.VertexCount < 3)
                 return false;
+
+            Point via = viaOrSideHint;
+            if (TryResolveArcViaForDraft(path, path.Vertices[^1], path.Vertices[0], viaOrSideHint, out Point viaTan))
+                via = viaTan;
 
             if (!RoiContourPath.IsValidArcVia(path.Vertices[^1], via, path.Vertices[0]))
             {
@@ -1108,13 +1365,17 @@ namespace CalibOperatorCLI_Example
             {
                 if (IsArcDraftClosingToStart(path, end))
                 {
+                    if (TryCommitArcDraftClick(path, end, imgPt, label, closingToStart: true))
+                    {
+                        AdvanceRingPhaseAfterClose(path);
+                        return true;
+                    }
+
                     TryCloseActiveRingWithArc(imgPt);
                     return true;
                 }
 
-                path.AddArcSegment(end, imgPt);
-                CancelArcDraft();
-                AppendLog($"{label} 圆弧段已添加，顶点数 {path.VertexCount}");
+                TryCommitArcDraftClick(path, end, imgPt, label, closingToStart: false);
                 return false;
             }
 
@@ -1140,7 +1401,11 @@ namespace CalibOperatorCLI_Example
                 }
 
                 _arcDraftEnd = imgPt;
-                AppendLog($"{label} 圆弧：已设终点，请点击弧上经过的一点");
+                _tangentArcPreferLeft = null;
+                UpdateTangentFlipButtonVisibility();
+                AppendLog(IsTangentJoinEnabled()
+                    ? $"{label} 圆弧终点已设；移动鼠标选鼓出侧，或点「换向」/F 切换，再点确认"
+                    : $"{label} 圆弧：已设终点，请点击弧上经过的一点");
                 return false;
             }
 
@@ -1150,10 +1415,7 @@ namespace CalibOperatorCLI_Example
                 AppendLog($"{label}: 第 1 点");
             }
             else
-            {
-                path.AddLineSegment(imgPt);
-                AppendLog($"{label} 直线段 → 顶点 {path.VertexCount}");
-            }
+                AddLineSegmentWithOptionalTangent(path, imgPt, label);
 
             return false;
         }
@@ -1497,6 +1759,9 @@ namespace CalibOperatorCLI_Example
                 .Append(opt.EdgeHigh.ToString(CultureInfo.InvariantCulture)).Append('|')
                 .Append(ReadRoiGradientPolarityForFingerprint());
 
+            if (opt.SourceKind == HalconShapeModelSourceKind.GeometryXld)
+                AppendGeometryFingerprint(sb);
+
             if (includeTrimState && _workingContours?.Contours != null && _workingContours.Contours.Count > 0)
             {
                 var trim = ReadTrimOptionsFromUi();
@@ -1619,14 +1884,14 @@ namespace CalibOperatorCLI_Example
             {
                 if (IsArcDraftClosingToStart(end))
                 {
+                    if (TryCommitArcDraftClick(_roiPath, end, imgPt, "多边形", closingToStart: true))
+                        return FinishPolygonRoiClosed("圆弧相切");
                     if (TryClosePolygonWithArc(imgPt))
                         return true;
                     return false;
                 }
 
-                _roiPath.AddArcSegment(end, imgPt);
-                CancelArcDraft();
-                AppendLog($"圆弧段已添加，顶点数 {_roiPath.VertexCount}");
+                TryCommitArcDraftClick(_roiPath, end, imgPt, "多边形", closingToStart: false);
                 return false;
             }
 
@@ -1652,7 +1917,11 @@ namespace CalibOperatorCLI_Example
                 }
 
                 _arcDraftEnd = imgPt;
-                AppendLog("圆弧：已设终点，请点击弧上经过的一点");
+                _tangentArcPreferLeft = null;
+                UpdateTangentFlipButtonVisibility();
+                AppendLog(IsTangentJoinEnabled()
+                    ? "圆弧终点已设；移动鼠标选鼓出侧，或点「换向」/F 切换，再点确认"
+                    : "圆弧：已设终点，请点击弧上经过的一点");
                 return false;
             }
 
@@ -1662,10 +1931,7 @@ namespace CalibOperatorCLI_Example
                 AppendLog("多边形: 第 1 点");
             }
             else
-            {
-                _roiPath.AddLineSegment(imgPt);
-                AppendLog($"直线段 → 顶点 {_roiPath.VertexCount}");
-            }
+                AddLineSegmentWithOptionalTangent(_roiPath, imgPt, "多边形");
 
             return false;
         }
@@ -1761,6 +2027,9 @@ namespace CalibOperatorCLI_Example
                     UpdateThresholdPreview();
                     AppendLog($"圆形ROI: 圆心=({_circleCenterImage.X:F0},{_circleCenterImage.Y:F0}) R={_circleRadiusImage:F0}");
                     PersistSessionChange();
+#if HALCON_ENABLED
+                    TryAutoSyncGeometryFromRoiIfNeeded();
+#endif
                 }
                 else
                     ResetCircleDrawState();
@@ -1784,6 +2053,9 @@ namespace CalibOperatorCLI_Example
                     UpdateThresholdPreview();
                     AppendLog($"矩形ROI: ({x:F0},{y:F0}) {w:F0}x{h:F0}");
                     PersistSessionChange();
+#if HALCON_ENABLED
+                    TryAutoSyncGeometryFromRoiIfNeeded();
+#endif
                 }
                 else if (RoiRect != null)
                 {
@@ -1865,6 +2137,11 @@ namespace CalibOperatorCLI_Example
             {
                 ResetView();
                 AppendLog("视图已重置");
+                e.Handled = true;
+            }
+            else if (e.Key == Key.F && IsTangentJoinEnabled() && IsNextSegmentArc())
+            {
+                FlipTangentArcSide();
                 e.Handled = true;
             }
         }
@@ -2204,6 +2481,10 @@ namespace CalibOperatorCLI_Example
         {
             if (!IsLoaded) return;
             UpdateCreatePanelsVisibility();
+#if HALCON_ENABLED
+            if ((CmbTemplateSource?.SelectedItem as ComboBoxItem)?.Tag?.ToString() == "GeometryXld")
+                TryAutoSyncGeometryFromRoiIfNeeded();
+#endif
         }
 
         private void UpdateCreatePanelsVisibility()
@@ -2213,11 +2494,14 @@ namespace CalibOperatorCLI_Example
             string src = (CmbTemplateSource.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "ThresholdXld";
             string kind = (CmbModelKind?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Shape";
 
-            bool isXld = src is "ThresholdXld" or "EdgesXld" or "PolygonXld";
+            bool isGeometry = src == "GeometryXld";
+            bool isXld = isGeometry || src is "ThresholdXld" or "EdgesXld" or "PolygonXld";
             bool isImage = src is "ImageRectangle" or "ImagePolygon";
 
+            if (PnlGeometryMeasure != null)
+                PnlGeometryMeasure.Visibility = isGeometry ? Visibility.Visible : Visibility.Collapsed;
             if (PnlContourExtract != null)
-                PnlContourExtract.Visibility = isXld ? Visibility.Visible : Visibility.Collapsed;
+                PnlContourExtract.Visibility = isXld && !isGeometry ? Visibility.Visible : Visibility.Collapsed;
             if (PnlContourTrim != null)
                 PnlContourTrim.Visibility = isXld ? Visibility.Visible : Visibility.Collapsed;
             if (PnlEdgeExtract != null)
@@ -2225,7 +2509,7 @@ namespace CalibOperatorCLI_Example
             if (PnlRoiBoundaryDir != null)
                 PnlRoiBoundaryDir.Visibility = src == "PolygonXld" ? Visibility.Visible : Visibility.Collapsed;
             if (PnlThreshold != null)
-                PnlThreshold.Visibility = Visibility.Visible;
+                PnlThreshold.Visibility = isGeometry ? Visibility.Collapsed : Visibility.Visible;
             if (BtnClosePolygon != null)
                 BtnClosePolygon.Visibility = RbPolygonMode?.IsChecked == true || IsRingModeActive()
                     ? Visibility.Visible
@@ -2234,9 +2518,792 @@ namespace CalibOperatorCLI_Example
                 PnlScale.Visibility = kind is "ScaledShape" or "Deformable" or "PlanarDeformable" ? Visibility.Visible : Visibility.Collapsed;
             if (RowContrast != null)
                 RowContrast.Visibility = isImage ? Visibility.Visible : Visibility.Collapsed;
+
+            if (isGeometry)
+            {
+#if HALCON_ENABLED
+                UpdateGeometryPanelRowsVisibility();
+#endif
+            }
+        }
+
+        private void GeometryParam_Changed(object sender, RoutedEventArgs e)
+        {
+            if (!IsLoaded) return;
+#if HALCON_ENABLED
+            UpdateGeometryPanelRowsVisibility();
+            RefreshMeasureSummaryFromUi();
+#endif
         }
 
 #if HALCON_ENABLED
+        private HalconMeasuredGeometryKind ParseGeometryKind()
+        {
+            string? tag = (CmbGeometryKind?.SelectedItem as ComboBoxItem)?.Tag?.ToString();
+            return Enum.TryParse(tag, out HalconMeasuredGeometryKind k)
+                ? k
+                : HalconMeasuredGeometryKind.AxisAlignedRectangle;
+        }
+
+        private void UpdateGeometryPanelRowsVisibility()
+        {
+            if (CmbGeometryKind == null) return;
+            var kind = ParseGeometryKind();
+            bool isCircle = kind == HalconMeasuredGeometryKind.Circle;
+            bool isArc = kind == HalconMeasuredGeometryKind.Arc;
+            bool isArc3 = kind == HalconMeasuredGeometryKind.ArcThreePoint;
+            bool isRoiPath = kind == HalconMeasuredGeometryKind.RoiPolyline;
+            bool isRect = kind is HalconMeasuredGeometryKind.AxisAlignedRectangle
+                or HalconMeasuredGeometryKind.RotatedRectangle;
+
+            if (RowGeomRectSize != null)
+                RowGeomRectSize.Visibility = isRect ? Visibility.Visible : Visibility.Collapsed;
+            if (RowGeomRadius != null)
+                RowGeomRadius.Visibility = isCircle || isArc ? Visibility.Visible : Visibility.Collapsed;
+            if (RowGeomAngle != null)
+                RowGeomAngle.Visibility = kind == HalconMeasuredGeometryKind.RotatedRectangle
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            if (RowGeomArcAngles != null)
+                RowGeomArcAngles.Visibility = isArc ? Visibility.Visible : Visibility.Collapsed;
+            if (RowGeomArc3Start != null)
+                RowGeomArc3Start.Visibility = isArc3 ? Visibility.Visible : Visibility.Collapsed;
+            if (RowGeomArc3Via != null)
+                RowGeomArc3Via.Visibility = isArc3 ? Visibility.Visible : Visibility.Collapsed;
+            if (RowGeomArc3End != null)
+                RowGeomArc3End.Visibility = isArc3 ? Visibility.Visible : Visibility.Collapsed;
+            if (TxtGeomRoiPathHint != null)
+                TxtGeomRoiPathHint.Visibility = isRoiPath ? Visibility.Visible : Visibility.Collapsed;
+            if (PnlGeomPathEditor != null)
+                PnlGeomPathEditor.Visibility = isRoiPath ? Visibility.Visible : Visibility.Collapsed;
+
+            if (RowGeomCenter != null)
+                RowGeomCenter.Visibility = isCircle || isArc || isRect ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void InvalidateNinePointAffineCache() => _ninePointCalibPathCached = null;
+
+        private bool TryGetNinePointAffine(out AffineTransform transform, out string error)
+        {
+            transform = default;
+            error = _ninePointAffineLoadError ?? "";
+            string path = TxtNinePointCalibPath?.Text?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                error = "未指定九点标定 JSON";
+                _ninePointAffineCached = null;
+                return false;
+            }
+
+            if (string.Equals(path, _ninePointCalibPathCached, StringComparison.OrdinalIgnoreCase)
+                && _ninePointAffineCached is AffineTransform cached)
+            {
+                transform = cached;
+                error = "";
+                return true;
+            }
+
+            if (!CalibrationResultFileLoader.TryLoadAffine(path, out transform, out error))
+            {
+                _ninePointCalibPathCached = path;
+                _ninePointAffineCached = null;
+                _ninePointAffineLoadError = error;
+                return false;
+            }
+
+            _ninePointCalibPathCached = path;
+            _ninePointAffineCached = transform;
+            _ninePointAffineLoadError = null;
+            return true;
+        }
+
+        private AffineTransform? TryGetNinePointAffineOptional()
+        {
+            return TryGetNinePointAffine(out AffineTransform t, out _) ? t : null;
+        }
+
+        private void BtnBrowseNinePointCalib_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new OpenFileDialog
+            {
+                Filter = "JSON|*.json|所有文件|*.*",
+                Title = "选择九点标定结果 JSON",
+                FileName = string.IsNullOrWhiteSpace(TxtNinePointCalibPath?.Text)
+                    ? "calibration_result.json"
+                    : IoPath.GetFileName(TxtNinePointCalibPath.Text)
+            };
+            if (!string.IsNullOrWhiteSpace(TxtNinePointCalibPath?.Text))
+            {
+                try
+                {
+                    string dir = IoPath.GetDirectoryName(TxtNinePointCalibPath.Text) ?? "";
+                    if (Directory.Exists(dir))
+                        dlg.InitialDirectory = dir;
+                }
+                catch { /* ignore */ }
+            }
+
+            if (dlg.ShowDialog() != true)
+                return;
+            TxtNinePointCalibPath.Text = dlg.FileName;
+            InvalidateNinePointAffineCache();
+            PersistSessionChange();
+            RefreshMeasureSummaryFromUi();
+        }
+
+        private void NinePointCalibPath_Changed(object sender, RoutedEventArgs e)
+        {
+            if (!IsLoaded) return;
+            InvalidateNinePointAffineCache();
+            RefreshMeasureSummaryFromUi();
+        }
+
+        private void RefreshMeasureSummaryFromUi()
+        {
+#if HALCON_ENABLED
+            if (TryReadGeometryParamsFromUi(out HalconMeasuredGeometryParams p))
+                RefreshMeasureSummaryText(p);
+            else if (TxtMeasureSummary != null)
+                TxtMeasureSummary.Text = "测量: —";
+#endif
+        }
+
+        private static void SelectGeometryKindCombo(ComboBox? cmb, HalconMeasuredGeometryKind kind)
+        {
+            if (cmb == null) return;
+            foreach (var item in cmb.Items.OfType<ComboBoxItem>())
+            {
+                if (string.Equals(item.Tag?.ToString(), kind.ToString(), StringComparison.Ordinal))
+                {
+                    cmb.SelectedItem = item;
+                    break;
+                }
+            }
+        }
+
+        private void WriteGeometryParamsToUi(in HalconMeasuredGeometryParams p)
+        {
+            SelectGeometryKindCombo(CmbGeometryKind, p.Kind);
+            SetGeomText(TxtGeomCenterCol, p.CenterCol);
+            SetGeomText(TxtGeomCenterRow, p.CenterRow);
+            SetGeomText(TxtGeomWidth, p.WidthPx);
+            SetGeomText(TxtGeomHeight, p.HeightPx);
+            SetGeomText(TxtGeomAngleDeg, p.AngleDeg, "F3");
+            SetGeomText(TxtGeomRadius, p.RadiusPx);
+            SetGeomText(TxtGeomArcStartDeg, p.ArcStartAngleDeg);
+            SetGeomText(TxtGeomArcExtentDeg, p.ArcExtentAngleDeg);
+            SetGeomText(TxtGeomArcStartCol, p.ArcStartCol);
+            SetGeomText(TxtGeomArcStartRow, p.ArcStartRow);
+            SetGeomText(TxtGeomArcViaCol, p.ArcViaCol);
+            SetGeomText(TxtGeomArcViaRow, p.ArcViaRow);
+            SetGeomText(TxtGeomArcEndCol, p.ArcEndCol);
+            SetGeomText(TxtGeomArcEndRow, p.ArcEndRow);
+            UpdateGeometryPanelRowsVisibility();
+            if (p.Kind == HalconMeasuredGeometryKind.RoiPolyline)
+                RefreshGeomPathSegmentList();
+            RefreshMeasureSummaryText(p);
+        }
+
+        private static void SetGeomText(TextBox? box, double value, string format = "F2")
+        {
+            if (box == null) return;
+            box.Text = value.ToString(format, CultureInfo.InvariantCulture);
+        }
+
+        private void RefreshMeasureSummaryText(in HalconMeasuredGeometryParams p)
+        {
+            if (TxtMeasureSummary == null) return;
+            var aff = TryGetNinePointAffineOptional();
+            string summary = p.Kind == HalconMeasuredGeometryKind.RoiPolyline && _geometryRoiPath != null
+                ? HalconGeometryPathEditor.FormatPathSummary(_geometryRoiPath, aff)
+                : HalconGeometryContourBuilder.FormatMeasurementSummary(p, aff);
+            TxtMeasureSummary.Text = "测量: " + summary;
+            RefreshGeomMmHints(p);
+        }
+
+        private void RefreshGeomMmHints(in HalconMeasuredGeometryParams p)
+        {
+            if (TxtGeomMmHints == null) return;
+            if (!TryGetNinePointAffine(out AffineTransform t, out string err))
+            {
+                TxtGeomMmHints.Text = string.IsNullOrWhiteSpace(err) ? "" : $"mm 标定: {err}";
+                ClearGeomFieldMmTooltips();
+                return;
+            }
+
+            switch (p.Kind)
+            {
+                case HalconMeasuredGeometryKind.Circle:
+                case HalconMeasuredGeometryKind.Arc:
+                    double rMm = HalconGeometryContourBuilder.PixelRadiusToWorldMm(
+                        p.RadiusPx, p.CenterCol, p.CenterRow, t);
+                    SetGeomFieldMmTooltip(TxtGeomCenterCol,
+                        $"列 X px；世界 {HalconGeometryContourBuilder.FormatWorldPointMm(p.CenterCol, p.CenterRow, t)}");
+                    SetGeomFieldMmTooltip(TxtGeomCenterRow, "行 Y px（与列共同确定圆心世界坐标）");
+                    SetGeomFieldMmTooltip(TxtGeomRadius, $"半径 {rMm:F2} mm");
+                    TxtGeomMmHints.Text = p.Kind == HalconMeasuredGeometryKind.Arc
+                        ? $"mm: 圆心 {HalconGeometryContourBuilder.FormatWorldPointMm(p.CenterCol, p.CenterRow, t)}，R={rMm:F2} mm，弧长≈{Math.Abs(p.ArcExtentAngleDeg) * Math.PI / 180.0 * rMm:F2} mm"
+                        : $"mm: 圆心 {HalconGeometryContourBuilder.FormatWorldPointMm(p.CenterCol, p.CenterRow, t)}，R={rMm:F2} mm，Ø={2 * rMm:F2} mm";
+                    break;
+                case HalconMeasuredGeometryKind.ArcThreePoint:
+                    SetGeomFieldMmTooltip(TxtGeomArcStartCol,
+                        $"起点 {HalconGeometryContourBuilder.FormatWorldPointMm(p.ArcStartCol, p.ArcStartRow, t)}");
+                    SetGeomFieldMmTooltip(TxtGeomArcViaCol,
+                        $"弧上 {HalconGeometryContourBuilder.FormatWorldPointMm(p.ArcViaCol, p.ArcViaRow, t)}");
+                    SetGeomFieldMmTooltip(TxtGeomArcEndCol,
+                        $"终点 {HalconGeometryContourBuilder.FormatWorldPointMm(p.ArcEndCol, p.ArcEndRow, t)}");
+                    TxtGeomMmHints.Text =
+                        $"mm: 起 {HalconGeometryContourBuilder.FormatWorldPointMm(p.ArcStartCol, p.ArcStartRow, t)}，"
+                        + $"弧上 {HalconGeometryContourBuilder.FormatWorldPointMm(p.ArcViaCol, p.ArcViaRow, t)}，"
+                        + $"终 {HalconGeometryContourBuilder.FormatWorldPointMm(p.ArcEndCol, p.ArcEndRow, t)}";
+                    break;
+                case HalconMeasuredGeometryKind.AxisAlignedRectangle:
+                case HalconMeasuredGeometryKind.RotatedRectangle:
+                {
+                    var (wMm, hMm) = HalconGeometryContourBuilder.PixelSizeToWorldMm(
+                        p.WidthPx, p.HeightPx, p.CenterCol, p.CenterRow, t);
+                    SetGeomFieldMmTooltip(TxtGeomCenterCol,
+                        $"中心 {HalconGeometryContourBuilder.FormatWorldPointMm(p.CenterCol, p.CenterRow, t)}");
+                    SetGeomFieldMmTooltip(TxtGeomWidth, $"宽 ≈{wMm:F2} mm");
+                    SetGeomFieldMmTooltip(TxtGeomHeight, $"高 ≈{hMm:F2} mm");
+                    TxtGeomMmHints.Text =
+                        $"mm: 中心 {HalconGeometryContourBuilder.FormatWorldPointMm(p.CenterCol, p.CenterRow, t)}，"
+                        + $"≈{wMm:F2}×{hMm:F2} mm";
+                    break;
+                }
+                case HalconMeasuredGeometryKind.RoiPolyline:
+                    TxtGeomMmHints.Text = _geometryRoiPath != null
+                        ? "选中路径段后可改起点/终点/弧上点；应用本段后更新 mm 摘要"
+                        : "请先「从 ROI 同步」闭合路径";
+                    ClearGeomFieldMmTooltips();
+                    break;
+                default:
+                    TxtGeomMmHints.Text = "";
+                    ClearGeomFieldMmTooltips();
+                    break;
+            }
+        }
+
+        private static void SetGeomFieldMmTooltip(TextBox? box, string tooltip)
+        {
+            if (box != null)
+                box.ToolTip = tooltip;
+        }
+
+        private void ClearGeomFieldMmTooltips()
+        {
+            foreach (string name in new[]
+                     {
+                         "TxtGeomCenterCol", "TxtGeomCenterRow", "TxtGeomWidth", "TxtGeomHeight",
+                         "TxtGeomRadius", "TxtGeomArcStartCol", "TxtGeomArcViaCol", "TxtGeomArcEndCol"
+                     })
+            {
+                if (FindName(name) is TextBox tb)
+                    tb.ToolTip = null;
+            }
+        }
+
+        private void AssignGeometryRoiPath(RoiContourPath source, string syncMessage, out string message)
+        {
+            _geometryRoiPath = HalconGeometryPathEditor.ClonePath(source);
+            RebuildGeometryRoiPolylineFromPath();
+            WriteGeometryParamsToUi(new HalconMeasuredGeometryParams { Kind = HalconMeasuredGeometryKind.RoiPolyline });
+            message = syncMessage;
+        }
+
+        private void RebuildGeometryRoiPolylineFromPath()
+        {
+            _geometryRoiPolylineContour = _geometryRoiPath != null
+                ? HalconGeometryContourBuilder.BuildFromRoiContourPath(_geometryRoiPath)
+                : null;
+        }
+
+        private void RefreshGeomPathSegmentList(int selectEdgeIndex = -1)
+        {
+            if (LstGeomPathSegments == null || _geometryRoiPath == null)
+                return;
+
+            _suppressGeomPathSegmentUi = true;
+            try
+            {
+                int edges = HalconGeometryPathEditor.GetClosedEdgeCount(_geometryRoiPath);
+                var items = new List<string>(edges);
+                for (int i = 0; i < edges; i++)
+                    items.Add(HalconGeometryPathEditor.FormatSegmentLabel(_geometryRoiPath, i));
+
+                LstGeomPathSegments.ItemsSource = items;
+                if (edges == 0)
+                {
+                    ClearGeomPathSegmentFields();
+                    return;
+                }
+
+                int pick = selectEdgeIndex >= 0 && selectEdgeIndex < edges ? selectEdgeIndex : 0;
+                LstGeomPathSegments.SelectedIndex = pick;
+                LoadGeomPathSegmentToUi(pick);
+            }
+            finally
+            {
+                _suppressGeomPathSegmentUi = false;
+            }
+        }
+
+        private void LoadGeomPathSegmentToUi(int edgeIndex)
+        {
+            if (_geometryRoiPath == null)
+            {
+                ClearGeomPathSegmentFields();
+                return;
+            }
+
+            HalconGeometryPathEditor.GetSegmentEndpoints(_geometryRoiPath, edgeIndex, out Point start, out Point end);
+            var kind = HalconGeometryPathEditor.GetSegmentKind(_geometryRoiPath, edgeIndex);
+            SelectPathSegKindCombo(kind);
+            UpdateGeomPathViaRowVisibility();
+
+            SetGeomText(TxtGeomPathStartCol, start.X);
+            SetGeomText(TxtGeomPathStartRow, start.Y);
+            SetGeomText(TxtGeomPathEndCol, end.X);
+            SetGeomText(TxtGeomPathEndRow, end.Y);
+            if (HalconGeometryPathEditor.GetSegmentArcVia(_geometryRoiPath, edgeIndex) is Point via)
+            {
+                SetGeomText(TxtGeomPathViaCol, via.X);
+                SetGeomText(TxtGeomPathViaRow, via.Y);
+            }
+            else
+            {
+                double mx = (start.X + end.X) * 0.5;
+                double my = (start.Y + end.Y) * 0.5;
+                SetGeomText(TxtGeomPathViaCol, mx);
+                SetGeomText(TxtGeomPathViaRow, my);
+            }
+
+            ApplyGeomPathSegmentMmTooltips(start, end, kind, edgeIndex);
+        }
+
+        private void ApplyGeomPathSegmentMmTooltips(Point start, Point end, RoiEdgeKind kind, int edgeIndex)
+        {
+            if (!TryGetNinePointAffine(out AffineTransform t, out _))
+                return;
+
+            SetGeomFieldMmTooltip(TxtGeomPathStartCol,
+                $"起点 {HalconGeometryContourBuilder.FormatWorldPointMm(start.X, start.Y, t)}");
+            SetGeomFieldMmTooltip(TxtGeomPathEndCol,
+                $"终点 {HalconGeometryContourBuilder.FormatWorldPointMm(end.X, end.Y, t)}");
+            if (kind == RoiEdgeKind.Arc
+                && _geometryRoiPath != null
+                && HalconGeometryPathEditor.GetSegmentArcVia(_geometryRoiPath, edgeIndex) is Point via)
+            {
+                SetGeomFieldMmTooltip(TxtGeomPathViaCol,
+                    $"弧上 {HalconGeometryContourBuilder.FormatWorldPointMm(via.X, via.Y, t)}");
+            }
+        }
+
+        private void SelectPathSegKindCombo(RoiEdgeKind kind)
+        {
+            if (CmbGeomPathSegKind == null) return;
+            string want = kind == RoiEdgeKind.Arc ? "Arc" : "Line";
+            foreach (var item in CmbGeomPathSegKind.Items.OfType<ComboBoxItem>())
+            {
+                if (string.Equals(item.Tag?.ToString(), want, StringComparison.Ordinal))
+                {
+                    CmbGeomPathSegKind.SelectedItem = item;
+                    break;
+                }
+            }
+        }
+
+        private RoiEdgeKind ParsePathSegKind()
+        {
+            string? tag = (CmbGeomPathSegKind?.SelectedItem as ComboBoxItem)?.Tag?.ToString();
+            return string.Equals(tag, "Arc", StringComparison.OrdinalIgnoreCase)
+                ? RoiEdgeKind.Arc
+                : RoiEdgeKind.Line;
+        }
+
+        private void UpdateGeomPathViaRowVisibility()
+        {
+            if (RowGeomPathVia != null)
+                RowGeomPathVia.Visibility = ParsePathSegKind() == RoiEdgeKind.Arc
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+        }
+
+        private void ClearGeomPathSegmentFields()
+        {
+            foreach (string name in new[]
+                     {
+                         "TxtGeomPathStartCol", "TxtGeomPathStartRow", "TxtGeomPathEndCol", "TxtGeomPathEndRow",
+                         "TxtGeomPathViaCol", "TxtGeomPathViaRow"
+                     })
+            {
+                if (FindName(name) is TextBox tb)
+                    tb.Text = "0";
+            }
+        }
+
+        private void GeomPathSegment_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_suppressGeomPathSegmentUi || !IsLoaded) return;
+            if (LstGeomPathSegments?.SelectedIndex is int idx && idx >= 0)
+                LoadGeomPathSegmentToUi(idx);
+        }
+
+        private void GeomPathSegmentParam_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_suppressGeomPathSegmentUi || !IsLoaded) return;
+            UpdateGeomPathViaRowVisibility();
+        }
+
+        private void BtnApplyGeomPathSegment_Click(object sender, RoutedEventArgs e)
+        {
+#if !HALCON_ENABLED
+            MessageBox.Show("当前构建未启用 HALCON。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+#else
+            if (_geometryRoiPath == null || LstGeomPathSegments?.SelectedIndex is not int edgeIndex || edgeIndex < 0)
+            {
+                MessageBox.Show("请先同步闭合路径并选择要修改的段。", "路径段", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (!TryParseGeomPathSegmentFields(
+                    out double sc, out double sr, out double ec, out double er, out double? vc, out double? vr))
+            {
+                MessageBox.Show("段参数无效，请检查数值。", "路径段", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var kind = ParsePathSegKind();
+            if (!HalconGeometryPathEditor.TryUpdateSegment(
+                    _geometryRoiPath, edgeIndex, kind, sc, sr, ec, er, vc, vr, out string err))
+            {
+                MessageBox.Show(err, "路径段", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            RebuildGeometryRoiPolylineFromPath();
+            RefreshGeomPathSegmentList(edgeIndex);
+            if (TryReadGeometryParamsFromUi(out HalconMeasuredGeometryParams p))
+                RefreshMeasureSummaryText(p);
+            ApplyGeometryContourFromUi(logSuccess: false);
+            AppendLog($"路径段 #{edgeIndex + 1} 已更新 ({kind})");
+#endif
+        }
+
+        private bool TryParseGeomPathSegmentFields(
+            out double startCol,
+            out double startRow,
+            out double endCol,
+            out double endRow,
+            out double? viaCol,
+            out double? viaRow)
+        {
+            startCol = startRow = endCol = endRow = 0;
+            viaCol = viaRow = null;
+            if (!TryParse(TxtGeomPathStartCol, out startCol)
+                || !TryParse(TxtGeomPathStartRow, out startRow)
+                || !TryParse(TxtGeomPathEndCol, out endCol)
+                || !TryParse(TxtGeomPathEndRow, out endRow))
+                return false;
+
+            if (ParsePathSegKind() == RoiEdgeKind.Arc)
+            {
+                if (!TryParse(TxtGeomPathViaCol, out double vc) || !TryParse(TxtGeomPathViaRow, out double vr))
+                    return false;
+                viaCol = vc;
+                viaRow = vr;
+            }
+
+            return true;
+
+            static bool TryParse(TextBox? box, out double v) =>
+                double.TryParse(box?.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out v);
+        }
+
+        private bool TryReadGeometryParamsFromUi(out HalconMeasuredGeometryParams p)
+        {
+            p = new HalconMeasuredGeometryParams { Kind = ParseGeometryKind() };
+            if (p.Kind == HalconMeasuredGeometryKind.RoiPolyline)
+                return _geometryRoiPath != null && _geometryRoiPath.IsClosed && _geometryRoiPath.VertexCount >= 3;
+
+            if (p.Kind == HalconMeasuredGeometryKind.ArcThreePoint)
+            {
+                if (!TryParse(TxtGeomArcStartCol, out p.ArcStartCol)
+                    || !TryParse(TxtGeomArcStartRow, out p.ArcStartRow)
+                    || !TryParse(TxtGeomArcViaCol, out p.ArcViaCol)
+                    || !TryParse(TxtGeomArcViaRow, out p.ArcViaRow)
+                    || !TryParse(TxtGeomArcEndCol, out p.ArcEndCol)
+                    || !TryParse(TxtGeomArcEndRow, out p.ArcEndRow))
+                    return false;
+                return RoiContourPath.IsValidArcVia(
+                    new Point(p.ArcStartCol, p.ArcStartRow),
+                    new Point(p.ArcViaCol, p.ArcViaRow),
+                    new Point(p.ArcEndCol, p.ArcEndRow));
+            }
+
+            if (!TryParse(TxtGeomCenterCol, out p.CenterCol) || !TryParse(TxtGeomCenterRow, out p.CenterRow))
+                return false;
+
+            if (p.Kind == HalconMeasuredGeometryKind.Circle || p.Kind == HalconMeasuredGeometryKind.Arc)
+            {
+                if (!TryParse(TxtGeomRadius, out p.RadiusPx) || p.RadiusPx < 0.5)
+                    return false;
+            }
+
+            if (p.Kind == HalconMeasuredGeometryKind.Arc)
+            {
+                if (!TryParse(TxtGeomArcStartDeg, out p.ArcStartAngleDeg)
+                    || !TryParse(TxtGeomArcExtentDeg, out p.ArcExtentAngleDeg))
+                    return false;
+                return Math.Abs(p.ArcExtentAngleDeg) > 0.01;
+            }
+
+            if (p.Kind == HalconMeasuredGeometryKind.Circle)
+                return true;
+
+            if (!TryParse(TxtGeomWidth, out p.WidthPx) || p.WidthPx < 1
+                || !TryParse(TxtGeomHeight, out p.HeightPx) || p.HeightPx < 1)
+                return false;
+
+            if (p.Kind == HalconMeasuredGeometryKind.AxisAlignedRectangle)
+            {
+                p.AngleDeg = 0;
+                return true;
+            }
+
+            return TryParse(TxtGeomAngleDeg, out p.AngleDeg);
+
+            static bool TryParse(TextBox? box, out double v) =>
+                double.TryParse(box?.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out v);
+        }
+
+        private static bool TryGetPolygonBounds(IReadOnlyList<Point> points, out Rect bounds)
+        {
+            bounds = Rect.Empty;
+            if (points == null || points.Count == 0)
+                return false;
+            double minX = points[0].X, maxX = points[0].X;
+            double minY = points[0].Y, maxY = points[0].Y;
+            for (int i = 1; i < points.Count; i++)
+            {
+                minX = Math.Min(minX, points[i].X);
+                maxX = Math.Max(maxX, points[i].X);
+                minY = Math.Min(minY, points[i].Y);
+                maxY = Math.Max(maxY, points[i].Y);
+            }
+
+            bounds = new Rect(minX, minY, Math.Max(1, maxX - minX), Math.Max(1, maxY - minY));
+            return true;
+        }
+
+        private bool TrySyncGeometryFromRoi(out string message)
+        {
+            message = "";
+            if (_imgWidth <= 0 || _imgHeight <= 0)
+            {
+                message = "请先加载图像";
+                return false;
+            }
+
+            if (IsCircleModeActive() && _hasRoi && _circleRadiusImage > 5)
+            {
+                WriteGeometryParamsToUi(new HalconMeasuredGeometryParams
+                {
+                    Kind = HalconMeasuredGeometryKind.Circle,
+                    CenterCol = _circleCenterImage.X,
+                    CenterRow = _circleCenterImage.Y,
+                    RadiusPx = _circleRadiusImage
+                });
+                _geometryRoiPath = null;
+                _geometryRoiPolylineContour = null;
+                message = $"已从圆形 ROI 同步: R={_circleRadiusImage:F1}";
+                return true;
+            }
+
+            if (RbRectMode?.IsChecked == true && _hasRoi && _roiRectImage.Width > 5 && _roiRectImage.Height > 5)
+            {
+                WriteGeometryParamsToUi(new HalconMeasuredGeometryParams
+                {
+                    Kind = HalconMeasuredGeometryKind.AxisAlignedRectangle,
+                    CenterCol = _roiRectImage.X + _roiRectImage.Width * 0.5,
+                    CenterRow = _roiRectImage.Y + _roiRectImage.Height * 0.5,
+                    WidthPx = _roiRectImage.Width,
+                    HeightPx = _roiRectImage.Height
+                });
+                _geometryRoiPath = null;
+                _geometryRoiPolylineContour = null;
+                message = $"已从矩形 ROI 同步: {_roiRectImage.Width:F0}×{_roiRectImage.Height:F0}";
+                return true;
+            }
+
+            if (HasUsableRingRoi())
+            {
+                var ringPath = new RoiContourPath();
+                ringPath.IsClosed = _ringOuterPath.IsClosed;
+                foreach (var v in _ringOuterPath.Vertices)
+                    ringPath.Vertices.Add(v);
+                foreach (var k in _ringOuterPath.EdgeKinds)
+                    ringPath.EdgeKinds.Add(k);
+                foreach (var a in _ringOuterPath.ArcVia)
+                    ringPath.ArcVia.Add(a);
+
+                if (ringPath.VertexCount >= 3 && ringPath.IsClosed)
+                {
+                    int arcCount = ringPath.EdgeKinds.Count(k => k == RoiEdgeKind.Arc);
+                    AssignGeometryRoiPath(
+                        ringPath,
+                        $"已从环形外圈同步: {ringPath.VertexCount} 顶点，{arcCount} 段圆弧",
+                        out message);
+                    return true;
+                }
+            }
+
+            if (RbPolygonMode?.IsChecked == true && _roiPath.VertexCount >= 3 && _roiPath.IsClosed)
+            {
+                int arcCount = _roiPath.EdgeKinds.Count(k => k == RoiEdgeKind.Arc);
+                AssignGeometryRoiPath(
+                    _roiPath,
+                    $"已从闭合多边形同步: {_roiPath.VertexCount} 顶点，{arcCount} 段圆弧",
+                    out message);
+                return true;
+            }
+
+            if (RbPolygonMode?.IsChecked == true && _roiPath.VertexCount >= 3 && !_roiPath.IsClosed)
+            {
+                message = "多边形未闭合，请单击起点闭合";
+                return false;
+            }
+
+            if (RbPolygonMode?.IsChecked == true && _roiPath.VertexCount == 3
+                && _roiPath.EdgeKinds.Count >= 1
+                && _roiPath.EdgeKinds[0] == RoiEdgeKind.Arc
+                && _roiPath.ArcVia[0] is Point via)
+            {
+                var p0 = _roiPath.Vertices[0];
+                var p2 = _roiPath.Vertices[2];
+                if (RoiContourPath.IsValidArcVia(
+                        new Point(p0.X, p0.Y), via, new Point(p2.X, p2.Y)))
+                {
+                    WriteGeometryParamsToUi(new HalconMeasuredGeometryParams
+                    {
+                        Kind = HalconMeasuredGeometryKind.ArcThreePoint,
+                        ArcStartCol = p0.X,
+                        ArcStartRow = p0.Y,
+                        ArcViaCol = via.X,
+                        ArcViaRow = via.Y,
+                        ArcEndCol = p2.X,
+                        ArcEndRow = p2.Y
+                    });
+                    _geometryRoiPath = null;
+                    _geometryRoiPolylineContour = null;
+                    message = $"已从单段圆弧 ROI 同步为三点弧";
+                    return true;
+                }
+            }
+
+            message = "请先绘制矩形、圆、闭合多边形(含弧)或环形 ROI";
+            return false;
+        }
+
+        private void TryAutoSyncGeometryFromRoiIfNeeded()
+        {
+            if (ParseSourceKind() != HalconShapeModelSourceKind.GeometryXld)
+                return;
+            if (TrySyncGeometryFromRoi(out string msg))
+            {
+                AppendLog(msg);
+                ApplyGeometryContourFromUi(logSuccess: false);
+            }
+        }
+
+        private HalconXldContourBundle? BuildGeometryBundleFromUi()
+        {
+            if (_imgWidth <= 0 || _imgHeight <= 0)
+                return null;
+            if (!TryReadGeometryParamsFromUi(out HalconMeasuredGeometryParams p))
+                return null;
+
+            return HalconGeometryContourBuilder.BuildBundle(
+                _imgWidth, _imgHeight, p, _geometryRoiPolylineContour, _geometryRoiPath);
+        }
+
+        private bool ApplyGeometryContourFromUi(bool logSuccess = true)
+        {
+            if (!TryReadGeometryParamsFromUi(out HalconMeasuredGeometryParams p))
+            {
+                MessageBox.Show(
+                    "几何参数无效。圆弧需填写圆心/半径/起始角/张角；三点弧需有效弧上点；手绘路径需先「从 ROI 同步」。",
+                    "测量几何",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return false;
+            }
+
+            var bundle = HalconGeometryContourBuilder.BuildBundle(
+                _imgWidth, _imgHeight, p, _geometryRoiPolylineContour, _geometryRoiPath);
+            if (bundle.Contours == null || bundle.Contours.Count == 0 || bundle.Contours[0].Length < 2)
+            {
+                MessageBox.Show("未能生成轮廓，请检查参数。", "测量几何", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return false;
+            }
+
+            SetWorkingContours(bundle);
+            RefreshMeasureSummaryText(p);
+            if (logSuccess)
+                AppendLog($"几何轮廓已应用: {TxtMeasureSummary?.Text ?? ""}");
+            return true;
+        }
+
+        private void BtnSyncGeometryFromRoi_Click(object sender, RoutedEventArgs e)
+        {
+#if !HALCON_ENABLED
+            MessageBox.Show("当前构建未启用 HALCON。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+#else
+            if (!TrySyncGeometryFromRoi(out string msg))
+            {
+                MessageBox.Show(msg, "从 ROI 同步", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            AppendLog(msg);
+            ApplyGeometryContourFromUi();
+#endif
+        }
+
+        private void BtnApplyGeometryParams_Click(object sender, RoutedEventArgs e)
+        {
+#if !HALCON_ENABLED
+            MessageBox.Show("当前构建未启用 HALCON。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+#else
+            if (_imgWidth <= 0)
+            {
+                MessageBox.Show("请先加载图像", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            ApplyGeometryContourFromUi();
+#endif
+        }
+
+        private void AppendGeometryFingerprint(System.Text.StringBuilder sb)
+        {
+            if (!TryReadGeometryParamsFromUi(out HalconMeasuredGeometryParams p))
+                return;
+            sb.Append("|geom:")
+                .Append(p.Kind).Append('|')
+                .Append(p.CenterCol.ToString("F2", CultureInfo.InvariantCulture)).Append('|')
+                .Append(p.CenterRow.ToString("F2", CultureInfo.InvariantCulture)).Append('|')
+                .Append(p.WidthPx.ToString("F2", CultureInfo.InvariantCulture)).Append('|')
+                .Append(p.HeightPx.ToString("F2", CultureInfo.InvariantCulture)).Append('|')
+                .Append(p.AngleDeg.ToString("F3", CultureInfo.InvariantCulture)).Append('|')
+                .Append(p.RadiusPx.ToString("F2", CultureInfo.InvariantCulture)).Append('|')
+                .Append(p.ArcStartAngleDeg.ToString("F2", CultureInfo.InvariantCulture)).Append('|')
+                .Append(p.ArcExtentAngleDeg.ToString("F2", CultureInfo.InvariantCulture));
+            if (p.Kind == HalconMeasuredGeometryKind.RoiPolyline && _geometryRoiPath != null)
+                sb.Append("|roiV:").Append(_geometryRoiPath.VertexCount)
+                    .Append("|roiE:").Append(HalconGeometryPathEditor.GetClosedEdgeCount(_geometryRoiPath));
+        }
+
         private HalconShapeModelSourceKind ParseSourceKind()
         {
             string? tag = (CmbTemplateSource?.SelectedItem as ComboBoxItem)?.Tag?.ToString();
@@ -2501,6 +3568,7 @@ namespace CalibOperatorCLI_Example
             {
                 HalconXldContourBundle? bundle = opt.SourceKind switch
                 {
+                    HalconShapeModelSourceKind.GeometryXld => BuildGeometryBundleFromUi(),
                     HalconShapeModelSourceKind.PolygonXld => ExtractDirectedHandPathBundle(opt),
                     HalconShapeModelSourceKind.EdgesXld => domain != null
                         ? HalconFlowBridge.XldContoursFromEdgesSubPix(_currentImage, domain, opt.EdgeAlpha, opt.EdgeLow, opt.EdgeHigh, minPts)
@@ -2514,7 +3582,8 @@ namespace CalibOperatorCLI_Example
                 if (bundle == null)
                     return null;
 
-                bundle = HalconFlowBridge.FilterXldBundle(bundle, minPts, opt.LargestContourOnly);
+                if (opt.SourceKind != HalconShapeModelSourceKind.GeometryXld)
+                    bundle = HalconFlowBridge.FilterXldBundle(bundle, minPts, opt.LargestContourOnly);
 
                 return bundle;
             }
@@ -2640,6 +3709,23 @@ namespace CalibOperatorCLI_Example
             try
             {
                 var opt = ReadCreateOptionsFromUi();
+                if (opt.SourceKind == HalconShapeModelSourceKind.GeometryXld)
+                {
+                    if (!ApplyGeometryContourFromUi(logSuccess: false))
+                    {
+                        MessageBox.Show("请填写有效几何参数或先从 ROI 同步。", "预览", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        return;
+                    }
+
+                    if (_workingContours != null)
+                    {
+                        MarkContourCacheReady(opt, 0, 255, includeTrimState: false);
+                        AppendLog($"几何轮廓预览: {_workingContours.Contours?.Count ?? 0} 条");
+                    }
+
+                    return;
+                }
+
                 if (opt.SourceKind is HalconShapeModelSourceKind.ImageRectangle or HalconShapeModelSourceKind.ImagePolygon)
                 {
                     HObject region = BuildRequiredRegionForImageMode(opt.SourceKind);

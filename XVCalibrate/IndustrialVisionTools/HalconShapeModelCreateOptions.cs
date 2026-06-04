@@ -41,7 +41,9 @@ namespace CalibOperatorCLI_Example
         /// <summary>矩形 ROI 内灰度图 → create_shape_model</summary>
         ImageRectangle,
         /// <summary>多边形域内灰度图 → create_shape_model</summary>
-        ImagePolygon
+        ImagePolygon,
+        /// <summary>由测量/ROI 参数生成几何轮廓 XLD，可手调宽高角后建模板。</summary>
+        GeometryXld
     }
 
     /// <summary>HALCON create_shape_model / create_shape_model_xld / scaled 变体共用参数。</summary>

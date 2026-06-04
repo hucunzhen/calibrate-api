@@ -273,7 +273,7 @@ namespace CalibOperatorCLI_Example
             return a;
         }
 
-        private static bool TryCircleFromThreePoints(Point a, Point b, Point c, out Point center, out double radius)
+        internal static bool TryCircleFromThreePoints(Point a, Point b, Point c, out Point center, out double radius)
         {
             double ax = a.X, ay = a.Y, bx = b.X, by = b.Y, cx = c.X, cy = c.Y;
             double d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
