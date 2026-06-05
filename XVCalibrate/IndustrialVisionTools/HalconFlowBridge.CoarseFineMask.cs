@@ -415,6 +415,441 @@ namespace CalibOperatorCLI_Example
             }
         }
 
+        private static Point2D[] ClampOpenPolylineToImage(IReadOnlyList<Point2D> polyline, int imageWidth, int imageHeight)
+        {
+            if (polyline == null || polyline.Count < 2)
+                throw new ArgumentException("开放轨迹至少需要 2 个点");
+
+            double maxX = Math.Max(0, imageWidth - 1);
+            double maxY = Math.Max(0, imageHeight - 1);
+            var clipped = new Point2D[polyline.Count];
+            for (int i = 0; i < polyline.Count; i++)
+            {
+                double x = polyline[i].X;
+                double y = polyline[i].Y;
+                if (double.IsNaN(x) || double.IsNaN(y) || double.IsInfinity(x) || double.IsInfinity(y))
+                    throw new InvalidOperationException("轨迹坐标无效（NaN/无穷），请重新绘制落点。");
+
+                clipped[i] = new Point2D(
+                    Math.Clamp(x, 0, maxX),
+                    Math.Clamp(y, 0, maxY));
+            }
+
+            double maxSeg = 0;
+            for (int i = 1; i < clipped.Length; i++)
+            {
+                double dx = clipped[i].X - clipped[i - 1].X;
+                double dy = clipped[i].Y - clipped[i - 1].Y;
+                maxSeg = Math.Max(maxSeg, Math.Sqrt(dx * dx + dy * dy));
+            }
+
+            if (maxSeg < 0.5)
+                throw new InvalidOperationException("轨迹有效长度过短，请增加顶点或段长。");
+
+            return clipped;
+        }
+
+        private static void EnsureStrokeRegionNonEmpty(HObject stroke, int imageWidth, int imageHeight)
+        {
+            HOperatorSet.AreaCenter(stroke, out HTuple area, out HTuple _, out HTuple __);
+            double a = area.TupleLength() > 0 ? area[0].D : 0;
+            if (a < 0.5)
+            {
+                throw new InvalidOperationException(
+                    $"轨迹在图像范围外或无效（图像 {imageWidth}×{imageHeight}）。请重置视图后重绘，或确认落点列 X∈[0,{Math.Max(0, imageWidth - 1)}]、行 Y∈[0,{Math.Max(0, imageHeight - 1)}]。");
+            }
+        }
+
+        private static HalconXldContourBundle BundleFromPolylineGeometry(
+            IReadOnlyList<Point2D> polyline,
+            int imageWidth,
+            int imageHeight)
+        {
+            return new HalconXldContourBundle
+            {
+                Width = imageWidth,
+                Height = imageHeight,
+                Contours = new List<Point2D[]> { polyline.ToArray() }
+            };
+        }
+
+        private static HObject? CollectEdgesByMinLengthOnly(HObject edgesXld, int minContourPoints)
+        {
+            if (edgesXld == null || !edgesXld.IsInitialized() || edgesXld.CountObj() == 0)
+                return null;
+
+            HOperatorSet.GenEmptyObj(out HObject acc);
+            int minLen = Math.Max(2, minContourPoints);
+            int n = edgesXld.CountObj();
+            for (int i = 1; i <= n; i++)
+            {
+                HObject one = edgesXld.SelectObj(i);
+                try
+                {
+                    if (ContourXldToPointArray(one).Length < minLen)
+                        continue;
+
+                    HOperatorSet.ConcatObj(acc, one, out HObject merged);
+                    acc.Dispose();
+                    acc = merged;
+                }
+                finally
+                {
+                    one.Dispose();
+                }
+            }
+
+            return acc.IsInitialized() && acc.CountObj() > 0 ? acc : null;
+        }
+
+        private static HObject? PickEdgesNearOpenPolyline(
+            HObject edgesXld,
+            HObject refXld,
+            int minContourPoints)
+        {
+            HObject? picked = TrySelectEdgesNearOpenReference(edgesXld, refXld, minContourPoints);
+            if (picked != null)
+                return picked;
+
+            return CollectEdgesByMinLengthOnly(edgesXld, Math.Max(2, minContourPoints));
+        }
+
+        private static HObject BuildStrokeRegionFromOpenPolyline(IReadOnlyList<Point2D> open, double dilationRadiusPx)
+        {
+            HOperatorSet.GenEmptyRegion(out HObject stroke);
+            for (int i = 0; i < open.Count - 1; i++)
+            {
+                HOperatorSet.GenRegionLine(
+                    out HObject seg,
+                    open[i].Y, open[i].X,
+                    open[i + 1].Y, open[i + 1].X);
+                HOperatorSet.Union2(stroke, seg, out HObject merged);
+                stroke.Dispose();
+                seg.Dispose();
+                stroke = merged;
+            }
+
+            HOperatorSet.DilationCircle(stroke, out HObject thick, Math.Max(2.5, dilationRadiusPx));
+            stroke.Dispose();
+            return thick;
+        }
+
+        private static HObject? TrySelectEdgesNearOpenReference(
+            HObject edgesXld,
+            HObject refXld,
+            int minContourPoints)
+        {
+            if (edgesXld == null || !edgesXld.IsInitialized() || edgesXld.CountObj() == 0)
+                return null;
+
+            double[] dists = { 4.0, 8.0, 14.0, 22.0 };
+            foreach (double maxDist in dists)
+            {
+                HObject filtered = SelectContoursNearReferenceXld(edgesXld, refXld, maxDist, Math.Max(2, minContourPoints));
+                if (filtered.IsInitialized() && filtered.CountObj() > 0)
+                    return filtered;
+                filtered.Dispose();
+            }
+
+            return null;
+        }
+
+        private static HObject? TryEdgesSubPixNearOpenPolyline(
+            HObject grayImage,
+            HObject strokeRegion,
+            HObject refXld,
+            int minContourPoints,
+            double edgeAlpha,
+            double edgeLow,
+            double edgeHigh)
+        {
+            HOperatorSet.ReduceDomain(grayImage, strokeRegion, out HObject reduced);
+            try
+            {
+                HOperatorSet.EdgesSubPix(reduced, out HObject edges, "canny", edgeAlpha, edgeLow, edgeHigh);
+                try
+                {
+                    return PickEdgesNearOpenPolyline(edges, refXld, minContourPoints);
+                }
+                finally
+                {
+                    edges.Dispose();
+                }
+            }
+            finally
+            {
+                reduced.Dispose();
+            }
+        }
+
+        private static HObject? TryEdgesFromSyntheticOpenBand(
+            int imageWidth,
+            int imageHeight,
+            HObject strokeRegion,
+            HObject refXld,
+            RoiGradientPolarity polarity,
+            int minContourPoints,
+            double edgeAlpha,
+            double edgeLow,
+            double edgeHigh)
+        {
+            bool outward = polarity == RoiGradientPolarity.Outward;
+            HOperatorSet.GenImageConst(out HObject syn, "byte", imageWidth, imageHeight);
+            try
+            {
+                if (outward)
+                {
+                    HOperatorSet.InvertImage(syn, out HObject whiteBg);
+                    syn.Dispose();
+                    syn = whiteBg;
+                    HOperatorSet.OverpaintRegion(syn, strokeRegion, new HTuple(0), "fill");
+                }
+                else
+                {
+                    HOperatorSet.OverpaintRegion(syn, strokeRegion, new HTuple(255), "fill");
+                }
+
+                HOperatorSet.EdgesSubPix(syn, out HObject edges, "canny", edgeAlpha, edgeLow, edgeHigh);
+                try
+                {
+                    HObject? picked = PickEdgesNearOpenPolyline(edges, refXld, minContourPoints);
+                    if (picked != null)
+                        return picked;
+
+                    HOperatorSet.EdgesSubPix(syn, out HObject edgesLoose, "canny", 1, 5, 15);
+                    try
+                    {
+                        return PickEdgesNearOpenPolyline(edgesLoose, refXld, minContourPoints);
+                    }
+                    finally
+                    {
+                        edgesLoose.Dispose();
+                    }
+                }
+                finally
+                {
+                    edges.Dispose();
+                }
+            }
+            finally
+            {
+                syn.Dispose();
+            }
+        }
+
+        public static HalconXldContourBundle BundleFromXldOrFallback(
+            HObject nativeXld,
+            int imageWidth,
+            int imageHeight,
+            int minContourPoints)
+        {
+            int bundleMin = Math.Max(2, Math.Min(minContourPoints, 5));
+            HalconXldContourBundle bundle = BundleFromXldContours(nativeXld, imageWidth, imageHeight, bundleMin);
+            if (bundle.Contours != null && bundle.Contours.Count > 0)
+                return bundle;
+
+            return BundleFromXldContours(nativeXld, imageWidth, imageHeight, 2);
+        }
+
+        /// <summary>单条开放折线：沿轨迹带状区域 EdgesSubPix，得到带 edge_direction 的 XLD。</summary>
+        public static (HalconXldContourBundle Bundle, HObject NativeXld) BuildOpenPolylineXldWithGradientDirection(
+            int imageWidth,
+            int imageHeight,
+            IReadOnlyList<Point2D> polylineDense,
+            RoiGradientPolarity polarity,
+            int minContourPoints,
+            CalibImage? sourceImage = null,
+            double edgeAlpha = 1,
+            double edgeLow = 20,
+            double edgeHigh = 40)
+        {
+            int iw = sourceImage?.Width > 0 ? sourceImage.Width : imageWidth;
+            int ih = sourceImage?.Height > 0 ? sourceImage.Height : imageHeight;
+            if (iw <= 0 || ih <= 0)
+                throw new ArgumentException("图像尺寸无效");
+            if (polylineDense == null || polylineDense.Count < 2)
+                throw new ArgumentException("开放轨迹至少需要 2 个点", nameof(polylineDense));
+
+            minContourPoints = Math.Max(2, minContourPoints);
+            Point2D[] open = ClampOpenPolylineToImage(polylineDense, iw, ih);
+
+            var rows = open.Select(p => p.Y).ToArray();
+            var cols = open.Select(p => p.X).ToArray();
+            HOperatorSet.GenContourPolygonXld(out HObject refXld, new HTuple(rows), new HTuple(cols));
+            HObject stroke = BuildStrokeRegionFromOpenPolyline(open, dilationRadiusPx: 5.0);
+            EnsureStrokeRegionNonEmpty(stroke, iw, ih);
+            HObject? filtered = null;
+            bool nativeIsRefXld = false;
+            try
+            {
+                if (sourceImage != null)
+                {
+                    HObject ho = CalibToHObject(sourceImage);
+                    try
+                    {
+                        ho = EnsureGray(ho);
+                        filtered = TryEdgesSubPixNearOpenPolyline(
+                            ho, stroke, refXld, minContourPoints, edgeAlpha, edgeLow, edgeHigh);
+                    }
+                    finally
+                    {
+                        ho.Dispose();
+                    }
+                }
+
+                if (filtered == null || !filtered.IsInitialized() || filtered.CountObj() == 0)
+                {
+                    filtered?.Dispose();
+                    filtered = TryEdgesFromSyntheticOpenBand(
+                        iw, ih, stroke, refXld, polarity,
+                        minContourPoints, edgeAlpha, edgeLow, edgeHigh);
+                }
+
+                if (filtered == null || !filtered.IsInitialized() || filtered.CountObj() == 0)
+                {
+                    filtered?.Dispose();
+                    HOperatorSet.CopyObj(refXld, out HObject geom, 1, 1);
+                    filtered = geom;
+                    nativeIsRefXld = true;
+                }
+
+                HalconXldContourBundle bundle = BundleFromXldOrFallback(filtered, iw, ih, minContourPoints);
+                if (bundle.Contours == null || bundle.Contours.Count == 0)
+                    bundle = BundleFromPolylineGeometry(open, iw, ih);
+
+                return (bundle, filtered);
+            }
+            finally
+            {
+                stroke.Dispose();
+                if (!nativeIsRefXld)
+                    refXld.Dispose();
+            }
+        }
+
+        /// <summary>多条独立开放轨迹合并为一个 XLD 模板（每条轨迹对应至少一条轮廓）。</summary>
+        public static (HalconXldContourBundle Bundle, HObject NativeXld) BuildMultiOpenTrajectoriesXldWithGradientDirection(
+            int imageWidth,
+            int imageHeight,
+            IReadOnlyList<IReadOnlyList<Point2D>> trajectories,
+            RoiGradientPolarity polarity,
+            int minContourPoints,
+            CalibImage? sourceImage = null,
+            double edgeAlpha = 1,
+            double edgeLow = 20,
+            double edgeHigh = 40)
+        {
+            if (trajectories == null || trajectories.Count == 0)
+                throw new ArgumentException("请至少完成一条开放轨迹");
+
+            HOperatorSet.GenEmptyObj(out HObject mergedXld);
+            var allContours = new List<Point2D[]>();
+            int added = 0;
+
+            foreach (IReadOnlyList<Point2D> traj in trajectories)
+            {
+                if (traj == null || traj.Count < 2)
+                    continue;
+
+                var (bundle, xld) = BuildOpenPolylineXldWithGradientDirection(
+                    imageWidth,
+                    imageHeight,
+                    traj,
+                    polarity,
+                    minContourPoints,
+                    sourceImage,
+                    edgeAlpha,
+                    edgeLow,
+                    edgeHigh);
+                try
+                {
+                    if (bundle.Contours != null)
+                        allContours.AddRange(bundle.Contours);
+                    if (xld.IsInitialized() && xld.CountObj() > 0)
+                    {
+                        if (added == 0)
+                        {
+                            mergedXld.Dispose();
+                            mergedXld = xld;
+                        }
+                        else
+                        {
+                            HOperatorSet.ConcatObj(mergedXld, xld, out HObject concat);
+                            mergedXld.Dispose();
+                            xld.Dispose();
+                            mergedXld = concat;
+                        }
+
+                        added++;
+                    }
+                    else
+                        xld.Dispose();
+                }
+                catch
+                {
+                    xld.Dispose();
+                    throw;
+                }
+            }
+
+            if (added == 0)
+            {
+                mergedXld.Dispose();
+                throw new InvalidOperationException("没有有效的开放轨迹可生成模板");
+            }
+
+            if (allContours.Count == 0)
+            {
+                HalconXldContourBundle repacked = BundleFromXldOrFallback(
+                    mergedXld, imageWidth, imageHeight, minContourPoints);
+                if (repacked.Contours != null && repacked.Contours.Count > 0)
+                    allContours.AddRange(repacked.Contours);
+            }
+
+            var result = new HalconXldContourBundle
+            {
+                Width = imageWidth,
+                Height = imageHeight,
+                Contours = allContours
+            };
+            return (result, mergedXld);
+        }
+
+        /// <summary>
+        /// 开放轨迹：直接由手绘折线几何生成 XLD（无 Canny、无 edge_direction），匹配时用 ignore_local_polarity。
+        /// </summary>
+        public static (HalconXldContourBundle Bundle, HObject NativeXld) BuildMultiOpenTrajectoriesXldFromGeometry(
+            int imageWidth,
+            int imageHeight,
+            IReadOnlyList<IReadOnlyList<Point2D>> trajectories)
+        {
+            if (trajectories == null || trajectories.Count == 0)
+                throw new ArgumentException("请至少完成一条开放轨迹");
+
+            var allContours = new List<Point2D[]>();
+            foreach (IReadOnlyList<Point2D> traj in trajectories)
+            {
+                if (traj == null || traj.Count < 2)
+                    continue;
+
+                Point2D[] clipped = ClampOpenPolylineToImage(traj, imageWidth, imageHeight);
+                if (clipped.Length >= 2)
+                    allContours.Add(clipped);
+            }
+
+            if (allContours.Count == 0)
+                throw new InvalidOperationException("没有有效的开放轨迹可生成模板");
+
+            var bundle = new HalconXldContourBundle
+            {
+                Width = imageWidth,
+                Height = imageHeight,
+                Contours = allContours
+            };
+            HObject native = XldBundleToHObject(allContours);
+            return (bundle, native);
+        }
+
         private static double ComputeDesiredGradientAngleRad(IReadOnlyList<Point2D> poly, int idx, bool gradientOutward)
         {
             int n = poly.Count;
@@ -586,6 +1021,49 @@ namespace CalibOperatorCLI_Example
                 Contrast = contrast > 0 ? contrast.ToString(CultureInfo.InvariantCulture) : "auto",
                 MinContrast = minContrast
             });
+        }
+
+        /// <summary>推断创建 XLD 模型时实际使用的 Metric（与 <see cref="CreateShapeModelFromXld"/> 一致）。</summary>
+        public static string ResolveShapeModelMetricForCreate(
+            HalconXldContourBundle? xldBundle,
+            HObject? nativeXldWithDirection,
+            HalconShapeModelCreateOptions opt)
+        {
+            HObject conts = new HObject();
+            bool disposeConts = true;
+            try
+            {
+                if (nativeXldWithDirection != null && nativeXldWithDirection.IsInitialized() &&
+                    nativeXldWithDirection.CountObj() > 0)
+                {
+                    conts = nativeXldWithDirection;
+                    disposeConts = false;
+                }
+                else
+                {
+                    if (xldBundle?.Contours == null || xldBundle.Contours.Count == 0)
+                        return string.IsNullOrWhiteSpace(opt.Metric) ? "ignore_local_polarity" : opt.Metric.Trim();
+
+                    List<Point2D[]> contours = xldBundle.Contours
+                        .Where(c => c != null && c.Length >= 2)
+                        .ToList();
+                    if (contours.Count == 0)
+                        return string.IsNullOrWhiteSpace(opt.Metric) ? "ignore_local_polarity" : opt.Metric.Trim();
+
+                    conts = XldBundleToHObject(contours);
+                    disposeConts = true;
+                }
+
+                if (!conts.IsInitialized() || conts.CountObj() == 0)
+                    return string.IsNullOrWhiteSpace(opt.Metric) ? "ignore_local_polarity" : opt.Metric.Trim();
+
+                return ResolveShapeModelXldMetric(conts, opt.Metric);
+            }
+            finally
+            {
+                if (disposeConts)
+                    conts.Dispose();
+            }
         }
 
         /// <summary>CreateShapeModel / CreateScaledShapeModel：基于 XLD。</summary>
@@ -3088,6 +3566,190 @@ namespace CalibOperatorCLI_Example
             return null;
         }
 
+        private const double FineFixedPositionRoiHalfPx = 3.0;
+
+        /// <summary>在单张域内图上用 ScaledShape .shm 做 ROI 精匹配（FindScaledShapeModel）。</summary>
+        public static HalconCoarseFineMatchResult FineScaledShapeMatchOnDomainImage(
+            CalibImage domainImg,
+            long scaledModelId,
+            ScaledShapeFineFixedPose fixedPose = default,
+            double anchorRow = double.NaN,
+            double anchorCol = double.NaN,
+            double poseAngleDeg = 0,
+            double fineAngleMarginDeg = 5,
+            double fineMinScore = 0.45,
+            int fineNumLevels = 0,
+            double fineGreediness = 0.75,
+            double fineScaleMin = 0.97,
+            double fineScaleMax = 1.03,
+            bool wantContour = true,
+            double roiMarginPx = 12,
+            double maxRoiHalfPx = 120,
+            CalibImage? fullImage = null,
+            double fineEndScoreWeight = 0,
+            double fineEndArcFraction = DefaultEndArcFraction,
+            double angleSearchCenterDeg = double.NaN,
+            double angleSearchMarginDeg = double.NaN)
+        {
+            if (domainImg == null)
+                throw new ArgumentNullException(nameof(domainImg));
+
+            long shapeId = ResolveRegisteredShapeModelId(scaledModelId);
+            if (shapeId < 0)
+                throw new InvalidOperationException("缩放形状精匹配: ModelId 无效或已释放");
+
+            if (fixedPose.FixRow)
+                anchorRow = fixedPose.Row;
+            if (fixedPose.FixCol)
+                anchorCol = fixedPose.Col;
+
+            if (double.IsNaN(anchorRow) || double.IsNaN(anchorCol))
+            {
+                if (!TryGetMaskedDomainCenterFromCalib(domainImg, out anchorRow, out anchorCol))
+                {
+                    anchorRow = domainImg.Height * 0.5;
+                    anchorCol = domainImg.Width * 0.5;
+                }
+            }
+
+            double defaultAngleDeg = fixedPose.FixAngle ? fixedPose.AngleDeg : poseAngleDeg;
+            double searchCenter = double.IsNaN(angleSearchCenterDeg) ? defaultAngleDeg : angleSearchCenterDeg;
+            if (fixedPose.FixAngle)
+                searchCenter = fixedPose.AngleDeg;
+            double searchMargin = fixedPose.FixAngle
+                ? 0
+                : double.IsNaN(angleSearchMarginDeg)
+                    ? Math.Max(3.0, fineAngleMarginDeg)
+                    : Math.Max(3.0, angleSearchMarginDeg);
+            var (halfLenRow, halfLenCol) = EstimateShapeModelHalfExtents(shapeId, roiMarginPx, maxRoiHalfPx);
+            double sMin;
+            double sMax;
+            if (fixedPose.FixScale)
+            {
+                double z = Math.Max(0.01, Math.Abs(fixedPose.Scale) > 1e-9 ? fixedPose.Scale : 1.0);
+                sMin = sMax = z;
+                halfLenRow *= z;
+                halfLenCol *= z;
+            }
+            else
+            {
+                sMin = Math.Max(0.01, Math.Min(fineScaleMin, fineScaleMax));
+                sMax = Math.Max(sMin, Math.Max(fineScaleMin, fineScaleMax));
+            }
+
+            if (fixedPose.PositionFixed)
+            {
+                halfLenRow = Math.Min(halfLenRow, FineFixedPositionRoiHalfPx);
+                halfLenCol = Math.Min(halfLenCol, FineFixedPositionRoiHalfPx);
+            }
+
+            bool matched = false;
+            double fineRow = 0, fineCol = 0, fineAngleDeg = 0;
+            double fineScale = fixedPose.FixScale ? sMin : 1.0;
+            double fineScore = 0;
+
+            if (!matched && fullImage != null)
+            {
+                HObject hoFull = CalibToHObject(fullImage);
+                HImage hFull = new HImage(EnsureGray(hoFull));
+                try
+                {
+                    try
+                    {
+                        matched = TryScaledShapeFineInRoi(
+                            hFull, shapeId, anchorRow, anchorCol, searchCenter,
+                            halfLenRow, halfLenCol, searchMargin, fineMinScore, fineNumLevels, fineGreediness,
+                            sMin, sMax, fixedPose,
+                            out fineRow, out fineCol, out fineAngleDeg, out fineScale, out fineScore);
+                    }
+                    catch (HOperatorException)
+                    {
+                        matched = false;
+                    }
+                }
+                finally
+                {
+                    hFull.Dispose();
+                    hoFull.Dispose();
+                }
+            }
+
+            if (!matched)
+            {
+                HObject ho = CalibToHObject(domainImg);
+                try
+                {
+                    HImage hMasked = new HImage(EnsureGray(ho));
+                    try
+                    {
+                        matched = TryScaledShapeFineOnMaskedImage(
+                            hMasked, shapeId, anchorRow, anchorCol, searchCenter,
+                            searchMargin, fineMinScore, fineNumLevels, fineGreediness,
+                            sMin, sMax, fixedPose.FixScale ? roiMarginPx * sMin : roiMarginPx, fixedPose,
+                            out fineRow, out fineCol, out fineAngleDeg, out fineScale, out fineScore);
+                    }
+                    finally
+                    {
+                        hMasked.Dispose();
+                    }
+                }
+                finally
+                {
+                    ho.Dispose();
+                }
+            }
+
+            if (!matched)
+                return HalconCoarseFineMatchResult.Empty;
+
+            ApplyFixedPoseToFineResult(ref fineRow, ref fineCol, ref fineAngleDeg, ref fineScale, fixedPose, sMin);
+
+            CalibImage scoreImg = fullImage ?? domainImg;
+            if (fineEndScoreWeight > 0)
+            {
+                HObject hoScore = CalibToHObject(scoreImg);
+                HImage hScoreGray = new HImage(EnsureGray(hoScore));
+                try
+                {
+                    fineScore = AdjustShapeMatchScoreForEndAlignment(
+                        hScoreGray, shapeId, fineRow, fineCol, fineAngleDeg, fineScore,
+                        fineEndScoreWeight, fineEndArcFraction);
+                }
+                finally
+                {
+                    hScoreGray.Dispose();
+                    hoScore.Dispose();
+                }
+            }
+
+            int xldW = fullImage?.Width ?? domainImg.Width;
+            int xldH = fullImage?.Height ?? domainImg.Height;
+            HalconXldContourBundle? xld = null;
+            if (wantContour)
+            {
+                Point2D[]? contour = BuildScaledShapeModelContourAtPose(shapeId, fineRow, fineCol, fineAngleDeg, fineScale);
+                if (contour != null && contour.Length >= 2)
+                {
+                    xld = new HalconXldContourBundle
+                    {
+                        Width = xldW,
+                        Height = xldH,
+                        Contours = new List<Point2D[]> { contour }
+                    };
+                }
+            }
+
+            return new HalconCoarseFineMatchResult
+            {
+                FineRows = new[] { fineRow },
+                FineCols = new[] { fineCol },
+                FineAngles = new[] { fineAngleDeg },
+                FineScales = new[] { fineScale },
+                FineScores = new[] { fineScore },
+                DeformedXld = xld
+            };
+        }
+
         /// <summary>在粗候选 ROI 内用刚性 .shm 精定位（毫秒级），坐标为全图。</summary>
         private static bool TryRigidShapeFineInRoi(
             HImage hFullGray,
@@ -3219,6 +3881,281 @@ namespace CalibOperatorCLI_Example
             fineAngleDeg = hvAng[best].D * 180.0 / Math.PI;
             fineScore = hvScore[best].D;
             return true;
+        }
+
+        private static void ApplyFixedPoseToFineResult(
+            ref double row,
+            ref double col,
+            ref double angleDeg,
+            ref double scale,
+            ScaledShapeFineFixedPose fixedPose,
+            double fixedScaleValue)
+        {
+            if (fixedPose.FixRow)
+                row = fixedPose.Row;
+            if (fixedPose.FixCol)
+                col = fixedPose.Col;
+            if (fixedPose.FixAngle)
+                angleDeg = fixedPose.AngleDeg;
+            if (fixedPose.FixScale)
+                scale = fixedScaleValue;
+        }
+
+        /// <summary>在粗候选 ROI 内用 ScaledShape .shm 精定位，坐标为全图。</summary>
+        private static bool TryScaledShapeFineInRoi(
+            HImage hFullGray,
+            long scaledModelId,
+            double coarseRow,
+            double coarseCol,
+            double coarseAngleDeg,
+            double halfLenRow,
+            double halfLenCol,
+            double angleMarginDeg,
+            double minScore,
+            int numLevels,
+            double greediness,
+            double scaleMin,
+            double scaleMax,
+            ScaledShapeFineFixedPose fixedPose,
+            out double fineRow,
+            out double fineCol,
+            out double fineAngleDeg,
+            out double fineScale,
+            out double fineScore)
+        {
+            fineRow = fineCol = fineAngleDeg = fineScale = fineScore = 0;
+            if (ResolveRegisteredShapeModelId(scaledModelId) < 0
+                || !HalconShapeModelRegistry.TryGet(scaledModelId, out HShapeModel shapeModel))
+                return false;
+
+            double halfSq = Math.Max(halfLenRow, halfLenCol);
+            if (fixedPose.PositionFixed)
+                halfSq = Math.Min(halfSq, FineFixedPositionRoiHalfPx);
+            double marginDeg = fixedPose.FixAngle ? 0 : Math.Max(3.0, angleMarginDeg);
+            double phi = coarseAngleDeg * Math.PI / 180.0;
+            HObject rect = new HObject();
+            HObject cropped = new HObject();
+            try
+            {
+                HOperatorSet.GenRectangle2(out rect, coarseRow, coarseCol, phi, halfSq, halfSq);
+                if (!TryBuildFineSearchRoi(
+                        hFullGray, rect, coarseRow, coarseCol, phi, halfSq, halfSq,
+                        FineRoiCropMode.CropRectangle2, out cropped, out double cropRow1, out double cropCol1))
+                    return false;
+
+                using var hRoi = new HImage(cropped);
+                int levels = numLevels > 0 ? Math.Min(numLevels, FineRoiMaxPyramidLevels) : FineRoiMaxPyramidLevels;
+                double angleStartRad = (coarseAngleDeg - marginDeg) * Math.PI / 180.0;
+                double angleExtentRad = 2 * marginDeg * Math.PI / 180.0;
+                double sMin = Math.Max(0.01, Math.Min(scaleMin, scaleMax));
+                double sMax = Math.Max(sMin, Math.Max(scaleMin, scaleMax));
+
+                const int maxCand = 12;
+                shapeModel.FindScaledShapeModel(
+                    hRoi,
+                    angleStartRad,
+                    angleExtentRad,
+                    sMin,
+                    sMax,
+                    minScore,
+                    maxCand,
+                    0.5,
+                    "least_squares",
+                    levels,
+                    greediness,
+                    out HTuple hvRow,
+                    out HTuple hvCol,
+                    out HTuple hvAng,
+                    out HTuple hvScale,
+                    out HTuple hvScore);
+
+                if (!SelectScaledShapeMatchNearestCoarse(
+                        hvRow, hvCol, hvAng, hvScale, hvScore, cropRow1, cropCol1,
+                        coarseRow, coarseCol, halfSq,
+                        out fineRow, out fineCol, out fineAngleDeg, out fineScale, out fineScore))
+                    return false;
+
+                ApplyFixedPoseToFineResult(ref fineRow, ref fineCol, ref fineAngleDeg, ref fineScale, fixedPose, sMin);
+                return true;
+            }
+            catch (HOperatorException)
+            {
+                return false;
+            }
+            finally
+            {
+                rect.Dispose();
+                cropped.Dispose();
+            }
+        }
+
+        private static bool TryScaledShapeFineOnMaskedImage(
+            HImage hMasked,
+            long scaledModelId,
+            double anchorRow,
+            double anchorCol,
+            double searchAngleDeg,
+            double angleMarginDeg,
+            double minScore,
+            int numLevels,
+            double greediness,
+            double scaleMin,
+            double scaleMax,
+            double roiMarginPx,
+            ScaledShapeFineFixedPose fixedPose,
+            out double fineRow,
+            out double fineCol,
+            out double fineAngleDeg,
+            out double fineScale,
+            out double fineScore)
+        {
+            fineRow = fineCol = fineAngleDeg = fineScale = fineScore = 0;
+            if (!HalconShapeModelRegistry.TryGet(scaledModelId, out HShapeModel shapeModel))
+                return false;
+
+            HImage searchImg = hMasked;
+            HImage? croppedImg = null;
+            double cropRow1 = 0;
+            double cropCol1 = 0;
+            if (TryCropDomainImageForFineSearch(hMasked, roiMarginPx, out croppedImg, out cropRow1, out cropCol1))
+                searchImg = croppedImg!;
+
+            try
+            {
+                int levels = numLevels > 0 ? Math.Min(numLevels, FineRoiMaxPyramidLevels) : FineRoiMaxPyramidLevels;
+                double marginDeg = fixedPose.FixAngle ? 0 : Math.Max(3.0, angleMarginDeg);
+                double angleStartRad = (searchAngleDeg - marginDeg) * Math.PI / 180.0;
+                double angleExtentRad = 2 * marginDeg * Math.PI / 180.0;
+                double sMin = Math.Max(0.01, Math.Min(scaleMin, scaleMax));
+                double sMax = Math.Max(sMin, Math.Max(scaleMin, scaleMax));
+                double roiHalf = fixedPose.PositionFixed
+                    ? FineFixedPositionRoiHalfPx
+                    : Math.Max(24, roiMarginPx + 24);
+
+                const int maxCand = 12;
+                shapeModel.FindScaledShapeModel(
+                    searchImg,
+                    angleStartRad,
+                    angleExtentRad,
+                    sMin,
+                    sMax,
+                    minScore,
+                    maxCand,
+                    0.5,
+                    "least_squares",
+                    levels,
+                    greediness,
+                    out HTuple hvRow,
+                    out HTuple hvCol,
+                    out HTuple hvAng,
+                    out HTuple hvScale,
+                    out HTuple hvScore);
+
+                if (!SelectScaledShapeMatchNearestCoarse(
+                        hvRow, hvCol, hvAng, hvScale, hvScore, cropRow1, cropCol1,
+                        anchorRow, anchorCol, roiHalf,
+                        out fineRow, out fineCol, out fineAngleDeg, out fineScale, out fineScore))
+                    return false;
+
+                ApplyFixedPoseToFineResult(ref fineRow, ref fineCol, ref fineAngleDeg, ref fineScale, fixedPose, sMin);
+                return true;
+            }
+            catch (HOperatorException)
+            {
+                return false;
+            }
+            finally
+            {
+                if (!ReferenceEquals(searchImg, hMasked))
+                    searchImg.Dispose();
+            }
+        }
+
+        private static bool SelectScaledShapeMatchNearestCoarse(
+            HTuple hvRow,
+            HTuple hvCol,
+            HTuple hvAng,
+            HTuple hvScale,
+            HTuple hvScore,
+            double cropRow1,
+            double cropCol1,
+            double coarseRow,
+            double coarseCol,
+            double roiHalfLen,
+            out double fineRow,
+            out double fineCol,
+            out double fineAngleDeg,
+            out double fineScale,
+            out double fineScore)
+        {
+            fineRow = fineCol = fineAngleDeg = fineScale = fineScore = 0;
+            if (hvScore == null || hvScore.Length == 0)
+                return false;
+
+            double maxAnchorDist = Math.Max(24, roiHalfLen * 0.85);
+            int best = -1;
+            double bestScore = double.NegativeInfinity;
+            for (int i = 0; i < hvScore.Length; i++)
+            {
+                double row = hvRow[i].D + cropRow1;
+                double col = hvCol[i].D + cropCol1;
+                double dr = row - coarseRow;
+                double dc = col - coarseCol;
+                double dist = Math.Sqrt(dr * dr + dc * dc);
+                if (dist > maxAnchorDist)
+                    continue;
+
+                double sc = hvScore[i].D;
+                if (sc <= bestScore)
+                    continue;
+                bestScore = sc;
+                best = i;
+            }
+
+            if (best < 0)
+                return false;
+
+            fineRow = hvRow[best].D + cropRow1;
+            fineCol = hvCol[best].D + cropCol1;
+            fineAngleDeg = hvAng[best].D * 180.0 / Math.PI;
+            fineScale = hvScale != null && hvScale.Length > best ? hvScale[best].D : 1.0;
+            fineScore = hvScore[best].D;
+            return true;
+        }
+
+        private static Point2D[]? BuildScaledShapeModelContourAtPose(
+            long scaledModelId,
+            double row,
+            double col,
+            double angleDeg,
+            double scale)
+        {
+            Point2D[][] contours = GetShapeModelContourPoints(scaledModelId, 1);
+            if (contours.Length == 0 || contours[0].Length < 2)
+                return null;
+            Point2D[] src = contours[0];
+            var dst = new Point2D[src.Length];
+            for (int i = 0; i < src.Length; i++)
+                dst[i] = TransformShapeModelPointToImageScaled(src[i], row, col, angleDeg, scale);
+            return dst;
+        }
+
+        private static Point2D TransformShapeModelPointToImageScaled(
+            Point2D modelPt,
+            double matchRow,
+            double matchCol,
+            double angleDeg,
+            double scale)
+        {
+            double z = Math.Abs(scale) > 1e-9 ? scale : 1.0;
+            double a = angleDeg * Math.PI / 180.0;
+            double c = Math.Cos(a);
+            double s = Math.Sin(a);
+            double row = modelPt.Y * z;
+            double col = modelPt.X * z;
+            double rowImg = row * c - col * s + matchRow;
+            double colImg = row * s + col * c + matchCol;
+            return new Point2D(colImg, rowImg);
         }
 
         /// <summary>在已确定的精位姿处用 .dfm 提取变形轮廓（位姿仍由刚性精匹配给出）。</summary>

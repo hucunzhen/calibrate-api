@@ -1222,7 +1222,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "display",
                 DisplayName = "显示图像",
-                Description = "每个画布上的「显示图像」节点独占一个预览窗口（标题含短 Guid）；同一节点多次运行会刷新该窗口。可选 Xld：叠加 HALCON XLD 折线（橘色）。可选 BarIds 与参数「点列折线」控制青色折线：默认 auto 仅在条号不全相同时分段（转换前多轮廓）；焊头/整段轨迹选 single。右键连线看图仍共用快捷预览窗口。",
+                Description = "每个画布上的「显示图像」节点独占一个预览窗口（标题含短 Guid）；同一节点多次运行会刷新该窗口。可选 Points（单条点列）或 PointsList（多条点列；可接「循环收集」PointsList / List、flow_loop 的 PointsList）。可选 Xld：叠加 HALCON XLD 折线（橘色）。可选 BarIds 与参数「点列折线」控制青色折线：默认 auto 仅在条号不全相同时分段；焊头/整段轨迹选 single。右键连线看图仍共用快捷预览窗口。",
                 Category = "可视化",
                 Params =
                 {
@@ -1240,9 +1240,10 @@ namespace CalibOperatorCLI_Example
                 {
                     new PortDef { Name = "Img", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
-                    new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
-                    new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107" },
-                    new PortDef { Name = "Xld", Direction = PortDirection.Input, DataType = typeof(HalconXldContourBundle), ColorHex = "#E65100" }
+                    new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3", IsOptional = true },
+                    new PortDef { Name = "PointsList", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#64B5F6", IsOptional = true },
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "Xld", Direction = PortDirection.Input, DataType = typeof(HalconXldContourBundle), ColorHex = "#E65100", IsOptional = true }
                 }
             },
             new OperatorDef
@@ -2271,7 +2272,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "flow_sink",
                 DisplayName = "循环收集",
-                Description = "接在循环下游：每轮将 In 追加到列表（如多曝光采图）。输出 ImageList 供 Exposure Fusion 等使用。循环结束后才执行仅依赖收集结果的算子（如曝光融合）。须用「运行」托管执行。",
+                Description = "接在循环下游：每轮将 In 追加到列表（图像、点列等）。List/PointsList 供下游使用；纯图像列表可接 Exposure Fusion 的 Images。循环结束后才执行仅依赖收集结果的算子。须用「运行」托管执行。",
                 Category = "流程",
                 Params =
                 {
@@ -2282,7 +2283,8 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B" },
                     new PortDef { Name = "After", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
                     new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
-                    new PortDef { Name = "List", Direction = PortDirection.Output, DataType = typeof(List<CalibImage>), ColorHex = "#FF9800" },
+                    new PortDef { Name = "List", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#FF9800" },
+                    new PortDef { Name = "PointsList", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#64B5F6", IsOptional = true },
                     new PortDef { Name = "Count", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#607D8B" }
                 }
             },
@@ -3246,11 +3248,11 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "halcon_load_shape_model",
                 DisplayName = "HALCON 加载形状模板",
-                Description = "从 .shm 文件加载形状模型（形状模板页导出），返回 ModelId。filePath 相对当前流程 .flow.json 所在目录。",
+                Description = "从 .shm 加载形状模型（形状模板页导出；文件名可含 xv_ 编码的创建参数）。filePath 相对当前流程 .flow.json 所在目录。",
                 Category = "HALCON",
                 Params =
                 {
-                    new OperatorParam { Name = "filePath", DisplayName = "模型文件", DefaultValue = "shape_model.shm", Description = ".shm 路径，相对流程文件目录或绝对路径" }
+                    new OperatorParam { Name = "filePath", DisplayName = "模型文件", DefaultValue = "shape_model.shm", Description = ".shm 路径；推荐 xv_ 前缀编码参数的文件名，相对流程目录或绝对路径" }
                 },
                 Ports =
                 {
@@ -3286,11 +3288,11 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "halcon_load_deformable_model",
                 DisplayName = "HALCON 加载可变形模板",
-                Description = "从 .dfm 加载可变形模型（形状模板页导出）。filePath 相对流程 .flow.json 目录。",
+                Description = "从 .dfm 加载可变形模型（文件名可含 xv_ 编码的创建参数）。filePath 相对流程 .flow.json 目录。",
                 Category = "HALCON",
                 Params =
                 {
-                    new OperatorParam { Name = "filePath", DisplayName = "模型文件", DefaultValue = "deformable_model.dfm", Description = ".dfm 路径" }
+                    new OperatorParam { Name = "filePath", DisplayName = "模型文件", DefaultValue = "deformable_model.dfm", Description = ".dfm 路径；推荐 xv_ 前缀编码参数的文件名" }
                 },
                 Ports =
                 {
@@ -3415,6 +3417,45 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF5722" },
                     new PortDef { Name = "Score", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FFC107" },
                     new PortDef { Name = "DeformedXld", Direction = PortDirection.Output, DataType = typeof(HalconXldContourBundle), ColorHex = "#E65100", IsOptional = true }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "halcon_fine_scaled_shape_match",
+                DisplayName = "HALCON 缩放形状精匹配",
+                Description = "仅 ScaledShape .shm + 单张域内图 In；在粗位姿 ROI 内精定位。CoarseRow/Column/Angle/Scale 任一端口有输入则该自由度固定为粗值、不再搜索；未接的 DOF 仍按 fineAngleMargin / fineScaleMin/Max 搜索。",
+                Category = "HALCON",
+                Params =
+                {
+                    new OperatorParam { Name = "fineAngleStart", DisplayName = "精 AngleStart(°)", DefaultValue = "", Description = "相对 CoarseAngle 输入的起始偏移(度)；留空时由「精角度余量」推导(=-余量)" },
+                    new OperatorParam { Name = "fineAngleExtent", DisplayName = "精 AngleExtent(°)", DefaultValue = "", Description = "相对 CoarseAngle 输入的角度搜索范围(度)；留空时由「精角度余量」推导(=2×余量)" },
+                    new OperatorParam { Name = "fineAngleMargin", DisplayName = "精角度余量(°)", DefaultValue = "5", Description = "未设 fineAngleStart/Extent 且未接 CoarseAngle 时：以 CoarseAngle 为中心 ± 该值(度)" },
+                    new OperatorParam { Name = "fineMinScore", DisplayName = "精 MinScore", DefaultValue = "0.45", Description = "缩放形状最低分" },
+                    new OperatorParam { Name = "fineNumLevels", DisplayName = "精 NumLevels", DefaultValue = "0", Description = "金字塔层数，0=与建模一致" },
+                    new OperatorParam { Name = "fineGreediness", DisplayName = "精 Greediness", DefaultValue = "0.75", Description = "贪心系数" },
+                    new OperatorParam { Name = "fineScaleMin", DisplayName = "精 ScaleMin", DefaultValue = "0.97", Description = "未接 CoarseScale 时的缩放下限；已接 CoarseScale 时忽略" },
+                    new OperatorParam { Name = "fineScaleMax", DisplayName = "精 ScaleMax", DefaultValue = "1.03", Description = "未接 CoarseScale 时的缩放上限；已接 CoarseScale 时忽略" },
+                    new OperatorParam { Name = "shapeContourMode", DisplayName = "模板轮廓", DefaultValue = "first", Description = "none=不输出；first=输出缩放后的模板轮廓" },
+                    new OperatorParam { Name = "roiMarginPx", DisplayName = "ROI边距(px)", DefaultValue = "12", Description = "粗位姿周围 CropRectangle2 的额外边距" },
+                    new OperatorParam { Name = "maxRoiHalfPx", DisplayName = "ROI半长上限(px)", DefaultValue = "120", Description = "限制精匹配裁剪区半长，0=不限制" },
+                    new OperatorParam { Name = "fineEndScoreWeight", DisplayName = "精端部得分权重", DefaultValue = "0.8", Description = "精匹配 Score 端部修正，0=关闭" },
+                    new OperatorParam { Name = "fineEndArcFraction", DisplayName = "精端部弧长占比", DefaultValue = "0.12", Description = "模板轮廓端部分段占比" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "ModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#9C27B0" },
+                    new PortDef { Name = "FullImage", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800", IsOptional = true },
+                    new PortDef { Name = "CoarseRow", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#8BC34A", IsOptional = true },
+                    new PortDef { Name = "CoarseColumn", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#03A9F4", IsOptional = true },
+                    new PortDef { Name = "CoarseAngle", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#FF9800", IsOptional = true },
+                    new PortDef { Name = "CoarseScale", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#26A69A", IsOptional = true },
+                    new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF5722" },
+                    new PortDef { Name = "Scale", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#26A69A" },
+                    new PortDef { Name = "Score", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FFC107" },
+                    new PortDef { Name = "ShapeXld", Direction = PortDirection.Output, DataType = typeof(HalconXldContourBundle), ColorHex = "#E65100", IsOptional = true }
                 }
             },
             new OperatorDef

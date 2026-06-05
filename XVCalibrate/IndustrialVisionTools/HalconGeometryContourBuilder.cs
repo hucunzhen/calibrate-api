@@ -255,6 +255,83 @@ namespace CalibOperatorCLI_Example
         public static Point2D ImagePixelToWorldMm(double col, double row, in AffineTransform t) =>
             CalibAPI.ImageToWorld(new Point2D(col, row), t);
 
+        /// <summary>世界坐标(mm) 反算图像像素 (col,row)。</summary>
+        public static Point2D WorldMmToImagePixel(double worldX, double worldY, in AffineTransform t)
+        {
+            double det = t.A * t.E - t.B * t.D;
+            if (Math.Abs(det) < 1e-12)
+                throw new InvalidOperationException("九点仿射矩阵不可逆，无法将 mm 换算为像素");
+
+            double wx = worldX - t.C;
+            double wy = worldY - t.F;
+            double col = (t.E * wx - t.B * wy) / det;
+            double row = (-t.D * wx + t.A * wy) / det;
+            return new Point2D(col, row);
+        }
+
+        /// <summary>世界系长度(mm) 反算沿图像列方向的像素宽度（与 <see cref="PixelSizeToWorldMm"/> 的宽分量互逆）。</summary>
+        public static double WorldMmWidthToPixelWidth(double widthMm, double anchorCol, double anchorRow, in AffineTransform t)
+        {
+            if (widthMm <= 0)
+                return 0;
+
+            double lo = 0;
+            double hi = Math.Max(widthMm * 200, 4);
+            for (int i = 0; i < 48; i++)
+            {
+                double mid = (lo + hi) * 0.5;
+                (double wMm, _) = PixelSizeToWorldMm(mid, 0, anchorCol, anchorRow, t);
+                if (wMm < widthMm)
+                    lo = mid;
+                else
+                    hi = mid;
+            }
+
+            return (lo + hi) * 0.5;
+        }
+
+        /// <summary>世界系长度(mm) 反算沿图像行方向的像素高度。</summary>
+        public static double WorldMmHeightToPixelHeight(double heightMm, double anchorCol, double anchorRow, in AffineTransform t)
+        {
+            if (heightMm <= 0)
+                return 0;
+
+            double lo = 0;
+            double hi = Math.Max(heightMm * 200, 4);
+            for (int i = 0; i < 48; i++)
+            {
+                double mid = (lo + hi) * 0.5;
+                (_, double hMm) = PixelSizeToWorldMm(0, mid, anchorCol, anchorRow, t);
+                if (hMm < heightMm)
+                    lo = mid;
+                else
+                    hi = mid;
+            }
+
+            return (lo + hi) * 0.5;
+        }
+
+        /// <summary>世界系半径(mm) 反算像素半径。</summary>
+        public static double WorldMmRadiusToPixelRadius(double radiusMm, double centerCol, double centerRow, in AffineTransform t)
+        {
+            if (radiusMm <= 0)
+                return 0;
+
+            double lo = 0;
+            double hi = Math.Max(radiusMm * 200, 4);
+            for (int i = 0; i < 48; i++)
+            {
+                double mid = (lo + hi) * 0.5;
+                double rMm = PixelRadiusToWorldMm(mid, centerCol, centerRow, t);
+                if (rMm < radiusMm)
+                    lo = mid;
+                else
+                    hi = mid;
+            }
+
+            return (lo + hi) * 0.5;
+        }
+
         /// <summary>在 (centerCol,centerRow) 处沿 +X 偏移 radiusPx 像素，求世界系半径长度(mm)。</summary>
         public static double PixelRadiusToWorldMm(double radiusPx, double centerCol, double centerRow, in AffineTransform t)
         {

@@ -20,6 +20,7 @@ namespace CalibOperatorCLI_Example
         /// <summary>精匹配角度：沿用对应粗匹配角度（可变形 API 不单独返回角度）。</summary>
         public double[] FineAngles { get; init; } = Array.Empty<double>();
         public double[] FineScores { get; init; } = Array.Empty<double>();
+        public double[] FineScales { get; init; } = Array.Empty<double>();
 
         /// <summary>与 Fine* 一一对应的变形轮廓（图像坐标）。</summary>
         public HalconXldContourBundle? DeformedXld { get; init; }

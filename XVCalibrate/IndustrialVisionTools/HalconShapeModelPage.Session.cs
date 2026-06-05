@@ -67,6 +67,7 @@ namespace CalibOperatorCLI_Example
             _uiReady = true;
             _suppressSessionPersist = false;
             UpdateTangentFlipButtonVisibility();
+            UpdateRoiManagePanelVisibility();
         }
 
         private void HalconShapeModelPage_Unloaded(object sender, RoutedEventArgs e)
@@ -131,6 +132,14 @@ namespace CalibOperatorCLI_Example
             ChkEnablePerspective.Checked += OnCameraCorrectionSettingChanged;
             ChkEnablePerspective.Unchecked += OnCameraCorrectionSettingChanged;
             CmbPerspectiveOutputFrame.SelectionChanged += (_, _) => ScheduleSessionPersist();
+            if (ChkRotateExpandCanvas != null)
+            {
+                ChkRotateExpandCanvas.Checked += OnCameraCorrectionSettingChanged;
+                ChkRotateExpandCanvas.Unchecked += OnCameraCorrectionSettingChanged;
+            }
+
+            if (TxtPostCorrectRotateDeg != null)
+                TxtPostCorrectRotateDeg.LostFocus += (_, _) => ScheduleSessionPersist();
         }
 
         private void OnCameraCorrectionSettingChanged(object sender, RoutedEventArgs e) => ScheduleSessionPersist();
@@ -193,6 +202,8 @@ namespace CalibOperatorCLI_Example
             s.CalibSquareSizeMm = TxtCalibSquareSizeMm?.Text?.Trim() ?? "25";
             s.CalibPxPerMm = TxtCalibPxPerMm?.Text?.Trim() ?? "1";
             s.PerspectiveOutputFrame = GetPerspectiveOutputFrameTag();
+            s.PostCorrectRotateDeg = _postCorrectRotateDeg;
+            s.RotateExpandCanvas = ChkRotateExpandCanvas?.IsChecked == true;
         }
 
         private string GetPerspectiveOutputFrameTag()
@@ -220,6 +231,10 @@ namespace CalibOperatorCLI_Example
             if (!string.IsNullOrWhiteSpace(s.CalibPxPerMm))
                 TxtCalibPxPerMm.Text = s.CalibPxPerMm;
             SelectPerspectiveOutputFrame(s.PerspectiveOutputFrame);
+            _postCorrectRotateDeg = NormalizePostCorrectRotateDeg(s.PostCorrectRotateDeg);
+            if (ChkRotateExpandCanvas != null)
+                ChkRotateExpandCanvas.IsChecked = s.RotateExpandCanvas;
+            SyncPostCorrectRotateTextBox();
         }
 
         private void ApplyExtraControlsFromSettings(HalconShapeModelUiSettings s)
@@ -376,12 +391,17 @@ namespace CalibOperatorCLI_Example
         {
             if (_hasRingRoi && IsRingModeActive())
                 return "ring";
+            if (IsOpenTrajectoriesModeActive()
+                && (_hasOpenTrajectoriesRoi || _roiPath.VertexCount >= 2))
+                return "opentrajectories";
             if (_hasRoi && IsCircleModeActive())
                 return "circle";
             if (_hasRoi && RbPolygonMode?.IsChecked == true)
                 return "polygon";
             if (_hasRoi && RbRectMode?.IsChecked == true)
                 return "rect";
+            if (HasUsableRotatedRectRoi())
+                return "rotatedrect";
             return "none";
         }
 
@@ -392,12 +412,41 @@ namespace CalibOperatorCLI_Example
             s.RoiRectY = _roiRectImage.Y;
             s.RoiRectW = _roiRectImage.Width;
             s.RoiRectH = _roiRectImage.Height;
+            s.RotRectCenterX = _rotRectCenterX;
+            s.RotRectCenterY = _rotRectCenterY;
+            s.RotRectWidth = _rotRectWidth;
+            s.RotRectHeight = _rotRectHeight;
+            s.RotRectAngleDeg = _rotRectAngleDeg;
             s.CircleCenterX = _circleCenterImage.X;
             s.CircleCenterY = _circleCenterImage.Y;
             s.CircleRadius = _circleRadiusImage;
             s.PolygonPath = ExportRoiPath(_roiPath);
             s.RingOuterPath = ExportRoiPath(_ringOuterPath);
             s.RingInnerPath = ExportRoiPath(_ringInnerPath);
+            s.OpenTrajectoryPaths.Clear();
+            s.OpenTrajectoryNames.Clear();
+            foreach (OpenTrajectoryEntry entry in _openTrajectoryEntries)
+            {
+                if (ExportRoiPath(entry.Path) is HalconShapeModelRoiPathDto dto)
+                {
+                    s.OpenTrajectoryPaths.Add(dto);
+                    s.OpenTrajectoryNames.Add(entry.Name ?? "");
+                }
+            }
+
+            s.LastRoiFile = _lastRoiFilePath ?? "";
+            s.OpenTrajectoryDraft = ExportRoiPath(_roiPath);
+            s.OpenTrajectoryConnectors.Clear();
+            foreach (RoiConnectorSegment conn in _trajectoryConnectors)
+            {
+                s.OpenTrajectoryConnectors.Add(new HalconShapeModelRoiConnectorDto
+                {
+                    StartX = conn.StartX,
+                    StartY = conn.StartY,
+                    EndX = conn.EndX,
+                    EndY = conn.EndY
+                });
+            }
         }
 
         private static HalconShapeModelRoiPathDto? ExportRoiPath(RoiContourPath path)
@@ -434,6 +483,11 @@ namespace CalibOperatorCLI_Example
             _roiPath.Clear();
             _ringOuterPath.Clear();
             _ringInnerPath.Clear();
+            _openTrajectoryEntries.Clear();
+            _editingOpenTrajectoryIndex = null;
+            _hasOpenTrajectoriesRoi = false;
+            _trajectoryConnectors.Clear();
+            _connectorDraftStart = null;
             ResetCircleDrawState();
 
             switch (s.RoiMode)
@@ -442,6 +496,17 @@ namespace CalibOperatorCLI_Example
                     if (s.RoiRectW > 5 && s.RoiRectH > 5)
                     {
                         _roiRectImage = new Rect(s.RoiRectX, s.RoiRectY, s.RoiRectW, s.RoiRectH);
+                        _hasRoi = true;
+                    }
+                    break;
+                case "rotatedrect":
+                    if (s.RotRectWidth > 5 && s.RotRectHeight > 5)
+                    {
+                        _rotRectCenterX = s.RotRectCenterX;
+                        _rotRectCenterY = s.RotRectCenterY;
+                        _rotRectWidth = s.RotRectWidth;
+                        _rotRectHeight = s.RotRectHeight;
+                        _rotRectAngleDeg = s.RotRectAngleDeg;
                         _hasRoi = true;
                     }
                     break;
@@ -467,12 +532,64 @@ namespace CalibOperatorCLI_Example
                     _hasRoi = _hasRingRoi;
                     InvalidateRingFlatCache();
                     break;
+                case "opentrajectories":
+                    _openTrajectoryEntries.Clear();
+                    _editingOpenTrajectoryIndex = null;
+                    if (s.OpenTrajectoryPaths != null)
+                    {
+                        int ti = 0;
+                        foreach (HalconShapeModelRoiPathDto? dto in s.OpenTrajectoryPaths)
+                        {
+                            if (dto == null)
+                                continue;
+                            var path = new RoiContourPath();
+                            ImportRoiPath(path, dto);
+                            path.IsClosed = false;
+                            if (path.VertexCount < 2)
+                                continue;
+
+                            string name = ti < s.OpenTrajectoryNames?.Count
+                                          && !string.IsNullOrWhiteSpace(s.OpenTrajectoryNames[ti])
+                                ? s.OpenTrajectoryNames[ti].Trim()
+                                : DefaultTrajectoryName(ti);
+                            _openTrajectoryEntries.Add(new OpenTrajectoryEntry { Name = name, Path = path });
+                            ti++;
+                        }
+                    }
+
+                    ImportRoiPath(_roiPath, s.OpenTrajectoryDraft);
+                    _roiPath.IsClosed = false;
+                    _trajectoryConnectors.Clear();
+                    if (s.OpenTrajectoryConnectors != null)
+                    {
+                        foreach (HalconShapeModelRoiConnectorDto? cdto in s.OpenTrajectoryConnectors)
+                        {
+                            if (cdto == null)
+                                continue;
+                            _trajectoryConnectors.Add(new RoiConnectorSegment(
+                                cdto.StartX, cdto.StartY, cdto.EndX, cdto.EndY));
+                        }
+                    }
+
+                    _hasOpenTrajectoriesRoi = _openTrajectoryEntries.Count > 0;
+                    _hasRoi = _hasOpenTrajectoriesRoi || _roiPath.VertexCount >= 2;
+                    break;
             }
+
+            _lastRoiFilePath = !string.IsNullOrWhiteSpace(s.LastRoiFile)
+                ? s.LastRoiFile.Trim()
+                : string.IsNullOrWhiteSpace(s.LastOpenTrajectoryFile)
+                    ? null
+                    : s.LastOpenTrajectoryFile.Trim();
 
             InvalidatePolygonFlatCache();
             RefreshRoiVisuals();
             RebuildCommittedPolygonVisual();
+            RebuildOpenTrajectoriesVisual();
+            RebuildConnectorsVisual();
+            UpdateConnectorRubberVisual();
             UpdateRingPreview();
+            UpdateRoiManagePanelVisibility();
             if (_hasRoi || _hasRingRoi)
                 UpdateThresholdPreview();
         }
@@ -481,6 +598,9 @@ namespace CalibOperatorCLI_Example
         {
             switch (roiMode)
             {
+                case "rotatedrect":
+                    RbRotatedRectMode.IsChecked = true;
+                    break;
                 case "circle":
                     RbCircleMode.IsChecked = true;
                     break;
@@ -489,6 +609,9 @@ namespace CalibOperatorCLI_Example
                     break;
                 case "ring":
                     RbRingMode.IsChecked = true;
+                    break;
+                case "opentrajectories":
+                    RbOpenTrajectoriesMode.IsChecked = true;
                     break;
                 default:
                     RbRectMode.IsChecked = true;

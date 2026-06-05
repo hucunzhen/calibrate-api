@@ -66,6 +66,20 @@ namespace CalibOperatorCLI_Example
             return $"#{edgeIndex + 1} {kindText} ({Fmt(start)})→({Fmt(end)})";
         }
 
+        public static bool TryGetSegmentArcRadius(RoiContourPath path, int edgeIndex, out double radiusPx)
+        {
+            radiusPx = 0;
+            GetSegmentEndpoints(path, edgeIndex, out Point start, out Point end);
+            if (GetSegmentKind(path, edgeIndex) != RoiEdgeKind.Arc
+                || GetSegmentArcVia(path, edgeIndex) is not Point via)
+                return false;
+
+            return RoiContourPath.TryGetArcGeometricRadius(start, via, end, out radiusPx);
+        }
+
+        public static bool TrySetSegmentArcRadius(RoiContourPath path, int edgeIndex, double radiusPx, out string error) =>
+            RoiContourPathTangent.TrySetArcEdgeRadius(path, edgeIndex, radiusPx, out error);
+
         public static bool TryUpdateSegment(
             RoiContourPath path,
             int edgeIndex,

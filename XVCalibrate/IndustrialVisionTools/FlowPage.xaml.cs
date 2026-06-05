@@ -376,6 +376,7 @@ namespace CalibOperatorCLI_Example
                 "halcon_find_shape_model" => HalconThreadPolicy.ParallelFind,
                 "halcon_coarse_shape_match" => HalconThreadPolicy.ParallelFind,
                 "halcon_fine_deformable_match" => HalconThreadPolicy.ParallelFind,
+                "halcon_fine_scaled_shape_match" => HalconThreadPolicy.ParallelFind,
                 "halcon_coarse_fine_shape_match" => HalconThreadPolicy.ParallelFind,
                 _ => HalconThreadPolicy.Geometry,
             };
@@ -1804,7 +1805,28 @@ namespace CalibOperatorCLI_Example
             if (a == typeof(object) || b == typeof(object)) return true;
             // 基座 3D 点列可连入仍声明为 Point2D[] 的端口（显示叠加取 XY；PLC 写 float 时写 X,Y）
             if (a == typeof(CalibPoint3D[]) && b == typeof(Point2D[])) return true;
+            if (AreGenericListTypesCompatible(a, b)) return true;
             return false;
+        }
+
+        private static bool AreGenericListTypesCompatible(Type a, Type b)
+        {
+            if (!TryGetListElementType(a, out Type? elemA) || !TryGetListElementType(b, out Type? elemB))
+                return false;
+            if (elemA == elemB) return true;
+            if (elemA == typeof(object) || elemB == typeof(object)) return true;
+            return PortTypesCompatible(elemA!, elemB!);
+        }
+
+        private static bool TryGetListElementType(Type type, out Type? elementType)
+        {
+            elementType = null;
+            if (!type.IsGenericType)
+                return false;
+            if (type.GetGenericTypeDefinition() != typeof(List<>))
+                return false;
+            elementType = type.GetGenericArguments()[0];
+            return true;
         }
 
         /// <summary>匹配中心点列排序：返回原下标 permute，pts[k]=原 (cols[order[k]], rows[order[k]])。</summary>
@@ -6733,7 +6755,7 @@ namespace CalibOperatorCLI_Example
                     var downstreamIds = CompositeDownstreamIds(compositeMaskEachNode.Id);
                     var preNodes = sorted.Where(n => !downstreamIds.Contains(n.Id)).ToList();
                     var postNodes = sorted.Where(n => downstreamIds.Contains(n.Id) && n.Id != compositeMaskEachNode.Id).ToList();
-                    var fineNodes = postNodes.Where(n => n.Def.TypeId == "halcon_fine_deformable_match").ToList();
+                    var fineNodes = postNodes.Where(IsHalconMaskLoopFineMatchNode).ToList();
                     var fineAccumulators = fineNodes.ToDictionary(n => n.Id, _ => new FineMatchRoundAccumulator());
 
                     // 前置节点执行一次
@@ -6780,20 +6802,10 @@ namespace CalibOperatorCLI_Example
                                 inner.Executed = false;
                                 var innerInputs = BuildInnerInputsFromEdges(inner.Id, edges, idMap);
                                 MergeCompositeExternalInputs(inner, innerInputs, compositeInputs, spec);
-                                if (inner.Def.TypeId == "halcon_fine_deformable_match")
+                                if (IsHalconMaskLoopFineMatchNode(inner))
                                 {
                                     TryAttachFineMatchFullImage(innerInputs, compositeInputs);
-                                    ApplyMaskBatchCoarsePoseToFineInputs(innerInputs, batch, mi);
-                                    if (!innerInputs.ContainsKey("FullImage") && batch.SourceImage != null)
-                                        innerInputs["FullImage"] = batch.SourceImage;
-                                    if (!innerInputs.ContainsKey("RigidModelId")
-                                        && maskInputs.TryGetValue("ModelId", out var rigidMid)
-                                        && rigidMid != null)
-                                    {
-                                        long rid = HalconFlowBridge.ResolveRegisteredShapeModelId(Convert.ToInt64(rigidMid));
-                                        if (rid >= 0)
-                                            innerInputs["RigidModelId"] = rid;
-                                    }
+                                    ApplyFineMatchMaskLoopInputs(innerInputs, maskInputs, batch, mi);
                                 }
 
                                 bool innerIsSource = !edges.Any(e => e.ToId == inner.Id);
@@ -6852,7 +6864,7 @@ namespace CalibOperatorCLI_Example
                     {
                         var innerInputs = BuildInnerInputsFromEdges(inner.Id, edges, idMap);
                         MergeCompositeExternalInputs(inner, innerInputs, compositeInputs, spec);
-                        if (inner.Def.TypeId == "halcon_fine_deformable_match")
+                        if (IsHalconMaskLoopFineMatchNode(inner))
                             TryAttachFineMatchFullImage(innerInputs, compositeInputs);
                         bool innerIsSource = !edges.Any(e => e.ToId == inner.Id);
                         if (!strictCompositeInputBinding)
@@ -7470,23 +7482,39 @@ namespace CalibOperatorCLI_Example
                 HalconThreadPolicy.Geometry);
         }
 
-        private Dictionary<string, object?> BuildFineDeformableMaskLoopInputs(
+        private static bool IsHalconMaskLoopFineMatchNode(FlowNode node) =>
+            node.Def.TypeId is "halcon_fine_deformable_match" or "halcon_fine_scaled_shape_match";
+
+        private static void ApplyFineMatchMaskLoopInputs(
+            IDictionary<string, object?> inputs,
+            IReadOnlyDictionary<string, object?> maskNodeInputs,
+            HalconCoarseMaskBatch batch,
+            int maskIndex)
+        {
+            ApplyMaskBatchCoarsePoseToFineInputs(inputs, batch, maskIndex);
+            if (!inputs.ContainsKey("FullImage") && batch.SourceImage != null)
+                inputs["FullImage"] = batch.SourceImage;
+            if (maskNodeInputs.TryGetValue("ModelId", out var modelId) && modelId != null)
+            {
+                long shapeId = HalconFlowBridge.ResolveRegisteredShapeModelId(Convert.ToInt64(modelId));
+                if (shapeId >= 0)
+                {
+                    if (!inputs.ContainsKey("RigidModelId"))
+                        inputs["RigidModelId"] = shapeId;
+                    if (!inputs.ContainsKey("ModelId"))
+                        inputs["ModelId"] = shapeId;
+                }
+            }
+        }
+
+        private Dictionary<string, object?> BuildFineMatchMaskLoopInputs(
             FlowNode fineNode,
             IReadOnlyDictionary<string, object?> maskNodeInputs,
             HalconCoarseMaskBatch batch,
             int maskIndex)
         {
             var inputs = GetNodeInputs(fineNode);
-            ApplyMaskBatchCoarsePoseToFineInputs(inputs, batch, maskIndex);
-            if (!inputs.ContainsKey("FullImage") && batch.SourceImage != null)
-                inputs["FullImage"] = batch.SourceImage;
-            if (!inputs.ContainsKey("RigidModelId") && maskNodeInputs.TryGetValue("ModelId", out var modelId))
-            {
-                long shapeId = HalconFlowBridge.ResolveRegisteredShapeModelId(Convert.ToInt64(modelId));
-                if (shapeId >= 0)
-                    inputs["RigidModelId"] = shapeId;
-            }
-
+            ApplyFineMatchMaskLoopInputs(inputs, maskNodeInputs, batch, maskIndex);
             return inputs;
         }
 
@@ -7538,10 +7566,12 @@ namespace CalibOperatorCLI_Example
             public readonly List<double> Rows = new();
             public readonly List<double> Cols = new();
             public readonly List<double> Angles = new();
+            public readonly List<double> Scales = new();
             public readonly List<double> Scores = new();
             public readonly List<Point2D[]> Contours = new();
             public int Width;
             public int Height;
+            public bool HasShapeXld;
         }
 
         private static void AccumulateFineMatchRound(FlowNode fineNode, FineMatchRoundAccumulator acc)
@@ -7578,7 +7608,24 @@ namespace CalibOperatorCLI_Example
                     acc.Scores.Add(scScalar);
             }
 
-            if (fineNode.Outputs.TryGetValue("DeformedXld", out var xldObj)
+            if (fineNode.Outputs.TryGetValue("Scale", out var scaleObj))
+            {
+                if (scaleObj is double[] scaleArr)
+                    acc.Scales.AddRange(scaleArr);
+                else if (HalconFlowBridge.TryReadCoarseScalar(scaleObj, out double scaleScalar))
+                    acc.Scales.Add(scaleScalar);
+            }
+
+            if (fineNode.Outputs.TryGetValue("ShapeXld", out var shapeXldObj)
+                && shapeXldObj is HalconXldContourBundle shapeBundle
+                && shapeBundle.Contours != null)
+            {
+                acc.HasShapeXld = true;
+                acc.Width = shapeBundle.Width;
+                acc.Height = shapeBundle.Height;
+                acc.Contours.AddRange(shapeBundle.Contours);
+            }
+            else if (fineNode.Outputs.TryGetValue("DeformedXld", out var xldObj)
                 && xldObj is HalconXldContourBundle bundle
                 && bundle.Contours != null)
             {
@@ -7594,14 +7641,17 @@ namespace CalibOperatorCLI_Example
             fineNode.Outputs["Column"] = acc.Cols.ToArray();
             fineNode.Outputs["Angle"] = acc.Angles.ToArray();
             fineNode.Outputs["Score"] = acc.Scores.ToArray();
+            if (acc.Scales.Count > 0)
+                fineNode.Outputs["Scale"] = acc.Scales.ToArray();
             if (acc.Contours.Count > 0)
             {
-                fineNode.Outputs["DeformedXld"] = new HalconXldContourBundle
+                var xld = new HalconXldContourBundle
                 {
                     Width = acc.Width,
                     Height = acc.Height,
                     Contours = acc.Contours
                 };
+                fineNode.Outputs[acc.HasShapeXld ? "ShapeXld" : "DeformedXld"] = xld;
             }
 
             fineNode.ResultSummary = acc.Rows.Count == 0
@@ -7614,7 +7664,7 @@ namespace CalibOperatorCLI_Example
             var downstream = GetDownstreamNodes(maskNode);
             var preNodes = sorted.Where(n => !downstream.Contains(n)).ToList();
             var postNodes = GetOrderedDownstreamOfNode(maskNode);
-            var fineNodes = postNodes.Where(n => n.Def.TypeId == "halcon_fine_deformable_match").ToList();
+            var fineNodes = postNodes.Where(IsHalconMaskLoopFineMatchNode).ToList();
             var fineAccumulators = fineNodes.ToDictionary(n => n.Id, _ => new FineMatchRoundAccumulator());
 
             AppendLog(
@@ -7689,8 +7739,8 @@ namespace CalibOperatorCLI_Example
                         await System.Threading.Tasks.Task.Yield();
                         try
                         {
-                            Dictionary<string, object?>? loopInputs = node.Def.TypeId == "halcon_fine_deformable_match"
-                                ? BuildFineDeformableMaskLoopInputs(node, maskInputs, batch, mi)
+                            Dictionary<string, object?>? loopInputs = IsHalconMaskLoopFineMatchNode(node)
+                                ? BuildFineMatchMaskLoopInputs(node, maskInputs, batch, mi)
                                 : null;
                             await ExecuteNodeForRunAsync(node, $"M{mi + 1}", loopInputs);
                         }
@@ -8156,6 +8206,102 @@ namespace CalibOperatorCLI_Example
             }
 
             throw new InvalidOperationException($"{context}: Images 须为 ImageList 或 CalibImage 列表");
+        }
+
+        private static List<Point2D[]> CoerceToPoint2DPolylineList(object? src)
+        {
+            var result = new List<Point2D[]>();
+            if (src == null)
+                return result;
+
+            if (src is List<Point2D[]> typed)
+            {
+                foreach (Point2D[]? seg in typed)
+                {
+                    if (seg != null && seg.Length > 0)
+                        result.Add(seg);
+                }
+
+                return result;
+            }
+
+            if (src is Point2D[][] arr2d)
+            {
+                foreach (Point2D[]? seg in arr2d)
+                {
+                    if (seg != null && seg.Length > 0)
+                        result.Add(seg);
+                }
+
+                return result;
+            }
+
+#if HALCON_ENABLED
+            if (src is HalconXldContourBundle xld && xld.Contours != null)
+            {
+                foreach (Point2D[]? seg in xld.Contours)
+                {
+                    if (seg != null && seg.Length > 0)
+                        result.Add(seg);
+                }
+
+                return result;
+            }
+#endif
+
+            if (src is System.Collections.IList list)
+            {
+                foreach (var item in list)
+                {
+                    switch (item)
+                    {
+                        case Point2D[] seg when seg.Length > 0:
+                            result.Add(seg);
+                            break;
+                        case List<Point2D> lp when lp.Count > 0:
+                            result.Add(lp.ToArray());
+                            break;
+                        case CalibPoint3D[] p3 when p3.Length > 0:
+                            result.Add(p3.Select(p => new Point2D(p.X, p.Y)).ToArray());
+                            break;
+                    }
+                }
+
+                return result;
+            }
+
+            return result;
+        }
+
+        private static (Point2D[]? Points, int[]? BarIds) MergeDisplayPointOverlays(
+            Point2D[]? singlePts,
+            object? pointsListObj,
+            int[]? explicitBarIds)
+        {
+            var polylines = CoerceToPoint2DPolylineList(pointsListObj);
+            if (singlePts != null && singlePts.Length > 0)
+                polylines.Add(singlePts);
+
+            if (polylines.Count == 0)
+                return (null, null);
+
+            if (explicitBarIds != null
+                && polylines.Count == 1
+                && explicitBarIds.Length == polylines[0].Length)
+            {
+                return (polylines[0], explicitBarIds);
+            }
+
+            var mergedPts = new List<Point2D>();
+            var mergedBarIds = new List<int>();
+            for (int i = 0; i < polylines.Count; i++)
+            {
+                Point2D[] seg = polylines[i];
+                mergedPts.AddRange(seg);
+                mergedBarIds.AddRange(Enumerable.Repeat(i, seg.Length));
+            }
+
+            return (mergedPts.ToArray(), mergedBarIds.ToArray());
         }
 
         private static CalibImage FuseExposureCalibImages(IReadOnlyList<CalibImage> images, string mode)
@@ -8869,6 +9015,22 @@ namespace CalibOperatorCLI_Example
                         node.Outputs["List"] = allImageOrNull
                             ? imageList
                             : new List<object?>(acc);
+
+                        var collectedPoints = new List<Point2D[]>();
+                        foreach (var item in acc)
+                        {
+                            switch (item)
+                            {
+                                case Point2D[] pts when pts.Length > 0:
+                                    collectedPoints.Add(pts);
+                                    break;
+                                case CalibPoint3D[] p3 when p3.Length > 0:
+                                    collectedPoints.Add(p3.Select(p => new Point2D(p.X, p.Y)).ToArray());
+                                    break;
+                            }
+                        }
+
+                        node.Outputs["PointsList"] = collectedPoints.Count > 0 ? collectedPoints : null;
                         node.Outputs["Count"] = acc.Count;
                         if (inputs.TryGetValue("After", out var afterSink))
                             node.Outputs["Out"] = afterSink;
@@ -8876,8 +9038,12 @@ namespace CalibOperatorCLI_Example
                             node.Outputs["Out"] = acc[^1];
 
                         node.ResultSummary = FlowLoopSinkAccumulateActive
-                            ? $"收集 {acc.Count} 项（图 {imageList.Count}）"
-                            : $"收集 {acc.Count} 项（单轮试跑）";
+                            ? collectedPoints.Count > 0
+                                ? $"收集 {acc.Count} 项（点列 {collectedPoints.Count} · 图 {imageList.Count}）"
+                                : $"收集 {acc.Count} 项（图 {imageList.Count}）"
+                            : collectedPoints.Count > 0
+                                ? $"收集 {acc.Count} 项（点列 {collectedPoints.Count}）"
+                                : $"收集 {acc.Count} 项（单轮试跑）";
                         break;
                     }
 
@@ -11424,22 +11590,22 @@ namespace CalibOperatorCLI_Example
 
                     case "display":
                     {
-                        // 显示图像到预览窗口：可选背景图 Img，Image 作为前景层，Points 透明叠加；Xld 单独叠加折线
+                        // 显示图像到预览窗口：可选背景图 Img，Image 作为前景层，Points/PointsList 透明叠加；Xld 单独叠加折线
                         var foregroundImg = (inputs.TryGetValue("Image", out var fgObj) ? fgObj : null) as CalibImage;
                         var backgroundImg = (inputs.TryGetValue("Img", out var bgObj) ? bgObj : null) as CalibImage;
                         if (foregroundImg == null && backgroundImg == null)
                             throw new InvalidOperationException("显示: 缺少输入图像(Image 或 Img)");
                         inputs.TryGetValue("Points", out var ptsObj);
-                        Point2D[]? overlayPts = ptsObj switch
+                        Point2D[]? singlePts = ptsObj switch
                         {
                             Point2D[] p2 => p2,
                             CalibPoint3D[] p3 => p3.Select(p => new Point2D(p.X, p.Y)).ToArray(),
                             _ => null
                         };
+                        inputs.TryGetValue("PointsList", out var ptsListObj);
                         inputs.TryGetValue("BarIds", out var barIdsObj);
-                        int[]? overlayBarIds = barIdsObj as int[];
-                        if (overlayBarIds != null && overlayPts != null && overlayBarIds.Length != overlayPts.Length)
-                            overlayBarIds = null;
+                        int[]? explicitBarIds = barIdsObj as int[];
+                        var (overlayPts, overlayBarIds) = MergeDisplayPointOverlays(singlePts, ptsListObj, explicitBarIds);
                         inputs.TryGetValue("Xld", out var xldObj);
                         var xldBundle = xldObj as HalconXldContourBundle;
                         int dotRadius = int.TryParse(node.Params.GetValueOrDefault("dotRadius"), out int r) ? r : 3;
@@ -11447,6 +11613,12 @@ namespace CalibOperatorCLI_Example
                         string dispTitle = $"{node.Def.DisplayName} [{node.Id.ToString("N")[..8]}]";
                         string pointLineJoin = (node.Params.GetValueOrDefault("pointLineJoin", "auto") ?? "auto").Trim();
                         ShowImagePreview(foregroundImg, overlayPts, dotRadius, backgroundImg, dispSlot, dispTitle, overlayBarIds, pointLineJoin, xldBundle);
+                        int polylineCount = CoerceToPoint2DPolylineList(ptsListObj).Count + (singlePts != null && singlePts.Length > 0 ? 1 : 0);
+                        node.ResultSummary = overlayPts == null
+                            ? "显示图像"
+                            : polylineCount > 1
+                                ? $"显示 {overlayPts.Length} 点 · {polylineCount} 条折线"
+                                : $"显示 {overlayPts.Length} 点";
                         break;
                     }
 
@@ -12996,6 +13168,111 @@ namespace CalibOperatorCLI_Example
                         break;
 #else
                         throw new InvalidOperationException("HALCON Mask域内图: 需要 HALCON 支持编译");
+#endif
+                    }
+
+                    case "halcon_fine_scaled_shape_match":
+                    {
+#if HALCON_ENABLED
+                        if (inputs["In"] is not CalibImage scaledDomainImg)
+                            throw new InvalidOperationException(
+                                "HALCON 缩放形状精匹配: 缺少 In（接 halcon_reduce_domain_by_mask 的 Out）。");
+                        long scaledModelId = HalconFlowBridge.ResolveRegisteredShapeModelId(
+                            Convert.ToInt64(inputs["ModelId"]));
+                        if (scaledModelId < 0)
+                            throw new InvalidOperationException("HALCON 缩放形状精匹配: ModelId 无效或已释放（须为 ScaledShape .shm）");
+                        CalibImage? scaledFullImg = inputs.TryGetValue("FullImage", out var sfiObj) ? sfiObj as CalibImage : null;
+                        inputs.TryGetValue("CoarseRow", out var scrObj);
+                        inputs.TryGetValue("CoarseColumn", out var sccObj);
+                        inputs.TryGetValue("CoarseAngle", out var scaObj);
+                        inputs.TryGetValue("CoarseScale", out var scsObj);
+                        double coarseRowVal = 0, coarseColVal = 0, coarseAngleVal = 0, coarseScaleVal = 1.0;
+                        bool fixRow = scrObj != null && HalconFlowBridge.TryReadCoarseScalar(scrObj, out coarseRowVal);
+                        bool fixCol = sccObj != null && HalconFlowBridge.TryReadCoarseScalar(sccObj, out coarseColVal);
+                        bool fixAngle = scaObj != null && HalconFlowBridge.TryReadCoarseScalar(scaObj, out coarseAngleVal);
+                        bool fixScale = scsObj != null && HalconFlowBridge.TryReadCoarseScalar(scsObj, out coarseScaleVal);
+                        var scaledFixedPose = new ScaledShapeFineFixedPose
+                        {
+                            FixRow = fixRow,
+                            FixCol = fixCol,
+                            FixAngle = fixAngle,
+                            FixScale = fixScale,
+                            Row = coarseRowVal,
+                            Col = coarseColVal,
+                            AngleDeg = coarseAngleVal,
+                            Scale = coarseScaleVal
+                        };
+                        double scaledPoseAngle = fixAngle ? coarseAngleVal : 0;
+
+                        static double Spf(IReadOnlyDictionary<string, string> p, string key, double def) =>
+                            double.TryParse(p.GetValueOrDefault(key), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : def;
+                        static int Spfi(IReadOnlyDictionary<string, string> p, string key, int def) =>
+                            int.TryParse(p.GetValueOrDefault(key), out var v) ? v : def;
+                        static string Spfs(IReadOnlyDictionary<string, string> p, string key, string def) =>
+                            string.IsNullOrWhiteSpace(p.GetValueOrDefault(key)) ? def : p[key]!.Trim();
+
+                        var (scaledFineRelStart, scaledFineRelExtent) = HalconFlowBridge.ResolveFineRelativeAngleRangeFromParams(
+                            node.Params, "fineAngleStart", "fineAngleExtent", "fineAngleMargin", 5);
+                        var (scaledFineSearchCenter, scaledFineSearchMargin) = HalconFlowBridge.ResolveFineAngleSearchCenterMargin(
+                            scaledPoseAngle, scaledFineRelStart, scaledFineRelExtent);
+
+                        string shapeContourMode = Spfs(node.Params, "shapeContourMode", "first");
+                        bool wantShapeContour = !string.Equals(shapeContourMode, "none", StringComparison.OrdinalIgnoreCase);
+
+                        HalconCoarseFineMatchResult scaledFineResult = HalconFlowBridge.FineScaledShapeMatchOnDomainImage(
+                            scaledDomainImg,
+                            scaledModelId,
+                            scaledFixedPose,
+                            fixRow ? coarseRowVal : double.NaN,
+                            fixCol ? coarseColVal : double.NaN,
+                            scaledPoseAngle,
+                            scaledFineSearchMargin,
+                            Spf(node.Params, "fineMinScore", 0.45),
+                            Spfi(node.Params, "fineNumLevels", 0),
+                            Spf(node.Params, "fineGreediness", 0.75),
+                            Spf(node.Params, "fineScaleMin", 0.97),
+                            Spf(node.Params, "fineScaleMax", 1.03),
+                            wantShapeContour,
+                            Spf(node.Params, "roiMarginPx", 12),
+                            Spf(node.Params, "maxRoiHalfPx", 120),
+                            scaledFullImg,
+                            Spf(node.Params, "fineEndScoreWeight", HalconFlowBridge.DefaultEndScoreWeight),
+                            Spf(node.Params, "fineEndArcFraction", HalconFlowBridge.DefaultEndArcFraction),
+                            angleSearchCenterDeg: scaledFineSearchCenter,
+                            angleSearchMarginDeg: scaledFineSearchMargin);
+
+                        scaledDomainImg.RefreshProperties();
+                        var fixedDofParts = new List<string>(4);
+                        if (fixRow) fixedDofParts.Add($"row={coarseRowVal:G4}");
+                        if (fixCol) fixedDofParts.Add($"col={coarseColVal:G4}");
+                        if (fixAngle) fixedDofParts.Add($"angle={coarseAngleVal:G4}°");
+                        if (fixScale) fixedDofParts.Add($"scale={coarseScaleVal:G4}");
+                        string fixedDofNote = fixedDofParts.Count > 0
+                            ? $"固定[{string.Join(", ", fixedDofParts)}], "
+                            : string.Empty;
+                        AppendLog(
+                            $"[HALCON] 缩放精匹配: 域内图 {scaledDomainImg.Width}x{scaledDomainImg.Height}, " +
+                            fixedDofNote +
+                            $"thread_num={HalconRuntimeSettings.LastParallelFindThreadNum}");
+
+                        node.Outputs["Row"] = scaledFineResult.FineRows;
+                        node.Outputs["Column"] = scaledFineResult.FineCols;
+                        node.Outputs["Angle"] = scaledFineResult.FineAngles;
+                        node.Outputs["Scale"] = scaledFineResult.FineScales;
+                        node.Outputs["Score"] = scaledFineResult.FineScores;
+                        if (scaledFineResult.DeformedXld != null)
+                            node.Outputs["ShapeXld"] = scaledFineResult.DeformedXld;
+
+                        node.ResultSummary = scaledFineResult.FineCount == 0
+                            ? fixedDofParts.Count > 0
+                                ? $"缩放精匹配无结果 ({string.Join(", ", fixedDofParts)})"
+                                : "缩放精匹配无结果"
+                            : fixedDofParts.Count > 0
+                                ? $"缩放精 1 sc={scaledFineResult.FineScores[0]:F3} ({string.Join(", ", fixedDofParts)})"
+                                : $"缩放精 1 sc={scaledFineResult.FineScores[0]:F3} scale={scaledFineResult.FineScales[0]:G4}";
+                        break;
+#else
+                        throw new InvalidOperationException("HALCON 缩放形状精匹配: 需要 HALCON 支持编译");
 #endif
                     }
 

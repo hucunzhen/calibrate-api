@@ -60,6 +60,23 @@ var uv864 = HalconShapeMatchLatticePick.PickUvGridAfterBootstrap(
 fail += AssertNotContains(uv864, 13, "Find#13 Score=0.864 离列远");
 fail += AssertFullGrid(uv864, 16);
 
+const double rotateDeg = 42.0;
+RotatePoints(Main2FlowFixture.Rows, Main2FlowFixture.Cols, rotateDeg, out var rotRows, out var rotCols);
+var rotAngles = angles.Select(a => a + rotateDeg).ToArray();
+var rotBoot = HalconShapeMatchLatticePick.StripBootstrap(
+    rotRows, rotCols, rotAngles, scores, gridRows, gridCols, "TestBootRot");
+var rotUv = HalconShapeMatchLatticePick.PickUvGridAfterBootstrap(
+    rotRows, rotCols, rotAngles, scores, gridRows, gridCols,
+    rotBoot.LatticeAngleDeg, rotBoot.BootstrapPickIndices, 0, 0, "TestUvGridRot",
+    pcaChainAngleDeg: rotBoot.PcaChainAngleDeg);
+Console.WriteLine($"=== 大角度旋转 +{rotateDeg:F0}° ===");
+Console.WriteLine($"引导: θ≈{rotBoot.LatticeAngleDeg:F1}°, v≈{rotBoot.VAxisImageAngleDeg:F1}°");
+PrintPick("u/v 落格16 (旋转)", rotUv);
+fail += AssertFullGrid(rotUv, 16);
+fail += AssertLatticeAngle(rotUv, 2.0 + rotateDeg, 8.0);
+fail += AssertImageChainAngle(rotUv, 90.0 + rotateDeg, 12.0);
+fail += AssertCol1Count(rotUv, 8);
+
 Console.WriteLine($"诊断日志: {logPath}");
 Console.WriteLine(File.Exists(svgPath)
     ? $"u/v 投影图: {svgPath}"
@@ -168,6 +185,26 @@ static int AssertLatticeAngle(HalconShapeMatchLatticePickResult pick, double exp
     }
     Console.WriteLine($"  FAIL θ≈{pick.LatticeAngleDeg:F1}° expected {expectedDeg:F1}°");
     return 1;
+}
+
+static void RotatePoints(
+    double[] rows, double[] cols, double deg, out double[] outRows, out double[] outCols)
+{
+    double rad = deg * Math.PI / 180.0;
+    double cos = Math.Cos(rad);
+    double sin = Math.Sin(rad);
+    double cx = cols.Average();
+    double cy = rows.Average();
+    int n = rows.Length;
+    outRows = new double[n];
+    outCols = new double[n];
+    for (int i = 0; i < n; i++)
+    {
+        double dc = cols[i] - cx;
+        double dr = rows[i] - cy;
+        outCols[i] = cx + dc * cos - dr * sin;
+        outRows[i] = cy + dc * sin + dr * cos;
+    }
 }
 
 static int AssertCol1Count(HalconShapeMatchLatticePickResult pick, int expected)

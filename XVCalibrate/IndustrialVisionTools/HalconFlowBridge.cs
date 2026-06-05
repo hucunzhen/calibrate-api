@@ -2134,6 +2134,25 @@ namespace CalibOperatorCLI_Example
             return reg;
         }
 
+        /// <summary>旋转矩形区域：中心 row/col，角度(°)顺时针为 HALCON phi，半边长沿 phi 与垂直方向。</summary>
+        public static HObject GenRegionRectangle2(
+            double centerRow,
+            double centerCol,
+            double angleDeg,
+            double halfLengthAlongAngle,
+            double halfLengthPerpendicular)
+        {
+            double phi = angleDeg * Math.PI / 180.0;
+            HOperatorSet.GenRectangle2(
+                out HObject reg,
+                centerRow,
+                centerCol,
+                phi,
+                halfLengthAlongAngle,
+                halfLengthPerpendicular);
+            return reg;
+        }
+
         public static HObject GenRegionPolygonFilled(IReadOnlyList<Point2D> polygon)
         {
             if (polygon == null || polygon.Count < 3)

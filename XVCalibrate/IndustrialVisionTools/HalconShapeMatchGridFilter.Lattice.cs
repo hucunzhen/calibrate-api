@@ -631,8 +631,9 @@ namespace CalibOperatorCLI_Example
             double chainDirectionDeg,
             string? tag)
         {
+            // 沿用引导/定向给出的链向(v)；勿用列0 PCA 重估+规范化覆盖（大角度时会翻 180° 导致 pitch 错）
             double chainDeg = chainDirectionDeg;
-            if (!double.IsNaN(chainDeg) && col0Indices.Length >= 2)
+            if (double.IsNaN(chainDeg) && col0Indices.Length >= 2)
                 chainDeg = CanonicalizeStripChainDirectionDeg(
                     EstimateChainDirectionAngleDeg(cols, rows, col0Indices), effRows, effCols);
 
@@ -1767,7 +1768,7 @@ namespace CalibOperatorCLI_Example
             return a;
         }
 
-        /// <summary>2×N 条带：u 沿纯左/纯右列中心连线（分列）；中间 Col 带不参与估角。</summary>
+        /// <summary>2×N 条带 u 轴：在图像 Col / PCA 候选 θ 上按全板 u 分列评分选优（大角度仍可靠）。</summary>
         private static bool TryEstimateStripColumnAxisDeg(
             double[] cols,
             double[] rows,
@@ -1778,37 +1779,51 @@ namespace CalibOperatorCLI_Example
             if (n < 4)
                 return false;
             int[] pool = Enumerable.Range(0, n).ToArray();
-            if (!TryPartitionTwoImageColumns(cols, pool, out int[] lowPool, out int[] highPool, out _, out _)
-                || lowPool.Length < 2 || highPool.Length < 2)
-                return false;
 
-            SplitPureImageColumnPools(cols, lowPool, highPool, out int[] pureLow, out int[] pureHigh, out double c0Ref, out double c1Ref);
-
-            double c0 = 0, r0 = 0;
-            foreach (int i in pureLow)
+            static bool AxisFromPools(
+                double[] cols, double[] rows, int[] low, int[] high, out double axisDeg)
             {
-                c0 += cols[i];
-                r0 += rows[i];
+                axisDeg = double.NaN;
+                if (low.Length < 2 || high.Length < 2)
+                    return false;
+                double c0 = low.Average(i => cols[i]);
+                double r0 = low.Average(i => rows[i]);
+                double c1 = high.Average(i => cols[i]);
+                double r1 = high.Average(i => rows[i]);
+                double dc = c1 - c0;
+                double dr = r1 - r0;
+                if (Math.Abs(dc) + Math.Abs(dr) < 1e-3)
+                    return false;
+                axisDeg = NormalizeAngleDeg(Math.Atan2(dr, dc) * 180.0 / Math.PI);
+                return true;
             }
-            c0 /= pureLow.Length;
-            r0 /= pureLow.Length;
 
-            double c1 = 0, r1 = 0;
-            foreach (int i in pureHigh)
+            var candidates = new List<double>();
+            if (TryPartitionTwoImageColumns(cols, pool, out int[] lowPool, out int[] highPool, out _, out _))
             {
-                c1 += cols[i];
-                r1 += rows[i];
+                SplitPureImageColumnPools(cols, lowPool, highPool, out int[] pureLow, out int[] pureHigh, out _, out _);
+                if (AxisFromPools(cols, rows, pureLow, pureHigh, out double imageAxis))
+                    candidates.Add(imageAxis);
+                else if (AxisFromPools(cols, rows, lowPool, highPool, out imageAxis))
+                    candidates.Add(imageAxis);
             }
-            c1 /= pureHigh.Length;
-            r1 /= pureHigh.Length;
 
-            double dc = c1 - c0;
-            double dr = r1 - r0;
-            if (Math.Abs(dc) + Math.Abs(dr) < 1e-3)
-                return false;
+            double pcaRad = EstimatePrincipalAngleRad(cols, rows);
+            candidates.Add(NormalizeAngleDeg(pcaRad * 180.0 / Math.PI));
+            candidates.Add(NormalizeAngleDeg((pcaRad + Math.PI / 2.0) * 180.0 / Math.PI));
 
-            columnAxisDeg = NormalizeAngleDeg(Math.Atan2(dr, dc) * 180.0 / Math.PI);
-            return true;
+            StripUvOrientationScore best = default;
+            foreach (double cand in candidates.Distinct())
+            {
+                var sc = ScoreStripUvThetaAutoPartition(cols, rows, n, cand);
+                if (PreferStripUvScore(sc, best, best.Merit > 0))
+                {
+                    best = sc;
+                    columnAxisDeg = sc.ThetaDeg;
+                }
+            }
+
+            return best.Merit > 0;
         }
 
         private readonly struct StripUvOrientationScore
@@ -2052,17 +2067,11 @@ namespace CalibOperatorCLI_Example
             double halfRangeDeg = 8.0,
             double stepDeg = 0.2)
         {
-            int[] pool = Enumerable.Range(0, n).ToArray();
-            if (!TryPartitionTwoImageColumns(cols, pool, out int[] lowPool, out int[] highPool, out _, out _))
-                return FineTuneStripUvTheta(cols, rows, pool, centerDeg, halfRangeDeg, stepDeg);
-
-            SplitPureImageColumnPools(cols, lowPool, highPool, out int[] pureLow, out int[] pureHigh, out _, out _);
-
             StripUvOrientationScore best = default;
             bool any = false;
             for (double t = centerDeg - halfRangeDeg; t <= centerDeg + halfRangeDeg + 1e-6; t += stepDeg)
             {
-                var sc = ScoreStripUvTheta(cols, rows, n, lowPool, highPool, NormalizeAngleDeg(t), pureLow, pureHigh);
+                var sc = ScoreStripUvThetaAutoPartition(cols, rows, n, NormalizeAngleDeg(t));
                 if (PreferStripUvScore(sc, best, any))
                 {
                     best = sc;
@@ -2070,6 +2079,27 @@ namespace CalibOperatorCLI_Example
                 }
             }
             return best;
+        }
+
+        /// <summary>按当前 θ 的 u 中位分双列后评分；大角度时比图像 Col 分列可靠。</summary>
+        private static StripUvOrientationScore ScoreStripUvThetaAutoPartition(
+            double[] cols, double[] rows, int n, double thetaDeg)
+        {
+            int[] pool = Enumerable.Range(0, n).ToArray();
+            double rad = thetaDeg * Math.PI / 180.0;
+            ProjectToUv(cols, rows, rad, out var u, out _);
+            if (!TrySplitPoolByMedian(u, pool, 2, out int[] lowPool, out int[] highPool))
+            {
+                if (!TryPartitionTwoImageColumns(cols, pool, out lowPool, out highPool, out _, out _))
+                    return default;
+            }
+
+            SplitPureImageColumnPools(cols, lowPool, highPool, out int[] pureLow, out int[] pureHigh, out _, out _);
+            if (pureLow.Length < 2)
+                pureLow = lowPool;
+            if (pureHigh.Length < 2)
+                pureHigh = highPool;
+            return ScoreStripUvTheta(cols, rows, n, lowPool, highPool, thetaDeg, pureLow, pureHigh);
         }
 
         /// <summary>单列内顶分 K（如 8 连）估链向，避免全板 Top-K 混入另一列。</summary>
@@ -2130,6 +2160,7 @@ namespace CalibOperatorCLI_Example
             int inputCount,
             int gridRows,
             int gridCols,
+            double consensusMatchDeg,
             out double thetaUDeg,
             out double chainDeg,
             out int[] topIndices)
@@ -2140,21 +2171,51 @@ namespace CalibOperatorCLI_Example
             if (topIndices.Length < 2)
                 return false;
 
+            int[] chainGeomIndices = topIndices;
+            if (gridCols == 2 && gridRows > gridCols)
+            {
+                TryEstimateStripColumnAxisDeg(cols, rows, inputCount, out double thetaHint);
+                if (!double.IsNaN(thetaHint) && Math.Abs(NormalizeAngleDeg(thetaHint)) > 12.0)
+                {
+                    int[] colPool = GetStripPrimaryColumnPool(cols, rows, inputCount);
+                    if (colPool.Length >= 2)
+                        chainGeomIndices = colPool;
+                }
+            }
+
             chainDeg = CanonicalizeStripChainDirectionDeg(
-                NormalizeAngleDeg(EstimateChainDirectionAngleDeg(cols, rows, topIndices)),
-                gridRows, gridCols);
-            thetaUDeg = NormalizeAngleDeg(chainDeg - 90.0);
+                NormalizeAngleDeg(EstimateChainDirectionAngleDeg(cols, rows, chainGeomIndices)),
+                gridRows, gridCols, consensusMatchDeg);
+            thetaUDeg = StripThetaUFromChainDeg(chainDeg);
             return true;
         }
 
-        /// <summary>8×2 条带：链沿 Row，链向约定为图像 +90° 附近（避免 PCA 符号导致 θ_u≈±180°）。</summary>
-        private static double CanonicalizeStripChainDirectionDeg(double chainDeg, int gridRows, int gridCols)
+        private static double StripThetaUFromChainDeg(double chainDeg) =>
+            NormalizeAngleDeg(chainDeg - 90.0);
+
+        /// <summary>8×2 条带：仅在链向接近竖直(±90°)时消歧 180°；大角度旋转须保留几何估计。</summary>
+        private static double CanonicalizeStripChainDirectionDeg(
+            double chainDeg, int gridRows, int gridCols, double consensusMatchDeg = double.NaN)
         {
             if (gridCols != 2 || gridRows <= gridCols || double.IsNaN(chainDeg))
                 return chainDeg;
             double c = NormalizeAngleDeg(chainDeg);
+            double distVertical = Math.Min(AngleDistanceDeg(c, 90.0), AngleDistanceDeg(c, -90.0));
+            if (distVertical > 35.0)
+                return c;
+
+            double alt = NormalizeAngleDeg(c + 180.0);
+            if (!double.IsNaN(consensusMatchDeg))
+            {
+                // 大角度条带：用模板角在 c / c+180° 间选与格网 u 更一致的一侧
+                double d0 = MinAngleDeltaToMatchDeg(StripThetaUFromChainDeg(c) * Math.PI / 180.0, consensusMatchDeg);
+                double d1 = MinAngleDeltaToMatchDeg(StripThetaUFromChainDeg(alt) * Math.PI / 180.0, consensusMatchDeg);
+                if (Math.Abs(d0 - d1) > 4.0)
+                    return d1 < d0 ? alt : c;
+            }
+
             if (Math.Abs(NormalizeAngleDeg(c + 90.0)) < Math.Abs(NormalizeAngleDeg(c - 90.0)))
-                c = NormalizeAngleDeg(c + 180.0);
+                c = alt;
             return c;
         }
 
@@ -2184,7 +2245,7 @@ namespace CalibOperatorCLI_Example
             double consensusMatchDeg,
             string? tag)
         {
-            if (!TryEstimateStripThetaFromTopScoreChain(cols, rows, scores, n, gridRows, gridCols,
+            if (!TryEstimateStripThetaFromTopScoreChain(cols, rows, scores, n, gridRows, gridCols, consensusMatchDeg,
                     out double thetaFromChain, out double chainDeg, out int[] topK))
             {
                 if (!TryEstimateStripColumnAxisDeg(cols, rows, n, out double columnAxisDeg))
@@ -2195,17 +2256,28 @@ namespace CalibOperatorCLI_Example
                             : EstimatePrincipalAngleRad(cols, rows),
                         SwapUv = false
                     };
-                thetaFromChain = columnAxisDeg;
+                thetaFromChain = NormalizeAngleDeg(columnAxisDeg);
                 chainDeg = double.NaN;
                 topK = Array.Empty<int>();
             }
 
-            // 方向仅由聚类 K 点链向决定；不在全板或单列 K 点上再做 u/v 分列评分细调（会偏 θ）。
+            // 方向由聚类 K 点链向决定；倾斜条带或 K 不足时用全板 u 分列评分细调 θ。
             double thetaU = thetaFromChain;
-            if (topK.Length < 2)
+            double columnAxisHint = double.NaN;
+            bool tiltedStrip = false;
+            if (ShouldUseStripUvGeometricOrientation(gridRows, gridCols) &&
+                TryEstimateStripColumnAxisDeg(cols, rows, n, out columnAxisHint))
+                tiltedStrip = Math.Abs(NormalizeAngleDeg(columnAxisHint)) > 12.0;
+
+            if (topK.Length < 2 || tiltedStrip)
             {
-                var tuned = FineTuneStripUvThetaOnFullBoard(cols, rows, n, thetaFromChain, 8.0, 0.2);
-                thetaU = tuned.ThetaDeg;
+                double center = tiltedStrip && !double.IsNaN(columnAxisHint)
+                    ? columnAxisHint
+                    : !double.IsNaN(thetaFromChain) ? thetaFromChain : columnAxisHint;
+                double halfRange = tiltedStrip ? 24.0 : 8.0;
+                var tuned = FineTuneStripUvThetaOnFullBoard(cols, rows, n, center, halfRange, 0.25);
+                if (tuned.Merit > 0)
+                    thetaU = tuned.ThetaDeg;
             }
 
             double vImg = VAxisImageAngleColToRowDeg(thetaU);
@@ -2627,18 +2699,81 @@ namespace CalibOperatorCLI_Example
             return SelectTopIndicesByScore(scores, inputCount, k);
         }
 
-        /// <summary>双列条带：取左列（纯列）池，供链向聚类。</summary>
-        private static int[] GetStripPrimaryColumnPool(double[] cols, int inputCount)
+        /// <summary>双列条带：取单列池供链向聚类；大角度时图像 Col 分列失效，改沿 u 轴中位分列。</summary>
+        private static int[] GetStripPrimaryColumnPool(double[] cols, double[] rows, int inputCount)
         {
             int[] pool = Enumerable.Range(0, inputCount).ToArray();
-            if (!TryPartitionTwoImageColumns(cols, pool, out int[] lowPool, out _, out double lowMed, out _))
-                return pool;
+            double thetaHint = double.NaN;
+            TryEstimateStripColumnAxisDeg(cols, rows, inputCount, out thetaHint);
+            bool tilted = !double.IsNaN(thetaHint) && Math.Abs(NormalizeAngleDeg(thetaHint)) > 12.0;
+            if (TryPartitionStripPrimaryColumn(cols, rows, pool, thetaHint, out int[] primary, out _, tilted))
+                return primary;
+            return pool;
+        }
 
-            double colMin = pool.Min(i => cols[i]);
-            double colMax = pool.Max(i => cols[i]);
-            double leftMax = lowMed + Math.Max(60, (colMax - colMin) * 0.22);
-            int[] col0Pool = lowPool.Where(i => cols[i] <= leftMax).ToArray();
-            return col0Pool.Length >= 2 ? col0Pool : lowPool;
+        private static bool TrySplitPoolByMedian(double[] coord, int[] pool, int minEach, out int[] low, out int[] high)
+        {
+            low = Array.Empty<int>();
+            high = Array.Empty<int>();
+            if (pool.Length < minEach * 2)
+                return false;
+            double med = MedianOfValues(pool.Select(i => coord[i]));
+            low = pool.Where(i => coord[i] <= med).ToArray();
+            high = pool.Where(i => coord[i] > med).ToArray();
+            return low.Length >= minEach && high.Length >= minEach;
+        }
+
+        /// <summary>条带双列：优先图像 Col 间隙；θ 偏大或纯列过宽时沿格网 u 中位分列。</summary>
+        private static bool TryPartitionStripPrimaryColumn(
+            double[] cols,
+            double[] rows,
+            int[] pool,
+            double latticeAngleDeg,
+            out int[] primaryPool,
+            out int[] secondaryPool,
+            bool forceUv = false)
+        {
+            primaryPool = Array.Empty<int>();
+            secondaryPool = Array.Empty<int>();
+            if (pool.Length < 4)
+                return false;
+
+            bool preferUv = forceUv ||
+                (!double.IsNaN(latticeAngleDeg) && Math.Abs(NormalizeAngleDeg(latticeAngleDeg)) > 18.0);
+
+            if (!preferUv && TryPartitionTwoImageColumns(cols, pool, out int[] lowPool, out int[] highPool, out double lowMed, out _))
+            {
+                double colMin = pool.Min(i => cols[i]);
+                double colMax = pool.Max(i => cols[i]);
+                double leftMax = lowMed + Math.Max(60, (colMax - colMin) * 0.22);
+                int[] pureLow = lowPool.Where(i => cols[i] <= leftMax).ToArray();
+                if (pureLow.Length >= 2 && pureLow.Length <= lowPool.Length * 0.78)
+                {
+                    primaryPool = pureLow;
+                    secondaryPool = highPool;
+                    return true;
+                }
+                if (lowPool.Length >= 2 && lowPool.Length <= pool.Length * 0.65)
+                {
+                    primaryPool = lowPool;
+                    secondaryPool = highPool;
+                    return true;
+                }
+            }
+
+            double thetaU = latticeAngleDeg;
+            if (double.IsNaN(thetaU) && TryEstimateStripColumnAxisDeg(cols, rows, pool.Length, out double columnAxisDeg))
+                thetaU = columnAxisDeg;
+            if (double.IsNaN(thetaU))
+                thetaU = EstimatePrincipalAngleRad(cols, rows) * 180.0 / Math.PI;
+
+            ProjectToUv(cols, rows, thetaU * Math.PI / 180.0, out var u, out _);
+            if (!TrySplitPoolByMedian(u, pool, 2, out int[] lowU, out int[] highU))
+                return false;
+
+            primaryPool = lowU;
+            secondaryPool = highU;
+            return true;
         }
 
         /// <summary>单列池：链向 1D 聚类 K 行，每簇取最高分 1 点；仅用这 K 点估链向（不用全板）。</summary>
@@ -2743,7 +2878,7 @@ namespace CalibOperatorCLI_Example
             if (inputCount == 0 || window <= 0)
                 return Array.Empty<int>();
 
-            int[] col0Pool = GetStripPrimaryColumnPool(cols, inputCount);
+            int[] col0Pool = GetStripPrimaryColumnPool(cols, rows, inputCount);
             return SelectStripChainIndicesByClusterFit(cols, rows, scores, col0Pool, window, tag);
         }
 
@@ -5006,15 +5141,26 @@ namespace CalibOperatorCLI_Example
             {
                 int[] col0Idx = angleIndices;
                 int[] col1Idx = Array.Empty<int>();
-                if (TryPartitionTwoImageColumns(c, angleIndices, out int[] lowPick, out int[] highPick, out _, out _)
+                int k = ConsensusChainWindowSize(gridRows, gridCols);
+                bool tiltedLattice = Math.Abs(NormalizeAngleDeg(latticeAngleDeg)) > 12.0;
+
+                if (tiltedLattice &&
+                    TryPartitionStripPrimaryColumn(c, r, Enumerable.Range(0, n).ToArray(), latticeAngleDeg,
+                        out int[] lowFull, out int[] highFull, forceUv: true))
+                {
+                    col0Idx = SelectStripChainIndicesByClusterFit(c, r, scores, lowFull, k, tag);
+                    col1Idx = SelectStripChainIndicesByClusterFit(c, r, scores, highFull, k,
+                        string.IsNullOrEmpty(tag) ? null : $"{tag}/Col1Pitch");
+                }
+                else if (TryPartitionTwoImageColumns(c, angleIndices, out int[] lowPick, out int[] highPick, out _, out _)
                     && lowPick.Length >= 2 && highPick.Length >= 2)
                 {
                     col0Idx = lowPick;
                     col1Idx = highPick;
                 }
-                else if (TryPartitionTwoImageColumns(c, Enumerable.Range(0, n).ToArray(), out _, out int[] highPool, out _, out _))
+                else if (TryPartitionStripPrimaryColumn(c, r, Enumerable.Range(0, n).ToArray(), latticeAngleDeg,
+                             out _, out int[] highPool))
                 {
-                    int k = ConsensusChainWindowSize(gridRows, gridCols);
                     col1Idx = SelectStripChainIndicesByClusterFit(c, r, scores, highPool, k,
                         string.IsNullOrEmpty(tag) ? null : $"{tag}/Col1Pitch");
                 }
@@ -5075,10 +5221,27 @@ namespace CalibOperatorCLI_Example
             double col0Img = double.NaN;
             double col1Img = double.NaN;
             double imgMargin = Math.Max(40, lattice.MeanPitchU * 0.12);
-            bool hasTwoImgCols = effCols == 2 &&
-                TryPartitionTwoImageColumns(c, Enumerable.Range(0, n).ToArray(), out _, out _, out col0Img, out col1Img);
+            bool tiltedLatticeSnap = Math.Abs(NormalizeAngleDeg(latticeAngleDeg)) > 12.0;
+            bool hasTwoImgCols = false;
+            if (effCols == 2)
+            {
+                int[] allIdx = Enumerable.Range(0, n).ToArray();
+                if (TryPartitionStripPrimaryColumn(c, r, allIdx, latticeAngleDeg, out int[] lowP, out int[] highP,
+                        forceUv: tiltedLatticeSnap))
+                {
+                    hasTwoImgCols = lowP.Length >= 2 && highP.Length >= 2;
+                    if (hasTwoImgCols && !tiltedLatticeSnap)
+                    {
+                        col0Img = MedianOfValues(lowP.Select(i => c[i]));
+                        col1Img = MedianOfValues(highP.Select(i => c[i]));
+                    }
+                }
+                if (!hasTwoImgCols &&
+                    TryPartitionTwoImageColumns(c, allIdx, out _, out _, out col0Img, out col1Img))
+                    hasTwoImgCols = true;
+            }
 
-            if (hasTwoImgCols)
+            if (hasTwoImgCols && !tiltedLatticeSnap)
             {
                 perCell = BuildLatticeCandidatesTwoColumn(
                     c, u, v, scores, n, lattice, snapU, snapV, 0,
@@ -5087,6 +5250,13 @@ namespace CalibOperatorCLI_Example
                     perCell, c, u, v, scores, n, lattice, col0Img, col1Img, imgMargin, 0, tag);
                 DiagLattice(tag,
                     $"落格(双列·snap): {perCell.Count}/{targetCells} 格, snap拒绝={rejectedSnap}, snap放宽={rescuedHigh}, 列内补候选={addedSnap}");
+            }
+            else if (hasTwoImgCols)
+            {
+                perCell = BuildLatticeCandidates(u, v, scores, n, lattice, snapU, snapV, 0,
+                    out rejectedSnap, out rescuedHigh);
+                DiagLattice(tag,
+                    $"落格(倾斜·u/v snap): {perCell.Count}/{targetCells} 格, snap拒绝={rejectedSnap}, snap放宽={rescuedHigh}");
             }
             else
             {
@@ -5098,10 +5268,12 @@ namespace CalibOperatorCLI_Example
 
             LogCandidateDisposition(tag, r, c, scores, u, v, n, lattice, snapU, snapV, perCell);
 
-            var cellBest = SelectOnePerCellLatticeFirst(perCell, tag, distanceFirst: hasTwoImgCols);
+            bool useImageColHeuristics = hasTwoImgCols && !tiltedLatticeSnap;
+
+            var cellBest = SelectOnePerCellLatticeFirst(perCell, tag, distanceFirst: useImageColHeuristics);
             if (cellBest.Count < targetCells)
             {
-                if (hasTwoImgCols)
+                if (useImageColHeuristics)
                     FillEmptyLatticeCellsScoreDistance(cellBest, c, u, v, scores, n, effRows, effCols, lattice,
                         col0Img, col1Img, imgMargin, tag);
                 else
@@ -5110,12 +5282,12 @@ namespace CalibOperatorCLI_Example
 
             double col0Bump = double.NaN;
             double col1Bump = double.NaN;
-            if (hasTwoImgCols)
+            if (useImageColHeuristics)
                 BumpUnassignedHighScoresToNearestCell(cellBest, u, v, scores, n, lattice, 0, tag, c, col0Img, col1Img);
             else
                 BumpUnassignedHighScoresToNearestCell(cellBest, u, v, scores, n, lattice, 0, tag);
 
-            if (hasTwoImgCols)
+            if (useImageColHeuristics)
             {
                 int pruned = PruneOutliersFromStripCellBest(
                     cellBest, c, u, v, lattice, col0Img, col1Img, snapU, snapV, tag);
@@ -5125,9 +5297,11 @@ namespace CalibOperatorCLI_Example
             }
 
             DiagLattice(tag,
-                hasTwoImgCols
+                useImageColHeuristics
                     ? $"每格选取: 列内 snap + 距格心优先, 命中 {cellBest.Count}/{targetCells} 格 (列间隙/离列远不占格)"
-                    : $"每格选取: snap 候选内分数优先, 命中 {cellBest.Count}/{targetCells} 格 (不按分筛选)");
+                    : tiltedLatticeSnap
+                        ? $"每格选取: 倾斜 u/v snap, 命中 {cellBest.Count}/{targetCells} 格"
+                        : $"每格选取: snap 候选内分数优先, 命中 {cellBest.Count}/{targetCells} 格 (不按分筛选)");
 
             var kept = new List<int>(targetCells);
             for (int ic = 0; ic < effCols; ic++)
@@ -5140,7 +5314,7 @@ namespace CalibOperatorCLI_Example
             }
 
             LogUvGridPickRejectionReasons(tag, r, c, scores, u, v, n, lattice, snapU, snapV, perCell, cellBest, kept,
-                col0Img, col1Img, imgMargin, hasTwoImgCols);
+                col0Img, col1Img, imgMargin, useImageColHeuristics);
 
             double consensusDeg = consensusPre;
             if (angles != null && kept.Count > 0 && double.IsNaN(consensusDeg))

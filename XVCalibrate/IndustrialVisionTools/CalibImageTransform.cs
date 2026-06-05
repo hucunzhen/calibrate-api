@@ -65,17 +65,69 @@ namespace CalibOperatorCLI_Example
         {
             if (src == null) throw new ArgumentNullException(nameof(src));
             double a = NormalizeClockwiseAngle(angleDeg);
+            int snapped = ((int)Math.Round(a) % 360 + 360) % 360;
 
-            if (Math.Abs(a) < 1e-6)
+            if (snapped == 0)
                 return CalibAPI.DuplicateImage(src);
-            if (Math.Abs(a - 90) < 1e-6)
-                return RotateRightAngle(src, 90);
-            if (Math.Abs(a - 180) < 1e-6)
-                return RotateRightAngle(src, 180);
-            if (Math.Abs(a - 270) < 1e-6)
-                return RotateRightAngle(src, 270);
 
-            return RotateArbitrary(src, a, expandCanvas);
+            CalibImage rotated = snapped switch
+            {
+                90 => RotateRightAngle(src, 90),
+                180 => RotateRightAngle(src, 180),
+                270 => RotateRightAngle(src, 270),
+                _ => RotateArbitrary(src, a, expandCanvas)
+            };
+
+            if (!expandCanvas && (rotated.Width != src.Width || rotated.Height != src.Height))
+            {
+                CalibImage cropped = CenterCropToSize(rotated, src.Width, src.Height);
+                if (!ReferenceEquals(cropped, rotated))
+                    rotated.Dispose();
+                return cropped;
+            }
+
+            return rotated;
+        }
+
+        /// <summary>中心对齐裁剪/贴到目标尺寸，不足区域填黑。</summary>
+        private static CalibImage CenterCropToSize(CalibImage src, int targetW, int targetH)
+        {
+            int sw = src.Width;
+            int sh = src.Height;
+            if (sw == targetW && sh == targetH)
+                return CalibAPI.DuplicateImage(src);
+
+            int ch = src.GetNativeStruct().channels;
+            var dst = new CalibImage(targetW, targetH, ch);
+            var dn = dst.GetNativeStruct();
+            int dstBytes = targetW * targetH * ch;
+            var outBuf = new byte[dstBytes];
+            Array.Clear(outBuf, 0, outBuf.Length);
+
+            int copyW = Math.Min(sw, targetW);
+            int copyH = Math.Min(sh, targetH);
+            int srcX0 = Math.Max(0, (sw - copyW) / 2);
+            int srcY0 = Math.Max(0, (sh - copyH) / 2);
+            int dstX0 = Math.Max(0, (targetW - copyW) / 2);
+            int dstY0 = Math.Max(0, (targetH - copyH) / 2);
+
+            var sn = src.GetNativeStruct();
+            int srcRow = sw * ch;
+            int dstRow = targetW * ch;
+            var srcBuf = new byte[sw * sh * ch];
+            Marshal.Copy(sn.data, srcBuf, 0, srcBuf.Length);
+
+            for (int y = 0; y < copyH; y++)
+            {
+                int sy = srcY0 + y;
+                int dy = dstY0 + y;
+                int srcOff = sy * srcRow + srcX0 * ch;
+                int dstOff = dy * dstRow + dstX0 * ch;
+                Array.Copy(srcBuf, srcOff, outBuf, dstOff, copyW * ch);
+            }
+
+            Marshal.Copy(outBuf, 0, dn.data, outBuf.Length);
+            return dst;
         }
 
         private static double NormalizeClockwiseAngle(double angleDeg)
@@ -148,9 +200,12 @@ namespace CalibOperatorCLI_Example
 
         private static CalibImage RotateArbitrary(CalibImage src, double angleCwDeg, bool expandCanvas)
         {
-            using var srcBmp = src.ToBitmap();
-            if (srcBmp == null)
+            int channels = src.GetNativeStruct().channels;
+            using Bitmap? srcBmpRaw = src.ToBitmap();
+            if (srcBmpRaw == null)
                 throw new InvalidOperationException("旋转: 无法转换为位图");
+
+            using var srcBmp = CloneToGdiSafeBitmap(srcBmpRaw);
 
             double rad = angleCwDeg * Math.PI / 180.0;
             int srcW = srcBmp.Width, srcH = srcBmp.Height;
@@ -170,16 +225,8 @@ namespace CalibOperatorCLI_Example
                 dstH = srcH;
             }
 
-            using var dstBmp = new Bitmap(dstW, dstH, srcBmp.PixelFormat);
-            if (srcBmp.PixelFormat == PixelFormat.Format8bppIndexed)
-            {
-                ColorPalette pal = dstBmp.Palette;
-                for (int i = 0; i < 256; i++)
-                    pal.Entries[i] = Color.FromArgb(i, i, i);
-                dstBmp.Palette = pal;
-            }
-
-            using (var g = Graphics.FromImage(dstBmp))
+            using var dstRgb = new Bitmap(dstW, dstH, PixelFormat.Format24bppRgb);
+            using (var g = Graphics.FromImage(dstRgb))
             {
                 g.Clear(Color.Black);
                 g.InterpolationMode = InterpolationMode.HighQualityBicubic;
@@ -191,7 +238,68 @@ namespace CalibOperatorCLI_Example
                 g.DrawImage(srcBmp, 0, 0, srcW, srcH);
             }
 
-            return FromBitmap(dstBmp);
+            if (channels == 1)
+                return FromBitmapGray(RgbBitmapToGray8(dstRgb));
+
+            return FromBitmapBgr(dstRgb);
+        }
+
+        private static bool IsIndexedPixelFormat(PixelFormat fmt) =>
+            (fmt & PixelFormat.Indexed) != 0;
+
+        /// <summary>GDI+ 不能在索引格式位图上创建 Graphics；先转到 24bpp RGB。</summary>
+        private static Bitmap CloneToGdiSafeBitmap(Bitmap bmp)
+        {
+            if (!IsIndexedPixelFormat(bmp.PixelFormat))
+                return (Bitmap)bmp.Clone();
+
+            var rgb = new Bitmap(bmp.Width, bmp.Height, PixelFormat.Format24bppRgb);
+            using (var g = Graphics.FromImage(rgb))
+            {
+                g.Clear(Color.Black);
+                g.DrawImage(bmp, 0, 0, bmp.Width, bmp.Height);
+            }
+
+            return rgb;
+        }
+
+        private static Bitmap RgbBitmapToGray8(Bitmap rgb)
+        {
+            var gray = new Bitmap(rgb.Width, rgb.Height, PixelFormat.Format8bppIndexed);
+            ColorPalette pal = gray.Palette;
+            for (int i = 0; i < 256; i++)
+                pal.Entries[i] = Color.FromArgb(i, i, i);
+            gray.Palette = pal;
+
+            var rect = new Rectangle(0, 0, rgb.Width, rgb.Height);
+            BitmapData srcBd = rgb.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+            BitmapData dstBd = gray.LockBits(rect, ImageLockMode.WriteOnly, PixelFormat.Format8bppIndexed);
+            try
+            {
+                int w = rgb.Width;
+                int h = rgb.Height;
+                int srcStride = Math.Abs(srcBd.Stride);
+                int dstStride = Math.Abs(dstBd.Stride);
+                for (int y = 0; y < h; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        int si = y * srcStride + x * 3;
+                        byte b = Marshal.ReadByte(srcBd.Scan0, si);
+                        byte gch = Marshal.ReadByte(srcBd.Scan0, si + 1);
+                        byte r = Marshal.ReadByte(srcBd.Scan0, si + 2);
+                        byte lum = (byte)(0.299 * r + 0.587 * gch + 0.114 * b);
+                        Marshal.WriteByte(dstBd.Scan0, y * dstStride + x, lum);
+                    }
+                }
+            }
+            finally
+            {
+                rgb.UnlockBits(srcBd);
+                gray.UnlockBits(dstBd);
+            }
+
+            return gray;
         }
 
         private static CalibImage FromBitmap(Bitmap bmp)
@@ -300,19 +408,12 @@ namespace CalibOperatorCLI_Example
             if (newW == n.width && newH == n.height)
                 return CalibAPI.DuplicateImage(src);
 
-            using var srcBmp = src.ToBitmap()
+            using Bitmap? srcBmpRaw = src.ToBitmap()
                 ?? throw new InvalidOperationException("图像缩放: 无法转换为位图");
+            using var srcBmp = CloneToGdiSafeBitmap(srcBmpRaw);
 
-            using var dstBmp = new Bitmap(newW, newH, srcBmp.PixelFormat);
-            if (srcBmp.PixelFormat == PixelFormat.Format8bppIndexed)
-            {
-                ColorPalette pal = dstBmp.Palette;
-                for (int i = 0; i < 256; i++)
-                    pal.Entries[i] = Color.FromArgb(i, i, i);
-                dstBmp.Palette = pal;
-            }
-
-            using (var g = Graphics.FromImage(dstBmp))
+            using var dstRgb = new Bitmap(newW, newH, PixelFormat.Format24bppRgb);
+            using (var g = Graphics.FromImage(dstRgb))
             {
                 g.Clear(Color.Black);
                 g.InterpolationMode = ParseInterpolation(interpolation);
@@ -321,7 +422,10 @@ namespace CalibOperatorCLI_Example
                 g.DrawImage(srcBmp, new Rectangle(0, 0, newW, newH), new Rectangle(0, 0, srcBmp.Width, srcBmp.Height), GraphicsUnit.Pixel);
             }
 
-            return FromBitmap(dstBmp);
+            if (n.channels == 1)
+                return FromBitmapGray(RgbBitmapToGray8(dstRgb));
+
+            return FromBitmapBgr(dstRgb);
         }
 
         private static void ResolveResizeOutputSize(

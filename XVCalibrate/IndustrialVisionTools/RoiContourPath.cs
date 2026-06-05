@@ -273,6 +273,44 @@ namespace CalibOperatorCLI_Example
             return a;
         }
 
+        public static bool TryGetArcGeometricRadius(Point start, Point via, Point end, out double radiusPx)
+        {
+            radiusPx = 0;
+            if (!TryCircleFromThreePoints(start, via, end, out _, out radiusPx))
+                return false;
+            return radiusPx > 1e-6;
+        }
+
+        /// <summary>固定起点、终点，按圆半径求弧上点（sideHint 决定鼓出侧）。</summary>
+        public static bool TryViaFromChordAndRadius(
+            Point start,
+            Point end,
+            double radiusPx,
+            Point sideHint,
+            out Point via)
+        {
+            via = default;
+            double dx = end.X - start.X;
+            double dy = end.Y - start.Y;
+            double chord = Math.Sqrt(dx * dx + dy * dy);
+            if (chord < 1e-6)
+                return false;
+
+            double minR = chord * 0.5 + 1e-3;
+            if (radiusPx < minR)
+                radiusPx = minR;
+
+            double mx = (start.X + end.X) * 0.5;
+            double my = (start.Y + end.Y) * 0.5;
+            double nx = -dy / chord;
+            double ny = dx / chord;
+            double h = Math.Sqrt(Math.Max(0, radiusPx * radiusPx - (chord * 0.5) * (chord * 0.5)));
+            var viaPlus = new Point(mx + nx * h, my + ny * h);
+            var viaMinus = new Point(mx - nx * h, my - ny * h);
+            via = Dist(viaPlus, sideHint) <= Dist(viaMinus, sideHint) ? viaPlus : viaMinus;
+            return IsValidArcVia(start, via, end);
+        }
+
         internal static bool TryCircleFromThreePoints(Point a, Point b, Point c, out Point center, out double radius)
         {
             double ax = a.X, ay = a.Y, bx = b.X, by = b.Y, cx = c.X, cy = c.Y;

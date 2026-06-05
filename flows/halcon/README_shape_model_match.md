@@ -63,7 +63,13 @@ FindShapeModel → halcon_pick_shape_match_lattice（阵列格点筛选，输出
 
 ## 使用已导出的 .shm（可选）
 
-形状模板页导出 `.shm` 后：
+形状模板页导出 `.shm` / `.dfm` 时，**默认文件名编码创建参数**（`xv_` 前缀），便于在目录中区分不同模型，例如：
+
+`xv_shape_ThXld_n4_am30x60_ilp_mc10_g20-255.shm`
+
+（负号写作 `m`，小数点写作 `p`；导入时若文件名符合该格式会自动恢复界面参数。）
+
+形状模板页导出模型后：
 
 1. 断开 `halcon_create_shape_model` → `halcon_find_shape_model` 的 ModelId 连线
 2. 将 **HALCON 加载形状模板** 的 ModelId 连到查找节点

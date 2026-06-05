@@ -5,6 +5,14 @@ using System.Text.Json;
 
 namespace CalibOperatorCLI_Example
 {
+    internal sealed class HalconShapeModelRoiConnectorDto
+    {
+        public double StartX { get; set; }
+        public double StartY { get; set; }
+        public double EndX { get; set; }
+        public double EndY { get; set; }
+    }
+
     internal sealed class HalconShapeModelRoiPathDto
     {
         public List<double> VertexXs { get; set; } = new();
@@ -22,13 +30,19 @@ namespace CalibOperatorCLI_Example
 
         /// <summary>九点标定结果 calibration_result.json（含 affine，用于几何测量 mm 显示）。</summary>
         public string NinePointCalibrationPath { get; set; } = "";
-        /// <summary>none | rect | circle | polygon | ring</summary>
+        /// <summary>none | rect | rotatedrect | circle | polygon | ring</summary>
         public string RoiMode { get; set; } = "none";
 
         public double RoiRectX { get; set; }
         public double RoiRectY { get; set; }
         public double RoiRectW { get; set; }
         public double RoiRectH { get; set; }
+
+        public double RotRectCenterX { get; set; }
+        public double RotRectCenterY { get; set; }
+        public double RotRectWidth { get; set; }
+        public double RotRectHeight { get; set; }
+        public double RotRectAngleDeg { get; set; }
 
         public double CircleCenterX { get; set; }
         public double CircleCenterY { get; set; }
@@ -37,6 +51,24 @@ namespace CalibOperatorCLI_Example
         public HalconShapeModelRoiPathDto? PolygonPath { get; set; }
         public HalconShapeModelRoiPathDto? RingOuterPath { get; set; }
         public HalconShapeModelRoiPathDto? RingInnerPath { get; set; }
+
+        /// <summary>已完成的多条开放轨迹（不闭合）。</summary>
+        public List<HalconShapeModelRoiPathDto> OpenTrajectoryPaths { get; set; } = new();
+
+        /// <summary>与 <see cref="OpenTrajectoryPaths"/> 同序的显示名称。</summary>
+        public List<string> OpenTrajectoryNames { get; set; } = new();
+
+        /// <summary>上次保存/加载的 ROI 快照文件路径。</summary>
+        public string LastRoiFile { get; set; } = "";
+
+        /// <summary>旧会话字段，读取时回退到 <see cref="LastRoiFile"/>。</summary>
+        public string LastOpenTrajectoryFile { get; set; } = "";
+
+        /// <summary>当前正在绘制的开放轨迹草稿。</summary>
+        public HalconShapeModelRoiPathDto? OpenTrajectoryDraft { get; set; }
+
+        /// <summary>开放轨迹之间的连接线（不参与模板）。</summary>
+        public List<HalconShapeModelRoiConnectorDto> OpenTrajectoryConnectors { get; set; } = new();
 
         /// <summary>相机矫正：内参去畸变。</summary>
         public bool EnableUndistort { get; set; }
@@ -58,6 +90,12 @@ namespace CalibOperatorCLI_Example
 
         /// <summary>board | local | plane，对应透视输出范围 ComboBox Tag。</summary>
         public string PerspectiveOutputFrame { get; set; } = "board";
+
+        /// <summary>矫正后图像顺时针旋转角度(°)，0/90/180/270 或任意角度。</summary>
+        public double PostCorrectRotateDeg { get; set; }
+
+        /// <summary>非 90° 整数倍旋转时扩大画布以容纳整图。</summary>
+        public bool RotateExpandCanvas { get; set; }
 
         /// <summary>海康相机枚举索引（摄像头取一帧）。</summary>
         public string CameraDeviceIndex { get; set; } = "0";

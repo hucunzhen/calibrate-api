@@ -25,6 +25,9 @@ namespace CalibOperatorCLI_Example
         private CalibImage? _currentImage;
         /// <summary>加载后未矫正的灰度图副本，用于重复应用矫正参数。</summary>
         private CalibImage? _rawCalibImage;
+
+        /// <summary>矫正后顺时针旋转角度(°)，在 TryApplyCameraCorrections 末尾施加。</summary>
+        private double _postCorrectRotateDeg;
         private string? _loadedImagePath;
         private byte[]? _grayPixels;
         private WriteableBitmap? _thresholdOverlay;
@@ -42,6 +45,15 @@ namespace CalibOperatorCLI_Example
         private bool _hasRoi;
         private Rect _roiRectImage;
 
+        /// <summary>旋转矩形 ROI：中心、宽高(像素)、长边方向角(°)。</summary>
+        private double _rotRectCenterX;
+        private double _rotRectCenterY;
+        private double _rotRectWidth;
+        private double _rotRectHeight;
+        private double _rotRectAngleDeg;
+        /// <summary>已拖出大小，等待第二次单击确定角度。</summary>
+        private bool _rotRectSettingAngle;
+
         // 圆形 ROI：圆心 + 半径（图像像素系，X=列 Y=行）
         private Point _circleCenterImage;
         private double _circleRadiusImage;
@@ -51,10 +63,18 @@ namespace CalibOperatorCLI_Example
         private readonly RoiContourPath _ringOuterPath = new RoiContourPath();
         private readonly RoiContourPath _ringInnerPath = new RoiContourPath();
         private int _ringPolygonPhase;
+
+        private bool _hasOpenTrajectoriesRoi;
+
+        /// <summary>轨迹间连接线（不参与模板）。</summary>
+        private readonly List<RoiConnectorSegment> _trajectoryConnectors = new();
+        private Point? _connectorDraftStart;
+
         private List<Point>? _cachedRingOuterFlat;
         private List<Point>? _cachedRingInnerFlat;
         private bool _ringFlatDirty = true;
-        private const double DefaultPolygonCloseDistance = 6;
+        /// <summary>闭合/吸附起点时在屏幕上的判点半径（px），会随视图缩放换算到图像坐标。</summary>
+        private const double DefaultPolygonCloseDistanceViewPx = 14;
         private const int PolygonPreviewMoveIntervalMs = 16;
         private const int PreviewArcSegments = 12;
         private const int ClosedArcSegments = 24;
@@ -62,6 +82,16 @@ namespace CalibOperatorCLI_Example
         private List<Point>? _cachedPolygonFlat;
         private bool _polygonFlatDirty = true;
         private long _lastPolygonPreviewMoveMs;
+
+        private sealed class RoiArcEditEntry
+        {
+            public required RoiContourPath Path { get; init; }
+            public int EdgeIndex { get; init; }
+            public string Label { get; init; } = "";
+        }
+
+        private readonly List<RoiArcEditEntry> _roiArcEditEntries = new();
+        private bool _suppressRoiArcEditUi;
 
         // 模型
         private long _modelId = -1;
@@ -233,6 +263,8 @@ namespace CalibOperatorCLI_Example
 
             _rawCalibImage?.Dispose();
             _rawCalibImage = CalibAPI.DuplicateImage(_currentImage);
+            _postCorrectRotateDeg = 0;
+            SyncPostCorrectRotateTextBox();
 
             try
             {
@@ -319,6 +351,8 @@ namespace CalibOperatorCLI_Example
 
             _rawCalibImage?.Dispose();
             _rawCalibImage = CalibAPI.DuplicateImage(_currentImage);
+            _postCorrectRotateDeg = 0;
+            SyncPostCorrectRotateTextBox();
 
             try
             {
@@ -419,7 +453,79 @@ namespace CalibOperatorCLI_Example
                 : CalibAPI.NormalizeIntrinsicsCalibrationJson(path);
         }
 
-        /// <summary>从 _rawCalibImage 应用内参/透视矫正并刷新显示与 _currentImage。</summary>
+        private static double NormalizePostCorrectRotateDeg(double angleDeg)
+        {
+            double a = angleDeg % 360.0;
+            if (a < 0)
+                a += 360.0;
+            return a;
+        }
+
+        private void SyncPostCorrectRotateTextBox()
+        {
+            if (TxtPostCorrectRotateDeg != null)
+                TxtPostCorrectRotateDeg.Text = _postCorrectRotateDeg.ToString("F0", CultureInfo.InvariantCulture);
+        }
+
+        private CalibImage ApplyPostCorrectRotation(CalibImage work)
+        {
+            if (Math.Abs(_postCorrectRotateDeg) < 1e-6)
+                return work;
+
+            bool expand = ChkRotateExpandCanvas?.IsChecked == true;
+            CalibImage rotated = CalibImageTransform.Rotate(work, _postCorrectRotateDeg, expand);
+            if (!ReferenceEquals(rotated, work))
+                work.Dispose();
+            return rotated;
+        }
+
+        private void ChangePostCorrectRotation(double newDegCw, bool logSuccess)
+        {
+            if (_rawCalibImage == null)
+            {
+                MessageBox.Show("请先加载图像", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            _postCorrectRotateDeg = NormalizePostCorrectRotateDeg(newDegCw);
+            SyncPostCorrectRotateTextBox();
+            ClearRoiState();
+#if HALCON_ENABLED
+            InvalidateContourCache();
+#endif
+            try
+            {
+                TryApplyCameraCorrections(logSuccess: logSuccess);
+                FitImageToView();
+                PersistSessionChange();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"旋转失败:\n{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void BtnRotateCorrectedCw90_Click(object sender, RoutedEventArgs e) =>
+            ChangePostCorrectRotation(_postCorrectRotateDeg + 90, logSuccess: true);
+
+        private void BtnRotateCorrectedCcw90_Click(object sender, RoutedEventArgs e) =>
+            ChangePostCorrectRotation(_postCorrectRotateDeg + 270, logSuccess: true);
+
+        private void BtnResetCorrectedRotate_Click(object sender, RoutedEventArgs e) =>
+            ChangePostCorrectRotation(0, logSuccess: true);
+
+        private void BtnApplyPostCorrectRotate_Click(object sender, RoutedEventArgs e)
+        {
+            if (!double.TryParse(TxtPostCorrectRotateDeg?.Text?.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double deg))
+            {
+                MessageBox.Show("请输入有效旋转角度(°)", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            ChangePostCorrectRotation(deg, logSuccess: true);
+        }
+
+        /// <summary>从 _rawCalibImage 应用内参/透视矫正、矫正后旋转，并刷新显示与 _currentImage。</summary>
         private bool TryApplyCameraCorrections(bool logSuccess)
         {
             if (_rawCalibImage == null)
@@ -429,9 +535,26 @@ namespace CalibOperatorCLI_Example
             bool perspective = ChkEnablePerspective.IsChecked == true;
             if (!undistort && !perspective)
             {
-                CommitCalibImageToUi(_rawCalibImage, disposeIncoming: false);
+                CalibImage? raw = CalibAPI.DuplicateImage(_rawCalibImage);
+                try
+                {
+                    CalibImage display = ApplyPostCorrectRotation(raw);
+                    CommitCalibImageToUi(display, disposeIncoming: true);
+                }
+                catch
+                {
+                    raw?.Dispose();
+                    throw;
+                }
+
                 if (logSuccess)
-                    AppendLog("相机矫正: 未启用，使用原图");
+                {
+                    string rotNote = Math.Abs(_postCorrectRotateDeg) < 1e-6
+                        ? ""
+                        : $"，顺时针旋转 {_postCorrectRotateDeg:F0}°";
+                    AppendLog($"相机矫正: 未启用，使用原图{rotNote}");
+                }
+
                 return true;
             }
 
@@ -481,10 +604,17 @@ namespace CalibOperatorCLI_Example
                     }
                 }
 
-                CommitCalibImageToUi(work, disposeIncoming: true);
-                owned = null;
+                CalibImage display = ApplyPostCorrectRotation(work);
+                owned = ReferenceEquals(display, work) ? work : null;
+                CommitCalibImageToUi(display, disposeIncoming: true);
                 if (logSuccess)
-                    AppendLog($"相机矫正完成 → {_imgWidth}x{_imgHeight}");
+                {
+                    string rotNote = Math.Abs(_postCorrectRotateDeg) < 1e-6
+                        ? ""
+                        : $"，顺时针旋转 {_postCorrectRotateDeg:F0}°";
+                    AppendLog($"相机矫正完成 → {_imgWidth}x{_imgHeight}{rotNote}");
+                }
+
                 return true;
             }
             finally
@@ -522,14 +652,81 @@ namespace CalibOperatorCLI_Example
             ClearFindResultOverlay();
         }
 
-        /// <summary>鼠标在画布上的位置即图像像素坐标（画布与图像 1:1，变换只施加在 ImageCanvas 整体）。</summary>
+        /// <summary>将 ViewHost 上的鼠标位置反算为图像像素坐标（与缩放/平移一致）。</summary>
         private Point GetImagePointFromMouse(MouseEventArgs e)
         {
-            var p = e.GetPosition(ImageCanvas);
-            return new Point(
-                Math.Max(0, Math.Min(_imgWidth - 1, p.X)),
-                Math.Max(0, Math.Min(_imgHeight - 1, p.Y)));
+            var hostPt = e.GetPosition(ViewHost);
+            double scale = Math.Max(_scale, 1e-9);
+            double x = (hostPt.X - _offsetX) / scale;
+            double y = (hostPt.Y - _offsetY) / scale;
+            if (_imgWidth > 0 && _imgHeight > 0)
+            {
+                x = Math.Max(0, Math.Min(_imgWidth - 1, x));
+                y = Math.Max(0, Math.Min(_imgHeight - 1, y));
+            }
+
+            return new Point(x, y);
         }
+
+        private bool TryPromptLandingPoint(Point mouseHint, string title, string? hint, out Point confirmed)
+        {
+            var dlg = new RoiPointLandingDialog
+            {
+                Owner = Window.GetWindow(this),
+                Title = title
+            };
+            AffineTransform? affine = null;
+#if HALCON_ENABLED
+            affine = TryGetNinePointAffineOptional();
+#endif
+            dlg.Initialize(mouseHint.X, mouseHint.Y, affine, _imgWidth, _imgHeight, hint);
+            if (dlg.ShowDialog() != true)
+            {
+                confirmed = default;
+                return false;
+            }
+
+            confirmed = new Point(dlg.ColumnPx, dlg.RowPx);
+            return true;
+        }
+
+        private bool TryAddFirstVertexWithDialog(RoiContourPath path, Point mouse, string logPrefix)
+        {
+            Point hint = mouse;
+            string? prompt = null;
+            if (IsOpenTrajectoriesModeActive() && path.VertexCount == 0 && TryGetLastConnectorEnd(out Point connEnd))
+            {
+                hint = connEnd;
+                prompt = "默认取最近一条连接线的终点；可修改后作为本条轨迹起点。";
+            }
+
+            if (!TryPromptLandingPoint(hint, "落点坐标", prompt ?? "可修改列 X、行 Y（图像像素）。", out Point p))
+                return false;
+
+            path.AddFirstVertex(p);
+            bool fromConn = IsOpenTrajectoriesModeActive()
+                            && TryGetLastConnectorEnd(out Point ce)
+                            && Dist(p, ce) < 1.0;
+            AppendLog(fromConn
+                ? $"{logPrefix}: 第 1 点 ({p.X:F1}, {p.Y:F1})（连接线终点）"
+                : $"{logPrefix}: 第 1 点 ({p.X:F1}, {p.Y:F1})");
+            return true;
+        }
+
+        private bool TrySetArcDraftEndWithDialog(Point mouse, string logPrefix)
+        {
+            if (!TryPromptLandingPoint(mouse, "圆弧段终点", "已用鼠标选定终点，可修改列 X、行 Y。", out Point p))
+                return false;
+
+            _arcDraftEnd = p;
+            _tangentArcPreferLeft = null;
+            UpdateTangentFlipButtonVisibility();
+            AppendLog($"{logPrefix} 圆弧：终点 ({p.X:F1}, {p.Y:F1})，请点击弧上经过的一点");
+            return true;
+        }
+
+        private double ViewPixelsToImagePixels(double viewPx) =>
+            viewPx / Math.Max(_scale, 1e-9);
 
         private void ClampRoiToImage(ref double x, ref double y, ref double w, ref double h)
         {
@@ -583,15 +780,84 @@ namespace CalibOperatorCLI_Example
                 RoiRect.Width = _roiRectImage.Width;
                 RoiRect.Height = _roiRectImage.Height;
             }
-            else if (!_isDrawing || RbCircleMode?.IsChecked == true)
+            else
                 RoiRect.Visibility = Visibility.Collapsed;
 
+            UpdateRotatedRectPreview();
             UpdateCirclePreview();
             UpdatePolygonPreview();
             UpdateRingPreview();
         }
 
         private bool IsCircleModeActive() => RbCircleMode?.IsChecked == true;
+
+        private bool IsRotatedRectModeActive() => RbRotatedRectMode?.IsChecked == true;
+
+        private bool HasUsableRotatedRectRoi() =>
+            _hasRoi && IsRotatedRectModeActive() && !_rotRectSettingAngle
+            && _rotRectWidth > 5 && _rotRectHeight > 5;
+
+        private List<Point> GetRotatedRectCornerPoints(
+            double centerCol,
+            double centerRow,
+            double widthPx,
+            double heightPx,
+            double angleDeg)
+        {
+#if HALCON_ENABLED
+            Point2D[] pts = HalconGeometryContourBuilder.BuildRotatedRectangle(
+                centerCol, centerRow, widthPx * 0.5, heightPx * 0.5, angleDeg, 1);
+            var list = new List<Point>(pts.Length + 1);
+            foreach (Point2D p in pts)
+                list.Add(new Point(p.X, p.Y));
+            if (list.Count > 0)
+                list.Add(list[0]);
+            return list;
+#else
+            return new List<Point>();
+#endif
+        }
+
+        private void UpdateRotatedRectPreview()
+        {
+            if (RoiRotatedRectLine == null)
+                return;
+
+            bool show = (HasUsableRotatedRectRoi() || _rotRectSettingAngle)
+                && (IsRotatedRectModeActive() || _rotRectSettingAngle);
+            if (!show)
+            {
+                RoiRotatedRectLine.Visibility = Visibility.Collapsed;
+                RoiRotatedRectLine.Points.Clear();
+                return;
+            }
+
+            var corners = GetRotatedRectCornerPoints(
+                _rotRectCenterX, _rotRectCenterY, _rotRectWidth, _rotRectHeight, _rotRectAngleDeg);
+            if (corners.Count < 2)
+            {
+                RoiRotatedRectLine.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            RoiRotatedRectLine.Visibility = Visibility.Visible;
+            RoiRotatedRectLine.Points = new PointCollection(corners);
+        }
+
+        private bool IsPointInRotatedRectRoi(double x, double y)
+        {
+            if (!HasUsableRotatedRectRoi())
+                return false;
+
+            double dx = x - _rotRectCenterX;
+            double dy = y - _rotRectCenterY;
+            double rad = -_rotRectAngleDeg * Math.PI / 180.0;
+            double cos = Math.Cos(rad);
+            double sin = Math.Sin(rad);
+            double lx = dx * cos - dy * sin;
+            double ly = dx * sin + dy * cos;
+            return Math.Abs(lx) <= _rotRectWidth * 0.5 && Math.Abs(ly) <= _rotRectHeight * 0.5;
+        }
 
         private bool HasUsableCircleRoi() =>
             _hasRoi && IsCircleModeActive() && _circleRadiusImage > 5;
@@ -654,6 +920,12 @@ namespace CalibOperatorCLI_Example
         }
 
         private bool IsRingModeActive() => RbRingMode?.IsChecked == true;
+
+        private bool IsOpenTrajectoriesModeActive() => RbOpenTrajectoriesMode?.IsChecked == true;
+
+        private bool HasUsableOpenTrajectoriesForTemplate() =>
+            IsOpenTrajectoriesModeActive()
+            && (CollectOpenTrajectoriesForTemplate().Count > 0);
 
         private bool HasUsableRingRoi() =>
             _hasRingRoi && IsRingModeActive() &&
@@ -727,6 +999,366 @@ namespace CalibOperatorCLI_Example
                 RingInnerLine.Visibility = Visibility.Collapsed;
                 RingInnerLine.Points.Clear();
             }
+        }
+
+        private void ResetOpenTrajectoriesDrawState()
+        {
+            _openTrajectoryEntries.Clear();
+            _editingOpenTrajectoryIndex = null;
+            _hasOpenTrajectoriesRoi = false;
+            _trajectoryConnectors.Clear();
+            _connectorDraftStart = null;
+            if (OpenTrajectoriesLayer != null)
+                OpenTrajectoriesLayer.Children.Clear();
+            RebuildConnectorsVisual();
+            UpdateConnectorRubberVisual();
+        }
+
+        private bool TryGetLastConnectorEnd(out Point end)
+        {
+            if (_trajectoryConnectors.Count == 0)
+            {
+                end = default;
+                return false;
+            }
+
+            RoiConnectorSegment last = _trajectoryConnectors[^1];
+            end = last.End;
+            return true;
+        }
+
+        private bool TryGetConnectorAnchorStart(out Point start)
+        {
+            if (_connectorDraftStart is Point draft)
+            {
+                start = draft;
+                return true;
+            }
+
+            if (_roiPath.VertexCount >= 1)
+            {
+                start = _roiPath.Vertices[^1];
+                return true;
+            }
+
+            if (_openTrajectoryEntries.Count > 0)
+            {
+                RoiContourPath last = _openTrajectoryEntries[^1].Path;
+                if (last.VertexCount >= 1)
+                {
+                    start = last.Vertices[^1];
+                    return true;
+                }
+            }
+
+            start = default;
+            return false;
+        }
+
+        /// <summary>连接线落点后：必要时保存上一条草稿，并在连接线终点自动开始下一条轨迹。</summary>
+        private void OnConnectorCommitted(Point connectorEnd)
+        {
+            if (_roiPath.VertexCount >= 2)
+                TryCommitCurrentOpenTrajectoryDraft(showMessage: false);
+            else if (_roiPath.VertexCount > 0)
+                _roiPath.Clear();
+
+            TryResumeTrajectoryAfterConnector(connectorEnd);
+        }
+
+        private void TryResumeTrajectoryAfterConnector(Point connectorEnd)
+        {
+            if (!IsOpenTrajectoriesModeActive() || _roiPath.VertexCount > 0)
+                return;
+
+            _roiPath.AddFirstVertex(connectorEnd);
+            if (RbNextSegmentLine != null)
+                RbNextSegmentLine.IsChecked = true;
+            UpdateNextSegmentToolbar();
+
+            InvalidatePolygonFlatCache();
+            UpdatePolygonPreview();
+            UpdateConnectorRubberVisual();
+            AppendLog($"开放轨迹: 已从连接线终点 ({connectorEnd.X:F1},{connectorEnd.Y:F1}) 继续，移动鼠标后单击绘制下一段");
+            PersistSessionChange();
+        }
+
+        private void RebuildConnectorsVisual()
+        {
+            if (ConnectorsLayer == null)
+                return;
+
+            ConnectorsLayer.Children.Clear();
+            foreach (RoiConnectorSegment seg in _trajectoryConnectors)
+            {
+                var poly = new Polyline
+                {
+                    Stroke = Brushes.Gray,
+                    StrokeThickness = 1.5,
+                    StrokeDashArray = new DoubleCollection { 6, 4 },
+                    Points = new PointCollection { seg.Start, seg.End }
+                };
+                ConnectorsLayer.Children.Add(poly);
+            }
+        }
+
+        private void UpdateConnectorRubberVisual()
+        {
+            if (ConnectorRubberLine == null)
+                return;
+
+            if (!IsOpenTrajectoriesModeActive()
+                || (!IsNextSegmentConnector() && _connectorDraftStart == null))
+            {
+                ConnectorRubberLine.Visibility = Visibility.Collapsed;
+                ConnectorRubberLine.Points.Clear();
+                return;
+            }
+
+            if (!TryGetConnectorAnchorStart(out Point start) || _polygonCursorImage is not Point cursor)
+            {
+                ConnectorRubberLine.Visibility = Visibility.Collapsed;
+                ConnectorRubberLine.Points.Clear();
+                return;
+            }
+
+            ConnectorRubberLine.Visibility = Visibility.Visible;
+            ConnectorRubberLine.Points = new PointCollection { start, cursor };
+        }
+
+        private bool TryCommitConnectorLineAtMouse(Point anchorStart, Point directionMouse, string logPrefix)
+        {
+            double dirX = directionMouse.X - anchorStart.X;
+            double dirY = directionMouse.Y - anchorStart.Y;
+            double initLenPx = Dist(anchorStart, directionMouse);
+            if (initLenPx < 1e-6)
+                initLenPx = 10;
+            else
+            {
+                dirX /= initLenPx;
+                dirY /= initLenPx;
+            }
+
+            var dlg = new RoiLineSegmentParamsDialog
+            {
+                Owner = Window.GetWindow(this),
+                Title = "连接线"
+            };
+            AffineTransform? affineForDialog = null;
+#if HALCON_ENABLED
+            affineForDialog = TryGetNinePointAffineOptional();
+#endif
+            dlg.Initialize(anchorStart.X, anchorStart.Y, dirX, dirY, initLenPx, affineForDialog, alongTangent: false);
+            if (dlg.ShowDialog() != true)
+            {
+                AppendLog($"{logPrefix} 已取消连接线");
+                return false;
+            }
+
+            Point connectorEnd = new Point(dlg.EndColumnPx, dlg.EndRowPx);
+            var seg = new RoiConnectorSegment(anchorStart, connectorEnd);
+            _trajectoryConnectors.Add(seg);
+            _connectorDraftStart = null;
+            RebuildConnectorsVisual();
+            UpdateConnectorRubberVisual();
+            AppendLog($"{logPrefix}: 连接线 ({seg.StartX:F1},{seg.StartY:F1})→({seg.EndX:F1},{seg.EndY:F1})，共 {_trajectoryConnectors.Count} 条（不参与模板）");
+            OnConnectorCommitted(connectorEnd);
+            return true;
+        }
+
+        private void HandleOpenTrajectoryConnectorClick(Point imgPt)
+        {
+            const string label = "连接线";
+
+            if (!TryGetConnectorAnchorStart(out Point start))
+            {
+                if (!TryPromptLandingPoint(imgPt, "连接线起点",
+                        "指定连接线起点；通常为上一条轨迹的终点。", out Point p))
+                    return;
+
+                _connectorDraftStart = p;
+                UpdateConnectorRubberVisual();
+                AppendLog($"{label}: 起点 ({p.X:F1}, {p.Y:F1})，移动鼠标后单击确定终点");
+                return;
+            }
+
+            TryCommitConnectorLineAtMouse(start, imgPt, label);
+        }
+
+        private void RebuildOpenTrajectoriesVisual()
+        {
+            if (OpenTrajectoriesLayer == null)
+                return;
+
+            OpenTrajectoriesLayer.Children.Clear();
+            Brush[] palette =
+            {
+                Brushes.Lime,
+                Brushes.Cyan,
+                Brushes.Orange,
+                Brushes.Magenta,
+                Brushes.DeepSkyBlue
+            };
+
+            int i = 0;
+            foreach (OpenTrajectoryEntry entry in _openTrajectoryEntries)
+            {
+                List<Point> pts = entry.Path.BuildFlattenedPolygon(false, arcSegments: ClosedArcSegments);
+                if (pts.Count < 2)
+                    continue;
+
+                var poly = new Polyline
+                {
+                    Stroke = palette[i % palette.Length],
+                    StrokeThickness = 2,
+                    Points = new PointCollection(pts)
+                };
+                OpenTrajectoriesLayer.Children.Add(poly);
+                i++;
+            }
+        }
+
+        private List<Point2D> GetOpenTrajectoryDensePoints(RoiContourPath path) =>
+            path.BuildFlattenedPolygon(false, arcSegments: ClosedArcSegments)
+                .Select(p => new Point2D(p.X, p.Y))
+                .ToList();
+
+        private List<List<Point2D>> CollectOpenTrajectoriesForTemplate()
+        {
+            var list = new List<List<Point2D>>();
+            foreach (OpenTrajectoryEntry entry in _openTrajectoryEntries)
+            {
+                List<Point2D> dense = GetOpenTrajectoryDensePoints(entry.Path);
+                if (dense.Count >= 2)
+                    list.Add(dense);
+            }
+
+            if (_roiPath.VertexCount >= 2)
+            {
+                List<Point2D> draft = GetOpenTrajectoryDensePoints(_roiPath);
+                if (draft.Count >= 2)
+                    list.Add(draft);
+            }
+
+            return list;
+        }
+
+        private bool TryCommitCurrentOpenTrajectoryDraft(bool showMessage)
+        {
+            if (_arcDraftEnd != null)
+            {
+                if (showMessage)
+                    MessageBox.Show("圆弧段尚未完成，请完成或撤销后再保存本条轨迹。", "开放轨迹",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                return false;
+            }
+
+            if (_roiPath.VertexCount < 2)
+            {
+                if (showMessage)
+                    MessageBox.Show("当前轨迹至少需要 2 个点才能保存。", "开放轨迹",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                return false;
+            }
+
+            RoiContourPath saved = HalconGeometryPathEditor.ClonePath(_roiPath);
+            saved.IsClosed = false;
+            if (_editingOpenTrajectoryIndex is int editIdx
+                && editIdx >= 0
+                && editIdx < _openTrajectoryEntries.Count)
+            {
+                string name = _openTrajectoryEntries[editIdx].Name;
+                _openTrajectoryEntries[editIdx].Path = saved;
+                _editingOpenTrajectoryIndex = null;
+                AppendLog($"开放轨迹: 已更新「{name}」");
+            }
+            else
+            {
+                _openTrajectoryEntries.Add(new OpenTrajectoryEntry
+                {
+                    Name = DefaultTrajectoryName(_openTrajectoryEntries.Count),
+                    Path = saved
+                });
+                AppendLog($"开放轨迹: 已保存第 {_openTrajectoryEntries.Count} 条「{_openTrajectoryEntries[^1].Name}」（不闭合）");
+            }
+
+            _roiPath.Clear();
+            _hasOpenTrajectoriesRoi = true;
+            _hasRoi = true;
+            CancelArcDraft();
+            InvalidatePolygonFlatCache();
+            RebuildOpenTrajectoriesVisual();
+            RebuildConnectorsVisual();
+            UpdatePolygonPreview();
+            UpdateConnectorRubberVisual();
+            RefreshOpenTrajectoryListUi();
+            PersistSessionChange();
+            return true;
+        }
+
+        private void BtnFinishOpenTrajectory_Click(object sender, RoutedEventArgs e) =>
+            TryCommitCurrentOpenTrajectoryDraft(showMessage: true);
+
+        private void BtnNewOpenTrajectory_Click(object sender, RoutedEventArgs e)
+        {
+            if (_roiPath.VertexCount >= 2)
+                TryCommitCurrentOpenTrajectoryDraft(showMessage: false);
+
+            if (_arcDraftEnd != null)
+                CancelArcDraft();
+
+            _editingOpenTrajectoryIndex = null;
+            _roiPath.Clear();
+            _connectorDraftStart = null;
+            InvalidatePolygonFlatCache();
+            UpdatePolygonPreview();
+            UpdateConnectorRubberVisual();
+            RefreshOpenTrajectoryListUi();
+            AppendLog("开放轨迹: 开始绘制新的一条");
+            PersistSessionChange();
+        }
+
+        private void HandleOpenTrajectoryClick(Point imgPt)
+        {
+            const string label = "开放轨迹";
+
+            if (IsNextSegmentConnector())
+            {
+                HandleOpenTrajectoryConnectorClick(imgPt);
+                return;
+            }
+
+            if (_arcDraftEnd is Point end)
+            {
+                TryCommitArcDraftClick(_roiPath, end, imgPt, label, closingToStart: false);
+                return;
+            }
+
+            if (IsNextSegmentArc())
+            {
+                if (_roiPath.VertexCount == 0)
+                {
+                    TryAddFirstVertexWithDialog(_roiPath, imgPt, label);
+                    return;
+                }
+
+                if (IsTangentJoinEnabled() && _roiPath.VertexCount >= 2)
+                {
+                    TryCommitTangentArcAtMouse(_roiPath, imgPt, label);
+                    return;
+                }
+
+                TrySetArcDraftEndWithDialog(imgPt, label);
+                return;
+            }
+
+            if (_roiPath.VertexCount == 0)
+            {
+                TryAddFirstVertexWithDialog(_roiPath, imgPt, label);
+                return;
+            }
+
+            TryCommitLineSegmentAtMouse(_roiPath, imgPt, label);
         }
 
         private void RebuildRingPolyline(Polyline? line, RoiContourPath path)
@@ -849,18 +1481,49 @@ namespace CalibOperatorCLI_Example
             AppendLog("视图已重置");
         }
 
-        private double GetPolygonCloseDistancePx()
+        /// <summary>起点吸附/闭合判定的半径（图像像素，由屏幕容差随缩放换算）。</summary>
+        private double GetPolygonCloseDistanceImagePx()
         {
+            double viewPx = DefaultPolygonCloseDistanceViewPx;
             if (TxtPolygonCloseDist != null
                 && double.TryParse(TxtPolygonCloseDist.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double d)
                 && d > 0)
-                return d;
-            return DefaultPolygonCloseDistance;
+                viewPx = d;
+            return ViewPixelsToImagePixels(viewPx);
         }
 
         private bool IsNextSegmentArc() => RbNextSegmentArc?.IsChecked == true;
 
+        private bool IsNextSegmentConnector() => RbNextSegmentConnector?.IsChecked == true;
+
         private bool IsTangentJoinEnabled() => ChkTangentJoin?.IsChecked == true;
+
+        private void NextSegment_Changed(object sender, RoutedEventArgs e)
+        {
+            if (!IsLoaded)
+                return;
+
+            if (!IsNextSegmentConnector())
+                _connectorDraftStart = null;
+
+            UpdateNextSegmentToolbar();
+            UpdateConnectorRubberVisual();
+        }
+
+        private void UpdateNextSegmentToolbar()
+        {
+            bool open = IsOpenTrajectoriesModeActive();
+            if (RbNextSegmentConnector != null)
+                RbNextSegmentConnector.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+
+            bool connector = IsNextSegmentConnector() && open;
+            if (ChkTangentJoin != null)
+                ChkTangentJoin.Visibility = connector ? Visibility.Collapsed : Visibility.Visible;
+            if (connector && ChkTangentJoin?.IsChecked == true)
+                ChkTangentJoin.IsChecked = false;
+
+            UpdateTangentFlipButtonVisibility();
+        }
 
         private bool TryResolveArcViaForDraft(RoiContourPath path, Point start, Point end, Point sideHint, out Point via)
         {
@@ -876,7 +1539,7 @@ namespace CalibOperatorCLI_Example
             if (BtnTangentFlipSide == null)
                 return;
 
-            bool drawingPath = RbPolygonMode?.IsChecked == true || IsRingModeActive();
+            bool drawingPath = RbPolygonMode?.IsChecked == true || IsRingModeActive() || IsOpenTrajectoriesModeActive();
             bool show = IsTangentJoinEnabled() && IsNextSegmentArc() && drawingPath
                 && (_arcDraftEnd != null
                     || (drawingPath && (IsRingModeActive()
@@ -903,6 +1566,21 @@ namespace CalibOperatorCLI_Example
                 return;
 
             Point start = path.Vertices[^1];
+            if (_arcDraftEnd == null && IsNextSegmentArc())
+            {
+                if (!RoiContourPathTangent.TryGetIncomingTravelTangent(path, out double tanX, out double tanY))
+                    return;
+                if (!_tangentArcPreferLeft.HasValue)
+                    _tangentArcPreferLeft = RoiContourPathTangent.TangentSideSign(
+                        tanX, tanY, start, _polygonCursorImage ?? start) >= 0;
+                _tangentArcPreferLeft = !_tangentArcPreferLeft.Value;
+                AppendLog(_tangentArcPreferLeft.Value ? "相切弧：切线左侧 (鼓出)" : "相切弧：切线右侧 (鼓出)");
+                UpdatePolygonRubberVisual();
+                if (IsRingModeActive())
+                    UpdateRingRubberVisual();
+                return;
+            }
+
             Point end = _arcDraftEnd ?? (_polygonCursorImage ?? start);
             if (Dist(start, end) < 1e-3)
             {
@@ -945,6 +1623,15 @@ namespace CalibOperatorCLI_Example
         {
             drewAlt = false;
             HideRubberAltLine();
+
+            if (IsTangentJoinEnabled() && _arcDraftEnd == null && path.VertexCount >= 2
+                && RoiContourPathTangent.TryBuildTangentArcFromPath(
+                    path, cursor, _tangentArcPreferLeft, out Point liveEnd, out Point liveVia))
+            {
+                foreach (var p in RoiContourPath.SampleArc(start, liveVia, liveEnd, PreviewArcSegments))
+                    primary.Add(p);
+                return;
+            }
 
             RoiContourPathTangent.TryGetIncomingLineAnchor(path, out Point lineAnchor);
             if (IsTangentJoinEnabled()
@@ -1001,6 +1688,205 @@ namespace CalibOperatorCLI_Example
             return RoiContourPathTangent.TryProjectTangentLineEndAfterArc(path, pick, minStepPx: 2.0, out placed);
         }
 
+        private bool TryCommitTangentArcAtMouse(RoiContourPath path, Point directionMouse, string logPrefix)
+        {
+            Point junction = path.Vertices[^1];
+            if (!RoiContourPathTangent.TryEstimateTangentArcParamsFromMouse(
+                    path, directionMouse, _tangentArcPreferLeft, out double initRadiusPx, out double initSweepDeg))
+            {
+                initRadiusPx = 30;
+                initSweepDeg = 45;
+            }
+
+            var dlg = new RoiTangentArcParamsDialog
+            {
+                Owner = Window.GetWindow(this)
+            };
+            AffineTransform? affineForDialog = null;
+#if HALCON_ENABLED
+            affineForDialog = TryGetNinePointAffineOptional();
+#endif
+            dlg.Initialize(junction.X, junction.Y, initRadiusPx, initSweepDeg, affineForDialog);
+            if (dlg.ShowDialog() != true)
+            {
+                AppendLog($"{logPrefix} 已取消圆弧参数输入");
+                return false;
+            }
+
+            if (!RoiContourPathTangent.TryBuildTangentArcFromRadiusAndSweep(
+                    path, directionMouse, dlg.RadiusPx, dlg.SweepDegrees, _tangentArcPreferLeft,
+                    out Point end, out Point via))
+            {
+                AppendLog($"{logPrefix} 圆弧参数无效（半径/张角与相切约束冲突）");
+                MessageBox.Show("圆弧参数无效，请调整半径或张角。", "相切圆弧", MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return false;
+            }
+
+            Point arcStart = junction;
+            if (IsNearPathStart(path, end)
+                && !(IsOpenTrajectoriesModeActive() && ReferenceEquals(path, _roiPath)))
+            {
+                if (!RoiContourPath.IsValidArcVia(arcStart, via, path.Vertices[0]))
+                {
+                    AppendLog($"{logPrefix} 闭合弧几乎共线，请调整参数");
+                    return false;
+                }
+
+                try
+                {
+                    path.CloseLoop(RoiEdgeKind.Arc, via);
+                }
+                catch (ArgumentException ex)
+                {
+                    MessageBox.Show(ex.Message, "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return false;
+                }
+
+                CancelArcDraft();
+                if (ReferenceEquals(path, _roiPath))
+                    FinishPolygonRoiClosed("圆弧相切");
+                else
+                {
+                    AdvanceRingPhaseAfterClose(path);
+                    AppendLog($"{logPrefix} 已自动闭合（终点与起点重合）");
+                }
+
+                return true;
+            }
+
+            if (!RoiContourPath.IsValidArcVia(arcStart, via, end))
+            {
+                AppendLog($"{logPrefix} 弧几乎共线，请调整鼠标位置");
+                return false;
+            }
+
+            try
+            {
+                path.AddArcSegment(end, via);
+            }
+            catch (ArgumentException ex)
+            {
+                MessageBox.Show(ex.Message, "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                return false;
+            }
+
+            CancelArcDraft();
+            AppendLog($"{logPrefix} 圆弧段已添加 R={dlg.RadiusPx:F1}px ∠={dlg.SweepDegrees:F1}°，顶点数 {path.VertexCount}");
+            RefreshRoiArcEditUi();
+            return ReferenceEquals(path, _roiPath) && _roiPath.IsClosed;
+        }
+
+        private bool IsNearPathStart(RoiContourPath path, Point p) =>
+            !path.IsClosed && path.VertexCount >= 3
+            && Dist(p, path.Vertices[0]) < GetPolygonCloseDistanceImagePx();
+
+        private bool TryClosePathIfCoincidentWithStart(RoiContourPath path, Point end, string logPrefix)
+        {
+            if (IsOpenTrajectoriesModeActive() && ReferenceEquals(path, _roiPath))
+                return false;
+
+            if (!IsNearPathStart(path, end))
+                return false;
+
+            if (path.VertexCount < 3)
+            {
+                MessageBox.Show("多边形至少需要 3 个顶点才能闭合。", "提示",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return false;
+            }
+
+            if (ReferenceEquals(path, _roiPath))
+                return TryClosePolygonWithLine();
+
+            path.CloseLoop(RoiEdgeKind.Line, null);
+            AdvanceRingPhaseAfterClose(path);
+            AppendLog($"{logPrefix} 已自动闭合（段终点与起点重合）");
+            return true;
+        }
+
+        private bool TryGetLineSegmentDirection(
+            RoiContourPath path,
+            Point directionMouse,
+            out double dirX,
+            out double dirY,
+            out double lengthPx,
+            out bool alongTangent)
+        {
+            dirX = 1;
+            dirY = 0;
+            lengthPx = 10;
+            alongTangent = false;
+            if (path.VertexCount == 0)
+                return false;
+
+            Point start = path.Vertices[^1];
+            if (TryAddTangentLineSegment(path, directionMouse, out Point onRay))
+            {
+                double dx = onRay.X - start.X;
+                double dy = onRay.Y - start.Y;
+                double len = Dist(start, onRay);
+                if (len >= 1e-6)
+                {
+                    dirX = dx / len;
+                    dirY = dy / len;
+                    lengthPx = len;
+                    alongTangent = true;
+                    return true;
+                }
+            }
+
+            double vx = directionMouse.X - start.X;
+            double vy = directionMouse.Y - start.Y;
+            lengthPx = Dist(start, directionMouse);
+            if (lengthPx < 1e-6)
+                lengthPx = 10;
+            else
+            {
+                dirX = vx / lengthPx;
+                dirY = vy / lengthPx;
+            }
+
+            return true;
+        }
+
+        /// <summary>直线段：鼠标定向后弹窗输入长度；终点落在起点容差内则自动闭合。返回 true 表示路径已闭合。</summary>
+        private bool TryCommitLineSegmentAtMouse(RoiContourPath path, Point directionMouse, string logPrefix)
+        {
+            if (path.VertexCount == 0)
+                return false;
+
+            Point start = path.Vertices[^1];
+            if (!TryGetLineSegmentDirection(path, directionMouse, out double dirX, out double dirY, out double initLenPx, out bool alongTangent))
+                return false;
+
+            var dlg = new RoiLineSegmentParamsDialog
+            {
+                Owner = Window.GetWindow(this)
+            };
+            AffineTransform? affineForDialog = null;
+#if HALCON_ENABLED
+            affineForDialog = TryGetNinePointAffineOptional();
+#endif
+            dlg.Initialize(start.X, start.Y, dirX, dirY, initLenPx, affineForDialog, alongTangent);
+            if (dlg.ShowDialog() != true)
+            {
+                AppendLog($"{logPrefix} 已取消直线段长度输入");
+                return false;
+            }
+
+            Point end = new Point(dlg.EndColumnPx, dlg.EndRowPx);
+
+            if (TryClosePathIfCoincidentWithStart(path, end, logPrefix))
+                return true;
+
+            path.AddLineSegment(end);
+            AppendLog(alongTangent
+                ? $"{logPrefix} 直线段(沿弧切线) L={dlg.LengthPx:F1}px ∠={dlg.AngleDegrees:F1}° → ({end.X:F1},{end.Y:F1}) 顶点 {path.VertexCount}"
+                : $"{logPrefix} 直线段 L={dlg.LengthPx:F1}px ∠={dlg.AngleDegrees:F1}° → ({end.X:F1},{end.Y:F1}) 顶点 {path.VertexCount}");
+            return path.IsClosed;
+        }
+
         private bool TryCommitArcDraftClick(
             RoiContourPath path,
             Point draftEnd,
@@ -1008,6 +1894,11 @@ namespace CalibOperatorCLI_Example
             string logPrefix,
             bool closingToStart)
         {
+            string viaTitle = closingToStart ? "闭合弧经过点" : "弧上经过点";
+            if (!TryPromptLandingPoint(clickPt, viaTitle, "可修改弧上经过点的列 X、行 Y。", out Point viaPick))
+                return false;
+
+            clickPt = viaPick;
             Point arcStart = path.Vertices[^1];
             Point arcEnd = closingToStart ? path.Vertices[0] : draftEnd;
 
@@ -1045,26 +1936,178 @@ namespace CalibOperatorCLI_Example
             return true;
         }
 
-        private void AddLineSegmentWithOptionalTangent(RoiContourPath path, Point imgPt, string logPrefix)
-        {
-            if (TryAddTangentLineSegment(path, imgPt, out Point onRay))
-            {
-                path.AddLineSegment(onRay);
-                AppendLog($"{logPrefix} 直线段(沿弧切线) → 顶点 {path.VertexCount}");
-            }
-            else
-            {
-                path.AddLineSegment(imgPt);
-                AppendLog($"{logPrefix} 直线段 → 顶点 {path.VertexCount}");
-            }
-        }
-
         private void CancelArcDraft()
         {
             _arcDraftEnd = null;
             _tangentArcPreferLeft = null;
             HideRubberAltLine();
             UpdateTangentFlipButtonVisibility();
+        }
+
+        private void RefreshRoiArcEditUi()
+        {
+            if (PnlRoiArcEdit == null)
+                return;
+
+            _roiArcEditEntries.Clear();
+            if (RbPolygonMode?.IsChecked == true && _roiPath.IsClosed && _roiPath.VertexCount >= 3)
+                CollectArcEditEntries(_roiPath, "");
+            if (IsRingModeActive())
+            {
+                if (_ringOuterPath.IsClosed && _ringOuterPath.VertexCount >= 3)
+                    CollectArcEditEntries(_ringOuterPath, "外圈 ");
+                if (_ringInnerPath.IsClosed && _ringInnerPath.VertexCount >= 3)
+                    CollectArcEditEntries(_ringInnerPath, "内圈 ");
+            }
+
+            bool show = _roiArcEditEntries.Count > 0;
+            PnlRoiArcEdit.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            if (!show || CmbRoiArcSegment == null)
+                return;
+
+            _suppressRoiArcEditUi = true;
+            try
+            {
+                int keep = CmbRoiArcSegment.SelectedIndex;
+                CmbRoiArcSegment.ItemsSource = _roiArcEditEntries.Select(e => e.Label).ToList();
+                int pick = keep >= 0 && keep < _roiArcEditEntries.Count ? keep : 0;
+                CmbRoiArcSegment.SelectedIndex = pick;
+                LoadSelectedRoiArcRadiusToUi();
+            }
+            finally
+            {
+                _suppressRoiArcEditUi = false;
+            }
+        }
+
+        private void CollectArcEditEntries(RoiContourPath path, string prefix)
+        {
+            int n = path.IsClosed ? path.VertexCount : 0;
+            for (int i = 0; i < path.EdgeKinds.Count && i < n; i++)
+            {
+                if (path.EdgeKinds[i] != RoiEdgeKind.Arc)
+                    continue;
+                string label = prefix + $"弧段 #{i + 1}";
+#if HALCON_ENABLED
+                label = prefix + HalconGeometryPathEditor.FormatSegmentLabel(path, i);
+#endif
+                _roiArcEditEntries.Add(new RoiArcEditEntry { Path = path, EdgeIndex = i, Label = label });
+            }
+        }
+
+        private RoiArcEditEntry? GetSelectedRoiArcEditEntry()
+        {
+            if (CmbRoiArcSegment?.SelectedIndex is not int idx || idx < 0 || idx >= _roiArcEditEntries.Count)
+                return null;
+            return _roiArcEditEntries[idx];
+        }
+
+        private void LoadSelectedRoiArcRadiusToUi()
+        {
+            if (TxtRoiArcRadius == null)
+                return;
+            if (GetSelectedRoiArcEditEntry() is not RoiArcEditEntry e)
+            {
+                TxtRoiArcRadius.Text = "";
+                return;
+            }
+
+            var path = e.Path;
+            int i = e.EdgeIndex;
+            Point start = path.Vertices[i];
+            Point end = path.Vertices[(i + 1) % path.VertexCount];
+            if (path.ArcVia[i] is Point via && RoiContourPath.TryGetArcGeometricRadius(start, via, end, out double r))
+                TxtRoiArcRadius.Text = r.ToString("F1", CultureInfo.InvariantCulture);
+            else
+                TxtRoiArcRadius.Text = "";
+        }
+
+        private void RoiArcSegment_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_suppressRoiArcEditUi || !IsLoaded)
+                return;
+            LoadSelectedRoiArcRadiusToUi();
+        }
+
+        private void BtnApplyRoiArcRadius_Click(object sender, RoutedEventArgs e)
+        {
+            if (GetSelectedRoiArcEditEntry() is not RoiArcEditEntry entry)
+            {
+                MessageBox.Show("请先选择要修改的圆弧段。", "圆弧弧度", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (!double.TryParse(TxtRoiArcRadius?.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double radiusPx)
+                || radiusPx < 0.5)
+            {
+                MessageBox.Show("请输入有效的半径 R（像素）。", "圆弧弧度", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (!RoiContourPathTangent.TrySetArcEdgeRadius(entry.Path, entry.EdgeIndex, radiusPx, out string err))
+            {
+                MessageBox.Show(err, "圆弧弧度", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (ReferenceEquals(entry.Path, _roiPath))
+            {
+                InvalidatePolygonFlatCache();
+                UpdatePolygonPreview();
+            }
+            else
+            {
+                InvalidateRingFlatCache();
+                UpdateRingPreview();
+            }
+
+            MirrorGeometryPathFromRoiIfSynced();
+            PersistSessionChange();
+            LoadSelectedRoiArcRadiusToUi();
+            AppendLog($"{entry.Label} 半径已设为 {radiusPx:F1} px");
+        }
+
+        private void MirrorGeometryPathFromRoiIfSynced()
+        {
+#if HALCON_ENABLED
+            if (_geometryRoiPath == null || ParseGeometryKind() != HalconMeasuredGeometryKind.RoiPolyline)
+                return;
+            if (!_roiPath.IsClosed || _roiPath.VertexCount < 3)
+                return;
+
+            _geometryRoiPath = HalconGeometryPathEditor.ClonePath(_roiPath);
+            RebuildGeometryRoiPolylineFromPath();
+            int sel = LstGeomPathSegments?.SelectedIndex ?? -1;
+            RefreshGeomPathSegmentList(sel >= 0 ? sel : -1);
+#endif
+        }
+
+        private void MirrorRoiPolygonFromGeometryPathIfSynced()
+        {
+#if HALCON_ENABLED
+            if (_geometryRoiPath == null || ParseGeometryKind() != HalconMeasuredGeometryKind.RoiPolyline)
+                return;
+            if (!_roiPath.IsClosed || _roiPath.VertexCount < 3)
+                return;
+
+            CopyContourPathContents(_geometryRoiPath, _roiPath);
+            InvalidatePolygonFlatCache();
+            UpdatePolygonPreview();
+#endif
+        }
+
+        private static void CopyContourPathContents(RoiContourPath src, RoiContourPath dst)
+        {
+            dst.IsClosed = src.IsClosed;
+            dst.Vertices.Clear();
+            foreach (Point p in src.Vertices)
+                dst.Vertices.Add(p);
+            dst.EdgeKinds.Clear();
+            foreach (RoiEdgeKind k in src.EdgeKinds)
+                dst.EdgeKinds.Add(k);
+            dst.ArcVia.Clear();
+            foreach (Point? v in src.ArcVia)
+                dst.ArcVia.Add(v);
         }
 
         private void InvalidatePolygonFlatCache()
@@ -1173,7 +2216,7 @@ namespace CalibOperatorCLI_Example
 
         private bool IsNearPolygonStart(Point imgPt) =>
             !_hasRoi && RbPolygonMode?.IsChecked == true && _roiPath.VertexCount >= 3
-            && Dist(_roiPath.Vertices[0], imgPt) < GetPolygonCloseDistancePx();
+            && Dist(_roiPath.Vertices[0], imgPt) < GetPolygonCloseDistanceImagePx();
 
         private bool IsNearActiveRingStart(Point imgPt)
         {
@@ -1181,7 +2224,7 @@ namespace CalibOperatorCLI_Example
                 return false;
             var path = GetActiveRingPath();
             return !path.IsClosed && path.VertexCount >= 3
-                && Dist(path.Vertices[0], imgPt) < GetPolygonCloseDistancePx();
+                && Dist(path.Vertices[0], imgPt) < GetPolygonCloseDistanceImagePx();
         }
 
         private bool TryClosePolygonWithLine()
@@ -1238,6 +2281,7 @@ namespace CalibOperatorCLI_Example
             UpdatePolygonPreview();
             UpdateThresholdPreview();
             AppendLog($"多边形 ROI 已{closingKindLabel}闭合: {_roiPath.VertexCount} 个顶点, {_roiPath.EdgeKinds.Count} 段");
+            RefreshRoiArcEditUi();
             PersistSessionChange();
             return true;
         }
@@ -1264,7 +2308,11 @@ namespace CalibOperatorCLI_Example
                 return false;
 
             if (IsNextSegmentArc())
+            {
+                if (IsTangentJoinEnabled())
+                    return TryClosePolygonWithArc(imgPt);
                 return false;
+            }
 
             return TryClosePolygonWithLine();
         }
@@ -1286,6 +2334,7 @@ namespace CalibOperatorCLI_Example
                 _hasRingRoi = true;
                 _hasRoi = true;
                 AppendLog($"环形 ROI 完成：外 {_ringOuterPath.VertexCount} 顶点，内 {_ringInnerPath.VertexCount} 顶点");
+                RefreshRoiArcEditUi();
                 PersistSessionChange();
             }
         }
@@ -1343,7 +2392,11 @@ namespace CalibOperatorCLI_Example
             if (_arcDraftEnd != null)
                 return false;
             if (IsNextSegmentArc())
+            {
+                if (IsTangentJoinEnabled())
+                    return TryCloseActiveRingWithArc(imgPt);
                 return false;
+            }
             return TryCloseActiveRingWithLine();
         }
 
@@ -1375,7 +2428,7 @@ namespace CalibOperatorCLI_Example
 
             if (IsNearActiveRingStart(imgPt))
             {
-                if (IsNextSegmentArc())
+                if (IsNextSegmentArc() && !IsTangentJoinEnabled())
                 {
                     _arcDraftEnd = path.Vertices[0];
                     AppendLog($"{label} 圆弧闭合：请点击弧上经过的一点");
@@ -1389,33 +2442,41 @@ namespace CalibOperatorCLI_Example
             {
                 if (path.VertexCount == 0)
                 {
-                    path.AddFirstVertex(imgPt);
-                    AppendLog($"{label}: 第 1 点（圆弧段起点）");
+                    TryAddFirstVertexWithDialog(path, imgPt, $"{label}（圆弧段起点）");
                     return false;
                 }
 
-                _arcDraftEnd = imgPt;
-                _tangentArcPreferLeft = null;
-                UpdateTangentFlipButtonVisibility();
-                AppendLog(IsTangentJoinEnabled()
-                    ? $"{label} 圆弧终点已设；移动鼠标选鼓出侧，或点「换向」/F 切换，再点确认"
-                    : $"{label} 圆弧：已设终点，请点击弧上经过的一点");
+                if (IsTangentJoinEnabled() && path.VertexCount >= 2)
+                {
+                    if (TryCommitTangentArcAtMouse(path, imgPt, label))
+                        return true;
+                    return false;
+                }
+
+                TrySetArcDraftEndWithDialog(imgPt, label);
                 return false;
             }
 
             if (path.VertexCount == 0)
             {
-                path.AddFirstVertex(imgPt);
-                AppendLog($"{label}: 第 1 点");
+                TryAddFirstVertexWithDialog(path, imgPt, label);
+                return false;
             }
-            else
-                AddLineSegmentWithOptionalTangent(path, imgPt, label);
+
+            if (TryCommitLineSegmentAtMouse(path, imgPt, label))
+                return true;
 
             return false;
         }
 
         private void BtnClosePolygon_Click(object sender, RoutedEventArgs e)
         {
+            if (IsOpenTrajectoriesModeActive())
+            {
+                AppendLog("开放轨迹不闭合；请用「完成本条」保存当前轨迹，「新建本条」开始下一条。");
+                return;
+            }
+
             if (RbPolygonMode.IsChecked == true)
             {
                 AppendLog(_roiPath.VertexCount >= 3 && !_hasRoi
@@ -1439,16 +2500,24 @@ namespace CalibOperatorCLI_Example
         {
             _hasRoi = false;
             _isDrawing = false;
+            _rotRectSettingAngle = false;
+            _rotRectWidth = _rotRectHeight = 0;
             _roiPath.Clear();
             CancelArcDraft();
             _polygonCursorImage = null;
             InvalidatePolygonFlatCache();
             ResetCircleDrawState();
             ResetRingDrawState();
+            ResetOpenTrajectoriesDrawState();
 
             try
             {
                 if (RoiRect != null) RoiRect.Visibility = Visibility.Collapsed;
+                if (RoiRotatedRectLine != null)
+                {
+                    RoiRotatedRectLine.Visibility = Visibility.Collapsed;
+                    RoiRotatedRectLine.Points.Clear();
+                }
                 if (PolygonLine != null)
                 {
                     PolygonLine.Visibility = Visibility.Collapsed;
@@ -1796,6 +2865,7 @@ namespace CalibOperatorCLI_Example
             if (_modelId >= 0)
                 AppendLog($"释放旧模型 ModelID={_modelId}（epoch→{_modelEpoch + 1}）");
             DisposeCurrentModel();
+            ClearModelCreateMeta();
             ResetFindResultUi();
         }
 
@@ -1812,20 +2882,58 @@ namespace CalibOperatorCLI_Example
             if (!_uiReady || _suppressDrawModeClear)
                 return;
             ClearRoiState();
+            UpdateDrawToolbarForMode();
+        }
+
+        private void UpdateDrawToolbarForMode()
+        {
+            bool open = IsOpenTrajectoriesModeActive();
+            if (BtnFinishOpenTrajectory != null)
+                BtnFinishOpenTrajectory.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+            if (BtnNewOpenTrajectory != null)
+                BtnNewOpenTrajectory.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+            if (BtnClosePolygon != null)
+                BtnClosePolygon.Visibility = open ? Visibility.Collapsed
+                    : RbPolygonMode?.IsChecked == true || IsRingModeActive()
+                        ? Visibility.Visible
+                        : Visibility.Collapsed;
+
+            if (!open && IsNextSegmentConnector() && RbNextSegmentLine != null)
+                RbNextSegmentLine.IsChecked = true;
+
+            UpdateNextSegmentToolbar();
+            UpdateRoiManagePanelVisibility();
         }
 
         // ───────── 画布鼠标事件 ─────────
+        private void DrawToolbar_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (ViewHost.IsMouseCaptured)
+                ViewHost.ReleaseMouseCapture();
+        }
+
         private void Canvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             if (_imgWidth <= 0 || _imgHeight <= 0) return;
 
             var imgPt = GetImagePointFromMouse(e);
+            bool captureForDrag = false;
 
-            if (RbRectMode.IsChecked == true)
+            if (RbRectMode.IsChecked == true || IsRotatedRectModeActive())
             {
+                if (_rotRectSettingAngle)
+                {
+                    CommitRotatedRectFromAnglePick(imgPt);
+                    ViewHost.ReleaseMouseCapture();
+                    return;
+                }
+
                 _isDrawing = true;
+                captureForDrag = true;
                 _drawStartImage = imgPt;
-                if (RoiRect != null)
+                if (RoiRect != null && IsRotatedRectModeActive())
+                    RoiRect.Visibility = Visibility.Collapsed;
+                else if (RoiRect != null)
                 {
                     RoiRect.Visibility = Visibility.Visible;
                     Canvas.SetLeft(RoiRect, imgPt.X);
@@ -1837,6 +2945,7 @@ namespace CalibOperatorCLI_Example
             else if (IsCircleModeActive())
             {
                 _isDrawing = true;
+                captureForDrag = true;
                 _circleCenterImage = imgPt;
                 _circleRadiusImage = 0;
                 UpdateCirclePreview();
@@ -1844,15 +2953,21 @@ namespace CalibOperatorCLI_Example
             else if (RbPolygonMode.IsChecked == true)
             {
                 if (HandlePolygonClick(imgPt))
-                {
-                    ViewHost.ReleaseMouseCapture();
                     return;
-                }
 
                 RebuildCommittedPolygonVisual();
                 UpdatePolygonRubberVisual();
                 if (_hasRoi)
                     UpdateThresholdPreview();
+            }
+            else if (IsOpenTrajectoriesModeActive())
+            {
+                HandleOpenTrajectoryClick(imgPt);
+                RebuildCommittedPolygonVisual();
+                RebuildOpenTrajectoriesVisual();
+                RebuildConnectorsVisual();
+                UpdatePolygonRubberVisual();
+                UpdateConnectorRubberVisual();
             }
             else if (IsRingModeActive())
             {
@@ -1860,13 +2975,11 @@ namespace CalibOperatorCLI_Example
                 UpdateRingPreview();
                 UpdateRingRubberVisual();
                 if (closedStep && _ringPolygonPhase >= 2)
-                {
                     UpdateThresholdPreview();
-                    ViewHost.ReleaseMouseCapture();
-                }
             }
 
-            ViewHost.CaptureMouse();
+            if (captureForDrag)
+                ViewHost.CaptureMouse();
         }
 
         private bool HandlePolygonClick(Point imgPt)
@@ -1891,7 +3004,7 @@ namespace CalibOperatorCLI_Example
 
             if (IsNearPolygonStart(imgPt))
             {
-                if (IsNextSegmentArc())
+                if (IsNextSegmentArc() && !IsTangentJoinEnabled())
                 {
                     _arcDraftEnd = _roiPath.Vertices[0];
                     AppendLog("圆弧闭合：请点击弧上经过的一点");
@@ -1905,27 +3018,29 @@ namespace CalibOperatorCLI_Example
             {
                 if (_roiPath.VertexCount == 0)
                 {
-                    _roiPath.AddFirstVertex(imgPt);
-                    AppendLog("多边形: 第 1 点（圆弧段起点）");
+                    TryAddFirstVertexWithDialog(_roiPath, imgPt, "多边形（圆弧段起点）");
                     return false;
                 }
 
-                _arcDraftEnd = imgPt;
-                _tangentArcPreferLeft = null;
-                UpdateTangentFlipButtonVisibility();
-                AppendLog(IsTangentJoinEnabled()
-                    ? "圆弧终点已设；移动鼠标选鼓出侧，或点「换向」/F 切换，再点确认"
-                    : "圆弧：已设终点，请点击弧上经过的一点");
+                if (IsTangentJoinEnabled() && _roiPath.VertexCount >= 2)
+                {
+                    if (TryCommitTangentArcAtMouse(_roiPath, imgPt, "多边形"))
+                        return true;
+                    return false;
+                }
+
+                TrySetArcDraftEndWithDialog(imgPt, "多边形");
                 return false;
             }
 
             if (_roiPath.VertexCount == 0)
             {
-                _roiPath.AddFirstVertex(imgPt);
-                AppendLog("多边形: 第 1 点");
+                TryAddFirstVertexWithDialog(_roiPath, imgPt, "多边形");
+                return false;
             }
-            else
-                AddLineSegmentWithOptionalTangent(_roiPath, imgPt, "多边形");
+
+            if (TryCommitLineSegmentAtMouse(_roiPath, imgPt, "多边形"))
+                return true;
 
             return false;
         }
@@ -1941,8 +3056,10 @@ namespace CalibOperatorCLI_Example
                 return;
             }
 
-            if (RbPolygonMode.IsChecked == true && !_hasRoi &&
-                (_roiPath.VertexCount > 0 || _arcDraftEnd != null))
+            if ((RbPolygonMode.IsChecked == true && !_hasRoi
+                 || IsOpenTrajectoriesModeActive())
+                && (_roiPath.VertexCount > 0 || _arcDraftEnd != null
+                    || IsNextSegmentConnector() || _connectorDraftStart != null))
             {
                 long now = Environment.TickCount64;
                 if (now - _lastPolygonPreviewMoveMs < PolygonPreviewMoveIntervalMs)
@@ -1951,6 +3068,7 @@ namespace CalibOperatorCLI_Example
 
                 _polygonCursorImage = GetImagePointFromMouse(e);
                 UpdatePolygonRubberVisual();
+                UpdateConnectorRubberVisual();
             }
             else if (IsRingModeActive() && _ringPolygonPhase < 2)
             {
@@ -1967,6 +3085,16 @@ namespace CalibOperatorCLI_Example
                 }
             }
 
+            if (_rotRectSettingAngle)
+            {
+                var curAngle = GetImagePointFromMouse(e);
+                _rotRectAngleDeg = Math.Atan2(
+                    curAngle.Y - _rotRectCenterY,
+                    curAngle.X - _rotRectCenterX) * 180.0 / Math.PI;
+                UpdateRotatedRectPreview();
+                return;
+            }
+
             if (!_isDrawing) return;
 
             var cur = GetImagePointFromMouse(e);
@@ -1981,13 +3109,25 @@ namespace CalibOperatorCLI_Example
                 return;
             }
 
-            if (RbRectMode.IsChecked != true) return;
+            if (RbRectMode.IsChecked != true && !IsRotatedRectModeActive())
+                return;
 
             double ix = Math.Min(_drawStartImage.X, cur.X);
             double iy = Math.Min(_drawStartImage.Y, cur.Y);
             double iw = Math.Abs(cur.X - _drawStartImage.X);
             double ih = Math.Abs(cur.Y - _drawStartImage.Y);
             ClampRoiToImage(ref ix, ref iy, ref iw, ref ih);
+
+            if (IsRotatedRectModeActive())
+            {
+                _rotRectCenterX = ix + iw * 0.5;
+                _rotRectCenterY = iy + ih * 0.5;
+                _rotRectWidth = iw;
+                _rotRectHeight = ih;
+                _rotRectAngleDeg = Math.Atan2(cur.Y - _rotRectCenterY, cur.X - _rotRectCenterX) * 180.0 / Math.PI;
+                UpdateRotatedRectPreview();
+                return;
+            }
 
             if (RoiRect != null)
             {
@@ -1996,6 +3136,39 @@ namespace CalibOperatorCLI_Example
                 RoiRect.Width = iw;
                 RoiRect.Height = ih;
             }
+        }
+
+        private void CommitRotatedRectFromAnglePick(Point imgPt)
+        {
+            _rotRectAngleDeg = Math.Atan2(
+                imgPt.Y - _rotRectCenterY,
+                imgPt.X - _rotRectCenterX) * 180.0 / Math.PI;
+            _rotRectSettingAngle = false;
+            _hasRoi = true;
+            RefreshRoiVisuals();
+            UpdateThresholdPreview();
+            AppendLog($"旋转矩形 ROI: 中心=({_rotRectCenterX:F0},{_rotRectCenterY:F0}) {_rotRectWidth:F0}×{_rotRectHeight:F0}° {_rotRectAngleDeg:F1}");
+            PersistSessionChange();
+#if HALCON_ENABLED
+            TryAutoSyncGeometryFromRoiIfNeeded();
+#endif
+        }
+
+        private bool TryBeginRotatedRectAnglePhase(double x, double y, double w, double h)
+        {
+            if (!IsRotatedRectModeActive() || w <= 5 || h <= 5)
+                return false;
+
+            _rotRectCenterX = x + w * 0.5;
+            _rotRectCenterY = y + h * 0.5;
+            _rotRectWidth = w;
+            _rotRectHeight = h;
+            _rotRectSettingAngle = true;
+            if (RoiRect != null)
+                RoiRect.Visibility = Visibility.Collapsed;
+            UpdateRotatedRectPreview();
+            AppendLog("旋转矩形: 移动鼠标确定角度，单击确认");
+            return true;
         }
 
         private void Canvas_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
@@ -2031,7 +3204,7 @@ namespace CalibOperatorCLI_Example
                 return;
             }
 
-            if (RbRectMode.IsChecked == true)
+            if (RbRectMode.IsChecked == true || IsRotatedRectModeActive())
             {
                 double x = Math.Min(_drawStartImage.X, cur.X);
                 double y = Math.Min(_drawStartImage.Y, cur.Y);
@@ -2039,7 +3212,10 @@ namespace CalibOperatorCLI_Example
                 double h = Math.Abs(cur.Y - _drawStartImage.Y);
                 ClampRoiToImage(ref x, ref y, ref w, ref h);
 
-                if (w > 5 && h > 5)
+                if (TryBeginRotatedRectAnglePhase(x, y, w, h))
+                    return;
+
+                if (w > 5 && h > 5 && RbRectMode.IsChecked == true)
                 {
                     _hasRoi = true;
                     _roiRectImage = new Rect(x, y, w, h);
@@ -2098,16 +3274,16 @@ namespace CalibOperatorCLI_Example
         {
             if (_imgWidth <= 0 || _imgHeight <= 0) return;
 
-            var mouseCanvas = e.GetPosition(ImageCanvas);
+            Point mouseImage = GetImagePointFromMouse(e);
             double factor = e.Delta > 0 ? 1.1 : (1.0 / 1.1);
             double newScale = Math.Max(MinScale, Math.Min(MaxScale, _scale * factor));
             if (Math.Abs(newScale - _scale) < 0.001) return;
 
-            double parentX = _scale * mouseCanvas.X + _offsetX;
-            double parentY = _scale * mouseCanvas.Y + _offsetY;
+            double parentX = newScale * mouseImage.X + _offsetX;
+            double parentY = newScale * mouseImage.Y + _offsetY;
             _scale = newScale;
-            _offsetX = parentX - newScale * mouseCanvas.X;
-            _offsetY = parentY - newScale * mouseCanvas.Y;
+            _offsetX = parentX - newScale * mouseImage.X;
+            _offsetY = parentY - newScale * mouseImage.Y;
 
             ApplyTransform();
         }
@@ -2144,6 +3320,7 @@ namespace CalibOperatorCLI_Example
         {
             RebuildCommittedPolygonVisual();
             UpdatePolygonRubberVisual();
+            RefreshRoiArcEditUi();
         }
 
         // ───────── 撤销多边形点 ─────────
@@ -2155,6 +3332,65 @@ namespace CalibOperatorCLI_Example
                 ResetCircleDrawState();
                 UpdateThresholdPreview();
                 AppendLog("圆形 ROI 已清除");
+                return;
+            }
+
+            if (IsOpenTrajectoriesModeActive())
+            {
+                if (_connectorDraftStart != null)
+                {
+                    _connectorDraftStart = null;
+                    UpdateConnectorRubberVisual();
+                    AppendLog("已取消未完成的连接线");
+                    return;
+                }
+
+                if (_trajectoryConnectors.Count > 0)
+                {
+                    RoiConnectorSegment removed = _trajectoryConnectors[^1];
+                    _trajectoryConnectors.RemoveAt(_trajectoryConnectors.Count - 1);
+                    if (_roiPath.VertexCount == 1 && Dist(_roiPath.Vertices[0], removed.End) < 1.0)
+                    {
+                        _roiPath.Clear();
+                        InvalidatePolygonFlatCache();
+                        UpdatePolygonPreview();
+                    }
+
+                    RebuildConnectorsVisual();
+                    UpdateConnectorRubberVisual();
+                    AppendLog($"连接线撤销: 剩余 {_trajectoryConnectors.Count} 条");
+                    PersistSessionChange();
+                    return;
+                }
+
+                if (_arcDraftEnd != null)
+                {
+                    CancelArcDraft();
+                    UpdatePolygonPreview();
+                    AppendLog("已取消未完成的圆弧段");
+                    return;
+                }
+
+                if (_roiPath.VertexCount > 0)
+                {
+                    _roiPath.RemoveLastVertex();
+                    UpdatePolygonPreview();
+                    AppendLog($"开放轨迹撤销: 当前条剩余 {_roiPath.VertexCount} 个顶点");
+                    return;
+                }
+
+                if (_openTrajectoryEntries.Count > 0)
+                {
+                    string removed = _openTrajectoryEntries[^1].Name;
+                    _openTrajectoryEntries.RemoveAt(_openTrajectoryEntries.Count - 1);
+                    _hasOpenTrajectoriesRoi = _openTrajectoryEntries.Count > 0;
+                    _hasRoi = _hasOpenTrajectoriesRoi || _roiPath.VertexCount >= 2;
+                    RebuildOpenTrajectoriesVisual();
+                    RefreshOpenTrajectoryListUi();
+                    AppendLog($"开放轨迹撤销: 已删除「{removed}」，剩余 {_openTrajectoryEntries.Count} 条");
+                    PersistSessionChange();
+                }
+
                 return;
             }
 
@@ -2228,6 +3464,7 @@ namespace CalibOperatorCLI_Example
             int[] hist = new int[256];
             int roiHits = 0;
             bool useRect = _hasRoi && RbRectMode?.IsChecked == true;
+            bool useRotated = HasUsableRotatedRectRoi();
             bool useCircle = HasUsableCircleRoi();
             bool usePoly = RbPolygonMode?.IsChecked == true && _hasRoi && _roiPath.VertexCount >= 3;
             bool useRing = HasUsableRingRoi();
@@ -2241,6 +3478,11 @@ namespace CalibOperatorCLI_Example
                     {
                         if (x + 0.5 < _roiRectImage.X || x + 0.5 >= _roiRectImage.Right ||
                             y + 0.5 < _roiRectImage.Y || y + 0.5 >= _roiRectImage.Bottom)
+                            continue;
+                    }
+                    else if (useRotated)
+                    {
+                        if (!IsPointInRotatedRectRoi(x + 0.5, y + 0.5))
                             continue;
                     }
                     else if (useCircle)
@@ -2308,6 +3550,8 @@ namespace CalibOperatorCLI_Example
                 if (useRect)
                     return x + 0.5 >= _roiRectImage.X && x + 0.5 < _roiRectImage.Right &&
                            y + 0.5 >= _roiRectImage.Y && y + 0.5 < _roiRectImage.Bottom;
+                if (useRotated)
+                    return IsPointInRotatedRectRoi(x + 0.5, y + 0.5);
                 if (useCircle)
                     return IsPointInCircleRoi(x + 0.5, y + 0.5);
                 if (usePoly)
@@ -2324,7 +3568,7 @@ namespace CalibOperatorCLI_Example
                 _grayPixels, _imgWidth, _imgHeight, thresh, InsideRoi);
             TxtMinGray.Text = minG.ToString(CultureInfo.InvariantCulture);
             TxtMaxGray.Text = maxG.ToString(CultureInfo.InvariantCulture);
-            AppendLog(useRect || useCircle || usePoly || useRing
+            AppendLog(useRect || useRotated || useCircle || usePoly || useRing
                 ? $"ROI 内自动阈值: [{minG}, {maxG}]（Otsu={thresh}，样本 {roiHits} 像素）"
                 : $"全图自动阈值: [{minG}, {maxG}]（Otsu={thresh}）");
             UpdateThresholdPreview();
@@ -2387,7 +3631,7 @@ namespace CalibOperatorCLI_Example
 
             bool drawingOpenPoly = RbPolygonMode?.IsChecked == true && !_hasRoi;
             bool drawingOpenRing = IsRingModeActive() && !_hasRingRoi;
-            if (drawingOpenPoly || drawingOpenRing)
+            if (drawingOpenPoly || drawingOpenRing || _rotRectSettingAngle)
             {
                 ThresholdOverlayImage.Visibility = Visibility.Collapsed;
                 return;
@@ -2397,6 +3641,7 @@ namespace CalibOperatorCLI_Example
             int h = _imgHeight;
             int x0 = 0, y0 = 0, x1 = w, y1 = h;
             bool useRect = _hasRoi && RbRectMode?.IsChecked == true;
+            bool useRotated = HasUsableRotatedRectRoi();
             bool useCircle = HasUsableCircleRoi();
             bool usePoly = RbPolygonMode?.IsChecked == true && _hasRoi && _roiPath.VertexCount >= 3;
             bool useRing = HasUsableRingRoi();
@@ -2408,6 +3653,18 @@ namespace CalibOperatorCLI_Example
                 y0 = Math.Max(0, (int)Math.Floor(_roiRectImage.Y));
                 x1 = Math.Min(w, (int)Math.Ceiling(_roiRectImage.Right));
                 y1 = Math.Min(h, (int)Math.Ceiling(_roiRectImage.Bottom));
+            }
+            else if (useRotated)
+            {
+                var rotCorners = GetRotatedRectCornerPoints(
+                    _rotRectCenterX, _rotRectCenterY, _rotRectWidth, _rotRectHeight, _rotRectAngleDeg);
+                if (TryGetPolygonBounds(rotCorners, out Rect rotBounds))
+                {
+                    x0 = Math.Max(0, (int)Math.Floor(rotBounds.X));
+                    y0 = Math.Max(0, (int)Math.Floor(rotBounds.Y));
+                    x1 = Math.Min(w, (int)Math.Ceiling(rotBounds.Right));
+                    y1 = Math.Min(h, (int)Math.Ceiling(rotBounds.Bottom));
+                }
             }
             else if (useCircle)
             {
@@ -2437,6 +3694,8 @@ namespace CalibOperatorCLI_Example
                 for (int x = x0; x < x1; x++)
                 {
                     if (useCircle && !IsPointInCircleRoi(x + 0.5, y + 0.5))
+                        continue;
+                    if (useRotated && !IsPointInRotatedRectRoi(x + 0.5, y + 0.5))
                         continue;
                     if (usePoly && polyFlat != null &&
                         !IsPointInPolygon(x + 0.5, y + 0.5, polyFlat))
@@ -2501,13 +3760,14 @@ namespace CalibOperatorCLI_Example
             if (PnlEdgeExtract != null)
                 PnlEdgeExtract.Visibility = src == "EdgesXld" ? Visibility.Visible : Visibility.Collapsed;
             if (PnlRoiBoundaryDir != null)
-                PnlRoiBoundaryDir.Visibility = src == "PolygonXld" ? Visibility.Visible : Visibility.Collapsed;
+            {
+                bool showRoiDir = src == "PolygonXld" && !IsOpenTrajectoriesModeActive();
+                PnlRoiBoundaryDir.Visibility = showRoiDir ? Visibility.Visible : Visibility.Collapsed;
+            }
+
             if (PnlThreshold != null)
                 PnlThreshold.Visibility = isGeometry ? Visibility.Collapsed : Visibility.Visible;
-            if (BtnClosePolygon != null)
-                BtnClosePolygon.Visibility = RbPolygonMode?.IsChecked == true || IsRingModeActive()
-                    ? Visibility.Visible
-                    : Visibility.Collapsed;
+            UpdateDrawToolbarForMode();
             if (PnlScale != null)
                 PnlScale.Visibility = kind is "ScaledShape" or "Deformable" or "PlanarDeformable" ? Visibility.Visible : Visibility.Collapsed;
             if (RowContrast != null)
@@ -2767,7 +4027,7 @@ namespace CalibOperatorCLI_Example
                 }
                 case HalconMeasuredGeometryKind.RoiPolyline:
                     TxtGeomMmHints.Text = _geometryRoiPath != null
-                        ? "选中路径段后可改起点/终点/弧上点；应用本段后更新 mm 摘要"
+                        ? "选中圆弧段可改半径 R 或弧上点；应用本段后同步 ROI 与 mm 摘要"
                         : "请先「从 ROI 同步」闭合路径";
                     ClearGeomFieldMmTooltips();
                     break;
@@ -2802,6 +4062,8 @@ namespace CalibOperatorCLI_Example
             _geometryRoiPath = HalconGeometryPathEditor.ClonePath(source);
             RebuildGeometryRoiPolylineFromPath();
             WriteGeometryParamsToUi(new HalconMeasuredGeometryParams { Kind = HalconMeasuredGeometryKind.RoiPolyline });
+            RefreshGeomPathSegmentList();
+            RefreshRoiArcEditUi();
             message = syncMessage;
         }
 
@@ -2854,6 +4116,12 @@ namespace CalibOperatorCLI_Example
             var kind = HalconGeometryPathEditor.GetSegmentKind(_geometryRoiPath, edgeIndex);
             SelectPathSegKindCombo(kind);
             UpdateGeomPathViaRowVisibility();
+
+            if (kind == RoiEdgeKind.Arc
+                && HalconGeometryPathEditor.TryGetSegmentArcRadius(_geometryRoiPath, edgeIndex, out double radiusPx))
+                SetGeomText(TxtGeomPathArcRadius, radiusPx);
+            else if (TxtGeomPathArcRadius != null)
+                TxtGeomPathArcRadius.Text = "";
 
             SetGeomText(TxtGeomPathStartCol, start.X);
             SetGeomText(TxtGeomPathStartRow, start.Y);
@@ -2917,10 +4185,11 @@ namespace CalibOperatorCLI_Example
 
         private void UpdateGeomPathViaRowVisibility()
         {
+            bool arc = ParsePathSegKind() == RoiEdgeKind.Arc;
             if (RowGeomPathVia != null)
-                RowGeomPathVia.Visibility = ParsePathSegKind() == RoiEdgeKind.Arc
-                    ? Visibility.Visible
-                    : Visibility.Collapsed;
+                RowGeomPathVia.Visibility = arc ? Visibility.Visible : Visibility.Collapsed;
+            if (RowGeomPathArcRadius != null)
+                RowGeomPathArcRadius.Visibility = arc ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void ClearGeomPathSegmentFields()
@@ -2928,7 +4197,7 @@ namespace CalibOperatorCLI_Example
             foreach (string name in new[]
                      {
                          "TxtGeomPathStartCol", "TxtGeomPathStartRow", "TxtGeomPathEndCol", "TxtGeomPathEndRow",
-                         "TxtGeomPathViaCol", "TxtGeomPathViaRow"
+                         "TxtGeomPathViaCol", "TxtGeomPathViaRow", "TxtGeomPathArcRadius"
                      })
             {
                 if (FindName(name) is TextBox tb)
@@ -2968,6 +4237,21 @@ namespace CalibOperatorCLI_Example
             }
 
             var kind = ParsePathSegKind();
+            if (kind == RoiEdgeKind.Arc
+                && double.TryParse(TxtGeomPathArcRadius?.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double radiusPx)
+                && HalconGeometryPathEditor.TrySetSegmentArcRadius(_geometryRoiPath, edgeIndex, radiusPx, out string radiusErr))
+            {
+                RebuildGeometryRoiPolylineFromPath();
+                MirrorRoiPolygonFromGeometryPathIfSynced();
+                RefreshGeomPathSegmentList(edgeIndex);
+                RefreshRoiArcEditUi();
+                if (TryReadGeometryParamsFromUi(out HalconMeasuredGeometryParams pRadius))
+                    RefreshMeasureSummaryText(pRadius);
+                ApplyGeometryContourFromUi(logSuccess: false);
+                AppendLog($"路径段 #{edgeIndex + 1} 圆弧半径已设为 {radiusPx:F1} px");
+                return;
+            }
+
             if (!HalconGeometryPathEditor.TryUpdateSegment(
                     _geometryRoiPath, edgeIndex, kind, sc, sr, ec, er, vc, vr, out string err))
             {
@@ -2976,7 +4260,9 @@ namespace CalibOperatorCLI_Example
             }
 
             RebuildGeometryRoiPolylineFromPath();
+            MirrorRoiPolygonFromGeometryPathIfSynced();
             RefreshGeomPathSegmentList(edgeIndex);
+            RefreshRoiArcEditUi();
             if (TryReadGeometryParamsFromUi(out HalconMeasuredGeometryParams p))
                 RefreshMeasureSummaryText(p);
             ApplyGeometryContourFromUi(logSuccess: false);
@@ -3130,6 +4416,23 @@ namespace CalibOperatorCLI_Example
                 return true;
             }
 
+            if (HasUsableRotatedRectRoi())
+            {
+                WriteGeometryParamsToUi(new HalconMeasuredGeometryParams
+                {
+                    Kind = HalconMeasuredGeometryKind.RotatedRectangle,
+                    CenterCol = _rotRectCenterX,
+                    CenterRow = _rotRectCenterY,
+                    WidthPx = _rotRectWidth,
+                    HeightPx = _rotRectHeight,
+                    AngleDeg = _rotRectAngleDeg
+                });
+                _geometryRoiPath = null;
+                _geometryRoiPolylineContour = null;
+                message = $"已从旋转矩形 ROI 同步: {_rotRectWidth:F0}×{_rotRectHeight:F0}° {_rotRectAngleDeg:F1}";
+                return true;
+            }
+
             if (HasUsableRingRoi())
             {
                 var ringPath = new RoiContourPath();
@@ -3195,7 +4498,7 @@ namespace CalibOperatorCLI_Example
                 }
             }
 
-            message = "请先绘制矩形、圆、闭合多边形(含弧)或环形 ROI";
+            message = "请先绘制矩形、旋转矩形、圆、闭合多边形(含弧)或环形 ROI";
             return false;
         }
 
@@ -3386,6 +4689,16 @@ namespace CalibOperatorCLI_Example
                 return HalconFlowBridge.GenRegionRectangle(r1, c1, r2, c2);
             }
 
+            if (HasUsableRotatedRectRoi())
+            {
+                return HalconFlowBridge.GenRegionRectangle2(
+                    _rotRectCenterY,
+                    _rotRectCenterX,
+                    _rotRectAngleDeg,
+                    _rotRectWidth * 0.5,
+                    _rotRectHeight * 0.5);
+            }
+
             return null;
         }
 
@@ -3405,8 +4718,18 @@ namespace CalibOperatorCLI_Example
                 if (HasUsableCircleRoi())
                     return HalconFlowBridge.GenRegionCircle(
                         _circleCenterImage.Y, _circleCenterImage.X, _circleRadiusImage);
+                if (HasUsableRotatedRectRoi())
+                {
+                    return HalconFlowBridge.GenRegionRectangle2(
+                        _rotRectCenterY,
+                        _rotRectCenterX,
+                        _rotRectAngleDeg,
+                        _rotRectWidth * 0.5,
+                        _rotRectHeight * 0.5);
+                }
+
                 if (!_hasRoi || RbRectMode.IsChecked != true)
-                    throw new InvalidOperationException("矩形灰度模板：请用「矩形」「圆形」或「环形」模式绘制 ROI。");
+                    throw new InvalidOperationException("矩形灰度模板：请用「矩形」「旋转矩形」「圆形」或「环形」模式绘制 ROI。");
                 return HalconFlowBridge.GenRegionRectangle(
                     _roiRectImage.Y, _roiRectImage.X, _roiRectImage.Bottom, _roiRectImage.Right);
             }
@@ -3447,6 +4770,19 @@ namespace CalibOperatorCLI_Example
                     new Point2D(_roiRectImage.Right, _roiRectImage.Bottom),
                     new Point2D(_roiRectImage.Left, _roiRectImage.Bottom)
                 };
+            }
+
+            if (HasUsableRotatedRectRoi())
+            {
+                List<Point> corners = GetRotatedRectCornerPoints(
+                    _rotRectCenterX, _rotRectCenterY, _rotRectWidth, _rotRectHeight, _rotRectAngleDeg);
+                int n = corners.Count > 0 && Dist(corners[0], corners[^1]) < 1e-3
+                    ? corners.Count - 1
+                    : corners.Count;
+                var pts = new Point2D[n];
+                for (int i = 0; i < n; i++)
+                    pts[i] = new Point2D(corners[i].X, corners[i].Y);
+                return pts;
             }
 
 #if HALCON_ENABLED
@@ -3498,12 +4834,33 @@ namespace CalibOperatorCLI_Example
                 if (!HasUsableRingRoi())
                     throw new InvalidOperationException("环形 ROI 请先完成外圈与内圈的闭合。");
             }
+            else if (IsOpenTrajectoriesModeActive())
+            {
+                if (!HasUsableOpenTrajectoriesForTemplate())
+                    throw new InvalidOperationException(
+                        "开放轨迹模板：请至少完成一条轨迹（≥2 点），可用「完成本条」保存；当前草稿也会一并计入。");
+            }
             else if (RbPolygonMode?.IsChecked == true && !_hasRoi)
             {
                 throw new InvalidOperationException("多边形 ROI 请先单击起点闭合。");
             }
 
             DisposeNativeXldForCreate();
+
+            if (IsOpenTrajectoriesModeActive())
+            {
+                List<List<Point2D>> trajectories = CollectOpenTrajectoriesForTemplate();
+                int iw = _currentImage?.Width > 0 ? _currentImage.Width : _imgWidth;
+                int ih = _currentImage?.Height > 0 ? _currentImage.Height : _imgHeight;
+                var (bundle, native) = HalconFlowBridge.BuildMultiOpenTrajectoriesXldFromGeometry(
+                    iw,
+                    ih,
+                    trajectories);
+                _nativeXldForCreate = native;
+                int pts = bundle.Contours?.Sum(c => c?.Length ?? 0) ?? 0;
+                AppendLog($"开放轨迹几何模板: {trajectories.Count} 条轨迹，{bundle.ContourCount} 条轮廓、共 {pts} 点（直接由轨迹生成，Metric 自动为 ignore_local_polarity）");
+                return bundle;
+            }
 
             if (HasUsableRingRoi())
             {
@@ -3577,7 +4934,12 @@ namespace CalibOperatorCLI_Example
                     return null;
 
                 if (opt.SourceKind != HalconShapeModelSourceKind.GeometryXld)
-                    bundle = HalconFlowBridge.FilterXldBundle(bundle, minPts, opt.LargestContourOnly);
+                {
+                    int filterMinPts = IsOpenTrajectoriesModeActive()
+                        ? Math.Min(minPts, 5)
+                        : minPts;
+                    bundle = HalconFlowBridge.FilterXldBundle(bundle, filterMinPts, opt.LargestContourOnly);
+                }
 
                 return bundle;
             }
@@ -3830,12 +5192,23 @@ namespace CalibOperatorCLI_Example
                     {
                         AppendLog("参数/ROI 已变或未预览，重新提取轮廓…");
                         xldBundle = ExtractXldBundleForCreate(opt, minGray, maxGray);
-                        if (xldBundle?.Contours == null || xldBundle.Contours.Count == 0)
+                        bool noContours = xldBundle?.Contours == null || xldBundle.Contours.Count == 0;
+                        bool noNative = _nativeXldForCreate == null
+                                        || !_nativeXldForCreate.IsInitialized()
+                                        || _nativeXldForCreate.CountObj() == 0;
+                        if (noContours && noNative)
                         {
                             MessageBox.Show(
-                                "未能提取到有效轮廓。\n阈值模式请调灰度；手绘/沿边线模式请调 Canny、边带或梯度向内/向外。",
+                                "未能提取到有效轮廓。\n阈值模式请调灰度；手绘/沿边线模式请调 Canny、边带或梯度向内/向外；"
+                                + "开放轨迹可尝试将「最小轮廓点数」降到 5 以下。",
                                 "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
                             return;
+                        }
+
+                        if (noContours && !noNative)
+                        {
+                            xldBundle = HalconFlowBridge.BundleFromXldOrFallback(
+                                _nativeXldForCreate!, _imgWidth, _imgHeight, opt.MinContourPoints);
                         }
 
                         AppendLog($"轮廓: {xldBundle.Contours.Count} 条");
@@ -3872,8 +5245,14 @@ namespace CalibOperatorCLI_Example
                     $"NumLevels: {levelsText}\n" +
                     (xldBundle != null ? $"轮廓数: {xldBundle.Contours.Count}\n" : "");
 
+                string? resolvedMetric = ResolveMetricUsedForCreate(opt, xldBundle, fromImage);
+                _lastModelCreateMeta = CaptureModelCreateMeta(opt, minGray, maxGray, xldBundle, resolvedMetric);
+
                 ResetFindResultUi();
                 AppendLog($"模型创建成功 ModelID={_modelId}, epoch={_modelEpoch} ({_modelKind})");
+                if (!string.IsNullOrWhiteSpace(resolvedMetric)
+                    && !string.Equals(resolvedMetric, opt.Metric, StringComparison.OrdinalIgnoreCase))
+                    AppendLog($"Metric: UI={opt.Metric} → 实际={resolvedMetric}");
                 string modelLabel = _modelKind == HalconFlowModelKind.Deformable ? "可变形模板" : "形状模型";
                 MessageBox.Show($"{modelLabel}创建成功!\nModelID: {_modelId}", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
             }
@@ -4332,9 +5711,22 @@ namespace CalibOperatorCLI_Example
                 string summary = _modelKind == HalconFlowModelKind.Deformable
                     ? HalconFlowBridge.GetDeformableModelParamsSummary(_modelId)
                     : HalconFlowBridge.GetShapeModelParamsSummary(_modelId);
+
+                string metaNote = "";
+                if (HalconShapeModelFileNameCodec.TryParse(IoPath.GetFileName(dlg.FileName), out HalconShapeModelParsedFileName parsed))
+                {
+                    ApplyParsedFileName(parsed);
+                    metaNote = "\n已从文件名恢复创建参数";
+                    AppendLog($"已从文件名解析创建参数: {IoPath.GetFileName(dlg.FileName)}");
+                }
+                else
+                {
+                    AppendLog("文件名未使用 xv_ 编码格式，未恢复创建参数");
+                }
+
                 TxtModelInfo.Text = $"来源: 文件导入 ({_modelKind})\nEpoch: {_modelEpoch}\n文件: {dlg.FileName}\n{summary}";
                 AppendLog($"模型已导入: {dlg.FileName} (ModelID={_modelId}, epoch={_modelEpoch}, {_modelKind})");
-                MessageBox.Show($"模型已导入，可进行匹配测试。\nModelID: {_modelId}", "导入成功",
+                MessageBox.Show($"模型已导入，可进行匹配测试。\nModelID: {_modelId}{metaNote}", "导入成功",
                     MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
@@ -4365,7 +5757,7 @@ namespace CalibOperatorCLI_Example
                     ? "HALCON 可变形模型 (*.dfm)|*.dfm|所有文件 (*.*)|*.*"
                     : "HALCON 形状模型 (*.shm)|*.shm|所有文件 (*.*)|*.*",
                 Title = isDeformable ? "保存可变形模型" : "保存形状模型",
-                FileName = isDeformable ? "deformable_model.dfm" : "shape_model.shm"
+                FileName = BuildDefaultExportFileName()
             };
             if (dlg.ShowDialog() != true) return;
 
@@ -4375,8 +5767,14 @@ namespace CalibOperatorCLI_Example
                     HalconFlowBridge.WriteDeformableModelToFile(_modelId, dlg.FileName);
                 else
                     HalconFlowBridge.WriteShapeModelToFile(_modelId, dlg.FileName);
+
                 AppendLog($"模型已导出: {dlg.FileName}");
-                MessageBox.Show($"HALCON 模型已保存:\n{dlg.FileName}", "导出成功", MessageBoxButton.OK, MessageBoxImage.Information);
+                AppendLog($"文件名编码: {HalconShapeModelFileNameCodec.DescribeFormat()}");
+                MessageBox.Show(
+                    $"HALCON 模型已保存:\n{dlg.FileName}\n\n创建参数已编码在文件名中（xv_ 前缀），便于区分不同模型。",
+                    "导出成功",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
             }
             catch (Exception ex)
             {

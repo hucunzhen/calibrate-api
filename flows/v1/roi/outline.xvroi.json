@@ -1,0 +1,82 @@
+{
+  "Version": 2,
+  "CoordinateUnit": "mm",
+  "NinePointCalibrationPath": "D:\\work\\calibrate-api\\flows\\v1\\models\\calibration_nine_point.json",
+  "ImagePath": "D:\\work\\data\\Image_20260602183730305.bmp",
+  "ImageWidth": 2592,
+  "ImageHeight": 1944,
+  "RoiMode": "opentrajectories",
+  "RoiRectX": 410.02636951791897,
+  "RoiRectY": 36.63130864206073,
+  "RoiRectW": 3.4017211327705668,
+  "RoiRectH": 3.3934643679213505,
+  "RotRectCenterX": 356.8110389369409,
+  "RotRectCenterY": 167.62001422802982,
+  "RotRectWidth": 0,
+  "RotRectHeight": 0,
+  "RotRectAngleDeg": 0,
+  "CircleCenterX": 356.8110389369409,
+  "CircleCenterY": 167.62001422802982,
+  "CircleRadius": 0,
+  "OpenTrajectoryPaths": [
+    {
+      "VertexXs": [
+        434.45638780800493,
+        516.4555422928113,
+        524.5070465892975,
+        524.8694869196522,
+        516.9212851133564,
+        434.92213062855,
+        426.87062633206386,
+        426.508186001709,
+        434.45638780800493
+      ],
+      "VertexYs": [
+        109.9135802866966,
+        110.32190269373461,
+        102.38137135639947,
+        46.38258617889532,
+        38.36238281873463,
+        37.95406041169662,
+        45.894591749031775,
+        101.89337692653591,
+        109.9135802866966
+      ],
+      "EdgeKinds": [
+        "Line",
+        "Arc",
+        "Line",
+        "Arc",
+        "Line",
+        "Arc",
+        "Line",
+        "Arc"
+      ],
+      "ArcViaXs": [
+        null,
+        522.1274209333774,
+        null,
+        522.5629071550593,
+        null,
+        429.2502519879839,
+        null,
+        428.81476576630206
+      ],
+      "ArcViaYs": [
+        null,
+        108.01267552745145,
+        null,
+        40.727946612628585,
+        null,
+        40.26328757797978,
+        null,
+        107.54801649280265
+      ],
+      "IsClosed": false
+    }
+  ],
+  "OpenTrajectoryNames": [
+    "\u8F68\u8FF9 1"
+  ],
+  "OpenTrajectoryConnectors": []
+}

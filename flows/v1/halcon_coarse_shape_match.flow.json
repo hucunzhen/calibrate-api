@@ -3,8 +3,8 @@
     {
       "Id": "b2000001-0001-4001-8001-000000000010",
       "TypeId": "halcon_coarse_shape_match",
-      "X": 285.8800000000001,
-      "Y": 19.80000000000001,
+      "X": 282.8800000000001,
+      "Y": 28.80000000000001,
       "Params": {
         "angleStart": "-3",
         "angleExtent": "6",
@@ -15,8 +15,8 @@
         "numLevels": "0",
         "greediness": "0.01",
         "allowRetry": "false",
-        "coarseScaleMin": "1",
-        "coarseScaleMax": "1",
+        "coarseScaleMin": "0.9",
+        "coarseScaleMax": "1.1",
         "endScoreWeight": "0",
         "endArcFraction": "0.7",
         "enable": "true",
@@ -26,7 +26,7 @@
     {
       "Id": "e1000001-0001-4001-8001-000000000011",
       "TypeId": "halcon_coarse_shape_reduce_domain",
-      "X": 1047,
+      "X": 1045,
       "Y": 40,
       "Params": {
         "loopEmit": "true",
@@ -55,7 +55,7 @@
       "X": 0,
       "Y": 290.3296,
       "Params": {
-        "filePath": "models\\shape_model_fixed.shm",
+        "filePath": "models\\shape_model_fixed_manual.shm",
         "enable": "true",
         "disable": "false"
       }
@@ -150,7 +150,7 @@
     {
       "Id": "4aa4eb0e-d9de-4222-ac66-c9916fb60886",
       "TypeId": "composite_bind_out",
-      "X": 1521,
+      "X": 1522,
       "Y": 450,
       "Params": {
         "externalPort": "Out4",
@@ -208,7 +208,7 @@
       "X": 0,
       "Y": 449.3296,
       "Params": {
-        "filePath": "models\\shape_mode_outlinel.shm",
+        "filePath": "models\\shape_mode_outlinel_manual.shm",
         "enable": "true",
         "disable": "false"
       }
@@ -258,6 +258,28 @@
         "crossHalf": "14",
         "strokeWidth": "2.5",
         "drawScores": "true",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "75c4f5b1-3466-4834-a365-adb78436b45c",
+      "TypeId": "flow_sink",
+      "X": 1294,
+      "Y": 548,
+      "Params": {
+        "acceptNull": "false",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "c9119588-db25-421f-a1a7-dc8d5d6c069e",
+      "TypeId": "composite_bind_out",
+      "X": 1528,
+      "Y": 555,
+      "Params": {
+        "externalPort": "Out5",
         "enable": "true",
         "disable": "false"
       }
@@ -551,6 +573,18 @@
       "FromPort": "In",
       "ToNodeId": "b2000001-0001-4001-8001-000000000010",
       "ToPort": "CoarseAngle"
+    },
+    {
+      "FromNodeId": "e1000001-0001-4001-8001-000000000011",
+      "FromPort": "CoarseScaleOut",
+      "ToNodeId": "75c4f5b1-3466-4834-a365-adb78436b45c",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "75c4f5b1-3466-4834-a365-adb78436b45c",
+      "FromPort": "List",
+      "ToNodeId": "c9119588-db25-421f-a1a7-dc8d5d6c069e",
+      "ToPort": "In"
     }
   ],
   "Meta": {
