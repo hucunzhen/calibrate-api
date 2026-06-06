@@ -3,11 +3,11 @@
     {
       "Id": "925e8678-f199-43cc-ab65-a59b8999ae65",
       "TypeId": "composite",
-      "X": 294,
-      "Y": 107,
+      "X": 295,
+      "Y": 65,
       "Params": {
         "inputPorts": "In",
-        "outputPorts": "Out,Out2,Out3,Out4",
+        "outputPorts": "Out,Out2,Out3,Out4,Out5",
         "innerFlowPath": "halcon_coarse_shape_match.flow.json",
         "innerFlowJson": "",
         "bindingsJson": "{}",
@@ -21,7 +21,7 @@
       "X": 806,
       "Y": 111,
       "Params": {
-        "inputPorts": "In,In2,In3,In4",
+        "inputPorts": "In,In2,In3,In4,In5",
         "outputPorts": "Out,Out2",
         "innerFlowPath": "halcon_fine_shape_match.flow.json",
         "innerFlowJson": "",
@@ -33,12 +33,12 @@
     {
       "Id": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
       "TypeId": "flow_loop",
-      "X": 545,
+      "X": 550,
       "Y": 84,
       "Params": {
         "count": "3",
         "stepValues": "",
-        "itemPorts": "In,In2,In3,In4",
+        "itemPorts": "In,In2,In3,In4,In5",
         "intervalMs": "0",
         "enable": "true",
         "disable": "false"
@@ -84,8 +84,8 @@
         "skipCountWrite": "false",
         "countRegister": "D800",
         "runDownstreamPerBatch": "true",
-        "enable": "false",
-        "disable": "true"
+        "enable": "true",
+        "disable": "false"
       }
     },
     {
@@ -121,8 +121,8 @@
       "Y": 584,
       "Params": {
         "flagRegister": "",
-        "enable": "false",
-        "disable": "true"
+        "enable": "true",
+        "disable": "false"
       }
     },
     {
@@ -139,12 +139,12 @@
     {
       "Id": "13c817a3-cc9e-4159-b965-8eaf5fd4dd80",
       "TypeId": "plc_wait_camera_capture",
-      "X": 91,
-      "Y": 281,
+      "X": 38,
+      "Y": 228,
       "Params": {
         "signalRegister": "",
         "bit": "0",
-        "timeoutMs": "60000",
+        "timeoutMs": "60000000",
         "pollIntervalMs": "20",
         "clearAfter": "true",
         "enable": "true",
@@ -154,7 +154,7 @@
     {
       "Id": "40018ac2-71e7-4e92-b601-14488b65dd60",
       "TypeId": "camera_snap",
-      "X": 52,
+      "X": 51,
       "Y": 54,
       "Params": {
         "deviceIndex": "0",
@@ -173,8 +173,8 @@
         "ip": "192.168.6.6",
         "port": "502",
         "station": "",
-        "enable": "false",
-        "disable": "true"
+        "enable": "true",
+        "disable": "false"
       }
     },
     {
@@ -190,32 +190,146 @@
         "enable": "true",
         "disable": "false"
       }
+    },
+    {
+      "Id": "f191dd3a-24ba-4eae-bce1-5885244ae197",
+      "TypeId": "intrinsics_undistort_image",
+      "X": 241,
+      "Y": 269,
+      "Params": {
+        "alpha": "-1",
+        "calibrationJsonFile": "models\\calibration_result.json",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "e3a0a693-a75c-479f-9f75-3e4f90c5d8bb",
+      "TypeId": "chessboard_perspective_warp_image",
+      "X": 281,
+      "Y": 438,
+      "Params": {
+        "calibrationJsonFile": "models\\calibration_result.json",
+        "viewIndex": "0",
+        "cols": "11",
+        "rows": "8",
+        "squareSizeMm": "5",
+        "pxPerMm": "32",
+        "perspectiveOutputFrame": "plane",
+        "perspectiveOutputScale": "board_pixels",
+        "assumeUndistorted": "true",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "2933e235-0d1d-4fa6-8a3e-59daadb1e292",
+      "TypeId": "display",
+      "X": 1367,
+      "Y": 247,
+      "Params": {
+        "dotRadius": "3",
+        "pointLineJoin": "auto",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "79612222-52a4-4d90-8242-4fe2e1076f2b",
+      "TypeId": "flow_sink",
+      "X": 1305,
+      "Y": 89,
+      "Params": {
+        "acceptNull": "false",
+        "enable": "true",
+        "disable": "false"
+      }
     }
   ],
   "Connections": [
     {
-      "FromNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
+      "FromNodeId": "6775f59b-913e-4dee-b635-9344aef3d779",
+      "FromPort": "Transform",
+      "ToNodeId": "cdccc632-49e3-4150-afee-a5901375acc9",
+      "ToPort": "Transform"
+    },
+    {
+      "FromNodeId": "cdccc632-49e3-4150-afee-a5901375acc9",
+      "FromPort": "World",
+      "ToNodeId": "f7437525-c8ec-4ac4-8f8c-a48b6f48de0b",
+      "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "f7437525-c8ec-4ac4-8f8c-a48b6f48de0b",
+      "FromPort": "GvarSent",
+      "ToNodeId": "5f068d87-b3f0-484e-84d2-d4ca43f0acf3",
+      "ToPort": "Enable"
+    },
+    {
+      "FromNodeId": "5f068d87-b3f0-484e-84d2-d4ca43f0acf3",
+      "FromPort": "Enabled",
+      "ToNodeId": "d027d67c-e3e6-47d6-a8f3-f390821eddee",
+      "ToPort": "After"
+    },
+    {
+      "FromNodeId": "633918c2-f4e3-4a65-b2a7-73455d5459ac",
       "FromPort": "Out",
-      "ToNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
-      "ToPort": "InList"
+      "ToNodeId": "bd47e3a9-837b-41df-bc49-a5d2f835a733",
+      "ToPort": "After"
     },
     {
-      "FromNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
-      "FromPort": "Out2",
-      "ToNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
-      "ToPort": "In2List"
+      "FromNodeId": "13c817a3-cc9e-4159-b965-8eaf5fd4dd80",
+      "FromPort": "Out",
+      "ToNodeId": "40018ac2-71e7-4e92-b601-14488b65dd60",
+      "ToPort": "After"
     },
     {
-      "FromNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
-      "FromPort": "Out3",
-      "ToNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
-      "ToPort": "In3List"
+      "FromNodeId": "77686dab-f233-4cf1-bcfe-2cac39db6166",
+      "FromPort": "Connected",
+      "ToNodeId": "1eb25dd8-9d6a-4ece-acc4-861b313afea1",
+      "ToPort": "After"
     },
     {
-      "FromNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
-      "FromPort": "Out4",
-      "ToNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
-      "ToPort": "In4List"
+      "FromNodeId": "1eb25dd8-9d6a-4ece-acc4-861b313afea1",
+      "FromPort": "Out",
+      "ToNodeId": "13c817a3-cc9e-4159-b965-8eaf5fd4dd80",
+      "ToPort": "After"
+    },
+    {
+      "FromNodeId": "40018ac2-71e7-4e92-b601-14488b65dd60",
+      "FromPort": "Image",
+      "ToNodeId": "f191dd3a-24ba-4eae-bce1-5885244ae197",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "f191dd3a-24ba-4eae-bce1-5885244ae197",
+      "FromPort": "Out",
+      "ToNodeId": "e3a0a693-a75c-479f-9f75-3e4f90c5d8bb",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "6e9ddbe1-6fe9-4610-934e-35daed362ed6",
+      "FromPort": "Out",
+      "ToNodeId": "cdccc632-49e3-4150-afee-a5901375acc9",
+      "ToPort": "Pixel"
+    },
+    {
+      "FromNodeId": "e3a0a693-a75c-479f-9f75-3e4f90c5d8bb",
+      "FromPort": "Out",
+      "ToNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "FromPort": "Out",
+      "ToNodeId": "633918c2-f4e3-4a65-b2a7-73455d5459ac",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "FromPort": "Out",
+      "ToNodeId": "6775f59b-913e-4dee-b635-9344aef3d779",
+      "ToPort": "After"
     },
     {
       "FromNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
@@ -242,77 +356,62 @@
       "ToPort": "In3"
     },
     {
-      "FromNodeId": "6775f59b-913e-4dee-b635-9344aef3d779",
-      "FromPort": "Transform",
-      "ToNodeId": "cdccc632-49e3-4150-afee-a5901375acc9",
-      "ToPort": "Transform"
+      "FromNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
+      "FromPort": "Out",
+      "ToNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "ToPort": "InList"
+    },
+    {
+      "FromNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
+      "FromPort": "Out2",
+      "ToNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "ToPort": "In2List"
+    },
+    {
+      "FromNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
+      "FromPort": "Out3",
+      "ToNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "ToPort": "In3List"
+    },
+    {
+      "FromNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
+      "FromPort": "Out4",
+      "ToNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "ToPort": "In4List"
+    },
+    {
+      "FromNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
+      "FromPort": "Out5",
+      "ToNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "ToPort": "In5List"
+    },
+    {
+      "FromNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "FromPort": "In5",
+      "ToNodeId": "6e9ddbe1-6fe9-4610-934e-35daed362ed6",
+      "ToPort": "In5"
     },
     {
       "FromNodeId": "6e9ddbe1-6fe9-4610-934e-35daed362ed6",
       "FromPort": "Out",
-      "ToNodeId": "cdccc632-49e3-4150-afee-a5901375acc9",
-      "ToPort": "Pixel"
-    },
-    {
-      "FromNodeId": "cdccc632-49e3-4150-afee-a5901375acc9",
-      "FromPort": "World",
-      "ToNodeId": "f7437525-c8ec-4ac4-8f8c-a48b6f48de0b",
-      "ToPort": "Points"
-    },
-    {
-      "FromNodeId": "f7437525-c8ec-4ac4-8f8c-a48b6f48de0b",
-      "FromPort": "GvarSent",
-      "ToNodeId": "5f068d87-b3f0-484e-84d2-d4ca43f0acf3",
-      "ToPort": "Enable"
-    },
-    {
-      "FromNodeId": "5f068d87-b3f0-484e-84d2-d4ca43f0acf3",
-      "FromPort": "Enabled",
-      "ToNodeId": "d027d67c-e3e6-47d6-a8f3-f390821eddee",
-      "ToPort": "After"
-    },
-    {
-      "FromNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
-      "FromPort": "Out",
-      "ToNodeId": "633918c2-f4e3-4a65-b2a7-73455d5459ac",
+      "ToNodeId": "79612222-52a4-4d90-8242-4fe2e1076f2b",
       "ToPort": "In"
     },
     {
-      "FromNodeId": "633918c2-f4e3-4a65-b2a7-73455d5459ac",
+      "FromNodeId": "e3a0a693-a75c-479f-9f75-3e4f90c5d8bb",
       "FromPort": "Out",
-      "ToNodeId": "bd47e3a9-837b-41df-bc49-a5d2f835a733",
-      "ToPort": "After"
+      "ToNodeId": "2933e235-0d1d-4fa6-8a3e-59daadb1e292",
+      "ToPort": "Image"
     },
     {
-      "FromNodeId": "13c817a3-cc9e-4159-b965-8eaf5fd4dd80",
-      "FromPort": "Out",
-      "ToNodeId": "40018ac2-71e7-4e92-b601-14488b65dd60",
-      "ToPort": "After"
-    },
-    {
-      "FromNodeId": "40018ac2-71e7-4e92-b601-14488b65dd60",
-      "FromPort": "Image",
-      "ToNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
-      "ToPort": "In"
-    },
-    {
-      "FromNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
-      "FromPort": "Out",
-      "ToNodeId": "6775f59b-913e-4dee-b635-9344aef3d779",
-      "ToPort": "After"
-    },
-    {
-      "FromNodeId": "77686dab-f233-4cf1-bcfe-2cac39db6166",
-      "FromPort": "Connected",
-      "ToNodeId": "1eb25dd8-9d6a-4ece-acc4-861b313afea1",
-      "ToPort": "After"
-    },
-    {
-      "FromNodeId": "1eb25dd8-9d6a-4ece-acc4-861b313afea1",
-      "FromPort": "Out",
-      "ToNodeId": "13c817a3-cc9e-4159-b965-8eaf5fd4dd80",
-      "ToPort": "After"
+      "FromNodeId": "79612222-52a4-4d90-8242-4fe2e1076f2b",
+      "FromPort": "PointsList",
+      "ToNodeId": "2933e235-0d1d-4fa6-8a3e-59daadb1e292",
+      "ToPort": "PointsList"
     }
   ],
-  "Meta": null
+  "Meta": {
+    "latticeGridRows": "8",
+    "latticeGridCols": "2"
+  }
 }

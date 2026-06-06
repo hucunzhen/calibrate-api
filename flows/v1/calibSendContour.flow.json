@@ -170,8 +170,8 @@
       "Y": 354.96705945775983,
       "Params": {
         "pattern": "\u4E5D\u5BAB\u683C (3\u00D73)",
-        "centerX": "473.100",
-        "centerY": "82.853",
+        "centerX": "475.416",
+        "centerY": "72.576",
         "centerZ": "451.5",
         "stepXmm": "38",
         "stepYmm": "24",
@@ -205,6 +205,17 @@
       "Y": 381,
       "Params": {
         "lineSeparator": "lf",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "9570d9d6-f2e1-4240-94f3-b1948bb2e982",
+      "TypeId": "plc_set_weld_done_to_plc",
+      "X": 769,
+      "Y": 629,
+      "Params": {
+        "flagRegister": "",
         "enable": "true",
         "disable": "false"
       }
@@ -294,7 +305,16 @@
       "FromPort": "Points",
       "ToNodeId": "b91f77dd-65ad-4029-8e65-c42f83ea002c",
       "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "ae3ea651-1a1b-47a3-b3ef-0c017aaaba51",
+      "FromPort": "Out",
+      "ToNodeId": "9570d9d6-f2e1-4240-94f3-b1948bb2e982",
+      "ToPort": "After"
     }
   ],
-  "Meta": null
+  "Meta": {
+    "latticeGridRows": "8",
+    "latticeGridCols": "2"
+  }
 }
