@@ -134,8 +134,34 @@ namespace CalibOperatorCLI_Example
         private bool _isPanning;
         private Point _panStart;
         private Point _lastPanOffset;
+
+        private bool _isMovingRoi;
+        private bool _roiDragDeferThresholdPreview;
+        private Point _roiDragStartMouse;
+        private RoiDragKind _roiDragKind;
+        private RoiDragSnapshot _roiDragSnapshot;
+
+        private enum RoiDragKind { None, Rect, RotatedRect, Circle, Polygon, Ring }
+
+        private sealed class RoiDragSnapshot
+        {
+            public RoiDragKind Kind;
+            public Rect Rect;
+            public double RotCenterX;
+            public double RotCenterY;
+            public double RotWidth;
+            public double RotHeight;
+            public double RotAngleDeg;
+            public Point CircleCenter;
+            public double CircleRadius;
+            public RoiContourPath? Polygon;
+            public RoiContourPath? RingOuter;
+            public RoiContourPath? RingInner;
+        }
+
         private const double MinScale = 0.1;
         private const double MaxScale = 10.0;
+        private bool _viewHostLayoutFitted;
 
         private static readonly Brush[] FindMatchBrushes =
         {
@@ -168,6 +194,7 @@ namespace CalibOperatorCLI_Example
                 Children = new TransformCollection { _viewScale, _viewTranslate }
             };
             ImageCanvas.RenderTransformOrigin = new Point(0, 0);
+            ViewHost.SizeChanged += ViewHost_SizeChanged;
             Loaded += HalconShapeModelPage_Loaded;
             Unloaded += HalconShapeModelPage_Unloaded;
         }
@@ -605,8 +632,8 @@ namespace CalibOperatorCLI_Example
                 }
 
                 CalibImage display = ApplyPostCorrectRotation(work);
-                owned = ReferenceEquals(display, work) ? work : null;
                 CommitCalibImageToUi(display, disposeIncoming: true);
+                owned = null;
                 if (logSuccess)
                 {
                     string rotNote = Math.Abs(_postCorrectRotateDeg) < 1e-6
@@ -631,6 +658,9 @@ namespace CalibOperatorCLI_Example
                 throw new InvalidOperationException("无效图像尺寸");
 
             var sn = source.GetNativeStruct();
+            if (sn.data == IntPtr.Zero || w <= 0 || h <= 0)
+                throw new InvalidOperationException("图像像素数据无效，无法刷新显示");
+
             _grayPixels = new byte[w * h];
             System.Runtime.InteropServices.Marshal.Copy(sn.data, _grayPixels, 0, w * h);
             _imgWidth = w;
@@ -652,13 +682,40 @@ namespace CalibOperatorCLI_Example
             ClearFindResultOverlay();
         }
 
-        /// <summary>将 ViewHost 上的鼠标位置反算为图像像素坐标（与缩放/平移一致）。</summary>
-        private Point GetImagePointFromMouse(MouseEventArgs e)
+        private CalibImage DuplicateCurrentImageForHalcon()
         {
-            var hostPt = e.GetPosition(ViewHost);
+            if (_currentImage == null)
+                throw new InvalidOperationException("请先加载图像");
+            return CalibAPI.DuplicateImage(_currentImage);
+        }
+
+        /// <summary>将 ViewHost 上的鼠标位置反算为图像像素坐标（与 ImageCanvas 变换一致）。</summary>
+        private Point GetImagePointFromMouse(MouseEventArgs e) =>
+            HostPointToImage(e.GetPosition(ViewHost));
+
+        private Point HostPointToImage(Point hostPt)
+        {
+            try
+            {
+                GeneralTransform? toHost = ImageCanvas.TransformToVisual(ViewHost);
+                if (toHost?.Inverse is GeneralTransform toCanvas)
+                    return ClampImagePoint(toCanvas.Transform(hostPt));
+            }
+            catch (InvalidOperationException)
+            {
+                // 布局未完成时 TransformToVisual 可能失败，走手工逆变换
+            }
+
             double scale = Math.Max(_scale, 1e-9);
-            double x = (hostPt.X - _offsetX) / scale;
-            double y = (hostPt.Y - _offsetY) / scale;
+            return ClampImagePoint(new Point(
+                (hostPt.X - _offsetX) / scale,
+                (hostPt.Y - _offsetY) / scale));
+        }
+
+        private Point ClampImagePoint(Point pt)
+        {
+            double x = pt.X;
+            double y = pt.Y;
             if (_imgWidth > 0 && _imgHeight > 0)
             {
                 x = Math.Max(0, Math.Min(_imgWidth - 1, x));
@@ -688,6 +745,211 @@ namespace CalibOperatorCLI_Example
 
             confirmed = new Point(dlg.ColumnPx, dlg.RowPx);
             return true;
+        }
+
+        private bool IsPrimitiveRoiDrawModeActive() =>
+            RbRectMode?.IsChecked == true || IsRotatedRectModeActive() || IsCircleModeActive();
+
+        private RoiPrimitiveKind GetActivePrimitiveRoiKind()
+        {
+            if (IsCircleModeActive())
+                return RoiPrimitiveKind.Circle;
+            if (IsRotatedRectModeActive())
+                return RoiPrimitiveKind.RotatedRectangle;
+            return RoiPrimitiveKind.Rectangle;
+        }
+
+        private Point GetImageCenterPoint() =>
+            _imgWidth > 0 && _imgHeight > 0
+                ? new Point(_imgWidth * 0.5, _imgHeight * 0.5)
+                : default;
+
+        private double DefaultPrimitiveExtent() =>
+            _imgWidth > 0 && _imgHeight > 0
+                ? Math.Max(40, Math.Min(_imgWidth, _imgHeight) * 0.25)
+                : 100;
+
+        private Point GetPrimitiveRoiDialogAnchorHint()
+        {
+            if (_hasRoi && RbRectMode?.IsChecked == true && _roiRectImage.Width > 5 && _roiRectImage.Height > 5)
+                return new Point(_roiRectImage.X, _roiRectImage.Y);
+            if (HasUsableRotatedRectRoi())
+                return new Point(_rotRectCenterX, _rotRectCenterY);
+            if (HasUsableCircleRoi())
+                return _circleCenterImage;
+            return GetImageCenterPoint();
+        }
+
+        private bool TryPromptPrimitiveRoiParams(Point anchorHint)
+        {
+            if (!IsPrimitiveRoiDrawModeActive() || _imgWidth <= 0 || _imgHeight <= 0)
+                return false;
+
+            var kind = GetActivePrimitiveRoiKind();
+            Point anchor = ClampImagePoint(anchorHint);
+            double extent = DefaultPrimitiveExtent();
+
+            double rectLeft = anchor.X;
+            double rectTop = anchor.Y;
+            double rectWidth = extent;
+            double rectHeight = Math.Max(40, extent * 0.75);
+            if (kind == RoiPrimitiveKind.Rectangle && _hasRoi && RbRectMode?.IsChecked == true
+                && _roiRectImage.Width > 5 && _roiRectImage.Height > 5)
+            {
+                rectLeft = _roiRectImage.X;
+                rectTop = _roiRectImage.Y;
+                rectWidth = _roiRectImage.Width;
+                rectHeight = _roiRectImage.Height;
+            }
+
+            double rotCx = anchor.X;
+            double rotCy = anchor.Y;
+            double rotW = extent;
+            double rotH = Math.Max(40, extent * 0.75);
+            double rotAngle = 0;
+            if (kind == RoiPrimitiveKind.RotatedRectangle && HasUsableRotatedRectRoi())
+            {
+                rotCx = _rotRectCenterX;
+                rotCy = _rotRectCenterY;
+                rotW = _rotRectWidth;
+                rotH = _rotRectHeight;
+                rotAngle = _rotRectAngleDeg;
+            }
+
+            double circleCx = anchor.X;
+            double circleCy = anchor.Y;
+            double circleR = Math.Max(20, extent * 0.5);
+            if (kind == RoiPrimitiveKind.Circle && HasUsableCircleRoi())
+            {
+                circleCx = _circleCenterImage.X;
+                circleCy = _circleCenterImage.Y;
+                circleR = _circleRadiusImage;
+            }
+
+            var dlg = new RoiPrimitiveParamsDialog { Owner = Window.GetWindow(this) };
+            if (!TryGetNinePointAffine(out AffineTransform affine, out string affineErr))
+            {
+                MessageBox.Show(
+                    $"矩形/旋转矩形/圆形 ROI 参数使用 mm，须先加载有效的九点标定 JSON。\n{affineErr}",
+                    "九点标定",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return false;
+            }
+
+            dlg.Initialize(
+                kind,
+                rectLeft, rectTop, rectWidth, rectHeight,
+                rotCx, rotCy, rotW, rotH, rotAngle,
+                circleCx, circleCy, circleR,
+                affine,
+                _imgWidth,
+                _imgHeight);
+            if (dlg.ShowDialog() != true)
+                return false;
+
+            return ApplyPrimitiveRoiFromDialog(dlg);
+        }
+
+        private bool ApplyPrimitiveRoiFromDialog(RoiPrimitiveParamsDialog dlg)
+        {
+            bool hasAffine = TryGetNinePointAffine(out AffineTransform affine, out _);
+
+            switch (GetActivePrimitiveRoiKind())
+            {
+                case RoiPrimitiveKind.Rectangle:
+                {
+                    double x = dlg.RectLeft;
+                    double y = dlg.RectTop;
+                    double w = dlg.RectWidth;
+                    double h = dlg.RectHeight;
+                    ClampRoiToImage(ref x, ref y, ref w, ref h);
+                    _roiRectImage = new Rect(x, y, w, h);
+                    _hasRoi = true;
+                    _rotRectSettingAngle = false;
+                    if (hasAffine)
+                    {
+                        var tlMm = HalconGeometryContourBuilder.ImagePixelToWorldMm(x, y, affine);
+                        (double wMm, double hMm) = HalconGeometryContourBuilder.PixelSizeToWorldMm(w, h, x, y, affine);
+                        AppendLog($"矩形ROI: ({tlMm.X:F2},{tlMm.Y:F2}) mm {wMm:F2}×{hMm:F2} mm");
+                    }
+                    else
+                        AppendLog($"矩形ROI: ({x:F0},{y:F0}) {w:F0}x{h:F0} px");
+                    break;
+                }
+                case RoiPrimitiveKind.RotatedRectangle:
+                {
+                    _rotRectCenterX = dlg.RotCenterX;
+                    _rotRectCenterY = dlg.RotCenterY;
+                    _rotRectWidth = Math.Max(6, dlg.RotWidth);
+                    _rotRectHeight = Math.Max(6, dlg.RotHeight);
+                    _rotRectAngleDeg = dlg.RotAngleDeg;
+                    _rotRectSettingAngle = false;
+                    _hasRoi = true;
+                    if (hasAffine)
+                    {
+                        var centerMm = HalconGeometryContourBuilder.ImagePixelToWorldMm(_rotRectCenterX, _rotRectCenterY, affine);
+                        double rad = _rotRectAngleDeg * Math.PI / 180.0;
+                        double dirX = Math.Cos(rad);
+                        double dirY = Math.Sin(rad);
+                        double rwMm = RoiSegmentMeasure.PixelLengthToWorldMm(
+                            _rotRectWidth, _rotRectCenterX, _rotRectCenterY, dirX, dirY, affine);
+                        double rhMm = RoiSegmentMeasure.PixelLengthToWorldMm(
+                            _rotRectHeight, _rotRectCenterX, _rotRectCenterY, -dirY, dirX, affine);
+                        AppendLog($"旋转矩形 ROI: 中心=({centerMm.X:F2},{centerMm.Y:F2}) mm {rwMm:F2}×{rhMm:F2} mm ∠{_rotRectAngleDeg:F1}°");
+                    }
+                    else
+                        AppendLog($"旋转矩形 ROI: 中心=({_rotRectCenterX:F0},{_rotRectCenterY:F0}) {_rotRectWidth:F0}×{_rotRectHeight:F0} px ∠{_rotRectAngleDeg:F1}°");
+                    break;
+                }
+                default:
+                {
+                    _circleCenterImage = ClampImagePoint(new Point(dlg.CircleCenterX, dlg.CircleCenterY));
+                    _circleRadiusImage = dlg.CircleRadius;
+                    ClampCircleRadiusToImage();
+                    if (_circleRadiusImage <= 5)
+                    {
+                        MessageBox.Show(
+                            "圆形 ROI 无效：圆心超出图像范围，或半径换算后过小/超出边界。请调整 mm 参数。",
+                            "ROI 参数",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Warning);
+                        return false;
+                    }
+
+                    _hasRoi = true;
+                    if (hasAffine)
+                    {
+                        var centerMm = HalconGeometryContourBuilder.ImagePixelToWorldMm(
+                            _circleCenterImage.X, _circleCenterImage.Y, affine);
+                        double rMm = HalconGeometryContourBuilder.PixelRadiusToWorldMm(
+                            _circleRadiusImage, _circleCenterImage.X, _circleCenterImage.Y, affine);
+                        AppendLog($"圆形ROI: 圆心=({centerMm.X:F2},{centerMm.Y:F2}) mm R={rMm:F2} mm");
+                    }
+                    else
+                        AppendLog($"圆形ROI: 圆心=({_circleCenterImage.X:F0},{_circleCenterImage.Y:F0}) R={_circleRadiusImage:F0} px");
+                    break;
+                }
+            }
+
+            RefreshRoiVisuals();
+            UpdateThresholdPreview();
+            PersistSessionChange();
+#if HALCON_ENABLED
+            TryAutoSyncGeometryFromRoiIfNeeded();
+#endif
+            return true;
+        }
+
+        private void BtnPrimitiveRoiParams_Click(object sender, RoutedEventArgs e)
+        {
+            if (_imgWidth <= 0 || _imgHeight <= 0)
+            {
+                MessageBox.Show("请先加载图像", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            TryPromptPrimitiveRoiParams(GetPrimitiveRoiDialogAnchorHint());
         }
 
         private bool TryAddFirstVertexWithDialog(RoiContourPath path, Point mouse, string logPrefix)
@@ -746,18 +1008,66 @@ namespace CalibOperatorCLI_Example
         {
             if (_imgWidth <= 0 || _imgHeight <= 0) return;
 
+            if (ViewHost.ActualWidth <= 1 || ViewHost.ActualHeight <= 1)
+            {
+                void OnLayoutUpdated(object? s, EventArgs e)
+                {
+                    if (ViewHost.ActualWidth <= 1 || ViewHost.ActualHeight <= 1)
+                        return;
+                    ViewHost.LayoutUpdated -= OnLayoutUpdated;
+                    DoFitImageToView();
+                }
+
+                ViewHost.LayoutUpdated += OnLayoutUpdated;
+                return;
+            }
+
+            DoFitImageToView();
+        }
+
+        private void DoFitImageToView()
+        {
+            if (_imgWidth <= 0 || _imgHeight <= 0) return;
+
             var host = ViewHost;
-            double viewW = host.ActualWidth > 1 ? host.ActualWidth : 800;
-            double viewH = host.ActualHeight > 1 ? host.ActualHeight : 600;
+            double viewW = host.ActualWidth;
+            double viewH = host.ActualHeight;
+            if (viewW <= 1 || viewH <= 1)
+                return;
 
             double fit = Math.Min(viewW / _imgWidth, viewH / _imgHeight) * 0.95;
             fit = Math.Max(MinScale, Math.Min(MaxScale, fit));
             _scale = fit;
             _offsetX = (viewW - _imgWidth * _scale) / 2;
             _offsetY = (viewH - _imgHeight * _scale) / 2;
+            _viewHostLayoutFitted = true;
             ApplyTransform();
             RefreshRoiVisuals();
             UpdateThresholdPreview();
+        }
+
+        private void ViewHost_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            if (!_uiReady || _imgWidth <= 0 || _imgHeight <= 0)
+                return;
+            if (e.NewSize.Width <= 1 || e.NewSize.Height <= 1)
+                return;
+
+            // 首次获得有效尺寸，或从 0 布局中恢复：完整适配
+            if (!_viewHostLayoutFitted || e.PreviousSize.Width <= 1 || e.PreviousSize.Height <= 1)
+            {
+                DoFitImageToView();
+                return;
+            }
+
+            if (Math.Abs(e.NewSize.Width - e.PreviousSize.Width) < 0.5
+                && Math.Abs(e.NewSize.Height - e.PreviousSize.Height) < 0.5)
+                return;
+
+            // 窗口最大化/全屏等：保持缩放，仅重新居中
+            _offsetX = (e.NewSize.Width - _imgWidth * _scale) / 2;
+            _offsetY = (e.NewSize.Height - _imgHeight * _scale) / 2;
+            ApplyTransform();
         }
 
         private void ApplyTransform()
@@ -2110,6 +2420,48 @@ namespace CalibOperatorCLI_Example
                 dst.ArcVia.Add(v);
         }
 
+        private static RoiContourPath CloneContourPath(RoiContourPath src)
+        {
+            var clone = new RoiContourPath();
+            CopyContourPathContents(src, clone);
+            return clone;
+        }
+
+        private static void TranslateContourPath(RoiContourPath path, double dx, double dy)
+        {
+            for (int i = 0; i < path.Vertices.Count; i++)
+            {
+                Point p = path.Vertices[i];
+                path.Vertices[i] = new Point(p.X + dx, p.Y + dy);
+            }
+
+            for (int i = 0; i < path.ArcVia.Count; i++)
+            {
+                if (path.ArcVia[i] is Point p)
+                    path.ArcVia[i] = new Point(p.X + dx, p.Y + dy);
+            }
+        }
+
+        private static (double MinX, double MinY, double MaxX, double MaxY) GetPathBounds(RoiContourPath path)
+        {
+            if (path.VertexCount == 0)
+                return (0, 0, 0, 0);
+
+            double minX = path.Vertices[0].X;
+            double maxX = minX;
+            double minY = path.Vertices[0].Y;
+            double maxY = minY;
+            foreach (Point p in path.Vertices)
+            {
+                minX = Math.Min(minX, p.X);
+                maxX = Math.Max(maxX, p.X);
+                minY = Math.Min(minY, p.Y);
+                maxY = Math.Max(maxY, p.Y);
+            }
+
+            return (minX, minY, maxX, maxY);
+        }
+
         private void InvalidatePolygonFlatCache()
         {
             _polygonFlatDirty = true;
@@ -2882,7 +3234,20 @@ namespace CalibOperatorCLI_Example
             if (!_uiReady || _suppressDrawModeClear)
                 return;
             ClearRoiState();
-            UpdateDrawToolbarForMode();
+            UpdateCreatePanelsVisibility();
+            if (_imgWidth > 0 && IsPrimitiveRoiDrawModeActive())
+                TryPromptPrimitiveRoiParams(GetImageCenterPoint());
+        }
+
+        private void UpdateHandDrawnEdgeGradientSubPanels(bool showPanel)
+        {
+            bool showRingInner = showPanel && IsRingModeActive();
+            if (PnlRingInnerGradientSettings != null)
+                PnlRingInnerGradientSettings.Visibility = showRingInner ? Visibility.Visible : Visibility.Collapsed;
+            if (!showRingInner && PnlRingInnerGradientCustom != null)
+                PnlRingInnerGradientCustom.Visibility = Visibility.Collapsed;
+            else if (showRingInner)
+                RingInnerGradientMode_Changed(CmbRingInnerGradientMode!, null!);
         }
 
         private void UpdateDrawToolbarForMode()
@@ -2897,6 +3262,10 @@ namespace CalibOperatorCLI_Example
                     : RbPolygonMode?.IsChecked == true || IsRingModeActive()
                         ? Visibility.Visible
                         : Visibility.Collapsed;
+            if (BtnPrimitiveRoiParams != null)
+                BtnPrimitiveRoiParams.Visibility = !open && IsPrimitiveRoiDrawModeActive()
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
 
             if (!open && IsNextSegmentConnector() && RbNextSegmentLine != null)
                 RbNextSegmentLine.IsChecked = true;
@@ -2912,14 +3281,268 @@ namespace CalibOperatorCLI_Example
                 ViewHost.ReleaseMouseCapture();
         }
 
+        private bool IsPointInRectRoi(double x, double y) =>
+            _hasRoi && RbRectMode?.IsChecked == true
+            && _roiRectImage.Width > 5 && _roiRectImage.Height > 5
+            && _roiRectImage.Contains(new Point(x, y));
+
+        private bool IsPointInActiveRoi(double x, double y)
+        {
+            if (IsPointInRectRoi(x, y))
+                return true;
+            if (HasUsableRotatedRectRoi() && IsPointInRotatedRectRoi(x, y))
+                return true;
+            if (HasUsableCircleRoi() && IsPointInCircleRoi(x, y))
+                return true;
+            if (RbPolygonMode?.IsChecked == true && _hasRoi && _roiPath.IsClosed && _roiPath.VertexCount >= 3
+                && IsPointInPolygon(x, y, GetPolygonFlattened(forHitTest: true)))
+                return true;
+            if (HasUsableRingRoi() && IsPointInRingRoi(x, y))
+                return true;
+            return false;
+        }
+
+        private bool CanBeginRoiDragNow()
+        {
+            if (_isPanning || _isMovingRoi || _isDrawing || _rotRectSettingAngle)
+                return false;
+            if (IsOpenTrajectoriesModeActive())
+                return false;
+            if (RbPolygonMode?.IsChecked == true && !_hasRoi && _roiPath.VertexCount > 0)
+                return false;
+            if (IsRingModeActive() && _ringPolygonPhase < 2)
+                return false;
+            return true;
+        }
+
+        private bool TryBeginRoiDrag(Point imgPt)
+        {
+            if (!CanBeginRoiDragNow() || !IsPointInActiveRoi(imgPt.X, imgPt.Y))
+                return false;
+
+            _roiDragSnapshot = CaptureRoiDragSnapshot(imgPt);
+            _roiDragKind = _roiDragSnapshot.Kind;
+            if (_roiDragKind == RoiDragKind.None)
+                return false;
+
+            _roiDragStartMouse = imgPt;
+            _isMovingRoi = true;
+            _roiDragDeferThresholdPreview = true;
+            CancelFindShapeRun("已取消进行中的匹配（正在移动 ROI）");
+            ViewHost.CaptureMouse();
+            ViewHost.Cursor = Cursors.SizeAll;
+            return true;
+        }
+
+        private RoiDragSnapshot CaptureRoiDragSnapshot(Point imgPt)
+        {
+            var snap = new RoiDragSnapshot();
+            if (IsPointInRectRoi(imgPt.X, imgPt.Y))
+            {
+                snap.Kind = RoiDragKind.Rect;
+                snap.Rect = _roiRectImage;
+                return snap;
+            }
+
+            if (HasUsableRotatedRectRoi() && IsPointInRotatedRectRoi(imgPt.X, imgPt.Y))
+            {
+                snap.Kind = RoiDragKind.RotatedRect;
+                snap.RotCenterX = _rotRectCenterX;
+                snap.RotCenterY = _rotRectCenterY;
+                snap.RotWidth = _rotRectWidth;
+                snap.RotHeight = _rotRectHeight;
+                snap.RotAngleDeg = _rotRectAngleDeg;
+                return snap;
+            }
+
+            if (HasUsableCircleRoi() && IsPointInCircleRoi(imgPt.X, imgPt.Y))
+            {
+                snap.Kind = RoiDragKind.Circle;
+                snap.CircleCenter = _circleCenterImage;
+                snap.CircleRadius = _circleRadiusImage;
+                return snap;
+            }
+
+            if (RbPolygonMode?.IsChecked == true && _hasRoi && _roiPath.IsClosed && _roiPath.VertexCount >= 3
+                && IsPointInPolygon(imgPt.X, imgPt.Y, GetPolygonFlattened(forHitTest: true)))
+            {
+                snap.Kind = RoiDragKind.Polygon;
+                snap.Polygon = CloneContourPath(_roiPath);
+                return snap;
+            }
+
+            if (HasUsableRingRoi() && IsPointInRingRoi(imgPt.X, imgPt.Y))
+            {
+                snap.Kind = RoiDragKind.Ring;
+                snap.RingOuter = CloneContourPath(_ringOuterPath);
+                snap.RingInner = CloneContourPath(_ringInnerPath);
+            }
+
+            return snap;
+        }
+
+        private void ApplyRoiDrag(Vector delta)
+        {
+            switch (_roiDragKind)
+            {
+                case RoiDragKind.Rect:
+                {
+                    double x = _roiDragSnapshot.Rect.X + delta.X;
+                    double y = _roiDragSnapshot.Rect.Y + delta.Y;
+                    double w = _roiDragSnapshot.Rect.Width;
+                    double h = _roiDragSnapshot.Rect.Height;
+                    ClampRoiToImage(ref x, ref y, ref w, ref h);
+                    _roiRectImage = new Rect(x, y, w, h);
+                    _hasRoi = true;
+                    break;
+                }
+                case RoiDragKind.RotatedRect:
+                    _rotRectCenterX = _roiDragSnapshot.RotCenterX + delta.X;
+                    _rotRectCenterY = _roiDragSnapshot.RotCenterY + delta.Y;
+                    _rotRectWidth = _roiDragSnapshot.RotWidth;
+                    _rotRectHeight = _roiDragSnapshot.RotHeight;
+                    _rotRectAngleDeg = _roiDragSnapshot.RotAngleDeg;
+                    _hasRoi = true;
+                    break;
+                case RoiDragKind.Circle:
+                    _circleCenterImage = new Point(
+                        _roiDragSnapshot.CircleCenter.X + delta.X,
+                        _roiDragSnapshot.CircleCenter.Y + delta.Y);
+                    _circleRadiusImage = _roiDragSnapshot.CircleRadius;
+                    ClampCircleRadiusToImage(clampCenter: false);
+                    _hasRoi = _roiDragSnapshot.CircleRadius > 5;
+                    break;
+                case RoiDragKind.Polygon:
+                    if (_roiDragSnapshot.Polygon != null)
+                    {
+                        CopyContourPathContents(_roiDragSnapshot.Polygon, _roiPath);
+                        TranslateContourPath(_roiPath, delta.X, delta.Y);
+                        InvalidatePolygonFlatCache();
+                        RebuildCommittedPolygonVisual();
+                    }
+                    break;
+                case RoiDragKind.Ring:
+                    if (_roiDragSnapshot.RingOuter != null && _roiDragSnapshot.RingInner != null)
+                    {
+                        CopyContourPathContents(_roiDragSnapshot.RingOuter, _ringOuterPath);
+                        CopyContourPathContents(_roiDragSnapshot.RingInner, _ringInnerPath);
+                        TranslateContourPath(_ringOuterPath, delta.X, delta.Y);
+                        TranslateContourPath(_ringInnerPath, delta.X, delta.Y);
+                        InvalidateRingFlatCache();
+                    }
+                    break;
+            }
+
+            RefreshRoiVisuals();
+            if (!_roiDragDeferThresholdPreview)
+                UpdateThresholdPreview();
+        }
+
+        private Vector ClampRoiDragDelta(Vector delta)
+        {
+            if (_imgWidth <= 0 || _imgHeight <= 0)
+                return delta;
+
+            return _roiDragKind switch
+            {
+                RoiDragKind.Rect => ClampDeltaForRect(delta, _roiDragSnapshot.Rect),
+                RoiDragKind.RotatedRect => ClampDeltaForCenter(delta, _roiDragSnapshot.RotCenterX, _roiDragSnapshot.RotCenterY),
+                RoiDragKind.Circle => ClampDeltaForCircle(delta, _roiDragSnapshot),
+                RoiDragKind.Polygon when _roiDragSnapshot.Polygon != null
+                    => ClampDeltaForPath(delta, _roiDragSnapshot.Polygon),
+                RoiDragKind.Ring when _roiDragSnapshot.RingOuter != null
+                    => ClampDeltaForPath(delta, _roiDragSnapshot.RingOuter),
+                _ => delta
+            };
+        }
+
+        private Vector ClampDeltaForRect(Vector delta, Rect rect)
+        {
+            double x = rect.X + delta.X;
+            double y = rect.Y + delta.Y;
+            x = Math.Max(0, Math.Min(x, _imgWidth - rect.Width));
+            y = Math.Max(0, Math.Min(y, _imgHeight - rect.Height));
+            return new Vector(x - rect.X, y - rect.Y);
+        }
+
+        private Vector ClampDeltaForCenter(Vector delta, double centerX, double centerY)
+        {
+            double cx = Math.Max(0, Math.Min(centerX + delta.X, _imgWidth - 1));
+            double cy = Math.Max(0, Math.Min(centerY + delta.Y, _imgHeight - 1));
+            return new Vector(cx - centerX, cy - centerY);
+        }
+
+        private Vector ClampDeltaForCircle(Vector delta, RoiDragSnapshot snap)
+        {
+            double r = snap.CircleRadius;
+            double cx = snap.CircleCenter.X + delta.X;
+            double cy = snap.CircleCenter.Y + delta.Y;
+            cx = Math.Max(r, Math.Min(cx, _imgWidth - 1 - r));
+            cy = Math.Max(r, Math.Min(cy, _imgHeight - 1 - r));
+            return new Vector(cx - snap.CircleCenter.X, cy - snap.CircleCenter.Y);
+        }
+
+        private static Vector ClampDeltaForPath(Vector delta, RoiContourPath path, int imgWidth, int imgHeight)
+        {
+            (double minX, double minY, double maxX, double maxY) = GetPathBounds(path);
+            double dx = delta.X;
+            double dy = delta.Y;
+            if (minX + dx < 0)
+                dx -= minX + dx;
+            if (maxX + dx > imgWidth - 1)
+                dx -= maxX + dx - (imgWidth - 1);
+            if (minY + dy < 0)
+                dy -= minY + dy;
+            if (maxY + dy > imgHeight - 1)
+                dy -= maxY + dy - (imgHeight - 1);
+            return new Vector(dx, dy);
+        }
+
+        private Vector ClampDeltaForPath(Vector delta, RoiContourPath path) =>
+            ClampDeltaForPath(delta, path, _imgWidth, _imgHeight);
+
+        private void FinishRoiDrag()
+        {
+            if (!_isMovingRoi)
+                return;
+
+            _isMovingRoi = false;
+            _roiDragKind = RoiDragKind.None;
+            _roiDragDeferThresholdPreview = false;
+            ViewHost.Cursor = Cursors.Arrow;
+            UpdateThresholdPreview();
+            PersistSessionChange();
+#if HALCON_ENABLED
+            try
+            {
+                TryAutoSyncGeometryFromRoiIfNeeded();
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"[ROI] 几何同步失败: {ex.Message}");
+            }
+#endif
+        }
+
         private void Canvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             if (_imgWidth <= 0 || _imgHeight <= 0) return;
 
             var imgPt = GetImagePointFromMouse(e);
-            bool captureForDrag = false;
 
-            if (RbRectMode.IsChecked == true || IsRotatedRectModeActive())
+            if (TryBeginRoiDrag(imgPt))
+            {
+                e.Handled = true;
+                return;
+            }
+
+            if (RbRectMode.IsChecked == true)
+            {
+                TryPromptPrimitiveRoiParams(imgPt);
+                return;
+            }
+
+            if (IsRotatedRectModeActive())
             {
                 if (_rotRectSettingAngle)
                 {
@@ -2928,27 +3551,14 @@ namespace CalibOperatorCLI_Example
                     return;
                 }
 
-                _isDrawing = true;
-                captureForDrag = true;
-                _drawStartImage = imgPt;
-                if (RoiRect != null && IsRotatedRectModeActive())
-                    RoiRect.Visibility = Visibility.Collapsed;
-                else if (RoiRect != null)
-                {
-                    RoiRect.Visibility = Visibility.Visible;
-                    Canvas.SetLeft(RoiRect, imgPt.X);
-                    Canvas.SetTop(RoiRect, imgPt.Y);
-                    RoiRect.Width = 0;
-                    RoiRect.Height = 0;
-                }
+                TryPromptPrimitiveRoiParams(imgPt);
+                return;
             }
-            else if (IsCircleModeActive())
+
+            if (IsCircleModeActive())
             {
-                _isDrawing = true;
-                captureForDrag = true;
-                _circleCenterImage = imgPt;
-                _circleRadiusImage = 0;
-                UpdateCirclePreview();
+                TryPromptPrimitiveRoiParams(imgPt);
+                return;
             }
             else if (RbPolygonMode.IsChecked == true)
             {
@@ -2977,9 +3587,6 @@ namespace CalibOperatorCLI_Example
                 if (closedStep && _ringPolygonPhase >= 2)
                     UpdateThresholdPreview();
             }
-
-            if (captureForDrag)
-                ViewHost.CaptureMouse();
         }
 
         private bool HandlePolygonClick(Point imgPt)
@@ -3047,6 +3654,15 @@ namespace CalibOperatorCLI_Example
 
         private void Canvas_MouseMove(object sender, MouseEventArgs e)
         {
+            if (_isMovingRoi)
+            {
+                var imgPt = GetImagePointFromMouse(e);
+                Vector delta = imgPt - _roiDragStartMouse;
+                delta = ClampRoiDragDelta(delta);
+                ApplyRoiDrag(delta);
+                return;
+            }
+
             if (_isPanning)
             {
                 var current = e.GetPosition(ViewHost);
@@ -3083,6 +3699,12 @@ namespace CalibOperatorCLI_Example
                     _polygonCursorImage = GetImagePointFromMouse(e);
                     UpdateRingRubberVisual();
                 }
+            }
+
+            if (!_isMovingRoi && !_isPanning && !_isDrawing && CanBeginRoiDragNow())
+            {
+                var hoverPt = GetImagePointFromMouse(e);
+                ViewHost.Cursor = IsPointInActiveRoi(hoverPt.X, hoverPt.Y) ? Cursors.SizeAll : Cursors.Arrow;
             }
 
             if (_rotRectSettingAngle)
@@ -3173,6 +3795,14 @@ namespace CalibOperatorCLI_Example
 
         private void Canvas_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
+            if (_isMovingRoi)
+            {
+                FinishRoiDrag();
+                ViewHost.ReleaseMouseCapture();
+                e.Handled = true;
+                return;
+            }
+
             ViewHost.ReleaseMouseCapture();
 
             if (!_isDrawing) return;
@@ -3234,16 +3864,19 @@ namespace CalibOperatorCLI_Example
             }
         }
 
-        private void ClampCircleRadiusToImage()
+        private void ClampCircleRadiusToImage(bool clampCenter = true)
         {
             if (_imgWidth <= 0 || _imgHeight <= 0 || _circleRadiusImage <= 0)
                 return;
 
+            if (clampCenter)
+                _circleCenterImage = ClampImagePoint(_circleCenterImage);
+
             double maxR = Math.Min(
                 Math.Min(_circleCenterImage.X, _imgWidth - 1 - _circleCenterImage.X),
                 Math.Min(_circleCenterImage.Y, _imgHeight - 1 - _circleCenterImage.Y));
-            if (maxR < 1)
-                maxR = 1;
+            if (maxR < 0)
+                maxR = 0;
             _circleRadiusImage = Math.Min(_circleRadiusImage, maxR);
         }
 
@@ -3611,10 +4244,24 @@ namespace CalibOperatorCLI_Example
         /// <summary>按阈值逐像素高亮（青色半透明），与底图同尺寸、同坐标。</summary>
         private void UpdateThresholdPreview()
         {
-            if (ThresholdOverlayImage == null || _grayPixels == null || _imgWidth <= 0)
+            if (ThresholdOverlayImage == null || _grayPixels == null || _imgWidth <= 0 || _imgHeight <= 0)
             {
                 if (ThresholdOverlayImage != null)
                     ThresholdOverlayImage.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            int expectedGrayBytes = _imgWidth * _imgHeight;
+            if (_grayPixels.Length < expectedGrayBytes)
+            {
+                ThresholdOverlayImage.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            if (!IsGrayThresholdTemplateSource(
+                    (CmbTemplateSource?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "ThresholdXld"))
+            {
+                ThresholdOverlayImage.Visibility = Visibility.Collapsed;
                 return;
             }
 
@@ -3734,11 +4381,27 @@ namespace CalibOperatorCLI_Example
         {
             if (!IsLoaded) return;
             UpdateCreatePanelsVisibility();
+            UpdateThresholdPreview();
 #if HALCON_ENABLED
             if ((CmbTemplateSource?.SelectedItem as ComboBoxItem)?.Tag?.ToString() == "GeometryXld")
                 TryAutoSyncGeometryFromRoiIfNeeded();
 #endif
         }
+
+        private static bool IsGrayThresholdTemplateSource(string src) =>
+            string.Equals(src, "ThresholdXld", StringComparison.Ordinal);
+
+        private static bool UsesContourExtractSettings(string src) =>
+            src is "ThresholdXld" or "EdgesXld" or "PolygonXld";
+
+        private static bool UsesGenContourModeSetting(string src) =>
+            string.Equals(src, "ThresholdXld", StringComparison.Ordinal);
+
+        private static bool UsesContourTrimWorkflow(string src) =>
+            src is "ThresholdXld" or "EdgesXld" or "PolygonXld" or "GeometryXld";
+
+        private bool UsesHandDrawnEdgeGradient(string src) =>
+            src == "PolygonXld" && !IsOpenTrajectoriesModeActive();
 
         private void UpdateCreatePanelsVisibility()
         {
@@ -3748,25 +4411,47 @@ namespace CalibOperatorCLI_Example
             string kind = (CmbModelKind?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Shape";
 
             bool isGeometry = src == "GeometryXld";
-            bool isXld = isGeometry || src is "ThresholdXld" or "EdgesXld" or "PolygonXld";
             bool isImage = src is "ImageRectangle" or "ImagePolygon";
+            bool showGrayThreshold = IsGrayThresholdTemplateSource(src);
+            bool showPolygonClose = !isGeometry && src is not "ImageRectangle";
+
+            if (PnlGrayThreshold != null)
+                PnlGrayThreshold.Visibility = showGrayThreshold ? Visibility.Visible : Visibility.Collapsed;
+            if (PnlPolygonCloseSettings != null)
+                PnlPolygonCloseSettings.Visibility = showPolygonClose ? Visibility.Visible : Visibility.Collapsed;
+            if (PnlThreshold != null)
+                PnlThreshold.Visibility = showGrayThreshold || showPolygonClose
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            if (TxtThresholdPanelTitle != null)
+            {
+                TxtThresholdPanelTitle.Text = showGrayThreshold && showPolygonClose
+                    ? "阈值与闭合"
+                    : showGrayThreshold
+                        ? "灰度阈值"
+                        : "多边形闭合";
+            }
 
             if (PnlGeometryMeasure != null)
                 PnlGeometryMeasure.Visibility = isGeometry ? Visibility.Visible : Visibility.Collapsed;
+            bool showContourExtract = UsesContourExtractSettings(src);
+            bool showGenContourMode = UsesGenContourModeSetting(src);
+            bool showContourTrim = UsesContourTrimWorkflow(src);
             if (PnlContourExtract != null)
-                PnlContourExtract.Visibility = isXld && !isGeometry ? Visibility.Visible : Visibility.Collapsed;
+                PnlContourExtract.Visibility = showContourExtract ? Visibility.Visible : Visibility.Collapsed;
+            if (PnlGenContourMode != null)
+                PnlGenContourMode.Visibility = showGenContourMode ? Visibility.Visible : Visibility.Collapsed;
             if (PnlContourTrim != null)
-                PnlContourTrim.Visibility = isXld ? Visibility.Visible : Visibility.Collapsed;
+                PnlContourTrim.Visibility = showContourTrim ? Visibility.Visible : Visibility.Collapsed;
             if (PnlEdgeExtract != null)
                 PnlEdgeExtract.Visibility = src == "EdgesXld" ? Visibility.Visible : Visibility.Collapsed;
             if (PnlRoiBoundaryDir != null)
             {
-                bool showRoiDir = src == "PolygonXld" && !IsOpenTrajectoriesModeActive();
+                bool showRoiDir = UsesHandDrawnEdgeGradient(src);
                 PnlRoiBoundaryDir.Visibility = showRoiDir ? Visibility.Visible : Visibility.Collapsed;
+                UpdateHandDrawnEdgeGradientSubPanels(showRoiDir);
             }
 
-            if (PnlThreshold != null)
-                PnlThreshold.Visibility = isGeometry ? Visibility.Collapsed : Visibility.Visible;
             UpdateDrawToolbarForMode();
             if (PnlScale != null)
                 PnlScale.Visibility = kind is "ScaledShape" or "Deformable" or "PlanarDeformable" ? Visibility.Visible : Visibility.Collapsed;
@@ -4747,13 +5432,6 @@ namespace CalibOperatorCLI_Example
 
         private IReadOnlyList<Point2D>? TryGetReferencePathForEdgeSampling()
         {
-            if (_roiPath.VertexCount >= 3)
-            {
-                return GetPolygonFlattened(forHitTest: true)
-                    .Select(p => new Point2D(p.X, p.Y))
-                    .ToList();
-            }
-
             if (HasUsableCircleRoi())
             {
                 return CircleToPolygonPoints(_circleCenterImage, _circleRadiusImage)
@@ -4783,6 +5461,13 @@ namespace CalibOperatorCLI_Example
                 for (int i = 0; i < n; i++)
                     pts[i] = new Point2D(corners[i].X, corners[i].Y);
                 return pts;
+            }
+
+            if (_roiPath.VertexCount >= 3)
+            {
+                return GetPolygonFlattened(forHitTest: true)
+                    .Select(p => new Point2D(p.X, p.Y))
+                    .ToList();
             }
 
 #if HALCON_ENABLED
@@ -4821,6 +5506,11 @@ namespace CalibOperatorCLI_Example
         {
             if (!IsLoaded || PnlRingInnerGradientCustom == null || CmbRingInnerGradientMode == null)
                 return;
+            if (PnlRingInnerGradientSettings?.Visibility != Visibility.Visible)
+            {
+                PnlRingInnerGradientCustom.Visibility = Visibility.Collapsed;
+                return;
+            }
             string mode = (CmbRingInnerGradientMode.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "opposite";
             PnlRingInnerGradientCustom.Visibility = string.Equals(mode, "custom", StringComparison.OrdinalIgnoreCase)
                 ? Visibility.Visible
@@ -5156,6 +5846,9 @@ namespace CalibOperatorCLI_Example
             _createModelInProgress = true;
             BtnCreateModel.IsEnabled = false;
             BtnTestFind.IsEnabled = false;
+            CalibImage? imageForCreate = null;
+            HObject? regionForCreate = null;
+            HObject? nativeXldForCreate = null;
             try
             {
                 var opt = ReadCreateOptionsFromUi();
@@ -5163,20 +5856,21 @@ namespace CalibOperatorCLI_Example
                 if (!double.TryParse(TxtMaxGray.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double maxGray)) maxGray = 255;
 
                 AppendLog($"创建模式: {opt.SourceKind} / {opt.ModelKind}（epoch={_modelEpoch}）");
+                imageForCreate = DuplicateCurrentImageForHalcon();
 
                 bool fromImage = opt.SourceKind is HalconShapeModelSourceKind.ImageRectangle
                     or HalconShapeModelSourceKind.ImagePolygon;
 
                 HalconXldContourBundle? xldBundle = null;
-                HObject? region = null;
 
                 if (fromImage)
                 {
-                    region = BuildRequiredRegionForImageMode(opt.SourceKind);
+                    using HObject regionBuilt = BuildRequiredRegionForImageMode(opt.SourceKind);
+                    regionForCreate = HalconFlowBridge.CloneHObject(regionBuilt)
+                        ?? throw new InvalidOperationException("ROI 区域无效，无法创建图像模板");
                     AppendLog("使用 ROI 灰度图创建模板...");
-                    var image = _currentImage;
                     _modelId = await HalconComputeRunner.RunAsync(() =>
-                        HalconFlowBridge.CreateShapeModel(image, null, region, opt),
+                        HalconFlowBridge.CreateShapeModel(imageForCreate, null, regionForCreate, opt),
                         HalconThreadPolicy.Geometry);
                 }
                 else
@@ -5216,16 +5910,13 @@ namespace CalibOperatorCLI_Example
                         MarkContourCacheReady(opt, minGray, maxGray, includeTrimState: false);
                     }
 
-                    var image = _currentImage;
-                    var nativeXld = _nativeXldForCreate;
+                    nativeXldForCreate = HalconFlowBridge.CloneHObject(_nativeXldForCreate);
                     _modelId = await HalconComputeRunner.RunAsync(() =>
-                        HalconFlowBridge.CreateShapeModel(image, xldBundle, null, opt, nativeXld),
+                        HalconFlowBridge.CreateShapeModel(imageForCreate, xldBundle, null, opt, nativeXldForCreate),
                         HalconThreadPolicy.Geometry);
                     if (opt.SourceKind == HalconShapeModelSourceKind.PolygonXld)
                         AppendLog("匹配指标建议: use_polarity（已含 edge_direction）");
                 }
-
-                region?.Dispose();
 
                 if (!HalconFlowBridge.TryGetRegisteredModelKind(_modelId, out _))
                     throw new InvalidOperationException($"模型注册失败 ModelID={_modelId}");
@@ -5263,6 +5954,9 @@ namespace CalibOperatorCLI_Example
             }
             finally
             {
+                imageForCreate?.Dispose();
+                regionForCreate?.Dispose();
+                nativeXldForCreate?.Dispose();
                 _createModelInProgress = false;
                 BtnCreateModel.IsEnabled = true;
                 BtnTestFind.IsEnabled = _modelId >= 0;
@@ -5464,7 +6158,7 @@ namespace CalibOperatorCLI_Example
                 long modelId = _modelId;
                 int modelEpoch = _modelEpoch;
                 var modelKind = _modelKind;
-                var image = _currentImage;
+                CalibImage? imageForFind = DuplicateCurrentImageForHalcon();
 
                 AppendLog($"查找({modelKind}): ModelID={modelId}, epoch={modelEpoch}, NumMatches={numMatches}, MinScore={minScore}, Greediness={greediness}, NumLevels={findNumLevels}, 角度[{angleStart}°~{angleStart + angleExtent}°]");
                 TxtFindResult.Text = "查找中…";
@@ -5472,50 +6166,76 @@ namespace CalibOperatorCLI_Example
                 if (modelKind == HalconFlowModelKind.Deformable)
                 {
                     var scaleOpt = ReadCreateOptionsFromUi();
-                    var findDef = await HalconComputeRunner.RunAsync(ct =>
+                    try
                     {
-                        if (autoRetry)
+                        var findDef = await HalconComputeRunner.RunAsync(ct =>
                         {
-                            return HalconFlowBridge.FindDeformableModelWithFallback(
-                                image, modelId, angleStart, angleExtent, minScore, numMatches, maxOverlap,
-                                findNumLevels, greediness, scaleOpt, ct);
+                            if (autoRetry)
+                            {
+                                return HalconFlowBridge.FindDeformableModelWithFallback(
+                                    imageForFind, modelId, angleStart, angleExtent, minScore, numMatches, maxOverlap,
+                                    findNumLevels, greediness, scaleOpt, ct);
+                            }
+
+                            ct.ThrowIfCancellationRequested();
+                            return HalconFlowBridge.FindDeformableModel(
+                                imageForFind, modelId, angleStart, angleExtent, minScore, numMatches, maxOverlap,
+                                findNumLevels, greediness, scaleOpt);
+                        }, findToken);
+
+                        if (!TryConsumeFindResult(runId, modelId, modelEpoch, modelKind))
+                            return;
+
+                        if (findDef.rows.Length == 0)
+                        {
+                            ClearFindResultOverlay();
+                            TxtFindResult.Text = "未找到匹配";
+                            AppendLog("未找到可变形匹配");
                         }
-
-                        ct.ThrowIfCancellationRequested();
-                        return HalconFlowBridge.FindDeformableModel(
-                            image, modelId, angleStart, angleExtent, minScore, numMatches, maxOverlap,
-                            findNumLevels, greediness, scaleOpt);
-                    }, findToken);
-
-                    if (!TryConsumeFindResult(runId, modelId, modelEpoch, modelKind))
-                        return;
-
-                    if (findDef.rows.Length == 0)
-                    {
-                        ClearFindResultOverlay();
-                        TxtFindResult.Text = "未找到匹配";
-                        AppendLog("未找到可变形匹配");
+                        else
+                        {
+                            DrawDeformableFindResultOverlay(findDef.rows, findDef.cols, findDef.scores, findDef.deformedContoursPerMatch);
+                            var sb = new System.Text.StringBuilder();
+                            sb.AppendLine($"找到 {findDef.rows.Length} 个可变形匹配:");
+                            for (int i = 0; i < findDef.rows.Length; i++)
+                                sb.AppendLine($"[{i}] Row={findDef.rows[i]:F1}, Col={findDef.cols[i]:F1}, Score={findDef.scores[i]:F3}");
+                            TxtFindResult.Text = sb.ToString();
+                            AppendLog($"查找完成: {findDef.rows.Length} 个可变形匹配");
+                        }
                     }
-                    else
+                    finally
                     {
-                        DrawDeformableFindResultOverlay(findDef.rows, findDef.cols, findDef.scores, findDef.deformedContoursPerMatch);
-                        var sb = new System.Text.StringBuilder();
-                        sb.AppendLine($"找到 {findDef.rows.Length} 个可变形匹配:");
-                        for (int i = 0; i < findDef.rows.Length; i++)
-                            sb.AppendLine($"[{i}] Row={findDef.rows[i]:F1}, Col={findDef.cols[i]:F1}, Score={findDef.scores[i]:F3}");
-                        TxtFindResult.Text = sb.ToString();
-                        AppendLog($"查找完成: {findDef.rows.Length} 个可变形匹配");
+                        imageForFind.Dispose();
                     }
 
                     return;
                 }
 
-                var findResult = await HalconComputeRunner.RunAsync(ct =>
+                try
                 {
-                    if (autoRetry)
+                    var findResult = await HalconComputeRunner.RunAsync(ct =>
                     {
-                        return HalconFlowBridge.FindShapeModelWithFallback(
-                            image,
+                        if (autoRetry)
+                        {
+                            return HalconFlowBridge.FindShapeModelWithFallback(
+                                imageForFind,
+                                modelId,
+                                angleStart,
+                                angleExtent,
+                                minScore,
+                                numMatches,
+                                maxOverlap,
+                                "least_squares",
+                                findNumLevels,
+                                greediness,
+                                scaleMin: 1.0,
+                                scaleMax: 1.0,
+                                cancellationToken: ct);
+                        }
+
+                        ct.ThrowIfCancellationRequested();
+                        return HalconFlowBridge.FindShapeModel(
+                            imageForFind,
                             modelId,
                             angleStart,
                             angleExtent,
@@ -5524,30 +6244,13 @@ namespace CalibOperatorCLI_Example
                             maxOverlap,
                             "least_squares",
                             findNumLevels,
-                            greediness,
-                            scaleMin: 1.0,
-                            scaleMax: 1.0,
-                            cancellationToken: ct);
-                    }
+                            greediness);
+                    }, findToken);
 
-                    ct.ThrowIfCancellationRequested();
-                    return HalconFlowBridge.FindShapeModel(
-                        image,
-                        modelId,
-                        angleStart,
-                        angleExtent,
-                        minScore,
-                        numMatches,
-                        maxOverlap,
-                        "least_squares",
-                        findNumLevels,
-                        greediness);
-                }, findToken);
+                    if (!TryConsumeFindResult(runId, modelId, modelEpoch, modelKind))
+                        return;
 
-                if (!TryConsumeFindResult(runId, modelId, modelEpoch, modelKind))
-                    return;
-
-                var (rows, cols, angles, scores) = findResult;
+                    var (rows, cols, angles, scores) = findResult;
                 int rawCount = rows.Length;
 
                 if (ChkFindApplyGridFilter.IsChecked == true && rows.Length > 0)
@@ -5642,6 +6345,11 @@ namespace CalibOperatorCLI_Example
                     }
                     TxtFindResult.Text = result.ToString();
                     AppendLog($"查找完成: {rows.Length} 个匹配（已在图像上高亮）");
+                }
+                }
+                finally
+                {
+                    imageForFind.Dispose();
                 }
             }
             catch (OperationCanceledException)

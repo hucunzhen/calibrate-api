@@ -34,7 +34,16 @@ namespace CalibOperatorCLI_Example
             try
             {
                 HOperatorSet.GenImage1(out HObject himg, "byte", w, h, handle.AddrOfPinnedObject());
-                return himg;
+                try
+                {
+                    // GenImage1 可能仍引用外部指针；CopyImage 后 HALCON 自有内存，避免 pin 释放后访问冲突。
+                    HOperatorSet.CopyImage(himg, out HObject owned);
+                    return owned;
+                }
+                finally
+                {
+                    himg.Dispose();
+                }
             }
             finally
             {
@@ -56,6 +65,16 @@ namespace CalibOperatorCLI_Example
             }
 
             return CalibToHObjectViaTempBmp(img);
+        }
+
+        /// <summary>深拷贝 HObject，供后台 HALCON 任务使用（避免 UI 线程释放后访问冲突）。</summary>
+        internal static HObject? CloneHObject(HObject? src)
+        {
+            if (src == null || !src.IsInitialized())
+                return null;
+
+            HOperatorSet.CopyObj(src, out HObject copy, 1, -1);
+            return copy;
         }
 
         /// <summary>经临时 BMP + ReadImage（非 1/3 通道时的兜底）。</summary>
@@ -1539,6 +1558,67 @@ namespace CalibOperatorCLI_Example
             Array.Copy(pts, closed, pts.Length);
             closed[^1] = pts[0];
             return closed;
+        }
+
+        /// <summary>
+        /// 沿闭合折线周长均匀插点，使顶点数至少达到 <paramref name="minTotalPoints"/>（矩形/圆等仅少量角点时用于手绘边线模板）。
+        /// </summary>
+        public static Point2D[] DensifyClosedPolyline(IReadOnlyList<Point2D> points, int minTotalPoints)
+        {
+            minTotalPoints = Math.Max(3, minTotalPoints);
+            if (points == null || points.Count == 0)
+                return Array.Empty<Point2D>();
+
+            var ring = new List<Point2D>(points);
+            if (ring.Count >= 2)
+            {
+                double cdx = ring[0].X - ring[^1].X;
+                double cdy = ring[0].Y - ring[^1].Y;
+                if (cdx * cdx + cdy * cdy <= 1e-12)
+                    ring.RemoveAt(ring.Count - 1);
+            }
+
+            if (ring.Count < 2)
+                return EnsureClosedContourPoints(ring.ToArray(), forceClose: true);
+
+            if (ring.Count >= minTotalPoints)
+                return EnsureClosedContourPoints(ring.ToArray(), forceClose: true);
+
+            double perimeter = 0;
+            for (int i = 0; i < ring.Count; i++)
+            {
+                var a = ring[i];
+                var b = ring[(i + 1) % ring.Count];
+                double dx = b.X - a.X;
+                double dy = b.Y - a.Y;
+                perimeter += Math.Sqrt(dx * dx + dy * dy);
+            }
+
+            if (perimeter < 1e-6)
+                return EnsureClosedContourPoints(ring.ToArray(), forceClose: true);
+
+            double spacing = Math.Max(perimeter / minTotalPoints, 0.25);
+            var dense = new List<Point2D>(minTotalPoints + ring.Count);
+            for (int i = 0; i < ring.Count; i++)
+            {
+                var a = ring[i];
+                var b = ring[(i + 1) % ring.Count];
+                dense.Add(a);
+                double dx = b.X - a.X;
+                double dy = b.Y - a.Y;
+                double segLen = Math.Sqrt(dx * dx + dy * dy);
+                if (segLen < 1e-9)
+                    continue;
+
+                int inserts = Math.Max(0, (int)Math.Ceiling(segLen / spacing) - 1);
+                for (int j = 1; j <= inserts; j++)
+                {
+                    double t = j / (inserts + 1.0);
+                    dense.Add(new Point2D(a.X + t * dx, a.Y + t * dy));
+                }
+            }
+
+            return EnsureClosedContourPoints(dense.ToArray(), forceClose: true);
         }
 
         private static Point2D[] ContourXldSingleToPointArray(HObject singleContourXld)

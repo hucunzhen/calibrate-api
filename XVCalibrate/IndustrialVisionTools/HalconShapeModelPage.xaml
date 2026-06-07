@@ -5,20 +5,27 @@
       Background="{StaticResource Ui.PageBackground}">
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*"/>
             <ColumnDefinition Width="400"/>
+            <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
-        <!-- 左侧：图像显示 -->
-        <Border Grid.Column="0" Background="#1E1E1E" Margin="8">
+        <!-- 工作区：图像 + 匹配/相机/日志 -->
+        <Border Grid.Column="1" Background="#1E1E1E" Margin="0,8,8,8">
             <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MinWidth="240"/>
+                    <ColumnDefinition Width="6"/>
+                    <ColumnDefinition Width="320" MinWidth="260"/>
+                </Grid.ColumnDefinitions>
+
+                <Grid Grid.Column="0" Margin="8,8,8,8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
 
                 <!-- 工具栏：分三行（图像 / ROI 形状 / 路径工具） -->
-                <Border Grid.Row="0" Background="#2D2D2D" Margin="8,8,8,4" Padding="8,6"
+                <Border Grid.Row="0" Background="#2D2D2D" Padding="8,6"
                         PreviewMouseDown="DrawToolbar_PreviewMouseDown">
                     <Grid>
                         <Grid.RowDefinitions>
@@ -30,7 +37,7 @@
                             <TextBlock Text="图像" Width="40" VerticalAlignment="Center" Foreground="#90A4AE" FontSize="11" Margin="0,0,8,0"/>
                             <Button x:Name="BtnLoadImage" Content="加载图像" MinWidth="80" Height="32" Padding="10,4" Margin="0,0,6,0" Click="BtnLoadImage_Click"/>
                             <Button x:Name="BtnCameraGrab" Content="摄像头取一帧" MinWidth="96" Height="32" Padding="10,4" Margin="0,0,6,0"
-                                    Click="BtnCameraGrab_Click" ToolTip="海康相机抓一帧（设备索引见右侧「相机矫正」页）"/>
+                                    Click="BtnCameraGrab_Click" ToolTip="海康相机抓一帧（设备索引见右侧「相机矫正」）"/>
                             <Button x:Name="BtnClearRoi" Content="清除 ROI" MinWidth="72" Height="32" Padding="10,4" Margin="0,0,6,0" Click="BtnClearRoi_Click"/>
                             <Button x:Name="BtnResetView" Content="重置视图" MinWidth="72" Height="32" Padding="10,4" Click="BtnResetView_Click"/>
                         </StackPanel>
@@ -38,15 +45,19 @@
                             <TextBlock Text="形状" Width="40" VerticalAlignment="Center" Foreground="#90A4AE" FontSize="11" Margin="0,0,8,4"/>
                             <RadioButton x:Name="RbRectMode" Content="矩形" GroupName="DrawMode" IsChecked="True"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
-                                         MinHeight="32" Checked="DrawMode_Changed"/>
+                                         MinHeight="32" Checked="DrawMode_Changed"
+                                         ToolTip="选中后弹出参数对话框，或在画布上单击"/>
                             <RadioButton x:Name="RbRotatedRectMode" Content="旋转矩形" GroupName="DrawMode"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
-                                         ToolTip="拖动定大小→移鼠标定角→单击确认"/>
+                                         ToolTip="中心、宽高、角度均在对话框中输入"/>
                             <RadioButton x:Name="RbCircleMode" Content="圆形" GroupName="DrawMode"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
-                                         ToolTip="按下圆心拖动设半径，松开完成"/>
+                                         ToolTip="圆心与半径在对话框中输入"/>
+                            <Button x:Name="BtnPrimitiveRoiParams" Content="参数…" MinWidth="56" Height="32" Padding="8,4"
+                                    Margin="0,0,6,4" Visibility="Collapsed" Click="BtnPrimitiveRoiParams_Click"
+                                    ToolTip="编辑当前矩形/旋转矩形/圆的 ROI 参数"/>
                             <RadioButton x:Name="RbPolygonMode" Content="多边形" GroupName="DrawMode"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"/>
@@ -128,11 +139,226 @@
                         <Canvas x:Name="FindResultOverlay" IsHitTestVisible="False"/>
                     </Canvas>
                 </Border>
+                </Grid>
+
+                <!-- 图像右侧：匹配测试 / 相机矫正 / 日志 -->
+                <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" Margin="0,8,8,8">
+                    <StackPanel>
+                        <TextBlock Text="④ 匹配测试" FontWeight="Bold" FontSize="13" Foreground="#B0BEC5" Margin="0,0,0,6"/>
+                            <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}"
+                                    BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="90"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="匹配个数" VerticalAlignment="Center"
+                                                   ToolTip="0=按下方阵列行×列（默认 3×3）；填正整数则固定上限；流程中 0 才表示全部"/>
+                                        <TextBox x:Name="TxtFindNumMatches" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"
+                                                 ToolTip="测试页 0 不会搜全部匹配，而是按阵列行列或默认 100 封顶"/>
+                                    </Grid>
+                                    <Grid Margin="0,0,0,4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="90"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="最低分数" VerticalAlignment="Center"
+                                                   ToolTip="漏检时降到 0.35~0.45；误检多时提高到 0.55~0.65"/>
+                                        <TextBox x:Name="TxtFindMinScore" Grid.Column="1" Text="0.4" Height="24" VerticalContentAlignment="Center"/>
+                                    </Grid>
+                                    <Grid Margin="0,0,0,4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="90"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="贪婪度" VerticalAlignment="Center"
+                                                   ToolTip="0~1；漏检时降低(如0.7)，速度慢但更全"/>
+                                        <TextBox x:Name="TxtFindGreediness" Grid.Column="1" Text="0.75" Height="24" VerticalContentAlignment="Center"/>
+                                    </Grid>
+                                    <Grid Margin="0,0,0,4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="90"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="搜索层数" VerticalAlignment="Center"
+                                                   ToolTip="0=与创建模型一致；建议与创建金字塔层数相同"/>
+                                        <TextBox x:Name="TxtFindNumLevels" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
+                                    </Grid>
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="90"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="最大重叠" VerticalAlignment="Center"/>
+                                        <TextBox x:Name="TxtFindMaxOverlap" Grid.Column="1" Text="0.5" Height="24" VerticalContentAlignment="Center"/>
+                                    </Grid>
+                                    <TextBlock Text="HALCON 会返回全部候选；流程后接「阵列过滤」后数量更少。下方可勾选以复现流程结果。"
+                                               FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                                    <CheckBox x:Name="ChkFindApplyGridFilter" Content="阵列过滤（同 halcon_filter_shape_match_grid）"
+                                              Margin="0,0,0,4" IsChecked="False"/>
+                                    <Grid Margin="0,0,0,4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="90"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="90"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="行×列" VerticalAlignment="Center"/>
+                                        <TextBox x:Name="TxtFindGridRows" Grid.Column="1" Text="3" Height="24" VerticalContentAlignment="Center" Margin="0,0,4,0"/>
+                                        <TextBox x:Name="TxtFindGridCols" Grid.Column="2" Grid.ColumnSpan="2" Text="3" Height="24" VerticalContentAlignment="Center"/>
+                                    </Grid>
+                                    <Grid Margin="0,0,0,4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="90"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="保留最低分" VerticalAlignment="Center"
+                                                   ToolTip="过滤后保留的最低分数，0=不按分数剔除"/>
+                                        <TextBox x:Name="TxtFindMinScoreKeep" Grid.Column="1" Text="0.45" Height="24" VerticalContentAlignment="Center" ToolTip="0=不按分数剔除"/>
+                                    </Grid>
+                                    <Grid Margin="0,0,0,4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="90"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="阵列角度°" VerticalAlignment="Center"
+                                                   ToolTip="auto=自动(匹配角+PCA)；或填固定角度"/>
+                                        <TextBox x:Name="TxtFindGridAngleDeg" Grid.Column="1" Text="auto" Height="24" VerticalContentAlignment="Center"/>
+                                    </Grid>
+                                    <Grid Margin="0,0,0,4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="90"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="角度偏差°" VerticalAlignment="Center"
+                                                   ToolTip="相对匹配角的中位偏差；整板同向可设10~15；对称模板请设0"/>
+                                        <TextBox x:Name="TxtFindMaxAngleDev" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
+                                    </Grid>
+                                    <CheckBox x:Name="ChkFindAutoRetry" Content="零结果时自动降低最低分数重试"
+                                              Margin="0,0,0,6" IsChecked="False"
+                                              ToolTip="仅当 HALCON 返回 0 个匹配时再试；有匹配时不会增加数量"/>
+
+                                    <Button x:Name="BtnImportModel" Content="导入模型(.shm)" Height="28"
+                                            Margin="0,0,0,8" Click="BtnImportModel_Click"
+                                            ToolTip="从文件加载 HALCON 形状模型，可直接测试形状匹配，无需在本页创建"/>
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="8"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Button x:Name="BtnTestFind" Grid.Column="0" Content="测试形状匹配" Height="28"
+                                                Click="BtnTestFind_Click"/>
+                                        <Button x:Name="BtnStopFind" Grid.Column="2" Content="停止" Height="28" MinWidth="56"
+                                                IsEnabled="False" Visibility="Collapsed" Click="BtnStopFind_Click"
+                                                ToolTip="停止当前匹配（HALCON 须结束本轮搜索后 UI 恢复；自动重试会在两轮之间停止）"/>
+                                    </Grid>
+                                    <Button x:Name="BtnExportModel" Content="导出模型(.shm)" Height="28"
+                                            Margin="0,0,0,0" Click="BtnExportModel_Click"
+                                            ToolTip="默认文件名含创建参数（xv_shape_ThXld_n4_a-30x60_ilp_mc10…），便于按名选择模型"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}"
+                                    BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                                <StackPanel>
+                                    <TextBlock FontWeight="Bold" Text="模型信息" Margin="0,0,0,6"/>
+                                    <TextBlock x:Name="TxtModelInfo" Text="未创建模型" Foreground="#888" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}"
+                                    BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                                <StackPanel>
+                                    <TextBlock FontWeight="Bold" Text="查找结果" Margin="0,0,0,6"/>
+                                    <TextBlock x:Name="TxtFindResult" Text="无" Foreground="#888" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
+
+                        <TextBlock Text="⑤ 相机矫正" FontWeight="Bold" FontSize="13" Foreground="#B0BEC5" Margin="0,8,0,6"/>
+                            <Border x:Name="PnlCameraCorrection" Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}"
+                                    BorderThickness="1" Padding="10" Margin="0,0,0,0" CornerRadius="3">
+                                <StackPanel>
+                                    <TextBlock Text="去畸变 / 透视 / 矫正后旋转；设备索引与顶部「摄像头取一帧」共用。"
+                                               FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="72"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="设备索引" VerticalAlignment="Center"/>
+                                        <TextBox x:Name="TxtCameraDeviceIndex" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
+                                    </Grid>
+                                    <Grid Margin="0,0,0,4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="72"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="28"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="标定 JSON" VerticalAlignment="Center"/>
+                                        <TextBox x:Name="TxtCalibrationJsonPath" Grid.Column="1" Height="24" VerticalContentAlignment="Center"/>
+                                        <Button Grid.Column="2" Content="..." Height="24" Margin="4,0,0,0" Click="BtnBrowseCalibrationJson_Click"/>
+                                    </Grid>
+                                    <CheckBox x:Name="ChkEnableUndistort" Content="内参畸变矫正" Foreground="#CCC" Margin="0,4,0,2"/>
+                                    <TextBox x:Name="TxtUndistortAlpha" Text="-1" Height="24" Margin="16,0,0,4" VerticalContentAlignment="Center"
+                                             ToolTip="裁剪 α：-1=原尺寸"/>
+                                    <CheckBox x:Name="ChkEnablePerspective" Content="透视矫正 (棋盘鸟瞰)" Foreground="#CCC" Margin="0,4,0,4"/>
+                                    <TextBox x:Name="TxtCalibViewIndex" Text="0" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center"/>
+                                    <Grid Margin="16,0,0,2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="36"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="36"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="列" VerticalAlignment="Center"/>
+                                        <TextBox x:Name="TxtCalibBoardCols" Grid.Column="1" Text="9" Height="24" Margin="0,0,4,0" VerticalContentAlignment="Center"/>
+                                        <TextBlock Grid.Column="2" Text="行" VerticalAlignment="Center"/>
+                                        <TextBox x:Name="TxtCalibBoardRows" Grid.Column="3" Text="6" Height="24" VerticalContentAlignment="Center"/>
+                                    </Grid>
+                                    <TextBox x:Name="TxtCalibSquareSizeMm" Text="25" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center" ToolTip="方格 mm"/>
+                                    <TextBox x:Name="TxtCalibPxPerMm" Text="1" Height="24" Margin="16,0,0,4" VerticalContentAlignment="Center" ToolTip="mm/像素"/>
+                                    <ComboBox x:Name="CmbPerspectiveOutputFrame" Height="26" Margin="16,0,0,6">
+                                        <ComboBoxItem Content="仅标定板 (board)" Tag="board" IsSelected="True"/>
+                                        <ComboBoxItem Content="原图+板内 (local)" Tag="local"/>
+                                        <ComboBoxItem Content="整图共面 (plane)" Tag="plane"/>
+                                    </ComboBox>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                        <Button x:Name="BtnRotateCorrectedCcw90" Content="逆时针90°" Height="28" Margin="0,0,6,0" Click="BtnRotateCorrectedCcw90_Click"/>
+                                        <Button x:Name="BtnRotateCorrectedCw90" Content="顺时针90°" Height="28" Margin="0,0,6,0" Click="BtnRotateCorrectedCw90_Click"/>
+                                        <Button x:Name="BtnResetCorrectedRotate" Content="重置旋转" Height="28" Click="BtnResetCorrectedRotate_Click"/>
+                                    </StackPanel>
+                                    <Grid Margin="0,0,0,4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="72"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="44"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="角度(°)" VerticalAlignment="Center"/>
+                                        <TextBox x:Name="TxtPostCorrectRotateDeg" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
+                                        <Button Grid.Column="2" x:Name="BtnApplyPostCorrectRotate" Content="应用" Height="24" Margin="4,0,0,0"
+                                                Click="BtnApplyPostCorrectRotate_Click"/>
+                                    </Grid>
+                                    <CheckBox x:Name="ChkRotateExpandCanvas" Content="扩大画布容纳整图" Foreground="#CCC" Margin="0,0,0,8" IsChecked="False"/>
+                                    <Button x:Name="BtnApplyCameraCorrection" Content="应用相机矫正" Height="28" Click="BtnApplyCameraCorrection_Click"/>
+                                </StackPanel>
+                            </Border>
+
+                        <TextBlock Text="日志" FontWeight="Bold" FontSize="13" Foreground="#B0BEC5" Margin="0,8,0,6"/>
+                        <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}"
+                                BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                            <TextBox x:Name="TxtLog" AcceptsReturn="True" MinHeight="120" MaxHeight="240" VerticalScrollBarVisibility="Auto"
+                                     TextWrapping="Wrap" FontFamily="Consolas" FontSize="11" Background="#1E1E1E" Foreground="#E0E0E0"
+                                     IsReadOnly="True"/>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
             </Grid>
         </Border>
 
-        <!-- 右侧：参数（按工作流分区标题） -->
-        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Margin="0,8,8,8">
+        <!-- 左侧：ROI / 模板 / 创建 -->
+        <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="8,8,0,8">
             <StackPanel>
                 <TextBlock Text="① ROI 与绘制" FontWeight="Bold" FontSize="13" Foreground="#B0BEC5" Margin="0,0,0,8"/>
                 <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}"
@@ -197,27 +423,30 @@
                 <Border x:Name="PnlThreshold" Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" 
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
                     <StackPanel>
-                        <TextBlock FontWeight="Bold" Text="阈值与闭合" Margin="0,0,0,8"/>
-                        <Grid Margin="0,0,0,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="70"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="最小灰度" VerticalAlignment="Center"/>
-                            <TextBox x:Name="TxtMinGray" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"
-                                     TextChanged="TxtMinGray_TextChanged"/>
-                        </Grid>
-                        <Grid Margin="0,0,0,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="70"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="最大灰度" VerticalAlignment="Center"/>
-                            <TextBox x:Name="TxtMaxGray" Grid.Column="1" Text="255" Height="24" VerticalContentAlignment="Center"
-                                     TextChanged="TxtMaxGray_TextChanged"/>
-                        </Grid>
-                        <Button x:Name="BtnAutoThreshold" Content="自动阈值" Width="100" Height="26" Margin="0,4,0,0" 
-                                HorizontalAlignment="Left" Click="BtnAutoThreshold_Click"/>
+                        <TextBlock x:Name="TxtThresholdPanelTitle" FontWeight="Bold" Text="阈值与闭合" Margin="0,0,0,8"/>
+                        <StackPanel x:Name="PnlGrayThreshold">
+                            <Grid Margin="0,0,0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="70"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="最小灰度" VerticalAlignment="Center"/>
+                                <TextBox x:Name="TxtMinGray" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"
+                                         TextChanged="TxtMinGray_TextChanged"/>
+                            </Grid>
+                            <Grid Margin="0,0,0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="70"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="最大灰度" VerticalAlignment="Center"/>
+                                <TextBox x:Name="TxtMaxGray" Grid.Column="1" Text="255" Height="24" VerticalContentAlignment="Center"
+                                         TextChanged="TxtMaxGray_TextChanged"/>
+                            </Grid>
+                            <Button x:Name="BtnAutoThreshold" Content="自动阈值" Width="100" Height="26" Margin="0,4,0,0" 
+                                    HorizontalAlignment="Left" Click="BtnAutoThreshold_Click"/>
+                        </StackPanel>
+                        <StackPanel x:Name="PnlPolygonCloseSettings">
                         <Grid Margin="0,8,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="70"/>
@@ -247,6 +476,7 @@
                                 </Grid>
                             </StackPanel>
                         </Border>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 
@@ -262,17 +492,20 @@
                             <RadioButton x:Name="RbGradientInward" Content="向内" GroupName="GradPol"
                                          Foreground="#CCC"/>
                         </StackPanel>
-                        <ComboBox x:Name="CmbRingInnerGradientMode" Height="26" Margin="0,0,0,6"
-                                  SelectionChanged="RingInnerGradientMode_Changed">
-                            <ComboBoxItem Content="内圈与外圈相反" Tag="opposite" IsSelected="True"/>
-                            <ComboBoxItem Content="内圈与外圈相同" Tag="same"/>
-                            <ComboBoxItem Content="内圈单独设置" Tag="custom"/>
-                        </ComboBox>
-                        <StackPanel x:Name="PnlRingInnerGradientCustom" Orientation="Horizontal" Visibility="Collapsed">
-                            <RadioButton x:Name="RbInnerGradientOutward" Content="内圈向外" GroupName="GradPolInner"
-                                         Foreground="#CCC" Margin="0,0,12,0" IsChecked="True"/>
-                            <RadioButton x:Name="RbInnerGradientInward" Content="内圈向内" GroupName="GradPolInner"
-                                         Foreground="#CCC"/>
+                        <StackPanel x:Name="PnlRingInnerGradientSettings" Visibility="Collapsed">
+                            <TextBlock Text="环形内圈梯度" FontSize="11" Foreground="#888" Margin="0,0,0,4"/>
+                            <ComboBox x:Name="CmbRingInnerGradientMode" Height="26" Margin="0,0,0,6"
+                                      SelectionChanged="RingInnerGradientMode_Changed">
+                                <ComboBoxItem Content="内圈与外圈相反" Tag="opposite" IsSelected="True"/>
+                                <ComboBoxItem Content="内圈与外圈相同" Tag="same"/>
+                                <ComboBoxItem Content="内圈单独设置" Tag="custom"/>
+                            </ComboBox>
+                            <StackPanel x:Name="PnlRingInnerGradientCustom" Orientation="Horizontal" Visibility="Collapsed">
+                                <RadioButton x:Name="RbInnerGradientOutward" Content="内圈向外" GroupName="GradPolInner"
+                                             Foreground="#CCC" Margin="0,0,12,0" IsChecked="True"/>
+                                <RadioButton x:Name="RbInnerGradientInward" Content="内圈向内" GroupName="GradPolInner"
+                                             Foreground="#CCC"/>
+                            </StackPanel>
                         </StackPanel>
                     </StackPanel>
                 </Border>
@@ -476,15 +709,17 @@
                 </Border>
 
                 <Border x:Name="PnlContourExtract" Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" 
-                        BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                        BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3" Visibility="Collapsed">
                     <StackPanel>
                         <TextBlock FontWeight="Bold" Text="轮廓提取" Margin="0,0,0,8"/>
-                        <TextBlock Text="轮廓生成模式" FontSize="11" Foreground="#888" Margin="0,0,0,2"/>
-                        <ComboBox x:Name="CmbGenContourMode" Height="26" Margin="0,0,0,6">
-                            <ComboBoxItem Content="边界" Tag="border" IsSelected="True"/>
-                            <ComboBoxItem Content="边界(含孔)" Tag="border_holes"/>
-                            <ComboBoxItem Content="中心线" Tag="center"/>
-                        </ComboBox>
+                        <StackPanel x:Name="PnlGenContourMode">
+                            <TextBlock Text="轮廓生成模式" FontSize="11" Foreground="#888" Margin="0,0,0,2"/>
+                            <ComboBox x:Name="CmbGenContourMode" Height="26" Margin="0,0,0,6">
+                                <ComboBoxItem Content="边界" Tag="border" IsSelected="True"/>
+                                <ComboBoxItem Content="边界(含孔)" Tag="border_holes"/>
+                                <ComboBoxItem Content="中心线" Tag="center"/>
+                            </ComboBox>
+                        </StackPanel>
                         <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="110"/>
@@ -498,7 +733,7 @@
                 </Border>
 
                 <Border x:Name="PnlContourTrim" Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" 
-                        BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                        BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3" Visibility="Collapsed">
                     <StackPanel>
                         <TextBlock FontWeight="Bold" Text="轮廓修剪" Margin="0,0,0,6"/>
                         <TextBlock Text="先「预览轮廓」，再修剪；创建模型时使用修剪结果" FontSize="10" Foreground="#888" 
@@ -700,219 +935,6 @@
                             <ComboBoxItem Content="忽略颜色极性" Tag="ignore_color_polarity"/>
                             <ComboBoxItem Content="使用极性" Tag="use_polarity"/>
                         </ComboBox>
-                    </StackPanel>
-                </Border>
-
-                <TextBlock Text="④ 匹配测试" FontWeight="Bold" FontSize="13" Foreground="#B0BEC5" Margin="0,8,0,8"/>
-                <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" 
-                        BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
-                    <StackPanel>
-                        <Grid Margin="0,0,0,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="90"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="匹配个数" VerticalAlignment="Center"
-                                       ToolTip="0=按下方阵列行×列（默认 3×3）；填正整数则固定上限；流程中 0 才表示全部"/>
-                            <TextBox x:Name="TxtFindNumMatches" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"
-                                     ToolTip="测试页 0 不会搜全部匹配，而是按阵列行列或默认 100 封顶"/>
-                        </Grid>
-                        <Grid Margin="0,0,0,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="90"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="最低分数" VerticalAlignment="Center"
-                                       ToolTip="漏检时降到 0.35~0.45；误检多时提高到 0.55~0.65"/>
-                            <TextBox x:Name="TxtFindMinScore" Grid.Column="1" Text="0.4" Height="24" VerticalContentAlignment="Center"/>
-                        </Grid>
-                        <Grid Margin="0,0,0,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="90"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="贪婪度" VerticalAlignment="Center"
-                                       ToolTip="0~1；漏检时降低(如0.7)，速度慢但更全"/>
-                            <TextBox x:Name="TxtFindGreediness" Grid.Column="1" Text="0.75" Height="24" VerticalContentAlignment="Center"/>
-                        </Grid>
-                        <Grid Margin="0,0,0,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="90"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="搜索层数" VerticalAlignment="Center"
-                                       ToolTip="0=与创建模型一致；建议与创建金字塔层数相同"/>
-                            <TextBox x:Name="TxtFindNumLevels" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
-                        </Grid>
-                        <Grid Margin="0,0,0,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="90"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="最大重叠" VerticalAlignment="Center"/>
-                            <TextBox x:Name="TxtFindMaxOverlap" Grid.Column="1" Text="0.5" Height="24" VerticalContentAlignment="Center"/>
-                        </Grid>
-                        <TextBlock Text="HALCON 会返回全部候选；流程后接「阵列过滤」后数量更少。下方可勾选以复现流程结果。" 
-                                   FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,6"/>
-                        <CheckBox x:Name="ChkFindApplyGridFilter" Content="阵列过滤（同 halcon_filter_shape_match_grid）"
-                                  Margin="0,0,0,4" IsChecked="False"/>
-                        <Grid Margin="0,0,0,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="90"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="90"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="行×列" VerticalAlignment="Center"/>
-                            <TextBox x:Name="TxtFindGridRows" Grid.Column="1" Text="3" Height="24" VerticalContentAlignment="Center" Margin="0,0,4,0"/>
-                            <TextBox x:Name="TxtFindGridCols" Grid.Column="2" Grid.ColumnSpan="2" Text="3" Height="24" VerticalContentAlignment="Center"/>
-                        </Grid>
-                        <Grid Margin="0,0,0,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="90"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="保留最低分" VerticalAlignment="Center"
-                                       ToolTip="过滤后保留的最低分数，0=不按分数剔除"/>
-                            <TextBox x:Name="TxtFindMinScoreKeep" Grid.Column="1" Text="0.45" Height="24" VerticalContentAlignment="Center" ToolTip="0=不按分数剔除"/>
-                        </Grid>
-                        <Grid Margin="0,0,0,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="90"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="阵列角度°" VerticalAlignment="Center"
-                                       ToolTip="auto=自动(匹配角+PCA)；或填固定角度"/>
-                            <TextBox x:Name="TxtFindGridAngleDeg" Grid.Column="1" Text="auto" Height="24" VerticalContentAlignment="Center"/>
-                        </Grid>
-                        <Grid Margin="0,0,0,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="90"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="角度偏差°" VerticalAlignment="Center"
-                                       ToolTip="相对匹配角的中位偏差；整板同向可设10~15；对称模板请设0"/>
-                            <TextBox x:Name="TxtFindMaxAngleDev" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
-                        </Grid>
-                        <CheckBox x:Name="ChkFindAutoRetry" Content="零结果时自动降低最低分数重试"
-                                  Margin="0,0,0,6" IsChecked="False"
-                                  ToolTip="仅当 HALCON 返回 0 个匹配时再试；有匹配时不会增加数量"/>
-
-                        <Button x:Name="BtnImportModel" Content="导入模型(.shm)" Height="28"
-                                Margin="0,0,0,8" Click="BtnImportModel_Click"
-                                ToolTip="从文件加载 HALCON 形状模型，可直接测试形状匹配，无需在本页创建"/>
-                        <Grid Margin="0,0,0,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="8"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <Button x:Name="BtnTestFind" Grid.Column="0" Content="测试形状匹配" Height="28"
-                                    Click="BtnTestFind_Click"/>
-                            <Button x:Name="BtnStopFind" Grid.Column="2" Content="停止" Height="28" MinWidth="56"
-                                    IsEnabled="False" Visibility="Collapsed" Click="BtnStopFind_Click"
-                                    ToolTip="停止当前匹配（HALCON 须结束本轮搜索后 UI 恢复；自动重试会在两轮之间停止）"/>
-                        </Grid>
-                        <Button x:Name="BtnExportModel" Content="导出模型(.shm)" Height="28" 
-                                Margin="0,0,0,8" Click="BtnExportModel_Click"
-                                ToolTip="默认文件名含创建参数（xv_shape_ThXld_n4_a-30x60_ilp_mc10…），便于按名选择模型"/>
-                    </StackPanel>
-                </Border>
-
-                <!-- 模型信息 -->
-                <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" 
-                        BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
-                    <StackPanel>
-                        <TextBlock FontWeight="Bold" Text="模型信息" Margin="0,0,0,8"/>
-                        <TextBlock x:Name="TxtModelInfo" Text="未创建模型" Foreground="#888" TextWrapping="Wrap"/>
-                    </StackPanel>
-                </Border>
-
-                <!-- 查找结果 -->
-                <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" 
-                        BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
-                    <StackPanel>
-                        <TextBlock FontWeight="Bold" Text="查找结果" Margin="0,0,0,8"/>
-                        <TextBlock x:Name="TxtFindResult" Text="无" Foreground="#888" TextWrapping="Wrap"/>
-                    </StackPanel>
-                </Border>
-
-                <TextBlock Text="⑤ 相机矫正" FontWeight="Bold" FontSize="13" Foreground="#B0BEC5" Margin="0,8,0,8"/>
-                <Border x:Name="PnlCameraCorrection" Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}"
-                        BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
-                    <StackPanel>
-                        <TextBlock Text="去畸变 / 透视 / 矫正后旋转；设备索引与顶部「摄像头取一帧」共用。"
-                                   FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,8"/>
-                        <Grid Margin="0,0,0,6">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="72"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="设备索引" VerticalAlignment="Center"/>
-                            <TextBox x:Name="TxtCameraDeviceIndex" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
-                        </Grid>
-                        <Grid Margin="0,0,0,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="72"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="28"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="标定 JSON" VerticalAlignment="Center"/>
-                            <TextBox x:Name="TxtCalibrationJsonPath" Grid.Column="1" Height="24" VerticalContentAlignment="Center"/>
-                            <Button Grid.Column="2" Content="..." Height="24" Margin="4,0,0,0" Click="BtnBrowseCalibrationJson_Click"/>
-                        </Grid>
-                        <CheckBox x:Name="ChkEnableUndistort" Content="内参畸变矫正" Foreground="#CCC" Margin="0,4,0,2"/>
-                        <TextBox x:Name="TxtUndistortAlpha" Text="-1" Height="24" Margin="16,0,0,4" VerticalContentAlignment="Center"
-                                 ToolTip="裁剪 α：-1=原尺寸"/>
-                        <CheckBox x:Name="ChkEnablePerspective" Content="透视矫正 (棋盘鸟瞰)" Foreground="#CCC" Margin="0,4,0,4"/>
-                        <TextBox x:Name="TxtCalibViewIndex" Text="0" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center"/>
-                        <Grid Margin="16,0,0,2">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="36"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="36"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="列" VerticalAlignment="Center"/>
-                            <TextBox x:Name="TxtCalibBoardCols" Grid.Column="1" Text="9" Height="24" Margin="0,0,4,0" VerticalContentAlignment="Center"/>
-                            <TextBlock Grid.Column="2" Text="行" VerticalAlignment="Center"/>
-                            <TextBox x:Name="TxtCalibBoardRows" Grid.Column="3" Text="6" Height="24" VerticalContentAlignment="Center"/>
-                        </Grid>
-                        <TextBox x:Name="TxtCalibSquareSizeMm" Text="25" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center" ToolTip="方格 mm"/>
-                        <TextBox x:Name="TxtCalibPxPerMm" Text="1" Height="24" Margin="16,0,0,4" VerticalContentAlignment="Center" ToolTip="mm/像素"/>
-                        <ComboBox x:Name="CmbPerspectiveOutputFrame" Height="26" Margin="16,0,0,6">
-                            <ComboBoxItem Content="仅标定板 (board)" Tag="board" IsSelected="True"/>
-                            <ComboBoxItem Content="原图+板内 (local)" Tag="local"/>
-                            <ComboBoxItem Content="整图共面 (plane)" Tag="plane"/>
-                        </ComboBox>
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                            <Button x:Name="BtnRotateCorrectedCcw90" Content="逆时针90°" Height="28" Margin="0,0,6,0" Click="BtnRotateCorrectedCcw90_Click"/>
-                            <Button x:Name="BtnRotateCorrectedCw90" Content="顺时针90°" Height="28" Margin="0,0,6,0" Click="BtnRotateCorrectedCw90_Click"/>
-                            <Button x:Name="BtnResetCorrectedRotate" Content="重置旋转" Height="28" Click="BtnResetCorrectedRotate_Click"/>
-                        </StackPanel>
-                        <Grid Margin="0,0,0,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="72"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="44"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="角度(°)" VerticalAlignment="Center"/>
-                            <TextBox x:Name="TxtPostCorrectRotateDeg" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
-                            <Button Grid.Column="2" x:Name="BtnApplyPostCorrectRotate" Content="应用" Height="24" Margin="4,0,0,0"
-                                    Click="BtnApplyPostCorrectRotate_Click"/>
-                        </Grid>
-                        <CheckBox x:Name="ChkRotateExpandCanvas" Content="扩大画布容纳整图" Foreground="#CCC" Margin="0,0,0,8" IsChecked="False"/>
-                        <Button x:Name="BtnApplyCameraCorrection" Content="应用相机矫正" Height="28" Click="BtnApplyCameraCorrection_Click"/>
-                    </StackPanel>
-                </Border>
-
-                <TextBlock Text="日志" FontWeight="Bold" FontSize="13" Foreground="#B0BEC5" Margin="0,0,0,6"/>
-                <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" 
-                        BorderThickness="1" Padding="10" CornerRadius="3">
-                    <StackPanel>
-                        <TextBox x:Name="TxtLog" AcceptsReturn="True" MaxHeight="150" VerticalScrollBarVisibility="Auto"
-                                 TextWrapping="Wrap" FontFamily="Consolas" FontSize="11" Background="#1E1E1E" Foreground="#E0E0E0"
-                                 IsReadOnly="True"/>
                     </StackPanel>
                 </Border>
             </StackPanel>

@@ -18,6 +18,9 @@
                 <Button x:Name="NavFlow" Content="流程编排" Style="{StaticResource NavTabButtonStyle}"
                         Click="NavFlow_Click"
                         AutomationProperties.Name="流程编排"/>
+                <Button x:Name="NavHalconShapeModel" Content="形状模板" Style="{StaticResource NavTabButtonStyle}"
+                        Click="NavHalconShapeModel_Click"
+                        AutomationProperties.Name="形状模板"/>
                 <Button x:Name="NavAdvanced" Content="高级功能 ▾" Style="{StaticResource NavTabButtonStyle}"
                         MinWidth="108"
                         Click="NavAdvanced_Click"
@@ -43,9 +46,6 @@
                                       AutomationProperties.Name="HALCON深度学习分割"/>
                             <MenuItem Header="SAM ONNX" Click="NavSamOnnx_Click"
                                       AutomationProperties.Name="SAM ONNX 导出"/>
-                            <Separator/>
-                            <MenuItem Header="形状模板" Click="NavHalconShapeModel_Click"
-                                      AutomationProperties.Name="形状模板"/>
                         </ContextMenu>
                     </Button.ContextMenu>
                 </Button>

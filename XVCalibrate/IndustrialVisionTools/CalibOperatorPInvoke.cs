@@ -599,6 +599,8 @@ namespace CalibOperatorPInvoke
 
         internal NativeImage GetNativeStruct()
         {
+            if (_disposed || _nativePtr == IntPtr.Zero)
+                throw new ObjectDisposedException(nameof(CalibImage));
             return Marshal.PtrToStructure<NativeImage>(_nativePtr);
         }
 

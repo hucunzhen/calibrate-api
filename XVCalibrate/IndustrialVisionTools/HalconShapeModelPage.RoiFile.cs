@@ -156,11 +156,13 @@ namespace CalibOperatorCLI_Example
 
 
 
-        private void TryLoadLinkedImageFromRoiSnapshot(RoiSnapshotDocument doc)
+        private void TryLoadLinkedImageFromRoiSnapshot(RoiSnapshotDocument doc, string roiFilePath)
 
         {
 
-            if (string.IsNullOrWhiteSpace(doc.ImagePath) || !File.Exists(doc.ImagePath))
+            string? imagePath = ResolveRoiLinkedImagePath(doc, roiFilePath);
+
+            if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
 
             {
 
@@ -186,7 +188,7 @@ namespace CalibOperatorCLI_Example
 
                 ? $"ROI 文件关联图像与当前显示尺寸不一致。\n文件: {doc.ImageWidth}×{doc.ImageHeight}\n当前: {_imgWidth}×{_imgHeight}\n是否仍要加载该图像？"
 
-                : $"是否加载 ROI 文件关联的图像？\n{doc.ImagePath}";
+                : $"是否加载 ROI 文件关联的图像？\n{imagePath}";
 
 
 
@@ -200,9 +202,9 @@ namespace CalibOperatorCLI_Example
 
             {
 
-                LoadImage(doc.ImagePath!);
+                LoadImage(imagePath);
 
-                AppendLog($"已加载关联图像: {IoPath.GetFileName(doc.ImagePath)}");
+                AppendLog($"已加载关联图像: {IoPath.GetFileName(imagePath)}");
 
             }
 
@@ -213,6 +215,44 @@ namespace CalibOperatorCLI_Example
                 MessageBox.Show($"加载图像失败:\n{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
 
             }
+
+        }
+
+
+
+        private static string? ResolveRoiLinkedImagePath(RoiSnapshotDocument doc, string roiFilePath)
+
+        {
+
+            if (string.IsNullOrWhiteSpace(doc.ImagePath))
+
+                return null;
+
+
+
+            if (File.Exists(doc.ImagePath))
+
+                return IoPath.GetFullPath(doc.ImagePath);
+
+
+
+            string? roiDir = IoPath.GetDirectoryName(roiFilePath);
+
+            if (!string.IsNullOrEmpty(roiDir))
+
+            {
+
+                string relative = IoPath.Combine(roiDir, doc.ImagePath);
+
+                if (File.Exists(relative))
+
+                    return IoPath.GetFullPath(relative);
+
+            }
+
+
+
+            return doc.ImagePath;
 
         }
 
@@ -430,9 +470,9 @@ namespace CalibOperatorCLI_Example
 
 
 
-                ApplyRoiSnapshotDocument(doc, dlg.FileName);
+                TryLoadLinkedImageFromRoiSnapshot(doc, dlg.FileName);
 
-                TryLoadLinkedImageFromRoiSnapshot(doc);
+                ApplyRoiSnapshotDocument(doc, dlg.FileName);
 
             }
 

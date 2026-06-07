@@ -307,9 +307,11 @@ namespace CalibOperatorCLI_Example
                 throw new ArgumentException("闭合边线至少需要 3 个点", nameof(boundaryDense));
 
             minContourPoints = Math.Max(2, minContourPoints);
-            Point2D[] closed = EnsureClosedContourPoints(boundaryDense.ToArray(), forceClose: true);
-            if (closed.Length < minContourPoints)
-                throw new InvalidOperationException($"闭合边线采样点不足（{closed.Length}），请增加顶点或圆弧段。");
+            Point2D[] closed = DensifyClosedPolyline(
+                EnsureClosedContourPoints(boundaryDense.ToArray(), forceClose: true),
+                minContourPoints);
+            if (closed.Length < 3)
+                throw new InvalidOperationException("闭合边线无效，请确认 ROI 在图像范围内。");
 
             var rows = closed.Select(p => p.Y).ToArray();
             var cols = closed.Select(p => p.X).ToArray();
@@ -335,7 +337,8 @@ namespace CalibOperatorCLI_Example
                     }
 
                     HOperatorSet.EdgesSubPix(syn, out HObject edges, "canny", 1, 5, 15);
-                    HObject filtered = SelectContoursNearReferenceXld(edges, refXld, 2.0, minContourPoints);
+                    int minSegPts = Math.Max(2, Math.Min(6, minContourPoints));
+                    HObject filtered = SelectContoursNearReferenceXld(edges, refXld, 2.0, minSegPts);
                     edges.Dispose();
 
                     if (!filtered.IsInitialized() || filtered.CountObj() == 0)

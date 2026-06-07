@@ -186,6 +186,7 @@ namespace CalibOperatorCLI_Example
             NavPlc.Background = dim;
             NavController.Background = dim;
             NavFlow.Background = dim;
+            NavHalconShapeModel.Background = dim;
             NavAdvanced.Background = dim;
 
             switch (tab)
@@ -199,11 +200,13 @@ namespace CalibOperatorCLI_Example
                 case "Flow":
                     NavFlow.Background = accent;
                     break;
+                case "HalconShapeModel":
+                    NavHalconShapeModel.Background = accent;
+                    break;
                 case "Histogram":
                 case "YoloSeg":
                 case "HalconDlSeg":
                 case "SamOnnx":
-                case "HalconShapeModel":
                     NavAdvanced.Background = accent;
                     break;
             }

@@ -29,6 +29,8 @@ namespace CalibOperatorCLI_Example
             }
 
             ApplySessionFromSettingsIfNeeded(forceReload: false);
+            if (_imgWidth > 0)
+                Dispatcher.BeginInvoke(FitImageToView, DispatcherPriority.Loaded);
         }
 
         private void HalconShapeModelPage_Loaded(object sender, RoutedEventArgs e)

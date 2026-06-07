@@ -8,7 +8,7 @@
       "Params": {
         "angleStart": "-3",
         "angleExtent": "6",
-        "minScore": "0.3",
+        "minScore": "0.2",
         "numMatches": "0",
         "maxOverlap": "0.5",
         "subPixel": "none",
