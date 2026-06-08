@@ -32,6 +32,22 @@ namespace CalibOperatorCLI_Example
     {
         public string? CurrentFlowFilePath { get; private set; }
 
+        /// <summary>配方目录重命名后，同步更新当前流程文件路径（不重新加载文件）。</summary>
+        internal void RemapFlowFilePathForRecipeRename(string oldRecipeDirectory, string newRecipeDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(CurrentFlowFilePath))
+                return;
+
+            string? remapped = FlowRecipeCatalog.RemapPathUnderRenamedRecipe(
+                CurrentFlowFilePath, oldRecipeDirectory, newRecipeDirectory);
+            if (remapped == null
+                || string.Equals(remapped, CurrentFlowFilePath, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            CurrentFlowFilePath = remapped;
+            FlowLoaded?.Invoke(CurrentFlowFilePath);
+        }
+
         /// <summary>无文件路径且无节点/连线，用于启动时是否可自动恢复 last_flow。</summary>
         public bool IsPristineEmptyDocument =>
             string.IsNullOrWhiteSpace(CurrentFlowFilePath) && _nodes.Count == 0 && _connections.Count == 0;
@@ -2784,7 +2800,8 @@ namespace CalibOperatorCLI_Example
             {
                 Filter = "流程文件|*.flow.json|所有文件|*.*",
                 DefaultExt = ".flow.json",
-                Title = "加载流程"
+                Title = "加载流程",
+                InitialDirectory = ResolveFlowBrowseInitialDirectory()
             };
             if (dlg.ShowDialog() != true) return;
             LoadFlowFromFile(dlg.FileName, showErrorDialog: true);
@@ -2796,12 +2813,26 @@ namespace CalibOperatorCLI_Example
             {
                 Filter = "流程文件|*.flow.json|所有文件|*.*",
                 DefaultExt = ".flow.json",
-                Title = "在新标签打开流程"
+                Title = "在新标签打开流程",
+                InitialDirectory = ResolveFlowBrowseInitialDirectory()
             };
             if (dlg.ShowDialog() != true) return;
             if (TryLoadFlowInNewTab?.Invoke(dlg.FileName) == true)
                 return;
             LoadFlowFromFile(dlg.FileName, showErrorDialog: true);
+        }
+
+        private static string? ResolveFlowBrowseInitialDirectory()
+        {
+            string? recipeDir = FlowRecipeCatalog.TryGetSelectedRecipeDirectory();
+            if (!string.IsNullOrEmpty(recipeDir) && System.IO.Directory.Exists(recipeDir))
+                return recipeDir;
+
+            string? flowsRoot = FlowRecipeCatalog.TryFindFlowsRootDirectory();
+            if (!string.IsNullOrEmpty(flowsRoot) && System.IO.Directory.Exists(flowsRoot))
+                return flowsRoot;
+
+            return null;
         }
 
         private void NewFlowTab_Click(object sender, RoutedEventArgs e)
@@ -6930,7 +6961,8 @@ namespace CalibOperatorCLI_Example
                     {
                         idx++;
                         var path = el.TryGetProperty("imagePath", out var pp) ? pp.GetString() ?? "" : "";
-                        sb.AppendLine($"#{idx} {path}");
+                        string viewRms = el.TryGetProperty("reprojRms", out var vr) ? $" reprojRms={vr.GetDouble():G4}px" : "";
+                        sb.AppendLine($"#{idx} {path}{viewRms}");
                         if (el.TryGetProperty("rvec", out var rv) && rv.ValueKind == JsonValueKind.Array)
                         {
                             var a = rv.EnumerateArray().Select(x => x.GetDouble()).ToArray();
@@ -6956,6 +6988,10 @@ namespace CalibOperatorCLI_Example
                 sb.AppendLine("· 选用外参：不同视图角度不同，不能把视图 A 的 rvec/tvec 当作视图 B 的场景位姿。Hand–Eye 或多相机需在其他链路估计；单相机静态场景应对「当前帧」用 solvePnP 等与棋盘共面的点重算外参，或固定棋盘位姿后只用对应那张图的外参。");
                 sb.AppendLine("· tvec、棋盘角点世界坐标的长度单位与标定节点 squareSizeMm 一致（例如毫米）。");
                 sb.AppendLine("· 像素轨迹→棋盘平面 XY：Flow 算子「棋盘像素→世界(mm)」，输入 Points + CalibrationJson，参数 viewIndex 选用 extrinsicsPerView[i]；示例 test_images/chessboard_trajectory_to_world.flow.json。");
+
+                if (root.TryGetProperty("intrinsics", out _))
+                    ChessboardCalibrationQuality.AppendQualitySection(sb, root);
+
                 return sb.ToString().TrimEnd();
             }
             catch
@@ -11070,6 +11106,7 @@ namespace CalibOperatorCLI_Example
                         node.Outputs["Intrinsics"] = intr;
                         node.Outputs["IntrinsicsJson"] = JsonSerializer.Serialize(intr, new JsonSerializerOptions { IncludeFields = true });
                         node.Outputs["CalibrationJson"] = calJson;
+                        node.ResultSummary = ChessboardCalibrationQuality.BuildBriefSummary(calJson);
                         break;
                     }
 
@@ -11180,6 +11217,13 @@ namespace CalibOperatorCLI_Example
                         node.Outputs["Transform"] = calResult.Transform;
                         node.Outputs["ImagePts"] = alignedImagePts.ToArray();
 
+                        var ninePtReport = NinePointCalibrationQuality.Analyze(
+                            calResult.Transform,
+                            alignedImagePts,
+                            worldPts,
+                            calResult.AverageError,
+                            calResult.MaxError);
+
                         string verifyRaw = node.Params.GetValueOrDefault("showVerifyPreview", "true") ?? "true";
                         bool showVerify = !string.Equals(verifyRaw.Trim(), "false", StringComparison.OrdinalIgnoreCase)
                             && verifyRaw.Trim() != "0";
@@ -11198,14 +11242,27 @@ namespace CalibOperatorCLI_Example
                                 null);
                         }
 
-                        string errNote = calResult.AverageError > 0
-                            ? $" avgErr={calResult.AverageError:F3}mm max={calResult.MaxError:F3}mm"
-                            : "";
+                        string brief = NinePointCalibrationQuality.BuildBriefSummary(ninePtReport);
                         node.ResultSummary = needDialog
                             ? (manualPick
-                                ? $"标定 OK（{alignedImagePts.Length} 对点，手选像素{errNote}）"
-                                : $"标定 OK（{alignedImagePts.Length} 对点，图像确认{errNote}）")
-                            : $"标定 OK（{alignedImagePts.Length} 对点{errNote}）";
+                                ? $"标定 OK（{alignedImagePts.Length} 对点，手选像素 · {brief}）"
+                                : $"标定 OK（{alignedImagePts.Length} 对点，图像确认 · {brief}）")
+                            : $"标定 OK（{alignedImagePts.Length} 对点 · {brief}）";
+
+                        Dispatcher.Invoke(() =>
+                        {
+                            if (NinePointCalibrationQuality.TryBuildPopupReport(ninePtReport, out string headline, out string body))
+                            {
+                                ChessboardCalibrationReportDialog.ShowTextReport(
+                                    Window.GetWindow(this),
+                                    ninePtReport.Passed ? "九点标定质检 · 合格" : "九点标定质检 · 不合格",
+                                    headline,
+                                    body);
+                            }
+
+                            StatusText.Text = brief;
+                        });
+                        AppendLog($"[九点标定质检] {brief}（详见弹窗报告）");
                         break;
                     }
 
@@ -11415,9 +11472,13 @@ namespace CalibOperatorCLI_Example
                     case "display_calibration":
                     {
                         string text;
+                        bool chessboardPopup = false;
+                        string? calJsonForDlg = null;
                         if (inputs.TryGetValue("CalibrationJson", out var calJsonObj) && calJsonObj is string cjs && !string.IsNullOrWhiteSpace(cjs))
                         {
                             text = FormatCalibrationFullSummary(cjs);
+                            calJsonForDlg = cjs;
+                            chessboardPopup = ChessboardCalibrationQuality.TryBuildPopupReport(cjs, out _, out _);
                         }
                         else if (inputs.TryGetValue("Transform", out var tObj) && tObj is AffineTransform t)
                         {
@@ -11441,10 +11502,26 @@ namespace CalibOperatorCLI_Example
                         }
 
                         node.Outputs["Out"] = text;
-                        node.ResultSummary = text.Replace("\n", " | ");
-                        AppendLog(text);
-                        Console.WriteLine(text);
-                        StatusText.Dispatcher.Invoke(() => { StatusText.Text = text.Replace("\n", "  "); });
+
+                        if (chessboardPopup && calJsonForDlg != null)
+                        {
+                            string brief = ChessboardCalibrationQuality.BuildBriefSummary(calJsonForDlg);
+                            node.ResultSummary = brief;
+                            Dispatcher.Invoke(() =>
+                            {
+                                ChessboardCalibrationReportDialog.ShowDialog(Window.GetWindow(this), calJsonForDlg);
+                                StatusText.Text = brief;
+                            });
+                            AppendLog($"[标定质检] {brief}（详见弹窗报告）");
+                        }
+                        else
+                        {
+                            node.ResultSummary = text.Replace("\n", " | ");
+                            AppendLog(text);
+                            Console.WriteLine(text);
+                            StatusText.Dispatcher.Invoke(() => { StatusText.Text = text.Replace("\n", "  "); });
+                        }
+
                         break;
                     }
 

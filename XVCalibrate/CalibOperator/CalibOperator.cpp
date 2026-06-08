@@ -5115,6 +5115,27 @@ static void AppendG(std::string& dst, double x) {
     dst += b;
 }
 
+static void AppendG(std::string& dst, int x) {
+    dst += std::to_string(x);
+}
+
+static double ComputeReprojRms(const std::vector<cv::Point3f>& objPts,
+    const std::vector<cv::Point2f>& imgPts,
+    const cv::Mat& rvec, const cv::Mat& tvec,
+    const cv::Mat& cameraMatrix, const cv::Mat& distCoeffs) {
+    if (objPts.empty() || objPts.size() != imgPts.size())
+        return 0.0;
+    std::vector<cv::Point2f> projected;
+    cv::projectPoints(objPts, rvec, tvec, cameraMatrix, distCoeffs, projected);
+    double sumSq = 0.0;
+    for (size_t i = 0; i < imgPts.size(); ++i) {
+        double dx = (double)imgPts[i].x - (double)projected[i].x;
+        double dy = (double)imgPts[i].y - (double)projected[i].y;
+        sumSq += dx * dx + dy * dy;
+    }
+    return std::sqrt(sumSq / (double)imgPts.size());
+}
+
 } // namespace
 
 int CalibrateCameraChessboardMultiview(const char* pathsDelimited, int boardCols, int boardRows, double squareSize,
@@ -5137,16 +5158,26 @@ int CalibrateCameraChessboardMultiview(const char* pathsDelimited, int boardCols
     std::vector<std::vector<cv::Point3f>> objPtsVec;
     std::vector<std::vector<cv::Point2f>> imgPtsVec;
     std::vector<std::string> usedPaths;
+    std::vector<std::string> failedPaths;
     cv::Size imageSize;
 
     for (const auto& path : paths) {
         cv::Mat img = cv::imread(path, cv::IMREAD_COLOR);
-        if (img.empty()) continue;
+        if (img.empty()) {
+            failedPaths.push_back(path);
+            continue;
+        }
         cv::Mat gray;
         cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
         std::vector<cv::Point2f> corners;
-        if (FindChessboardCornersGrayMat(gray, boardCols, boardRows, corners, 1, 0) != 0) continue;
-        if ((int)corners.size() != boardCols * boardRows) continue;
+        if (FindChessboardCornersGrayMat(gray, boardCols, boardRows, corners, 1, 0) != 0) {
+            failedPaths.push_back(path);
+            continue;
+        }
+        if ((int)corners.size() != boardCols * boardRows) {
+            failedPaths.push_back(path);
+            continue;
+        }
         usedPaths.push_back(path);
         imgPtsVec.push_back(corners);
         objPtsVec.push_back(templateObj);
@@ -5203,6 +5234,30 @@ int CalibrateCameraChessboardMultiview(const char* pathsDelimited, int boardCols
             AppendEscapedJsonString(j, usedPaths[i]);
             const cv::Mat& rv = rvecs[i];
             const cv::Mat& tv = tvecs[i];
+            double viewRms = ComputeReprojRms(objPtsVec[i], imgPtsVec[i], rv, tv, cameraMatrix, distCoeffs);
+            j += ",\"reprojRms\":";
+            AppendG(j, viewRms);
+            cv::Point3f boardCenter(
+                (float)((boardCols - 1) * squareSize * 0.5),
+                (float)((boardRows - 1) * squareSize * 0.5),
+                0.f);
+            std::vector<cv::Point3f> boardCenterObj = { boardCenter };
+            std::vector<cv::Point2f> boardCenterImg;
+            cv::projectPoints(boardCenterObj, rv, tv, cameraMatrix, distCoeffs, boardCenterImg);
+            j += ",\"boardCenterPx\":[";
+            AppendG(j, boardCenterImg[0].x);
+            j += ',';
+            AppendG(j, boardCenterImg[0].y);
+            j += "]";
+            cv::Mat Rview;
+            cv::Rodrigues(rv, Rview);
+            double nz = Rview.at<double>(2, 2);
+            double clamped = nz;
+            if (clamped > 1.0) clamped = 1.0;
+            if (clamped < -1.0) clamped = -1.0;
+            double tiltDeg = std::acos(std::abs(clamped)) * 180.0 / CV_PI;
+            j += ",\"tiltDeg\":";
+            AppendG(j, tiltDeg);
             j += ",\"rvec\":[";
             AppendG(j, rv.at<double>(0));
             j += ',';
@@ -5217,7 +5272,29 @@ int CalibrateCameraChessboardMultiview(const char* pathsDelimited, int boardCols
             AppendG(j, tv.at<double>(2));
             j += "]}";
         }
-        j += "],\"convention\":\"OpenCV calibrateCamera: P_cam = R*P_board + t; board plane Z=0, units same as squareSize (e.g. mm).\"}";
+            j += "],\"boardSpec\":{\"cols\":";
+        AppendG(j, boardCols);
+        j += ",\"rows\":";
+        AppendG(j, boardRows);
+        j += ",\"squareSizeMm\":";
+        AppendG(j, squareSize);
+        j += "},\"imageSize\":{\"width\":";
+        AppendG(j, imageSize.width);
+        j += ",\"height\":";
+        AppendG(j, imageSize.height);
+        j += "},\"failedImagePaths\":[";
+        for (size_t i = 0; i < failedPaths.size(); ++i) {
+            if (i) j += ',';
+            AppendEscapedJsonString(j, failedPaths[i]);
+        }
+        j += "],\"calibrationStats\":{\"attemptedCount\":";
+        AppendG(j, (int)paths.size());
+        j += ",\"successfulCount\":";
+        AppendG(j, (int)usedPaths.size());
+        j += ",\"failedCount\":";
+        AppendG(j, (int)failedPaths.size());
+        j += "}";
+        j += ",\"convention\":\"OpenCV calibrateCamera: P_cam = R*P_board + t; board plane Z=0, units same as squareSize (e.g. mm).\"}";
         if ((int)j.size() + 1 > fullCalibrationJsonOutSize)
             fullCalibrationJsonOut[0] = '\0';
         else

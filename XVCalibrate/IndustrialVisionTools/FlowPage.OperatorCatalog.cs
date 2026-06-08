@@ -1442,7 +1442,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "calibrate",
                 DisplayName = "九点标定",
-                Description = "标定像素→世界坐标。世界点可填参数 worldPoints，或由 worldPointsFile 读取「点列转文本」保存的 txt（每行 x,y）。默认 pixelPickMode=手选：仅需 Image，在弹窗中按世界点列表左键手选像素。也可连接 ImagePts 作参考或匹配检测点。",
+                Description = "标定像素→世界坐标。完成后弹出质检报告（平均/最大重投影误差 mm、坏点清单）。世界点可填参数 worldPoints，或由 worldPointsFile 读取「点列转文本」保存的 txt（每行 x,y）。默认 pixelPickMode=手选：仅需 Image，在弹窗中按世界点列表左键手选像素。也可连接 ImagePts 作参考或匹配检测点。",
                 Category = "标定",
                 Params =
                 {
@@ -1745,7 +1745,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "display_calibration",
                 DisplayName = "显示标定结果",
-                Description = "统一显示 Affine/Homography/Poly2D；棋盘格标定可接 CalibrationJson（含内参+每视图外参，并在摘要末尾附带用法说明）或仅接 Intrinsics 结构体",
+                Description = "棋盘格标定接 CalibrationJson 时弹出质检报告窗口（合格/不合格、补拍位置、坏图清单）；其它标定类型仍输出到日志。",
                 Category = "标定",
                 Ports =
                 {
@@ -2451,7 +2451,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "chessboard_calibrate_intrinsics",
                 DisplayName = "棋盘格内参标定",
-                Description = "由多张棋盘格图像通过 OpenCV calibrateCamera 最小化重投影误差，同时优化求解：相机内参 fx/fy/cx/cy、畸变系数，以及每张成功视图的外参 rvec/tvec（棋盘坐标系→相机坐标系）。输出均为标定计算结果。至少需 3 张成功检出棋盘的视图。完整结果见 CalibrationJson。帮助：flows/chessboard/README.md",
+                Description = "由多张棋盘格图像通过 OpenCV calibrateCamera 最小化重投影误差，同时优化求解：相机内参 fx/fy/cx/cy、畸变系数，以及每张成功视图的外参 rvec/tvec（棋盘坐标系→相机坐标系）。CalibrationJson 含 failedImagePaths、calibrationStats、每视图 reprojRms。至少需 3 张成功检出棋盘的视图。帮助：flows/chessboard/README.md",
                 Category = "标定",
                 Params =
                 {

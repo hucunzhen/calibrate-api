@@ -411,14 +411,27 @@ namespace CalibOperatorCLI_Example
 
         private void TryRestoreFlowSessionOnStartup()
         {
+            _flowHostPage.InitializeRecipes();
+
             var session = TryReadFlowSession();
-            if (session == null)
+            bool noRestorableTabs = session == null
+                || session.Tabs.Count == 0
+                || session.Tabs.All(string.IsNullOrWhiteSpace);
+
+            if (noRestorableTabs)
             {
-                _flowHostPage.RestoreOpenFlows(Array.Empty<string?>(), 0);
-                return;
+                string? mainPath = FlowRecipeCatalog.TryGetSelectedMainFlowPath();
+                if (mainPath != null)
+                    _flowHostPage.RestoreOpenFlows(new[] { mainPath }, 0);
+                else
+                    _flowHostPage.RestoreOpenFlows(Array.Empty<string?>(), 0);
+            }
+            else
+            {
+                _flowHostPage.RestoreOpenFlows(session!.Tabs, session.ActiveIndex);
             }
 
-            _flowHostPage.RestoreOpenFlows(session.Tabs, session.ActiveIndex);
+            _flowHostPage.SyncRecipeFromActiveTab();
         }
     }
 }

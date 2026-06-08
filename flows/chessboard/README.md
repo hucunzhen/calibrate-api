@@ -109,7 +109,8 @@ load_image / camera_snap ── Image ── calibration_correct_image ── Ou
 |------|------|
 | `chessboard_example.flow.json` | 角点检测 + 显示 |
 | `chessboard_intrinsics_example.flow.json` | 目录批量内参标定 |
-| `chessboard_intrinsics_from_dir.flow.json` | 从目录标定并保存 JSON |
+| `chessboard_intrinsics_from_dir.flow.json` | 从目录标定、质检报告、角点逐张检查、去畸变对比并保存 JSON |
+| `chessboard_intrinsics_with_qc.flow.json` | 与上一文件相同（带完整质检支路） |
 | `chessboard_undistort_example.flow.json` | 去畸变对比显示 |
 | `chessboard_perspective_warp_example.flow.json` | 去畸变 → 透视展开 → 存图 |
 | `chessboard_intrinsics_extrinsics_usage.flow.json` | 标定结果导出与显示 |
@@ -118,7 +119,27 @@ load_image / camera_snap ── Image ── calibration_correct_image ── Ou
 
 ---
 
-## CalibrationJson 结构（简要）
+## 标定质检（自动判级 + 目视支路）
+
+`chessboard_intrinsics_from_dir.flow.json` / `chessboard_intrinsics_with_qc.flow.json` 含三条支路：
+
+1. **显示标定结果**：运行后**弹出质检报告窗口**（非日志），含 **[1] 标定好坏**、**[2] 补拍位置**、**[3] 坏图清单**；日志仅一行摘要。
+2. **角点逐张检查**：`加载图像目录(each)` → `棋盘格角点` → `显示图像`（运行流程时逐张刷新，无角点即需重拍）。
+3. **去畸变对比**：`加载图像目录(single)` → `内参畸变矫正` → `显示图像`（Img=原图，Image=矫正后）。
+
+**CalibrationJson 新增字段**（标定算子输出）：
+
+| 字段 | 说明 |
+|------|------|
+| `calibrationStats.attemptedCount` | 目录内参与扫描的张数 |
+| `calibrationStats.successfulCount` | 角点成功、参与标定的张数 |
+| `calibrationStats.failedCount` | 读图失败或角点失败的张数 |
+| `failedImagePaths[]` | 失败图像绝对路径列表 |
+| `extrinsicsPerView[].reprojRms` | 该视图单张重投影 RMS（像素） |
+
+**RMS 参考**：&lt; 0.10 优秀；0.10~0.30 良好；0.30~0.50 可用；&gt; 0.50 建议重拍。产线建议 15~25 张成功图，覆盖画面四角与中心，并保留一张较正视图供 `viewIndex`。
+
+---
 
 标定节点输出 JSON 含：
 

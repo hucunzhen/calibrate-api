@@ -3,8 +3,8 @@
     {
       "Id": "cba52002-1000-4000-8000-000000000001",
       "TypeId": "chessboard_calibrate_intrinsics",
-      "X": 80,
-      "Y": 120,
+      "X": 60,
+      "Y": 80,
       "Params": {
         "imageDirectory": "chessboard",
         "extensions": ".bmp",
@@ -12,41 +12,95 @@
         "imagePaths": "",
         "cols": "11",
         "rows": "8",
-        "squareSizeMm": "5",
-        "enable": "true",
-        "disable": "false"
+        "squareSizeMm": "5"
       }
     },
     {
       "Id": "cba52002-1000-4000-8000-000000000002",
       "TypeId": "display_calibration",
-      "X": 383,
-      "Y": 294,
-      "Params": {
-        "enable": "true",
-        "disable": "false"
-      }
+      "X": 420,
+      "Y": 80,
+      "Params": {}
     },
     {
       "Id": "cba52002-1000-4000-8000-000000000003",
       "TypeId": "save_text",
-      "X": 720,
-      "Y": 120,
+      "X": 780,
+      "Y": 40,
       "Params": {
-        "filePath": "../../../../../test_images/chessboard_calibration_from_dir.json",
-        "enable": "true",
-        "disable": "false"
+        "filePath": "chessboard/calibration_full.json"
       }
     },
     {
       "Id": "6e4afabe-ca7b-4ae7-b55d-ff80ce91a4bc",
       "TypeId": "save_calibration_result",
-      "X": 715,
-      "Y": 266,
+      "X": 780,
+      "Y": 160,
       "Params": {
-        "filePath": "chessboard\\calibration_result.json",
-        "enable": "true",
-        "disable": "false"
+        "filePath": "chessboard/calibration_result.json"
+      }
+    },
+    {
+      "Id": "qc-a001-4000-8000-000000000001",
+      "TypeId": "load_image_dir",
+      "X": 60,
+      "Y": 280,
+      "Params": {
+        "mode": "each",
+        "directory": "chessboard",
+        "extensions": ".bmp",
+        "index": "0"
+      }
+    },
+    {
+      "Id": "qc-a002-4000-8000-000000000002",
+      "TypeId": "chessboard_find_corners",
+      "X": 320,
+      "Y": 280,
+      "Params": {
+        "cols": "11",
+        "rows": "8",
+        "refine": "true",
+        "fastCheck": "true"
+      }
+    },
+    {
+      "Id": "qc-a003-4000-8000-000000000003",
+      "TypeId": "display",
+      "X": 580,
+      "Y": 280,
+      "Params": {
+        "dotRadius": "4"
+      }
+    },
+    {
+      "Id": "qc-b001-4000-8000-000000000001",
+      "TypeId": "load_image_dir",
+      "X": 60,
+      "Y": 460,
+      "Params": {
+        "mode": "single",
+        "directory": "chessboard",
+        "extensions": ".bmp",
+        "index": "0"
+      }
+    },
+    {
+      "Id": "qc-b002-4000-8000-000000000002",
+      "TypeId": "intrinsics_undistort_image",
+      "X": 320,
+      "Y": 460,
+      "Params": {
+        "alpha": "-1"
+      }
+    },
+    {
+      "Id": "qc-b003-4000-8000-000000000003",
+      "TypeId": "display",
+      "X": 580,
+      "Y": 460,
+      "Params": {
+        "dotRadius": "3"
       }
     }
   ],
@@ -74,10 +128,48 @@
       "FromPort": "Intrinsics",
       "ToNodeId": "6e4afabe-ca7b-4ae7-b55d-ff80ce91a4bc",
       "ToPort": "Intrinsics"
+    },
+    {
+      "FromNodeId": "qc-a001-4000-8000-000000000001",
+      "FromPort": "Image",
+      "ToNodeId": "qc-a002-4000-8000-000000000002",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "qc-a002-4000-8000-000000000002",
+      "FromPort": "Vis",
+      "ToNodeId": "qc-a003-4000-8000-000000000003",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "cba52002-1000-4000-8000-000000000001",
+      "FromPort": "CalibrationJson",
+      "ToNodeId": "qc-b002-4000-8000-000000000002",
+      "ToPort": "CalibrationJson"
+    },
+    {
+      "FromNodeId": "cba52002-1000-4000-8000-000000000001",
+      "FromPort": "Intrinsics",
+      "ToNodeId": "qc-b002-4000-8000-000000000002",
+      "ToPort": "Intrinsics"
+    },
+    {
+      "FromNodeId": "qc-b001-4000-8000-000000000001",
+      "FromPort": "Image",
+      "ToNodeId": "qc-b002-4000-8000-000000000002",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "qc-b001-4000-8000-000000000001",
+      "FromPort": "Image",
+      "ToNodeId": "qc-b003-4000-8000-000000000003",
+      "ToPort": "Img"
+    },
+    {
+      "FromNodeId": "qc-b002-4000-8000-000000000002",
+      "FromPort": "Out",
+      "ToNodeId": "qc-b003-4000-8000-000000000003",
+      "ToPort": "Image"
     }
-  ],
-  "Meta": {
-    "latticeGridRows": "8",
-    "latticeGridCols": "2"
-  }
+  ]
 }

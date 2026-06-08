@@ -14,6 +14,7 @@ namespace CalibOperatorCLI_Example
     public sealed partial class FlowHostPage : Page
     {
         private bool _suppressSessionNotify;
+        private bool _suppressRecipeChange;
 
         public FlowHostPage()
         {
@@ -21,7 +22,10 @@ namespace CalibOperatorCLI_Example
             FlowTabs.SelectionChanged += (_, _) =>
             {
                 if (!_suppressSessionNotify)
+                {
                     OpenTabsChanged?.Invoke();
+                    SyncRecipeFromActiveTab();
+                }
             };
         }
 
@@ -87,10 +91,361 @@ namespace CalibOperatorCLI_Example
 
                 int idx = Math.Clamp(activeIndex, 0, FlowTabs.Items.Count - 1);
                 FlowTabs.SelectedIndex = idx;
+                SyncRecipeFromActiveTab();
             }
             finally
             {
                 _suppressSessionNotify = false;
+            }
+        }
+
+        /// <summary>扫描 flows/ 子目录并填充配方下拉框。</summary>
+        public void InitializeRecipes() => RefreshRecipeCombo(selectFromSettings: true);
+
+        public void SyncRecipeFromActiveTab()
+        {
+            string? path = ActiveFlowPage?.CurrentFlowFilePath;
+            string? detected = FlowRecipeCatalog.TryDetectRecipeNameFromFlowPath(path);
+            if (string.IsNullOrEmpty(detected))
+                return;
+
+            _suppressRecipeChange = true;
+            try
+            {
+                if (CmbRecipe.Items.Cast<object>().Any(i => string.Equals(i as string, detected, StringComparison.OrdinalIgnoreCase)))
+                    CmbRecipe.SelectedItem = CmbRecipe.Items.Cast<object>()
+                        .First(i => string.Equals(i as string, detected, StringComparison.OrdinalIgnoreCase));
+                UpdateRecipePathHint(detected);
+            }
+            finally
+            {
+                _suppressRecipeChange = false;
+            }
+        }
+
+        private void RefreshRecipeCombo(bool selectFromSettings)
+        {
+            var recipes = FlowRecipeCatalog.ListRecipes();
+            string? selectName = selectFromSettings
+                ? FlowRecipeCatalog.ResolveSelectedRecipeName(recipes)
+                : CmbRecipe.SelectedItem as string;
+
+            _suppressRecipeChange = true;
+            try
+            {
+                CmbRecipe.Items.Clear();
+                foreach (var r in recipes)
+                    CmbRecipe.Items.Add(r.Name);
+
+                if (recipes.Count == 0)
+                {
+                    TxtRecipeHint.Text = FlowRecipeCatalog.TryFindFlowsRootDirectory() is { } root
+                        ? $"未在 {root} 下发现配方目录"
+                        : "未找到 flows/ 目录";
+                    CmbRecipe.IsEnabled = false;
+                    BtnOpenRecipeMain.IsEnabled = false;
+                    BtnOpenNinePointCalib.IsEnabled = false;
+                    BtnOpenChessboardCalib.IsEnabled = false;
+                    BtnCopyRecipe.IsEnabled = false;
+                    BtnRenameRecipe.IsEnabled = false;
+                    BtnDeleteRecipe.IsEnabled = false;
+                    return;
+                }
+
+                CmbRecipe.IsEnabled = true;
+                BtnOpenRecipeMain.IsEnabled = true;
+                BtnOpenNinePointCalib.IsEnabled = true;
+                BtnOpenChessboardCalib.IsEnabled = true;
+                BtnCopyRecipe.IsEnabled = true;
+                BtnRenameRecipe.IsEnabled = true;
+                BtnDeleteRecipe.IsEnabled = true;
+
+                string pick = !string.IsNullOrEmpty(selectName)
+                    && recipes.Any(r => string.Equals(r.Name, selectName, StringComparison.OrdinalIgnoreCase))
+                    ? recipes.First(r => string.Equals(r.Name, selectName, StringComparison.OrdinalIgnoreCase)).Name
+                    : recipes[0].Name;
+
+                CmbRecipe.SelectedItem = pick;
+                UpdateRecipePathHint(pick);
+            }
+            finally
+            {
+                _suppressRecipeChange = false;
+            }
+        }
+
+        private void UpdateRecipePathHint(string recipeName)
+        {
+            string? dir = FlowRecipeCatalog.TryGetRecipeDirectory(recipeName);
+            TxtRecipeHint.Text = dir == null
+                ? ""
+                : dir;
+        }
+
+        private void PersistSelectedRecipe(string recipeName)
+        {
+            var settings = FlowRecipeUiSettings.Load();
+            settings.SelectedRecipe = recipeName;
+            settings.Save();
+        }
+
+        private void LoadSelectedRecipeMainFlow(bool showErrors) =>
+            LoadSelectedRecipeFlow(
+                FlowRecipeCatalog.TryGetMainFlowPath,
+                FlowRecipeCatalog.DefaultMainFlowFileName,
+                showErrors);
+
+        private void LoadSelectedRecipeNinePointCalibFlow(bool showErrors) =>
+            LoadSelectedRecipeFlow(
+                FlowRecipeCatalog.TryGetNinePointCalibFlowPath,
+                $"{FlowRecipeCatalog.NinePointCalibFlowFileName} / {FlowRecipeCatalog.NinePointCalibFlowFileNameAlt}",
+                showErrors);
+
+        private void LoadSelectedRecipeChessboardCalibFlow(bool showErrors) =>
+            LoadSelectedRecipeFlow(
+                FlowRecipeCatalog.TryGetChessboardIntrinsicsFlowPath,
+                FlowRecipeCatalog.ChessboardIntrinsicsFlowFileName,
+                showErrors);
+
+        private void LoadSelectedRecipeFlow(Func<string, string?> pathResolver, string flowLabel, bool showErrors)
+        {
+            string? name = CmbRecipe.SelectedItem as string;
+            if (string.IsNullOrWhiteSpace(name))
+                return;
+
+            string? flowPath = pathResolver(name);
+            if (flowPath == null)
+            {
+                if (showErrors)
+                {
+                    MessageBox.Show(
+                        $"未找到配方「{name}」的流程文件（{flowLabel}）。",
+                        "配方",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
+                return;
+            }
+
+            LoadFlowPathInActiveTab(flowPath, showErrors);
+        }
+
+        private void LoadFlowPathInActiveTab(string flowPath, bool showErrors)
+        {
+            var fp = ActiveFlowOrFirst();
+            if (fp == null)
+            {
+                OpenFlowInNewTab(flowPath);
+                return;
+            }
+
+            fp.LoadFlowFromFile(flowPath, showErrorDialog: showErrors);
+        }
+
+        private void CmbRecipe_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_suppressRecipeChange)
+                return;
+
+            string? name = CmbRecipe.SelectedItem as string;
+            if (string.IsNullOrWhiteSpace(name))
+                return;
+
+            PersistSelectedRecipe(name);
+            UpdateRecipePathHint(name);
+            LoadSelectedRecipeMainFlow(showErrors: true);
+        }
+
+        private void BtnOpenRecipeMain_Click(object sender, RoutedEventArgs e) =>
+            LoadSelectedRecipeMainFlow(showErrors: true);
+
+        private void BtnOpenNinePointCalib_Click(object sender, RoutedEventArgs e) =>
+            LoadSelectedRecipeNinePointCalibFlow(showErrors: true);
+
+        private void BtnOpenChessboardCalib_Click(object sender, RoutedEventArgs e) =>
+            LoadSelectedRecipeChessboardCalibFlow(showErrors: true);
+
+        private void BtnRefreshRecipes_Click(object sender, RoutedEventArgs e) =>
+            RefreshRecipeCombo(selectFromSettings: false);
+
+        private void BtnCopyRecipe_Click(object sender, RoutedEventArgs e)
+        {
+            string? sourceName = CmbRecipe.SelectedItem as string;
+            if (string.IsNullOrWhiteSpace(sourceName))
+                return;
+
+            string suggested = FlowRecipeCatalog.SuggestCopyRecipeName(sourceName);
+            var dlg = new RecipeNameInputDialog($"复制配方「{sourceName}」为：", suggested)
+            {
+                Owner = Window.GetWindow(this)
+            };
+            if (dlg.ShowDialog() != true)
+                return;
+
+            var result = FlowRecipeCatalog.TryCopyRecipe(sourceName, dlg.RecipeName);
+            if (!result.Success)
+            {
+                MessageBox.Show(result.Error ?? "复制失败。", "复制配方", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            RefreshRecipeCombo(selectFromSettings: false);
+            SelectRecipeByName(result.RecipeName!, loadMainFlow: true);
+        }
+
+        private void BtnRenameRecipe_Click(object sender, RoutedEventArgs e)
+        {
+            string? oldName = CmbRecipe.SelectedItem as string;
+            if (string.IsNullOrWhiteSpace(oldName))
+                return;
+
+            string? oldDir = FlowRecipeCatalog.TryGetRecipeDirectory(oldName);
+            if (oldDir == null)
+            {
+                MessageBox.Show($"未找到配方「{oldName}」。", "重命名配方", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var dlg = new RecipeNameInputDialog($"重命名配方「{oldName}」为：", oldName, renameFromName: oldName)
+            {
+                Owner = Window.GetWindow(this)
+            };
+            if (dlg.ShowDialog() != true)
+                return;
+
+            string newName = dlg.RecipeName;
+            if (string.Equals(oldName, newName, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var result = FlowRecipeCatalog.TryRenameRecipe(oldName, newName);
+            if (!result.Success)
+            {
+                MessageBox.Show(result.Error ?? "重命名失败。", "重命名配方", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            string? newDir = FlowRecipeCatalog.TryGetRecipeDirectory(newName);
+            if (newDir != null)
+                RemapOpenTabsForRecipeRename(oldDir, newDir);
+
+            RefreshRecipeCombo(selectFromSettings: false);
+            SelectRecipeByName(newName, loadMainFlow: false);
+            OpenTabsChanged?.Invoke();
+        }
+
+        private void RemapOpenTabsForRecipeRename(string oldRecipeDirectory, string newRecipeDirectory)
+        {
+            foreach (TabItem ti in FlowTabs.Items)
+            {
+                if (ti.Content is FlowPage fp)
+                    fp.RemapFlowFilePathForRecipeRename(oldRecipeDirectory, newRecipeDirectory);
+            }
+        }
+
+        private void BtnDeleteRecipe_Click(object sender, RoutedEventArgs e)
+        {
+            string? name = CmbRecipe.SelectedItem as string;
+            if (string.IsNullOrWhiteSpace(name))
+                return;
+
+            string? recipeDir = FlowRecipeCatalog.TryGetRecipeDirectory(name);
+            if (recipeDir == null)
+            {
+                MessageBox.Show($"未找到配方「{name}」。", "删除配方", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            int openTabCount = CountOpenTabsUnderRecipeDirectory(recipeDir);
+            string message = openTabCount > 0
+                ? $"确定删除配方「{name}」及其目录下全部文件？\n当前有 {openTabCount} 个标签正在使用该配方下的流程，删除后将关闭或清空这些标签。\n此操作不可撤销。"
+                : $"确定删除配方「{name}」及其目录下全部文件？\n此操作不可撤销。";
+
+            if (MessageBox.Show(message, "删除配方", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                return;
+
+            CloseTabsUnderRecipeDirectory(recipeDir);
+
+            var result = FlowRecipeCatalog.TryDeleteRecipe(name);
+            if (!result.Success)
+            {
+                MessageBox.Show(result.Error ?? "删除失败。", "删除配方", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            RefreshRecipeCombo(selectFromSettings: true);
+            if (CmbRecipe.SelectedItem is string selected)
+            {
+                PersistSelectedRecipe(selected);
+                LoadSelectedRecipeMainFlow(showErrors: false);
+            }
+        }
+
+        private void SelectRecipeByName(string recipeName, bool loadMainFlow)
+        {
+            _suppressRecipeChange = true;
+            try
+            {
+                object? item = CmbRecipe.Items.Cast<object>()
+                    .FirstOrDefault(i => string.Equals(i as string, recipeName, StringComparison.OrdinalIgnoreCase));
+                if (item != null)
+                    CmbRecipe.SelectedItem = item;
+            }
+            finally
+            {
+                _suppressRecipeChange = false;
+            }
+
+            PersistSelectedRecipe(recipeName);
+            UpdateRecipePathHint(recipeName);
+            if (loadMainFlow)
+                LoadSelectedRecipeMainFlow(showErrors: true);
+        }
+
+        private int CountOpenTabsUnderRecipeDirectory(string recipeDirectory)
+        {
+            int count = 0;
+            foreach (TabItem ti in FlowTabs.Items)
+            {
+                if (ti.Content is FlowPage fp
+                    && FlowRecipeCatalog.IsPathUnderRecipeDirectory(fp.CurrentFlowFilePath, recipeDirectory))
+                    count++;
+            }
+
+            return count;
+        }
+
+        private void CloseTabsUnderRecipeDirectory(string recipeDirectory)
+        {
+            var toClose = new List<TabItem>();
+            foreach (TabItem ti in FlowTabs.Items)
+            {
+                if (ti.Content is FlowPage fp
+                    && FlowRecipeCatalog.IsPathUnderRecipeDirectory(fp.CurrentFlowFilePath, recipeDirectory))
+                    toClose.Add(ti);
+            }
+
+            if (toClose.Count == 0)
+                return;
+
+            _suppressSessionNotify = true;
+            try
+            {
+                foreach (TabItem ti in toClose)
+                {
+                    if (FlowTabs.Items.Count <= 1)
+                    {
+                        if (ti.Content is FlowPage fp)
+                            fp.ResetToEmptyDocument();
+                        break;
+                    }
+
+                    CloseTab(ti);
+                }
+            }
+            finally
+            {
+                _suppressSessionNotify = false;
+                OpenTabsChanged?.Invoke();
             }
         }
 
@@ -145,7 +500,10 @@ namespace CalibOperatorCLI_Example
                 if (!_suppressSessionNotify)
                     OpenTabsChanged?.Invoke();
                 if (ReferenceEquals(FlowTabs.SelectedItem, ownerTab))
+                {
                     FlowLoaded?.Invoke(path);
+                    SyncRecipeFromActiveTab();
+                }
             };
             fp.TryLoadFlowInNewTab = path =>
             {
@@ -167,7 +525,11 @@ namespace CalibOperatorCLI_Example
                 ? "未命名"
                 : Path.GetFileName(flowPath.Trim());
 
-            var headerPanel = new DockPanel { LastChildFill = true };
+            string tabToolTip = string.IsNullOrWhiteSpace(flowPath)
+                ? "尚未保存的流程"
+                : Path.GetFullPath(flowPath.Trim());
+
+            var headerPanel = new DockPanel { LastChildFill = true, ToolTip = tabToolTip };
 
             var closeBtn = new Button
             {
@@ -196,13 +558,15 @@ namespace CalibOperatorCLI_Example
                 Text = name,
                 VerticalAlignment = VerticalAlignment.Center,
                 Foreground = Brushes.White,
-                FontWeight = FontWeights.Bold
+                FontWeight = FontWeights.Bold,
+                ToolTip = tabToolTip
             };
 
             headerPanel.Children.Add(closeBtn);
             headerPanel.Children.Add(titleTb);
 
             ti.Header = headerPanel;
+            ti.ToolTip = tabToolTip;
         }
 
         private void CloseTab(TabItem ti)

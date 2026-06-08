@@ -3,8 +3,54 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       Title="流程编排"
       Background="#252526">
-    <!-- 单页内多标签仍保留（关闭 ×、工具栏「在新标签打开流程」）；不再单独提供空白「新建标签」顶栏 -->
-    <TabControl x:Name="FlowTabs"
-                Style="{StaticResource FlowHostTabControlStyle}"
-                ItemContainerStyle="{StaticResource FlowHostTabItemStyle}"/>
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Background="#2D2D30" BorderBrush="#3C3C3C" BorderThickness="0,0,0,1" Padding="8,6">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="160"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="配方" Foreground="#9CDCFE" FontWeight="SemiBold"
+                           VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <ComboBox x:Name="CmbRecipe" Grid.Column="1" Height="28" VerticalContentAlignment="Center"
+                          ToolTip="每个配方对应 flows/ 下的一个目录（如 v1、v2）"
+                          SelectionChanged="CmbRecipe_SelectionChanged"/>
+                <Button x:Name="BtnOpenRecipeMain" Grid.Column="2" Content="打开主流程" Height="28" MinWidth="88"
+                        Margin="8,0,0,0" Padding="10,2" Click="BtnOpenRecipeMain_Click"
+                        ToolTip="在当前标签加载所选配方的 main.flow.json"/>
+                <Button x:Name="BtnOpenNinePointCalib" Grid.Column="3" Content="九点标定" Height="28" MinWidth="72"
+                        Margin="6,0,0,0" Padding="10,2" Click="BtnOpenNinePointCalib_Click"
+                        ToolTip="在当前标签加载所选配方的 calibSendContour.flow.json"/>
+                <Button x:Name="BtnOpenChessboardCalib" Grid.Column="4" Content="棋盘格标定" Height="28" MinWidth="80"
+                        Margin="6,0,0,0" Padding="10,2" Click="BtnOpenChessboardCalib_Click"
+                        ToolTip="在当前标签加载所选配方的 chessboard_intrinsics_from_dir.flow.json"/>
+                <Button x:Name="BtnRefreshRecipes" Grid.Column="5" Content="刷新" Height="28" MinWidth="56"
+                        Margin="6,0,0,0" Padding="8,2" Click="BtnRefreshRecipes_Click"
+                        ToolTip="重新扫描 flows/ 子目录"/>
+                <Button x:Name="BtnCopyRecipe" Grid.Column="6" Content="复制" Height="28" MinWidth="56"
+                        Margin="6,0,0,0" Padding="8,2" Click="BtnCopyRecipe_Click"
+                        ToolTip="复制当前配方目录为新配方"/>
+                <Button x:Name="BtnRenameRecipe" Grid.Column="7" Content="重命名" Height="28" MinWidth="64"
+                        Margin="6,0,0,0" Padding="8,2" Click="BtnRenameRecipe_Click"
+                        ToolTip="重命名当前配方目录"/>
+                <Button x:Name="BtnDeleteRecipe" Grid.Column="8" Content="删除" Height="28" MinWidth="56"
+                        Margin="6,0,0,0" Padding="8,2" Click="BtnDeleteRecipe_Click"
+                        ToolTip="删除当前配方目录（不可撤销）"/>
+                <TextBlock x:Name="TxtRecipeHint" Grid.Column="9" Text="" Foreground="#888" FontSize="11"
+                           VerticalAlignment="Center" Margin="12,0,0,0" TextTrimming="CharacterEllipsis"/>
+            </Grid>
+        </Border>
+        <!-- 单页内多标签仍保留（关闭 ×、工具栏「在新标签打开流程」）；不再单独提供空白「新建标签」顶栏 -->
+        <TabControl x:Name="FlowTabs"
+                    Style="{StaticResource FlowHostTabControlStyle}"
+                    ItemContainerStyle="{StaticResource FlowHostTabItemStyle}"/>
+    </DockPanel>
 </Page>

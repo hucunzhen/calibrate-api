@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -103,11 +104,17 @@ namespace CalibOperatorCLI_Example
 
         public static string? TryGuessDefaultPath()
         {
-            string[] candidates =
+            var candidates = new List<string>();
+
+            string? recipeDir = FlowRecipeCatalog.TryGetSelectedRecipeDirectory();
+            if (!string.IsNullOrEmpty(recipeDir))
             {
-                Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "flows", "halcon", "calibration_result.json")),
-                Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "flows", "v1", "models", "calibration_result.json")),
-            };
+                candidates.Add(Path.Combine(recipeDir, "models", "calibration_result.json"));
+                candidates.Add(Path.Combine(recipeDir, "calibration_result.json"));
+            }
+
+            candidates.Add(Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "flows", "halcon", "calibration_result.json")));
+            candidates.Add(Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "flows", "v1", "models", "calibration_result.json")));
 
             foreach (string p in candidates)
             {

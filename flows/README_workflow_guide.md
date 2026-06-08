@@ -118,7 +118,8 @@ flowchart LR
 | 项 | 说明 |
 |----|------|
 | **输入** | 参数 `imageDirectory`：标定图目录（可配合 `namePrefix`、`extensions` 过滤） |
-| **输出** | `CalibrationJson` → `save_text` / `save_calibration_result` |
+| **输出** | `CalibrationJson`（含质检字段）→ `display_calibration` / `save_calibration_result` |
+| **质检** | 同文件含角点逐张检查、去畸变对比支路；详见 [chessboard/README.md](chessboard/README.md#标定质检自动判级--目视支路) |
 | **采图** | 棋盘完整、共面、姿态多样；**其中一张要较正**，记下其 `viewIndex` 供透视展开 |
 | **算子参数** | `cols` / `rows` / `squareSizeMm` 须与物理棋盘一致 |
 
