@@ -425,8 +425,8 @@ namespace CalibOperatorPInvoke
                 throw new ArgumentException("pixels 不能为空", nameof(pixels));
             if (string.IsNullOrWhiteSpace(calibrationJson))
                 throw new ArgumentException("calibrationJson 不能为空", nameof(calibrationJson));
-            if (viewIndex < 0)
-                throw new ArgumentOutOfRangeException(nameof(viewIndex));
+            if (viewIndex < -1)
+                throw new ArgumentOutOfRangeException(nameof(viewIndex), "viewIndex 须 >= -1（-1/axis=光轴对称）");
 
             var nativeIn = new NativePoint2D[pixels.Length];
             for (int i = 0; i < pixels.Length; i++)
@@ -479,12 +479,31 @@ namespace CalibOperatorPInvoke
             return dst;
         }
 
-        /// <summary>透视展开到棋盘平面（鸟瞰），使用 CalibrationJson 内参 + extrinsicsPerView[viewIndex]。</summary>
+        /// <summary>解析 viewIndex：0..n-1 或 axis/-1=光轴对称。</summary>
+        public static int ParseChessboardViewIndex(string? raw, int defaultIndex = 0)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return defaultIndex;
+            var t = raw.Trim();
+            if (string.Equals(t, "axis", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(t, "optical_axis", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(t, "optical", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(t, "光轴", StringComparison.OrdinalIgnoreCase)
+                || t == "-1")
+                return -1;
+            return int.TryParse(t, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int vi)
+                ? vi
+                : defaultIndex;
+        }
+
+        /// <summary>透视展开到棋盘平面（鸟瞰）。viewIndex=-1 或 axis：光轴对称外参（多视图平均 rvec，棋盘中心对齐主点）。</summary>
         public static CalibImage WarpToChessboardPlane(CalibImage src, string calibrationJson, int viewIndex,
             int boardCols, int boardRows, double squareSizeMm, double pxPerMm = 1.0, int perspectiveOutputMode = 0,
             bool assumeUndistortedInput = false, int outputSizeMode = 0)
         {
             if (src == null) throw new ArgumentNullException(nameof(src));
+            if (viewIndex < -1)
+                throw new ArgumentOutOfRangeException(nameof(viewIndex), "viewIndex 须 >= -1（-1/axis=光轴对称）");
             string calNorm = NormalizeChessboardCalibrationJson(calibrationJson);
             if (boardCols < 2 || boardRows < 2)
                 throw new ArgumentOutOfRangeException(nameof(boardCols), "棋盘内侧角点列/行数须 >= 2");
@@ -533,6 +552,8 @@ namespace CalibOperatorPInvoke
             -7 => "输出缓冲分配失败",
             -8 => "整图(共面)透视画布过大，请检查 viewIndex/外参或改用 board/local",
             -9 => "perspectiveOutputMode 无效（0=board 1=local 2=plane）",
+            -10 => "光轴对称：extrinsicsPerView 为空",
+            -11 => "光轴对称：CalibrationJson 缺少 boardSpec（cols/rows/squareSizeMm）",
             _ => $"JSON 解析或 viewIndex 越界 (native code {code})，请确认接的是 CalibrationJson 整包且 viewIndex 有效"
         };
 

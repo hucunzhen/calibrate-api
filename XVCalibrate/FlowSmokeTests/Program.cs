@@ -27,6 +27,18 @@ namespace FlowSmokeTests
                     Console.WriteLine("=== FlowNestedLoopSmokeTest ===");
                     return FlowNestedLoopSmokeTest.Run(root);
                 }
+
+                if (args[i] == "--image-transform")
+                {
+                    Console.WriteLine("=== CalibImageTransformSmokeTest ===");
+                    return CalibImageTransformSmokeTest.Run();
+                }
+
+                if (args[i] == "--nine-point-sort")
+                {
+                    Console.WriteLine("=== NinePointPixelGridSortSmokeTest ===");
+                    return NinePointPixelGridSortSmokeTest.Run();
+                }
             }
 
             Console.WriteLine("=== FlowCalibrationSmokeTest ===");

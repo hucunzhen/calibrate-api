@@ -167,18 +167,19 @@ namespace CalibOperatorCLI_Example
                 for (int x = 0; x < newW; x++)
                 {
                     int sx, sy;
+                    // 与 OpenCV cv::rotate(ROTATE_90_CLOCKWISE / ROTATE_180 / ROTATE_90_COUNTERCLOCKWISE) 一致
                     switch (angleCw)
                     {
-                        case 90:
+                        case 90: // 顺时针 90°：dst(h×w) 采样 src(w×h)
                             sx = y;
-                            sy = w - 1 - x;
+                            sy = h - 1 - x;
                             break;
-                        case 180:
+                        case 180: // 180° = 水平 + 垂直翻转（非仅上下翻转）
                             sx = w - 1 - x;
                             sy = h - 1 - y;
                             break;
-                        case 270:
-                            sx = h - 1 - y;
+                        case 270: // 顺时针 270° (= 逆时针 90°)
+                            sx = w - 1 - y;
                             sy = x;
                             break;
                         default:

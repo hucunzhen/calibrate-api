@@ -329,6 +329,14 @@ static double ToDouble(const std::string& s, double defVal) {
     try { return std::stod(s); } catch (...) { return defVal; }
 }
 
+static int ParseChessboardViewIndex(const std::string& s, int defVal) {
+    std::string t = s;
+    for (auto& c : t) c = (char)tolower((unsigned char)c);
+    if (t == "axis" || t == "optical_axis" || t == "optical" || t == "-1")
+        return -1;
+    return ToInt(s, defVal);
+}
+
 // Polyline helpers aligned with FlowPage.xaml.cs (SimplifyOpenPolyline / closed / resample / smooth / splits).
 
 static double FlowPtLineDist(Point2D p, Point2D a, Point2D b) {
@@ -2129,7 +2137,7 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         if (ptsIn.kind != Value::Kind::Points) { err = "chessboard_pixels_to_world: missing Points"; return false; }
         if (cal.kind != Value::Kind::String || cal.str.empty()) { err = "chessboard_pixels_to_world: missing CalibrationJson"; return false; }
         if (ptsIn.points.empty()) { err = "chessboard_pixels_to_world: empty Points"; return false; }
-        int viewIdx = ToInt(NodeParam(n, "viewIndex", "0"), 0);
+        int viewIdx = ParseChessboardViewIndex(NodeParam(n, "viewIndex", "0"), 0);
         std::vector<Point2D> outw(ptsIn.points.size());
         int rc = PixelsToChessboardPlaneXYFromCalibrationJson(cal.str.c_str(), viewIdx,
             ptsIn.points.data(), outw.data(), (int)ptsIn.points.size());
@@ -2176,7 +2184,7 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
             err = "chessboard_perspective_warp_image: missing CalibrationJson";
             return false;
         }
-        int viewIdx = ToInt(NodeParam(n, "viewIndex", "0"), 0);
+        int viewIdx = ParseChessboardViewIndex(NodeParam(n, "viewIndex", "0"), 0);
         int cols = ToInt(NodeParam(n, "cols", "9"), 9);
         int rows = ToInt(NodeParam(n, "rows", "6"), 6);
         double sq = ToDouble(NodeParam(n, "squareSizeMm", "25"), 25.0);

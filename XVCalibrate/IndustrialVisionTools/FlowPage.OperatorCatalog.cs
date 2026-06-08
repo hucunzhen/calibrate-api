@@ -2511,7 +2511,7 @@ namespace CalibOperatorCLI_Example
                 Category = "标定",
                 Params =
                 {
-                    new OperatorParam { Name = "viewIndex", DisplayName = "外参视图序号", DefaultValue = "0", Description = "从 0 开始，对应 CalibrationJson.extrinsicsPerView[i]" }
+                    new OperatorParam { Name = "viewIndex", DisplayName = "外参视图序号", DefaultValue = "0", Description = "0..n-1=extrinsicsPerView；axis/-1=光轴对称（多视图平均外参）" },
                 },
                 Ports =
                 {
@@ -2557,12 +2557,12 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "chessboard_perspective_warp_image",
                 DisplayName = "棋盘透视展开",
-                Description = "整图透视展开到标定棋盘平面（鸟瞰）：使用 CalibrationJson 内参 + extrinsicsPerView[viewIndex]。输出尺度 metric 时各角度尺寸一致。常与「内参畸变矫正」串联。帮助：flows/chessboard/README.md",
+                Description = "整图透视展开到标定棋盘平面（鸟瞰）：内参 + 外参（指定 viewIndex 或 axis 光轴对称）。不检测图中棋盘角点。",
                 Category = "标定",
                 Params =
                 {
                     new OperatorParam { Name = "calibrationJsonFile", DisplayName = "标定 JSON 文件", DefaultValue = "", Description = "可选；未接端口时读取完整标定 JSON（须含 extrinsicsPerView，如 chessboard_calibration_from_dir.json）" },
-                    new OperatorParam { Name = "viewIndex", DisplayName = "外参视图序号", DefaultValue = "0", Description = "extrinsicsPerView 下标，从 0 开始；须与当前图像位姿接近" },
+                    new OperatorParam { Name = "viewIndex", DisplayName = "外参视图序号", DefaultValue = "0", Description = "0..n-1=extrinsicsPerView 下标；axis/-1=光轴对称（多视图平均旋转，棋盘中心对齐主点 cx,cy，无需手选视图）" },
                     new OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "9", Description = "与棋盘格标定一致" },
                     new OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "6", Description = "与棋盘格标定一致" },
                     new OperatorParam { Name = "squareSizeMm", DisplayName = "方格边长(mm)", DefaultValue = "25", Description = "与标定 squareSizeMm 一致" },
@@ -3548,7 +3548,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "halcon_shape_match_centers",
                 DisplayName = "HALCON 匹配中心→点列",
-                Description = "将 FindShapeModel 的 Row/Column 转为 Point2D[]（X=列,Y=行），并按参数排序。默认 yx=先行后列（与九点世界坐标行优先一致）；接阵列过滤时可设 grid 并按 GridRow/GridCol 排序。",
+                Description = "将 FindShapeModel 的 Row/Column 转为 Point2D[]（X=列,Y=行），并按参数排序。九点标定推荐 bl_xy（左下角原点、Y 向上、底行优先，小幅旋转鲁棒）；接阵列过滤时可设 grid 并按 GridRow/GridCol 排序。",
                 Category = "HALCON",
                 Params =
                 {
@@ -3557,8 +3557,22 @@ namespace CalibOperatorCLI_Example
                         Name = "sortMode",
                         DisplayName = "排序方式",
                         DefaultValue = "yx",
-                        Description = "yx=按图像行Y再列X；xy=先列X再行Y；grid=按 GridRow/GridCol（须连接）；none=保持输入顺序",
-                        Options = new List<string> { "yx", "xy", "grid", "none" }
+                        Description = "bl_xy/nine=九点世界坐标序（左下原点 Y 向上，底行→顶行、行内左→右，PCA 抗小角度旋转）；yx=图像行Y向下顶行优先；xy=先列X再行Y；grid=按 GridRow/GridCol（须连接）；none=保持输入顺序",
+                        Options = new List<string> { "bl_xy", "nine", "yx", "xy", "grid", "none" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "gridRows",
+                        DisplayName = "阵列行数",
+                        DefaultValue = "0",
+                        Description = "sortMode=bl_xy/nine 时可选；0=按点数自动推断（如 9→3×3）"
+                    },
+                    new OperatorParam
+                    {
+                        Name = "gridCols",
+                        DisplayName = "阵列列数",
+                        DefaultValue = "0",
+                        Description = "sortMode=bl_xy/nine 时可选；须与 gridRows 乘积等于点数"
                     }
                 },
                 Ports =
@@ -4187,7 +4201,7 @@ namespace CalibOperatorCLI_Example
                 Description = "可选；未接 CalibrationJson 端口时使用；须为完整 CalibrationJson"
             },
             new FlowPage.OperatorParam { Name = "undistortAlpha", DisplayName = "去畸变裁剪α", DefaultValue = "-1", Description = "-1=保持原尺寸；0..1 裁剪黑边" },
-            new FlowPage.OperatorParam { Name = "viewIndex", DisplayName = "外参视图序号", DefaultValue = "0", Description = "透视用 extrinsicsPerView 下标" },
+            new FlowPage.OperatorParam { Name = "viewIndex", DisplayName = "外参视图序号", DefaultValue = "0", Description = "0..n-1=extrinsicsPerView；axis/-1=光轴对称" },
             new FlowPage.OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "9", Description = "与棋盘标定一致" },
             new FlowPage.OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "6", Description = "与棋盘标定一致" },
             new FlowPage.OperatorParam { Name = "squareSizeMm", DisplayName = "方格边长(mm)", DefaultValue = "25", Description = "与标定一致" },

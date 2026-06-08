@@ -16,6 +16,10 @@
     <NoWarn>$(NoWarn);NU1701</NoWarn>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="FlowSmokeTests" />
+  </ItemGroup>
+
   <!-- HALCON：未安装时跳过引用与算子。
        MSBuild 会把「环境变量 HalconRoot」映射为同名属性；若误指向无 bin 的目录会挡住默认路径。
        HalconRootEffective：仅在候选路径下存在 bin 时采纳，否则依次尝试 D:\HALCON、HALCONROOT，最后仍回退原 HalconRoot/D:\HALCON。 -->

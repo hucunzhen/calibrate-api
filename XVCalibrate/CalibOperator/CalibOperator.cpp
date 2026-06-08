@@ -5367,6 +5367,146 @@ int ParseCalibrationJsonForView(const std::string& json, int viewIndex,
     return 0;
 }
 
+struct ViewPoseD {
+    double rvec[3];
+    double tvec[3];
+};
+
+/** @return 0 ok; -3 extrinsics header; -5..-8 parse; -10 empty array */
+static int ParseAllExtrinsicsPoses(const std::string& json, std::vector<ViewPoseD>& out) {
+    out.clear();
+    size_t exPos = json.find("\"extrinsicsPerView\"");
+    if (exPos == std::string::npos)
+        return -3;
+    size_t arr = json.find('[', exPos);
+    if (arr == std::string::npos)
+        return -3;
+    size_t cursor = arr + 1;
+    for (;;) {
+        size_t rvKey = json.find("\"rvec\":[", cursor);
+        if (rvKey == std::string::npos)
+            break;
+        ViewPoseD p{};
+        size_t rv = rvKey + 8;
+        while (rv < json.size() && (json[rv] == ' ' || json[rv] == '\t'))
+            rv++;
+        if (std::sscanf(json.c_str() + rv, "%lf,%lf,%lf", &p.rvec[0], &p.rvec[1], &p.rvec[2]) != 3)
+            return -5;
+        size_t tvKey = json.find("\"tvec\":[", rv);
+        if (tvKey == std::string::npos)
+            return -6;
+        size_t tv = tvKey + 8;
+        while (tv < json.size() && (json[tv] == ' ' || json[tv] == '\t'))
+            tv++;
+        if (std::sscanf(json.c_str() + tv, "%lf,%lf,%lf", &p.tvec[0], &p.tvec[1], &p.tvec[2]) != 3)
+            return -7;
+        out.push_back(p);
+        size_t closeBracket = json.find(']', tv);
+        if (closeBracket == std::string::npos)
+            return -8;
+        cursor = closeBracket + 1;
+    }
+    if (out.empty())
+        return -10;
+    return 0;
+}
+
+static int ParseCalibrationJsonIntrinsicsOnly(const std::string& json,
+    double* fx, double* fy, double* cx, double* cy,
+    double* k1, double* k2, double* p1, double* p2, double* k3) {
+    size_t i0 = json.find("\"intrinsics\"");
+    if (i0 == std::string::npos)
+        return -2;
+    size_t i1 = json.find("\"extrinsicsPerView\"", i0);
+    if (i1 == std::string::npos)
+        i1 = json.size();
+    const std::string head = json.substr(i0, i1 - i0);
+    if (!GrabDoubleInSpan(head, "fx", fx) || !GrabDoubleInSpan(head, "fy", fy) ||
+        !GrabDoubleInSpan(head, "cx", cx) || !GrabDoubleInSpan(head, "cy", cy) ||
+        !GrabDoubleInSpan(head, "k1", k1) || !GrabDoubleInSpan(head, "k2", k2) ||
+        !GrabDoubleInSpan(head, "p1", p1) || !GrabDoubleInSpan(head, "p2", p2) ||
+        !GrabDoubleInSpan(head, "k3", k3))
+        return -2;
+    return 0;
+}
+
+/** viewIndex=-1：多视图平均旋转 + 棋盘中心落在光轴 (cx,cy) 的对称外参。 */
+static int BuildOpticalAxisSymmetricPose(const std::vector<ViewPoseD>& views,
+    int boardCols, int boardRows, double squareSizeMm,
+    double rvecOut[3], double tvecOut[3]) {
+    if (views.empty() || boardCols < 2 || boardRows < 2 || squareSizeMm <= 0.0)
+        return -10;
+    cv::Mat Rsum = cv::Mat::zeros(3, 3, CV_64F);
+    cv::Point3f boardCenter(
+        (float)((boardCols - 1) * squareSizeMm * 0.5),
+        (float)((boardRows - 1) * squareSizeMm * 0.5),
+        0.f);
+    cv::Mat Pboard = (cv::Mat_<double>(3, 1) << (double)boardCenter.x, (double)boardCenter.y, 0.0);
+    double zsum = 0.0;
+    for (const auto& p : views) {
+        cv::Mat rv = (cv::Mat_<double>(3, 1) << p.rvec[0], p.rvec[1], p.rvec[2]);
+        cv::Mat tv = (cv::Mat_<double>(3, 1) << p.tvec[0], p.tvec[1], p.tvec[2]);
+        cv::Mat R;
+        cv::Rodrigues(rv, R);
+        Rsum += R;
+        cv::Mat Pcam = R * Pboard + tv;
+        zsum += Pcam.at<double>(2);
+    }
+    cv::SVD svd(Rsum, cv::SVD::FULL_UV);
+    cv::Mat Rmean = svd.u * svd.vt;
+    if (cv::determinant(Rmean) < 0) {
+        cv::Mat fix = cv::Mat::eye(3, 3, CV_64F);
+        fix.at<double>(2, 2) = -1.0;
+        Rmean = svd.u * fix * svd.vt;
+    }
+    cv::Mat rvMean;
+    cv::Rodrigues(Rmean, rvMean);
+    rvecOut[0] = rvMean.at<double>(0);
+    rvecOut[1] = rvMean.at<double>(1);
+    rvecOut[2] = rvMean.at<double>(2);
+    const double z0 = zsum / (double)views.size();
+    cv::Mat t = (cv::Mat_<double>(3, 1) << 0.0, 0.0, z0) - Rmean * Pboard;
+    tvecOut[0] = t.at<double>(0);
+    tvecOut[1] = t.at<double>(1);
+    tvecOut[2] = t.at<double>(2);
+    return 0;
+}
+
+static int ParseCalibrationJsonForOpticalAxis(const std::string& json,
+    int boardCols, int boardRows, double squareSizeMm,
+    double* fx, double* fy, double* cx, double* cy,
+    double* k1, double* k2, double* p1, double* p2, double* k3,
+    double rvec[3], double tvec[3]) {
+    int ir = ParseCalibrationJsonIntrinsicsOnly(json, fx, fy, cx, cy, k1, k2, p1, p2, k3);
+    if (ir != 0)
+        return ir;
+    std::vector<ViewPoseD> views;
+    int pr = ParseAllExtrinsicsPoses(json, views);
+    if (pr != 0)
+        return pr;
+    return BuildOpticalAxisSymmetricPose(views, boardCols, boardRows, squareSizeMm, rvec, tvec);
+}
+
+static int ParseBoardSpecFromJson(const std::string& json, int& boardCols, int& boardRows, double& squareSizeMm) {
+    size_t pos = json.find("\"boardSpec\"");
+    if (pos == std::string::npos)
+        return -11;
+    size_t end = json.find('}', pos);
+    if (end == std::string::npos)
+        return -11;
+    const std::string span = json.substr(pos, end - pos + 1);
+    double dc = 0, dr = 0, ds = 0;
+    if (!GrabDoubleInSpan(span, "cols", &dc) || !GrabDoubleInSpan(span, "rows", &dr) ||
+        !GrabDoubleInSpan(span, "squareSizeMm", &ds))
+        return -11;
+    boardCols = (int)std::lround(dc);
+    boardRows = (int)std::lround(dr);
+    squareSizeMm = ds;
+    if (boardCols < 2 || boardRows < 2 || squareSizeMm <= 0.0)
+        return -11;
+    return 0;
+}
+
 int PixelsToChessboardPlaneXY(double fx, double fy, double cx, double cy,
     double k1, double k2, double p1, double p2, double k3,
     const double rvec[3], const double tvec[3],
@@ -5412,12 +5552,23 @@ int PixelsToChessboardPlaneXY(double fx, double fy, double cx, double cy,
 
 int PixelsToChessboardPlaneXYFromCalibrationJson(const char* calibrationJsonUtf8, int viewIndex,
     const Point2D* pixels, Point2D* worldXYOut, int count) {
-    if (!calibrationJsonUtf8 || !pixels || !worldXYOut || count <= 0 || viewIndex < 0)
+    if (!calibrationJsonUtf8 || !pixels || !worldXYOut || count <= 0 || viewIndex < -1)
         return -1;
     std::string json(calibrationJsonUtf8);
     double fx, fy, cx, cy, k1, k2, p1, p2, k3;
     double rvec[3], tvec[3];
-    int pr = ParseCalibrationJsonForView(json, viewIndex, &fx, &fy, &cx, &cy, &k1, &k2, &p1, &p2, &k3, rvec, tvec);
+    int pr;
+    if (viewIndex == -1) {
+        int cols = 0, rows = 0;
+        double sq = 0;
+        int br = ParseBoardSpecFromJson(json, cols, rows, sq);
+        if (br != 0)
+            return br;
+        pr = ParseCalibrationJsonForOpticalAxis(json, cols, rows, sq,
+            &fx, &fy, &cx, &cy, &k1, &k2, &p1, &p2, &k3, rvec, tvec);
+    } else {
+        pr = ParseCalibrationJsonForView(json, viewIndex, &fx, &fy, &cx, &cy, &k1, &k2, &p1, &p2, &k3, rvec, tvec);
+    }
     if (pr != 0)
         return pr;
     return PixelsToChessboardPlaneXY(fx, fy, cx, cy, k1, k2, p1, p2, k3, rvec, tvec, pixels, worldXYOut, count);
@@ -5503,32 +5654,6 @@ int UndistortImageFromCalibrationJson(const Image* src, Image* dst, const char* 
     return UndistortImageWithIntrinsics(src, dst, fx, fy, cx, cy, k1, k2, p1, p2, k3, alpha);
 }
 
-static int DetectChessboardCornersOnMat(const cv::Mat& bgrOrGray, int boardCols, int boardRows,
-    std::vector<cv::Point2f>& corners) {
-    if (bgrOrGray.empty() || boardCols < 2 || boardRows < 2)
-        return -1;
-    cv::Mat gray;
-    if (bgrOrGray.channels() == 1)
-        gray = bgrOrGray;
-    else if (bgrOrGray.channels() == 3)
-        cv::cvtColor(bgrOrGray, gray, cv::COLOR_BGR2GRAY);
-    else
-        return -1;
-    if (gray.type() != CV_8UC1)
-        return -1;
-
-    cv::Size pattern(boardCols, boardRows);
-    const int flags = cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE;
-    corners.clear();
-    if (!cv::findChessboardCorners(gray, pattern, corners, flags))
-        return 1;
-    if ((int)corners.size() != boardCols * boardRows)
-        return 1;
-    cv::cornerSubPix(gray, corners, cv::Size(11, 11), cv::Size(-1, -1),
-        cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 30, 0.001));
-    return 0;
-}
-
 static void BoardOuterQuadFromCorners(const std::vector<cv::Point2f>& corners, int boardCols, int boardRows,
     std::vector<cv::Point2f>& quadOut) {
     auto at = [&](int row, int col) -> cv::Point2f {
@@ -5542,32 +5667,6 @@ static void BoardOuterQuadFromCorners(const std::vector<cv::Point2f>& corners, i
     };
 }
 
-static float SampleBilinearGrayOrChannel(const cv::Mat& img, float x, float y, int c) {
-    if (img.empty() || img.type() != CV_8UC1 && img.type() != CV_8UC3)
-        return 0.f;
-    const int ch = img.channels();
-    if (c < 0 || c >= ch)
-        return 0.f;
-    if (x < 0.f || y < 0.f || x >= (float)(img.cols - 1) || y >= (float)(img.rows - 1))
-        return 0.f;
-    const int x0 = (int)std::floor(x);
-    const int y0 = (int)std::floor(y);
-    const float dx = x - (float)x0;
-    const float dy = y - (float)y0;
-    auto pix = [&](int px, int py) -> float {
-        if (img.type() == CV_8UC1)
-            return (float)img.at<unsigned char>(py, px);
-        return (float)img.at<cv::Vec3b>(py, px)[c];
-    };
-    const float v00 = pix(x0, y0);
-    const float v10 = pix(x0 + 1, y0);
-    const float v01 = pix(x0, y0 + 1);
-    const float v11 = pix(x0 + 1, y0 + 1);
-    const float v0 = v00 * (1.f - dx) + v10 * dx;
-    const float v1 = v01 * (1.f - dx) + v11 * dx;
-    return v0 * (1.f - dy) + v1 * dy;
-}
-
 /** 整图模式：保持 src 尺寸，仅在棋盘四边形内写入鸟瞰校正后的像素，板外不变形。 */
 static bool WarpChessboardPerspectiveInPlaceFullFrame(cv::Mat& out, const cv::Mat& src,
     const std::vector<cv::Point2f>& srcQuad, const cv::Mat& H_img_to_board, int boardW, int boardH) {
@@ -5579,36 +5678,24 @@ static bool WarpChessboardPerspectiveInPlaceFullFrame(cv::Mat& out, const cv::Ma
     if (boardPatch.empty())
         return false;
 
-    out = src.clone();
-    const int ch = out.channels();
-    if (ch != 1 && ch != 3)
+    cv::Mat H_board_to_img;
+    if (!cv::invert(H_img_to_board, H_board_to_img, cv::DECOMP_LU))
         return false;
 
-    for (int y = 0; y < out.rows; ++y) {
-        for (int x = 0; x < out.cols; ++x) {
-            if (cv::pointPolygonTest(srcQuad, cv::Point2f((float)x, (float)y), false) < 0)
-                continue;
-            cv::Mat ph = (cv::Mat_<double>(3, 1) << (double)x, (double)y, 1.0);
-            cv::Mat b = H_img_to_board * ph;
-            const double wz = b.at<double>(2);
-            if (std::fabs(wz) < 1e-12)
-                continue;
-            const float bx = (float)(b.at<double>(0) / wz);
-            const float by = (float)(b.at<double>(1) / wz);
-            if (bx < 0.f || by < 0.f || bx >= (float)(boardW - 1) || by >= (float)(boardH - 1))
-                continue;
-            if (ch == 1) {
-                const float v = SampleBilinearGrayOrChannel(boardPatch, bx, by, 0);
-                out.at<unsigned char>(y, x) = (unsigned char)std::lround(std::max(0.f, std::min(255.f, v)));
-            } else {
-                cv::Vec3b& px = out.at<cv::Vec3b>(y, x);
-                for (int c = 0; c < 3; ++c) {
-                    const float v = SampleBilinearGrayOrChannel(boardPatch, bx, by, c);
-                    px[c] = (unsigned char)std::lround(std::max(0.f, std::min(255.f, v)));
-                }
-            }
-        }
-    }
+    cv::Mat warpedFull;
+    cv::warpPerspective(boardPatch, warpedFull, H_board_to_img, src.size(),
+        cv::INTER_LINEAR, cv::BORDER_CONSTANT, cv::Scalar(0));
+    if (warpedFull.empty() || warpedFull.type() != src.type())
+        return false;
+
+    cv::Mat mask(src.rows, src.cols, CV_8UC1, cv::Scalar(0));
+    std::vector<cv::Point> poly(4);
+    for (int i = 0; i < 4; ++i)
+        poly[i] = cv::Point((int)std::lround(srcQuad[i].x), (int)std::lround(srcQuad[i].y));
+    cv::fillConvexPoly(mask, poly, cv::Scalar(255));
+
+    out = src.clone();
+    warpedFull.copyTo(out, mask);
     return true;
 }
 
@@ -5656,12 +5743,6 @@ int WarpImageToChessboardPlane(const Image* src, Image* dst,
     };
 
     std::vector<cv::Point2f> srcCorners = imgAll;
-    bool usedDetectedCorners = false;
-    std::vector<cv::Point2f> detected;
-    if (DetectChessboardCornersOnMat(m, boardCols, boardRows, detected) == 0) {
-        srcCorners = detected;
-        usedDetectedCorners = true;
-    }
 
     std::vector<cv::Point2f> srcPts;
     BoardOuterQuadFromCorners(srcCorners, boardCols, boardRows, srcPts);
@@ -5674,8 +5755,8 @@ int WarpImageToChessboardPlane(const Image* src, Image* dst,
 
     int outW = (int)std::lround((boardCols - 1) * squareSizeMm * pxPerMm);
     int outH = (int)std::lround((boardRows - 1) * squareSizeMm * pxPerMm);
-    // board_pixels: 按图中棋盘边长定尺寸；未检测到角点时不应使用外参投影边长（随 viewIndex 变化），回退 metric
-    if (outputSizeMode == 1 && usedDetectedCorners) {
+    // board_pixels: 按标定外参投影的棋盘边长定尺寸（生产图无棋盘，不做 findChessboardCorners）
+    if (outputSizeMode == 1) {
         const double horiz = 0.5 * ((double)edgeLen(srcPts[0], srcPts[1]) + (double)edgeLen(srcPts[3], srcPts[2]));
         const double vert = 0.5 * ((double)edgeLen(srcPts[0], srcPts[3]) + (double)edgeLen(srcPts[1], srcPts[2]));
         const double scaleW = horiz / (double)(boardCols - 1);
@@ -5755,14 +5836,20 @@ int WarpImageToChessboardPlaneFromCalibrationJson(const Image* src, Image* dst,
     const char* calibrationJsonUtf8, int viewIndex,
     int boardCols, int boardRows, double squareSizeMm, double pxPerMm,
     int perspectiveOutputMode, int assumeUndistortedInput, int outputSizeMode) {
-    if (!calibrationJsonUtf8 || !calibrationJsonUtf8[0] || viewIndex < 0)
+    if (!calibrationJsonUtf8 || !calibrationJsonUtf8[0] || viewIndex < -1)
         return -1;
     if (perspectiveOutputMode < 0 || perspectiveOutputMode > 2)
         return -9;
     std::string json(calibrationJsonUtf8);
     double fx, fy, cx, cy, k1, k2, p1, p2, k3;
     double rvec[3], tvec[3];
-    int pr = ParseCalibrationJsonForView(json, viewIndex, &fx, &fy, &cx, &cy, &k1, &k2, &p1, &p2, &k3, rvec, tvec);
+    int pr;
+    if (viewIndex == -1) {
+        pr = ParseCalibrationJsonForOpticalAxis(json, boardCols, boardRows, squareSizeMm,
+            &fx, &fy, &cx, &cy, &k1, &k2, &p1, &p2, &k3, rvec, tvec);
+    } else {
+        pr = ParseCalibrationJsonForView(json, viewIndex, &fx, &fy, &cx, &cy, &k1, &k2, &p1, &p2, &k3, rvec, tvec);
+    }
     if (pr != 0)
         return pr;
     return WarpImageToChessboardPlane(src, dst, fx, fy, cx, cy, k1, k2, p1, p2, k3, rvec, tvec,

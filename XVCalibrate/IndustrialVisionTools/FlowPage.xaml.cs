@@ -1869,11 +1869,16 @@ namespace CalibOperatorCLI_Example
             double[] cols,
             int[]? gridRow,
             int[]? gridCol,
-            string sortMode)
+            string sortMode,
+            int gridRowsHint = 0,
+            int gridColsHint = 0)
         {
             var order = Enumerable.Range(0, n).ToArray();
             if (n <= 1 || sortMode is "none" or "preserve")
                 return order;
+
+            if (sortMode is "bl_xy" or "nine" or "nine_point" or "world" or "world_yx")
+                return NinePointPixelGridSort.SortIndices(n, rows, cols, gridRowsHint, gridColsHint);
 
             bool canGrid = sortMode is "grid" or "grid_row_col"
                 && gridRow != null && gridCol != null
@@ -1901,7 +1906,7 @@ namespace CalibOperatorCLI_Example
                 return order;
             }
 
-            // yx / row_col / row_major：先行(Y)后列(X)，与九点世界坐标默认顺序一致
+            // yx / row_col / row_major：图像坐标先行(Y 向下)后列(X)，顶行优先
             Array.Sort(order, (a, b) =>
             {
                 int cmp = rows[a].CompareTo(rows[b]);
@@ -8785,6 +8790,9 @@ namespace CalibOperatorCLI_Example
                 : 0;
         }
 
+        private static int ParseChessboardViewIndex(IReadOnlyDictionary<string, string?> paramBag, int defaultIndex = 0) =>
+            CalibAPI.ParseChessboardViewIndex(paramBag.GetValueOrDefault("viewIndex"), defaultIndex);
+
         private static bool ParseAssumeUndistortedForWarp(IReadOnlyDictionary<string, string?> paramBag, bool undistortEnabledInSameNode)
         {
             if (!paramBag.TryGetValue("assumeUndistorted", out var raw) || string.IsNullOrWhiteSpace(raw))
@@ -8831,7 +8839,7 @@ namespace CalibOperatorCLI_Example
             if (perspective)
             {
                 string calJsonP = ResolveChessboardCalibrationJson(node, inputs, compositeInnerFlowBaseDir, requireExtrinsics: true);
-                int viewIdx = int.TryParse(node.Params.GetValueOrDefault("viewIndex"), out int vi) ? vi : 0;
+                int viewIdx = ParseChessboardViewIndex(node.Params);
                 int cols = int.TryParse(node.Params.GetValueOrDefault("cols"), out int cc) ? cc : 9;
                 int rows = int.TryParse(node.Params.GetValueOrDefault("rows"), out int rr) ? rr : 6;
                 double sqMm = double.TryParse(node.Params.GetValueOrDefault("squareSizeMm"), out double sqv) ? sqv : 25.0;
@@ -11241,7 +11249,7 @@ namespace CalibOperatorCLI_Example
 
                         if (!inputs.TryGetValue("CalibrationJson", out var cjObj) || cjObj is not string calJson || string.IsNullOrWhiteSpace(calJson))
                             throw new InvalidOperationException("棋盘像素→世界: 缺少 CalibrationJson（须为多视图标定输出的完整 JSON）");
-                        int viewIdx = int.TryParse(node.Params.GetValueOrDefault("viewIndex"), out int vi) ? vi : 0;
+                        int viewIdx = ParseChessboardViewIndex(node.Params);
                         var world = CalibAPI.PixelsToChessboardWorld(calJson, viewIdx, pts);
                         node.Outputs["World"] = world;
                         break;
@@ -11299,7 +11307,7 @@ namespace CalibOperatorCLI_Example
                             throw new InvalidOperationException("棋盘透视展开: 缺少输入图像 Image");
                         string calJson = ResolveChessboardCalibrationJson(node, inputs, compositeInnerFlowBaseDir, requireExtrinsics: true);
 
-                        int viewIdx = int.TryParse(node.Params.GetValueOrDefault("viewIndex"), out int vi) ? vi : 0;
+                        int viewIdx = ParseChessboardViewIndex(node.Params);
                         int cols = int.TryParse(node.Params.GetValueOrDefault("cols"), out int cc) ? cc : 9;
                         int rows = int.TryParse(node.Params.GetValueOrDefault("rows"), out int rr) ? rr : 6;
                         double sqMm = double.TryParse(node.Params.GetValueOrDefault("squareSizeMm"), out double sqv) ? sqv : 25.0;
@@ -13696,8 +13704,22 @@ namespace CalibOperatorCLI_Example
                         int[]? gridCol = inputs.TryGetValue("GridCol", out var gcObj) && gcObj is int[] gca ? gca : null;
                         int n = Math.Min(rows.Length, cols.Length);
                         string sortMode = (node.Params.GetValueOrDefault("sortMode", "yx") ?? "yx").Trim().ToLowerInvariant();
+                        int gridRowsHint = int.TryParse(
+                            node.Params.GetValueOrDefault("gridRows", "0")?.Trim(),
+                            System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var grHint)
+                            ? grHint
+                            : 0;
+                        int gridColsHint = int.TryParse(
+                            node.Params.GetValueOrDefault("gridCols", "0")?.Trim(),
+                            System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var gcHint)
+                            ? gcHint
+                            : 0;
 
-                        var order = SortShapeMatchCenterIndices(n, rows, cols, gridRow, gridCol, sortMode);
+                        var order = SortShapeMatchCenterIndices(n, rows, cols, gridRow, gridCol, sortMode, gridRowsHint, gridColsHint);
 
                         var pts = new Point2D[n];
                         for (int k = 0; k < n; k++)

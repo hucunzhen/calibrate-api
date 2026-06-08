@@ -609,7 +609,7 @@ namespace CalibOperatorCLI_Example
 
                 if (perspective)
                 {
-                    int viewIdx = int.TryParse(TxtCalibViewIndex.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int vi) ? vi : 0;
+                    int viewIdx = CalibAPI.ParseChessboardViewIndex(TxtCalibViewIndex.Text);
                     int cols = int.TryParse(TxtCalibBoardCols.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int c) ? c : 9;
                     int rows = int.TryParse(TxtCalibBoardRows.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int r) ? r : 6;
                     double sq = double.TryParse(TxtCalibSquareSizeMm.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double s) ? s : 25.0;
@@ -627,7 +627,8 @@ namespace CalibOperatorCLI_Example
                     if (logSuccess)
                     {
                         string frame = perspMode switch { 2 => "plane", 1 => "local", _ => "board" };
-                        AppendLog($"透视矫正: view={viewIdx} {cols}x{rows} 格, 输出={frame}, {work.Width}x{work.Height}px");
+                        string viewNote = viewIdx == -1 ? "view=axis(光轴对称)" : $"view={viewIdx}";
+                        AppendLog($"透视矫正: {viewNote} {cols}x{rows} 格, 输出={frame}, {work.Width}x{work.Height}px");
                     }
                 }
 
