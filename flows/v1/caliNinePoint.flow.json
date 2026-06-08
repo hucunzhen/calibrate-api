@@ -21,6 +21,7 @@
         "worldPoints": "426.6,48.853;473.1,48.853;519.6,48.853;426.6,82.853;473.1,82.853;519.6,82.853;426.6,116.853;473.1,116.853;519.6,116.853;",
         "pixelPickMode": "\u5339\u914D\u68C0\u6D4B\u70B9",
         "confirmCorrespondence": "true",
+        "calibrationJsonFile": "chessboard\\calibration_result.json",
         "enable": "true",
         "disable": "false"
       }
@@ -39,8 +40,8 @@
     {
       "Id": "7caa3be5-5003-4181-b717-d7da90c662f8",
       "TypeId": "halcon_load_shape_model",
-      "X": 0,
-      "Y": 145,
+      "X": 10,
+      "Y": 146,
       "Params": {
         "filePath": "models\\cali_board.shm",
         "enable": "true",

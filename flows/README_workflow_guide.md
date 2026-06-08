@@ -141,7 +141,7 @@ flowchart LR
 | **用途** | 计算**九点标定**仿射参数 |
 | **输入** | 标定图 + 子流程 [`findCircle.flow.json`](halcon/findCircle.flow.json) 输出的 9 个像素点 |
 | **worldPoints** | 由 **`caliSendContour.flow.json`** 对应 PLC 坐标填写；**顺序与像素点一一对应** |
-| **输出** | `save_calibration_result` → 如 `calibration_nine_point.json` |
+| **输出** | `save_calibration_result` → 如 `calibration_nine_point.json`（含 `systemError` 系统整体误差，需填写 `calibrationJsonFile` 或连接 `CalibrationJson`） |
 | **核对** | `confirmCorrespondence=true` 时可交互确认像素↔世界配对 |
 
 ### 4.4 `halcon/main.flow.json`
@@ -175,6 +175,9 @@ A: 使用 `perspectiveOutputScale=metric`；并确保 `viewIndex` 对应「较�
 
 **Q: 九点标定重投影误差大？**  
 A: 检查 `worldPoints` 是否与 `caliSendContour` 一致；像素 9 点顺序是否与 `findCircle` 网格排序一致。
+
+**Q: 如何查看棋盘格 + 九点的系统整体误差？**  
+A: 九点标定算子填写 `calibrationJsonFile`（或连接棋盘 `CalibrationJson`），运行后弹窗末尾有 **[系统整体误差]** 段；`SystemErrorJson` 接 `save_calibration_result` 会写入 `systemError` 字段（合成 avg/max，单位 mm）。
 
 **Q: 精匹配偏差大？**  
 A: 确认粗匹配已缩小位置/角度；精模板边缘是否贴合物体；Mask / `CoarseAngle` 是否接入。

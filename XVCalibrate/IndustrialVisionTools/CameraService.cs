@@ -374,6 +374,162 @@ namespace CalibOperatorCLI_Example
             }
         }
 
+        public enum CameraFramePixelLayout
+        {
+            Unsupported,
+            Mono8,
+            Bgr24,
+            Rgb24
+        }
+
+        /// <summary>解析 SDK 帧像素格式（与 <see cref="BuildCalibImageFromFrameOut"/> 一致）。</summary>
+        public static CameraFramePixelLayout GetFramePixelLayout(IFrameOut frameOut)
+        {
+            var camImg = frameOut.Image;
+            if (camImg.PixelDataPtr == IntPtr.Zero || camImg.Width <= 0 || camImg.Height <= 0)
+                return CameraFramePixelLayout.Unsupported;
+
+            uint pixelFormat = (uint)camImg.PixelType;
+            if (pixelFormat == 0x01080001)
+                return CameraFramePixelLayout.Mono8;
+            if (pixelFormat == 0x0218000F)
+                return CameraFramePixelLayout.Bgr24;
+            if (pixelFormat == 0x02180015)
+                return CameraFramePixelLayout.Rgb24;
+            return CameraFramePixelLayout.Unsupported;
+        }
+
+        /// <summary>
+        /// 将帧像素拷贝到紧凑 buffer：Mono8=w×h；彩色=w×h×3 BGR 逐行紧密排列。
+        /// 须在 SDK 回调线程内调用（<paramref name="frameOut"/> 随后会被释放）。
+        /// </summary>
+        public static bool TryCopyFramePixels(
+            IFrameOut frameOut,
+            byte[] buffer,
+            out int width,
+            out int height,
+            out CameraFramePixelLayout layout)
+        {
+            width = 0;
+            height = 0;
+            layout = GetFramePixelLayout(frameOut);
+            if (layout == CameraFramePixelLayout.Unsupported)
+                return false;
+
+            var camImg = frameOut.Image;
+            width = (int)camImg.Width;
+            height = (int)camImg.Height;
+            IntPtr srcData = camImg.PixelDataPtr;
+
+            if (layout == CameraFramePixelLayout.Mono8)
+            {
+                int need = width * height;
+                if (buffer.Length < need)
+                    return false;
+                for (int y = 0; y < height; y++)
+                    Marshal.Copy(IntPtr.Add(srcData, y * width), buffer, y * width, width);
+                return true;
+            }
+
+            int rowBytes = width * 3;
+            int needColor = rowBytes * height;
+            if (buffer.Length < needColor)
+                return false;
+
+            if (layout == CameraFramePixelLayout.Bgr24)
+            {
+                for (int y = 0; y < height; y++)
+                    Marshal.Copy(IntPtr.Add(srcData, y * rowBytes), buffer, y * rowBytes, rowBytes);
+                return true;
+            }
+
+            unsafe
+            {
+                byte* src = (byte*)srcData;
+                fixed (byte* dstBase = buffer)
+                {
+                    for (int y = 0; y < height; y++)
+                    {
+                        byte* srcRow = src + y * rowBytes;
+                        byte* dstRow = dstBase + y * rowBytes;
+                        for (int x = 0; x < width; x++)
+                        {
+                            int si = x * 3;
+                            int di = x * 3;
+                            dstRow[di + 0] = srcRow[si + 2];
+                            dstRow[di + 1] = srcRow[si + 1];
+                            dstRow[di + 2] = srcRow[si + 0];
+                        }
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>由紧凑像素 buffer 构造标定用 BGR <see cref="CalibImage"/>（保存时调用，非预览热路径）。</summary>
+        public static CalibImage? CreateCalibImageFromPixels(
+            byte[] buffer,
+            int width,
+            int height,
+            CameraFramePixelLayout layout)
+        {
+            if (width <= 0 || height <= 0 || buffer == null)
+                return null;
+
+            try
+            {
+                var calibImg = new CalibImage(width, height, 3);
+                var native = calibImg.GetNativeStruct();
+                int dstRow = width * 3;
+                if (dstRow % 4 != 0)
+                    dstRow = ((dstRow / 4) + 1) * 4;
+
+                unsafe
+                {
+                    byte* dst = (byte*)native.data;
+                    if (layout == CameraFramePixelLayout.Mono8)
+                    {
+                        if (buffer.Length < width * height)
+                            return null;
+                        for (int y = 0; y < height; y++)
+                        {
+                            for (int x = 0; x < width; x++)
+                            {
+                                byte gray = buffer[y * width + x];
+                                int dstIdx = y * dstRow + x * 3;
+                                dst[dstIdx + 0] = gray;
+                                dst[dstIdx + 1] = gray;
+                                dst[dstIdx + 2] = gray;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        int srcRow = width * 3;
+                        if (buffer.Length < srcRow * height)
+                            return null;
+                        fixed (byte* srcBase = buffer)
+                        {
+                            for (int y = 0; y < height; y++)
+                            {
+                                byte* src = srcBase + y * srcRow;
+                                byte* dstRowPtr = dst + y * dstRow;
+                                for (int x = 0; x < srcRow; x++)
+                                    dstRowPtr[x] = src[x];
+                            }
+                        }
+                    }
+                }
+
+                return calibImg;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private void OnFrameGrabbed(object sender, FrameGrabbedEventArgs e)
         {
             try

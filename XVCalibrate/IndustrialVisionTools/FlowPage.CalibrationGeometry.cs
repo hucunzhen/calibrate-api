@@ -57,6 +57,7 @@ namespace CalibOperatorCLI_Example
             public HomographyCalibrationSaveV1? Homography { get; set; }
             public Poly2DCalibrationSaveV1? Poly2d { get; set; }
             public IntrinsicsCalibrationSaveV1? Intrinsics { get; set; }
+            public SystemCalibrationQuality.SystemErrorDocument? SystemError { get; set; }
         }
 
         private sealed class AffineCalibrationSaveV1

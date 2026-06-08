@@ -98,6 +98,13 @@ namespace CalibOperatorCLI_Example
         public static bool TryBuildPopupReport(
             QualityReport report,
             out string headline,
+            out string body) =>
+            TryBuildPopupReport(report, null, out headline, out body);
+
+        public static bool TryBuildPopupReport(
+            QualityReport report,
+            SystemCalibrationQuality.SystemQualityReport? systemReport,
+            out string headline,
             out string body)
         {
             headline = report.VerdictLine;
@@ -116,7 +123,14 @@ namespace CalibOperatorCLI_Example
 
             AppendBadPoints(sb, report);
             AppendFixTips(sb, report);
+
+            if (systemReport != null)
+                SystemCalibrationQuality.AppendSystemSection(sb, systemReport);
+
             body = sb.ToString().TrimEnd();
+            headline = systemReport != null && !systemReport.Passed
+                ? systemReport.VerdictLine
+                : report.VerdictLine;
             return true;
         }
 

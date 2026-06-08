@@ -27,7 +27,8 @@
       "Y": 180,
       "Params": {
         "worldPoints": "452.682,62.785;472.682,62.785;492.682,62.785;452.682,82.785;472.682,82.785;492.682,82.785;452.682,102.785;472.682,102.785;492.682,102.785",
-        "confirmCorrespondence": "true"
+        "confirmCorrespondence": "true",
+        "calibrationJsonFile": "../chessboard/chessboard_calibration_from_dir.json"
       }
     },
     {
@@ -74,6 +75,12 @@
       "FromPort": "Transform",
       "ToNodeId": "91090304-28ba-437e-b090-e4c52c2e6dee",
       "ToPort": "Transform"
+    },
+    {
+      "FromNodeId": "62879182-0f97-45ea-800c-48cf296b72f1",
+      "FromPort": "SystemErrorJson",
+      "ToNodeId": "91090304-28ba-437e-b090-e4c52c2e6dee",
+      "ToPort": "SystemErrorJson"
     },
     {
       "FromNodeId": "307a2dfa-6cc1-4e0e-a515-51c0504d79fc",

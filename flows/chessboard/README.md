@@ -16,6 +16,7 @@
 
 | 算子 | 作用 |
 |------|------|
+| `camera_calib_capture` | 摄像头预览采集标定图（确定/完成）→ `ImagePaths` / `ImageDirectory` |
 | `chessboard_find_corners` | 单张图检测棋盘角点 |
 | `chessboard_calibrate_intrinsics` | 多视图 OpenCV 标定 → `Intrinsics` / `CalibrationJson` |
 | `intrinsics_undistort_image` | 内参去畸变（`cv::undistort`） |
@@ -109,7 +110,7 @@ load_image / camera_snap ── Image ── calibration_correct_image ── Ou
 |------|------|
 | `chessboard_example.flow.json` | 角点检测 + 显示 |
 | `chessboard_intrinsics_example.flow.json` | 目录批量内参标定 |
-| `chessboard_intrinsics_from_dir.flow.json` | 从目录标定、质检报告、角点逐张检查、去畸变对比并保存 JSON |
+| `chessboard_intrinsics_from_dir.flow.json` | **摄像头交互采集** → 内参标定、质检报告、角点逐张检查、去畸变对比并保存 JSON |
 | `chessboard_intrinsics_with_qc.flow.json` | 与上一文件相同（带完整质检支路） |
 | `chessboard_undistort_example.flow.json` | 去畸变对比显示 |
 | `chessboard_perspective_warp_example.flow.json` | 去畸变 → 透视展开 → 存图 |

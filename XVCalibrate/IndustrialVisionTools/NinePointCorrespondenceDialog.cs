@@ -20,6 +20,9 @@ namespace CalibOperatorCLI_Example
         private const double HitRadiusPx = 18;
         private const double MinScale = 0.05;
         private const double MaxScale = 20;
+        private const double NudgeStepPx = 1.0;
+        private const double NudgeStepFinePx = 0.1;
+        private const double NudgeStepCoarsePx = 10.0;
 
         private readonly CalibImage _image;
         private readonly Point2D[] _referenceImagePts;
@@ -30,6 +33,9 @@ namespace CalibOperatorCLI_Example
 
         private readonly ListBox _worldList;
         private readonly TextBlock _hintText;
+        private readonly TextBox _txtPixelX;
+        private readonly TextBox _txtPixelY;
+        private readonly StackPanel _pnlFineTune;
         private readonly Canvas _overlay;
         private readonly Border _viewHost;
         private readonly ScaleTransform _viewScale = new ScaleTransform();
@@ -40,6 +46,8 @@ namespace CalibOperatorCLI_Example
         private double _offsetX;
         private double _offsetY;
         private bool _isPanning;
+        private bool _isDraggingPoint;
+        private int _dragWorldIndex = -1;
         private Point _panStart;
         private Point _lastPanOffset;
 
@@ -105,6 +113,92 @@ namespace CalibOperatorCLI_Example
             DockPanel.SetDock(btnRow, Dock.Bottom);
             left.Children.Add(btnRow);
 
+            _pnlFineTune = new StackPanel { Margin = new Thickness(8, 0, 8, 8) };
+            DockPanel.SetDock(_pnlFineTune, Dock.Bottom);
+            left.Children.Add(_pnlFineTune);
+
+            _pnlFineTune.Children.Add(new TextBlock
+            {
+                Text = "像素微调（选中已配对的点）",
+                Foreground = Brushes.Silver,
+                FontSize = 12,
+                Margin = new Thickness(0, 0, 0, 4)
+            });
+
+            var xyRow = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+            xyRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
+            xyRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            xyRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
+            xyRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            xyRow.RowDefinitions.Add(new RowDefinition());
+            xyRow.RowDefinitions.Add(new RowDefinition());
+
+            var lblX = new TextBlock { Text = "X", Foreground = Brushes.Gainsboro, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetRow(lblX, 0);
+            Grid.SetColumn(lblX, 0);
+            _txtPixelX = new TextBox { Height = 24, Margin = new Thickness(4, 0, 8, 4) };
+            Grid.SetRow(_txtPixelX, 0);
+            Grid.SetColumn(_txtPixelX, 1);
+            var lblY = new TextBlock { Text = "Y", Foreground = Brushes.Gainsboro, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetRow(lblY, 0);
+            Grid.SetColumn(lblY, 2);
+            _txtPixelY = new TextBox { Height = 24, Margin = new Thickness(4, 0, 0, 4) };
+            Grid.SetRow(_txtPixelY, 0);
+            Grid.SetColumn(_txtPixelY, 3);
+            xyRow.Children.Add(lblX);
+            xyRow.Children.Add(_txtPixelX);
+            xyRow.Children.Add(lblY);
+            xyRow.Children.Add(_txtPixelY);
+            _pnlFineTune.Children.Add(xyRow);
+
+            void ApplyPixelFromTextBoxes()
+            {
+                if (_activeWorldIndex < 0 || _activeWorldIndex >= _n
+                    || _pixelForWorld[_activeWorldIndex] == null)
+                    return;
+                if (!double.TryParse(_txtPixelX.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double x)
+                    || !double.TryParse(_txtPixelY.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double y))
+                    return;
+                SetWorldPixel(_activeWorldIndex, x, y, refreshUi: true);
+            }
+
+            _txtPixelX.LostFocus += (_, _) => ApplyPixelFromTextBoxes();
+            _txtPixelY.LostFocus += (_, _) => ApplyPixelFromTextBoxes();
+            _txtPixelX.KeyDown += (_, e) =>
+            {
+                if (e.Key == Key.Enter) { ApplyPixelFromTextBoxes(); e.Handled = true; }
+            };
+            _txtPixelY.KeyDown += (_, e) =>
+            {
+                if (e.Key == Key.Enter) { ApplyPixelFromTextBoxes(); e.Handled = true; }
+            };
+
+            var nudgeRow1 = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 4) };
+            var btnUp = new Button { Content = "↑", Width = 36, Height = 28, Margin = new Thickness(2) };
+            btnUp.Click += (_, _) => NudgeActivePixel(0, -NudgeStepPx);
+            nudgeRow1.Children.Add(btnUp);
+            _pnlFineTune.Children.Add(nudgeRow1);
+
+            var nudgeRow2 = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 6) };
+            var btnLeft = new Button { Content = "←", Width = 36, Height = 28, Margin = new Thickness(2) };
+            var btnDown = new Button { Content = "↓", Width = 36, Height = 28, Margin = new Thickness(2) };
+            var btnRight = new Button { Content = "→", Width = 36, Height = 28, Margin = new Thickness(2) };
+            btnLeft.Click += (_, _) => NudgeActivePixel(-NudgeStepPx, 0);
+            btnDown.Click += (_, _) => NudgeActivePixel(0, NudgeStepPx);
+            btnRight.Click += (_, _) => NudgeActivePixel(NudgeStepPx, 0);
+            nudgeRow2.Children.Add(btnLeft);
+            nudgeRow2.Children.Add(btnDown);
+            nudgeRow2.Children.Add(btnRight);
+            _pnlFineTune.Children.Add(nudgeRow2);
+
+            _pnlFineTune.Children.Add(new TextBlock
+            {
+                Text = "方向键 ±1 px · Shift ±10 · Ctrl ±0.1\n可拖拽黄色当前点",
+                Foreground = Brushes.Gray,
+                FontSize = 11,
+                TextWrapping = TextWrapping.Wrap
+            });
+
             _worldList = new ListBox
             {
                 Margin = new Thickness(8, 0, 8, 8),
@@ -119,6 +213,7 @@ namespace CalibOperatorCLI_Example
                 if (_worldList.SelectedIndex >= 0)
                     _activeWorldIndex = _worldList.SelectedIndex;
                 UpdateHint();
+                RefreshFineTuneFields();
                 RefreshOverlay();
             };
             left.Children.Add(_worldList);
@@ -151,6 +246,7 @@ namespace CalibOperatorCLI_Example
             _viewHost.MouseMove += ViewHost_MouseMove;
             _viewHost.MouseLeftButtonUp += ViewHost_MouseLeftButtonUp;
             _viewHost.MouseWheel += ViewHost_MouseWheel;
+            _viewHost.KeyDown += ViewHost_KeyDown;
             _viewHost.PreviewMouseRightButtonDown += ViewHost_PreviewMouseRightButtonDown;
             _viewHost.PreviewMouseRightButtonUp += ViewHost_PreviewMouseRightButtonUp;
 
@@ -205,9 +301,9 @@ namespace CalibOperatorCLI_Example
         private string BuildHintText() =>
             _manualPixelPick
                 ? "左侧选中世界点，在图像上左键点击取该点的像素坐标。\n" +
-                  "浅蓝圆=检测参考点（若有）；绿=已手选；黄=当前行。滚轮缩放，右键拖动平移。"
+                  "已选点可拖拽或方向键微调。浅蓝圆=检测参考；绿=已选；黄=当前。"
                 : "左侧选中世界点，在图像上点击检测圆心附近。\n" +
-                  "绿=已配对，黄=当前行，灰蓝=未配对检测点。滚轮缩放，右键拖动平移。";
+                  "已配对点可拖拽或方向键微调。绿=已配对，黄=当前，灰蓝=未配对。";
 
         private void UpdateHint()
         {
@@ -343,7 +439,117 @@ namespace CalibOperatorCLI_Example
         private void RefreshAll()
         {
             RefreshWorldList();
+            RefreshFineTuneFields();
             RefreshOverlay();
+        }
+
+        private void RefreshFineTuneFields()
+        {
+            if (_activeWorldIndex < 0 || _activeWorldIndex >= _n
+                || _pixelForWorld[_activeWorldIndex] is not Point2D p)
+            {
+                _pnlFineTune.IsEnabled = false;
+                _txtPixelX.Text = "";
+                _txtPixelY.Text = "";
+                return;
+            }
+
+            _pnlFineTune.IsEnabled = true;
+            _txtPixelX.Text = p.X.ToString("F2", CultureInfo.InvariantCulture);
+            _txtPixelY.Text = p.Y.ToString("F2", CultureInfo.InvariantCulture);
+        }
+
+        private static Point2D ClampPixel(CalibImage image, double x, double y) =>
+            new Point2D(
+                Math.Max(0, Math.Min(image.Width - 1, x)),
+                Math.Max(0, Math.Min(image.Height - 1, y)));
+
+        private void SetWorldPixel(int worldIndex, double x, double y, bool refreshUi)
+        {
+            if (worldIndex < 0 || worldIndex >= _n)
+                return;
+
+            _pixelForWorld[worldIndex] = ClampPixel(_image, x, y);
+            if (refreshUi)
+                RefreshAll();
+        }
+
+        private void NudgeActivePixel(double dx, double dy)
+        {
+            if (_activeWorldIndex < 0 || _activeWorldIndex >= _n
+                || _pixelForWorld[_activeWorldIndex] is not Point2D p)
+                return;
+
+            SetWorldPixel(_activeWorldIndex, p.X + dx, p.Y + dy, refreshUi: true);
+            _viewHost.Focus();
+        }
+
+        private double ResolveNudgeStep(KeyEventArgs e)
+        {
+            if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+                return NudgeStepFinePx;
+            if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
+                return NudgeStepCoarsePx;
+            return NudgeStepPx;
+        }
+
+        private void ViewHost_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (_activeWorldIndex < 0 || _pixelForWorld[_activeWorldIndex] == null)
+                return;
+
+            double step = ResolveNudgeStep(e);
+            switch (e.Key)
+            {
+                case Key.Left:
+                    NudgeActivePixel(-step, 0);
+                    e.Handled = true;
+                    break;
+                case Key.Right:
+                    NudgeActivePixel(step, 0);
+                    e.Handled = true;
+                    break;
+                case Key.Up:
+                    NudgeActivePixel(0, -step);
+                    e.Handled = true;
+                    break;
+                case Key.Down:
+                    NudgeActivePixel(0, step);
+                    e.Handled = true;
+                    break;
+            }
+        }
+
+        private int HitTestAssignedPoint(Point imgPt, bool preferActive = true)
+        {
+            int best = -1;
+            double bestD2 = HitRadiusPx * HitRadiusPx;
+
+            if (preferActive && _activeWorldIndex >= 0 && _activeWorldIndex < _n
+                && _pixelForWorld[_activeWorldIndex] is Point2D ap)
+            {
+                double dx = imgPt.X - ap.X;
+                double dy = imgPt.Y - ap.Y;
+                double d2 = dx * dx + dy * dy;
+                if (d2 <= bestD2)
+                    return _activeWorldIndex;
+            }
+
+            for (int i = 0; i < _n; i++)
+            {
+                if (_pixelForWorld[i] is not Point2D p)
+                    continue;
+                double dx = imgPt.X - p.X;
+                double dy = imgPt.Y - p.Y;
+                double d2 = dx * dx + dy * dy;
+                if (d2 <= bestD2)
+                {
+                    bestD2 = d2;
+                    best = i;
+                }
+            }
+
+            return best;
         }
 
         private void ClearAssignments()
@@ -454,6 +660,20 @@ namespace CalibOperatorCLI_Example
         private void ViewHost_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             var imgPt = GetImagePointFromMouse(e);
+            int assignedHit = HitTestAssignedPoint(imgPt, preferActive: true);
+            if (assignedHit >= 0)
+            {
+                _worldList.SelectedIndex = assignedHit;
+                _activeWorldIndex = assignedHit;
+                _isDraggingPoint = true;
+                _dragWorldIndex = assignedHit;
+                _viewHost.CaptureMouse();
+                SetWorldPixel(_dragWorldIndex, imgPt.X, imgPt.Y, refreshUi: true);
+                _viewHost.Focus();
+                e.Handled = true;
+                return;
+            }
+
             if (_manualPixelPick)
             {
                 AssignPixelToActiveWorld(new Point2D(imgPt.X, imgPt.Y));
@@ -476,6 +696,13 @@ namespace CalibOperatorCLI_Example
 
         private void ViewHost_MouseMove(object sender, MouseEventArgs e)
         {
+            if (_isDraggingPoint && _dragWorldIndex >= 0)
+            {
+                var imgPt = GetImagePointFromMouse(e);
+                SetWorldPixel(_dragWorldIndex, imgPt.X, imgPt.Y, refreshUi: true);
+                return;
+            }
+
             if (!_isPanning) return;
             var current = e.GetPosition(_viewHost);
             _offsetX = _lastPanOffset.X + (current.X - _panStart.X);
@@ -485,6 +712,14 @@ namespace CalibOperatorCLI_Example
 
         private void ViewHost_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
+            if (_isDraggingPoint)
+            {
+                _isDraggingPoint = false;
+                _dragWorldIndex = -1;
+                _viewHost.ReleaseMouseCapture();
+                return;
+            }
+
             _viewHost.ReleaseMouseCapture();
         }
 

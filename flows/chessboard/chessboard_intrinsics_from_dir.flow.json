@@ -1,12 +1,25 @@
 {
   "Nodes": [
     {
-      "Id": "cba52002-1000-4000-8000-000000000001",
-      "TypeId": "chessboard_calibrate_intrinsics",
+      "Id": "cap-a001-4000-8000-000000000001",
+      "TypeId": "camera_calib_capture",
       "X": 60,
       "Y": 80,
       "Params": {
-        "imageDirectory": "../v2/chessboard",
+        "deviceIndex": "0",
+        "minFrames": "10",
+        "saveDirectory": "captured_chessboard",
+        "namePrefix": "Image_",
+        "fileExtension": ".bmp"
+      }
+    },
+    {
+      "Id": "cba52002-1000-4000-8000-000000000001",
+      "TypeId": "chessboard_calibrate_intrinsics",
+      "X": 380,
+      "Y": 80,
+      "Params": {
+        "imageDirectory": "",
         "extensions": ".bmp",
         "namePrefix": "Image_",
         "imagePaths": "",
@@ -18,14 +31,14 @@
     {
       "Id": "cba52002-1000-4000-8000-000000000002",
       "TypeId": "display_calibration",
-      "X": 420,
+      "X": 740,
       "Y": 80,
       "Params": {}
     },
     {
       "Id": "cba52002-1000-4000-8000-000000000003",
       "TypeId": "save_text",
-      "X": 780,
+      "X": 1100,
       "Y": 40,
       "Params": {
         "filePath": "chessboard_calibration_from_dir.json"
@@ -34,7 +47,7 @@
     {
       "Id": "6e4afabe-ca7b-4ae7-b55d-ff80ce91a4bc",
       "TypeId": "save_calibration_result",
-      "X": 780,
+      "X": 1100,
       "Y": 160,
       "Params": {
         "filePath": "calibration_result.json"
@@ -47,7 +60,7 @@
       "Y": 280,
       "Params": {
         "mode": "each",
-        "directory": "../v2/chessboard",
+        "directory": "",
         "extensions": ".bmp",
         "index": "0"
       }
@@ -80,7 +93,7 @@
       "Y": 460,
       "Params": {
         "mode": "single",
-        "directory": "../v2/chessboard",
+        "directory": "",
         "extensions": ".bmp",
         "index": "0"
       }
@@ -105,6 +118,24 @@
     }
   ],
   "Connections": [
+    {
+      "FromNodeId": "cap-a001-4000-8000-000000000001",
+      "FromPort": "ImagePaths",
+      "ToNodeId": "cba52002-1000-4000-8000-000000000001",
+      "ToPort": "ImagePaths"
+    },
+    {
+      "FromNodeId": "cap-a001-4000-8000-000000000001",
+      "FromPort": "ImageDirectory",
+      "ToNodeId": "qc-a001-4000-8000-000000000001",
+      "ToPort": "Directory"
+    },
+    {
+      "FromNodeId": "cap-a001-4000-8000-000000000001",
+      "FromPort": "ImageDirectory",
+      "ToNodeId": "qc-b001-4000-8000-000000000001",
+      "ToPort": "Directory"
+    },
     {
       "FromNodeId": "cba52002-1000-4000-8000-000000000001",
       "FromPort": "CalibrationJson",

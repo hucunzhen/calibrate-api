@@ -53,6 +53,9 @@ namespace CalibOperatorCLI_Example
             }
         }
 
+        /// <summary>供系统误差合成使用的轻量分析（不构建完整弹窗）。</summary>
+        public static QualityReport AnalyzeForSystem(JsonElement root) => Analyze(root);
+
         /// <summary>构建弹窗报告正文；非棋盘格 JSON 返回 false。</summary>
         public static bool TryBuildPopupReport(string calibrationJson, out string headline, out string body)
         {

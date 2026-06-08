@@ -142,6 +142,7 @@ namespace CalibOperatorCLI_Example
                 },
                 Ports =
                 {
+                    new PortDef { Name = "Directory", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#9CCC65", IsOptional = true },
                     new PortDef { Name = "Image", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Count", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#607D8B" },
                     new PortDef { Name = "Path", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#9CCC65" }
@@ -200,6 +201,27 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "After", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
                     new PortDef { Name = "Image", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true }
+                }
+            },
+            new OperatorDef
+            {
+                TypeId = "camera_calib_capture",
+                DisplayName = "摄像头标定采集",
+                Description = "打开摄像头预览，点「确定」保存当前帧，采集足够张数后点「完成」。输出 ImagePaths / ImageDirectory 供棋盘格内参标定与质检使用。",
+                Category = "输入",
+                Params =
+                {
+                    new OperatorParam { Name = "deviceIndex", DisplayName = "设备索引", DefaultValue = "0", Description = "相机枚举索引，从0开始" },
+                    new OperatorParam { Name = "minFrames", DisplayName = "最少张数", DefaultValue = "10", Description = "点「完成」前至少采集的张数（标定至少需3张成功检出棋盘的视图）" },
+                    new OperatorParam { Name = "saveDirectory", DisplayName = "保存目录", DefaultValue = "captured_chessboard", Description = "相对当前 .flow.json 目录；采集图像保存为 Image_001.bmp 等" },
+                    new OperatorParam { Name = "namePrefix", DisplayName = "文件名前缀", DefaultValue = "Image_", Description = "保存文件名前缀，如 Image_001.bmp" },
+                    new OperatorParam { Name = "fileExtension", DisplayName = "扩展名", DefaultValue = ".bmp", Description = "保存格式扩展名，如 .bmp 或 .png" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "ImagePaths", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#9CCC65" },
+                    new PortDef { Name = "ImageDirectory", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#9CCC65" },
+                    new PortDef { Name = "Count", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#607D8B" }
                 }
             },
             new OperatorDef
@@ -1442,7 +1464,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "calibrate",
                 DisplayName = "九点标定",
-                Description = "标定像素→世界坐标。完成后弹出质检报告（平均/最大重投影误差 mm、坏点清单）。世界点可填参数 worldPoints，或由 worldPointsFile 读取「点列转文本」保存的 txt（每行 x,y）。默认 pixelPickMode=手选：仅需 Image，在弹窗中按世界点列表左键手选像素。也可连接 ImagePts 作参考或匹配检测点。",
+                Description = "九点标定（像素→世界）。弹窗内可手选/确认对应，并对已选点拖拽、方向键或 X/Y 输入微调。连接 CalibrationJson 或填写 calibrationJsonFile 可输出系统整体误差。",
                 Category = "标定",
                 Params =
                 {
@@ -1475,13 +1497,22 @@ namespace CalibOperatorCLI_Example
                         DefaultValue = "true",
                         Description = "true=弹窗确认；false=仅 auto 且 ImagePts 数量一致时按顺序标定（手选模式仍会弹窗）",
                         Options = new List<string> { "true", "false" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "calibrationJsonFile",
+                        DisplayName = "棋盘标定 JSON",
+                        DefaultValue = "",
+                        Description = "可选；填写后九点质检弹窗与 SystemErrorJson 输出将包含「棋盘格+九点」系统整体误差。相对路径相对当前 .flow.json"
                     }
                 },
                 Ports =
                 {
                     new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "ImagePts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3", IsOptional = true },
-                    new PortDef { Name = "Transform", Direction = PortDirection.Output, DataType = typeof(AffineTransform), ColorHex = "#E91E63" }
+                    new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "Transform", Direction = PortDirection.Output, DataType = typeof(AffineTransform), ColorHex = "#E91E63" },
+                    new PortDef { Name = "SystemErrorJson", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" }
                 }
             },
             new OperatorDef
@@ -1761,7 +1792,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "save_calibration_result",
                 DisplayName = "保存标定结果",
-                Description = "将 CalibrationJson（棋盘多视图）、Affine / Homography / Poly2D、Intrinsics 以 JSON 落盘（可同时写入多项）。至少连接一路输入。相对路径相对当前 .flow.json 目录。",
+                Description = "将 CalibrationJson（棋盘多视图）、Affine / Homography / Poly2D、Intrinsics、SystemErrorJson 以 JSON 落盘（可同时写入多项）。至少连接一路输入。",
                 Category = "标定",
                 Params =
                 {
@@ -1773,7 +1804,8 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "Transform", Direction = PortDirection.Input, DataType = typeof(AffineTransform), ColorHex = "#E91E63", IsOptional = true },
                     new PortDef { Name = "H", Direction = PortDirection.Input, DataType = typeof(HomographyTransform), ColorHex = "#E91E63", IsOptional = true },
                     new PortDef { Name = "Poly", Direction = PortDirection.Input, DataType = typeof(Poly2DTransform), ColorHex = "#E91E63", IsOptional = true },
-                    new PortDef { Name = "Intrinsics", Direction = PortDirection.Input, DataType = typeof(CameraIntrinsics), ColorHex = "#E91E63", IsOptional = true }
+                    new PortDef { Name = "Intrinsics", Direction = PortDirection.Input, DataType = typeof(CameraIntrinsics), ColorHex = "#E91E63", IsOptional = true },
+                    new PortDef { Name = "SystemErrorJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true }
                 }
             },
             new OperatorDef
@@ -2465,6 +2497,7 @@ namespace CalibOperatorCLI_Example
                 },
                 Ports =
                 {
+                    new PortDef { Name = "ImagePaths", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#9CCC65", IsOptional = true },
                     new PortDef { Name = "Intrinsics", Direction = PortDirection.Output, DataType = typeof(CameraIntrinsics), ColorHex = "#E91E63" },
                     new PortDef { Name = "IntrinsicsJson", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" },
                     new PortDef { Name = "CalibrationJson", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" }

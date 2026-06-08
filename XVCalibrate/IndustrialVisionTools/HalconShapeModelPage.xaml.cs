@@ -2273,7 +2273,25 @@ namespace CalibOperatorCLI_Example
             bool show = _roiArcEditEntries.Count > 0;
             PnlRoiArcEdit.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
             if (!show || CmbRoiArcSegment == null)
+            {
+                if (CmbRoiArcSegment != null)
+                {
+                    _suppressRoiArcEditUi = true;
+                    try
+                    {
+                        CmbRoiArcSegment.ItemsSource = null;
+                        CmbRoiArcSegment.SelectedIndex = -1;
+                    }
+                    finally
+                    {
+                        _suppressRoiArcEditUi = false;
+                    }
+                }
+
+                if (TxtRoiArcRadius != null)
+                    TxtRoiArcRadius.Text = "";
                 return;
+            }
 
             _suppressRoiArcEditUi = true;
             try
@@ -2292,11 +2310,16 @@ namespace CalibOperatorCLI_Example
 
         private void CollectArcEditEntries(RoiContourPath path, string prefix)
         {
-            int n = path.IsClosed ? path.VertexCount : 0;
-            for (int i = 0; i < path.EdgeKinds.Count && i < n; i++)
+            if (!TryGetMaxArcEdgeIndex(path, out int maxEdge))
+                return;
+
+            for (int i = 0; i <= maxEdge && i < path.EdgeKinds.Count; i++)
             {
                 if (path.EdgeKinds[i] != RoiEdgeKind.Arc)
                     continue;
+                if (!TryGetArcEdgeGeometry(path, i, out _, out _, out _))
+                    continue;
+
                 string label = prefix + $"弧段 #{i + 1}";
 #if HALCON_ENABLED
                 label = prefix + HalconGeometryPathEditor.FormatSegmentLabel(path, i);
@@ -2305,28 +2328,85 @@ namespace CalibOperatorCLI_Example
             }
         }
 
+        /// <summary>闭合：边 0..n-1；开放：边 0..n-2。</summary>
+        private static bool TryGetMaxArcEdgeIndex(RoiContourPath path, out int maxEdge)
+        {
+            maxEdge = -1;
+            int n = path.VertexCount;
+            if (n < 2)
+                return false;
+            if (path.IsClosed)
+            {
+                if (n < 3)
+                    return false;
+                maxEdge = n - 1;
+                return true;
+            }
+
+            maxEdge = n - 2;
+            return maxEdge >= 0;
+        }
+
+        private static bool TryGetArcEdgeGeometry(
+            RoiContourPath path,
+            int edgeIndex,
+            out Point start,
+            out Point end,
+            out Point? via)
+        {
+            start = end = default;
+            via = null;
+            if (edgeIndex < 0 || edgeIndex >= path.EdgeKinds.Count
+                || path.EdgeKinds[edgeIndex] != RoiEdgeKind.Arc)
+                return false;
+
+            int n = path.VertexCount;
+            if (path.IsClosed)
+            {
+                if (n < 3 || edgeIndex >= n)
+                    return false;
+                start = path.Vertices[edgeIndex];
+                end = path.Vertices[(edgeIndex + 1) % n];
+            }
+            else
+            {
+                if (edgeIndex + 1 >= n)
+                    return false;
+                start = path.Vertices[edgeIndex];
+                end = path.Vertices[edgeIndex + 1];
+            }
+
+            if (edgeIndex >= path.ArcVia.Count || path.ArcVia[edgeIndex] is not Point v)
+                return false;
+
+            via = v;
+            return true;
+        }
+
         private RoiArcEditEntry? GetSelectedRoiArcEditEntry()
         {
             if (CmbRoiArcSegment?.SelectedIndex is not int idx || idx < 0 || idx >= _roiArcEditEntries.Count)
                 return null;
-            return _roiArcEditEntries[idx];
+
+            var entry = _roiArcEditEntries[idx];
+            return TryGetArcEdgeGeometry(entry.Path, entry.EdgeIndex, out _, out _, out _)
+                ? entry
+                : null;
         }
 
         private void LoadSelectedRoiArcRadiusToUi()
         {
             if (TxtRoiArcRadius == null)
                 return;
-            if (GetSelectedRoiArcEditEntry() is not RoiArcEditEntry e)
+            if (GetSelectedRoiArcEditEntry() is not RoiArcEditEntry e
+                || !TryGetArcEdgeGeometry(e.Path, e.EdgeIndex, out Point start, out Point end, out Point? via)
+                || via is not Point viaPt)
             {
                 TxtRoiArcRadius.Text = "";
                 return;
             }
 
-            var path = e.Path;
-            int i = e.EdgeIndex;
-            Point start = path.Vertices[i];
-            Point end = path.Vertices[(i + 1) % path.VertexCount];
-            if (path.ArcVia[i] is Point via && RoiContourPath.TryGetArcGeometricRadius(start, via, end, out double r))
+            if (RoiContourPath.TryGetArcGeometricRadius(start, viaPt, end, out double r))
                 TxtRoiArcRadius.Text = r.ToString("F1", CultureInfo.InvariantCulture);
             else
                 TxtRoiArcRadius.Text = "";
@@ -2336,6 +2416,15 @@ namespace CalibOperatorCLI_Example
         {
             if (_suppressRoiArcEditUi || !IsLoaded)
                 return;
+
+            if (CmbRoiArcSegment?.SelectedIndex is int idx
+                && (idx < 0 || idx >= _roiArcEditEntries.Count))
+            {
+                if (TxtRoiArcRadius != null)
+                    TxtRoiArcRadius.Text = "";
+                return;
+            }
+
             LoadSelectedRoiArcRadiusToUi();
         }
 
