@@ -422,6 +422,15 @@ namespace CalibOperatorCLI_Example
             return false;
         }
 
+        /// <summary>模态对话框须在 UI 线程；组合子流程等可能在后台线程调用 ExecuteNode。</summary>
+        private void RunOnUiThread(Action action)
+        {
+            if (Dispatcher.CheckAccess())
+                action();
+            else
+                Dispatcher.Invoke(action);
+        }
+
         /// <summary>解析 channels 参数，格式 ch:value;ch:value，如 1:200;2:150。action=multi 时使用。</summary>
         private static int ApplyLightChannelSpec(ControllerSdkSession light, string spec)
         {
@@ -964,8 +973,10 @@ namespace CalibOperatorCLI_Example
             {
                 if (ExecuteNodeRequiresUiDispatcher(node))
                 {
-                    await System.Threading.Tasks.Task.Yield();
-                    ExecuteNode(node, explicitInputs);
+                    if (Dispatcher.CheckAccess())
+                        ExecuteNode(node, explicitInputs);
+                    else
+                        await Dispatcher.InvokeAsync(() => ExecuteNode(node, explicitInputs));
                     return;
                 }
 
@@ -6630,7 +6641,10 @@ namespace CalibOperatorCLI_Example
         {
             try
             {
-                ExecuteNode(inner, innerInputs, compositeInputs, compositeInnerFlowBaseDir);
+                if (ExecuteNodeRequiresUiDispatcher(inner))
+                    RunOnUiThread(() => ExecuteNode(inner, innerInputs, compositeInputs, compositeInnerFlowBaseDir));
+                else
+                    ExecuteNode(inner, innerInputs, compositeInputs, compositeInnerFlowBaseDir);
             }
             catch (Exception ex)
             {
@@ -7185,11 +7199,19 @@ namespace CalibOperatorCLI_Example
 
                 bool dialogManual = manualPick || imagePts == null || imagePts.Length == 0;
                 var owner = Window.GetWindow(this);
-                var dlg = new NinePointCorrespondenceDialog(
-                    calibImage, imagePts, worldPts, owner, dialogManual);
-                if (dlg.ShowDialog() != true || dlg.ResultImagePoints == null)
+                Point2D[]? confirmed = null;
+                bool? accepted = null;
+                RunOnUiThread(() =>
+                {
+                    var dlg = new NinePointCorrespondenceDialog(
+                        calibImage, imagePts, worldPts, owner, dialogManual);
+                    accepted = dlg.ShowDialog() == true;
+                    if (accepted == true)
+                        confirmed = dlg.ResultImagePoints;
+                });
+                if (accepted != true || confirmed == null)
                     throw new OperationCanceledException($"{contextLabel}已取消：未确认点对应关系");
-                return dlg.ResultImagePoints;
+                return confirmed;
             }
 
             if (imagePts == null)
@@ -11249,7 +11271,7 @@ namespace CalibOperatorCLI_Example
                                 : $"标定 OK（{alignedImagePts.Length} 对点，图像确认 · {brief}）")
                             : $"标定 OK（{alignedImagePts.Length} 对点 · {brief}）";
 
-                        Dispatcher.Invoke(() =>
+                        void ShowNinePointQcPopup()
                         {
                             if (NinePointCalibrationQuality.TryBuildPopupReport(ninePtReport, out string headline, out string body))
                             {
@@ -11261,7 +11283,20 @@ namespace CalibOperatorCLI_Example
                             }
 
                             StatusText.Text = brief;
-                        });
+                        }
+
+                        if (Dispatcher.CheckAccess())
+                        {
+                            StatusText.Text = brief;
+                            // 延后弹窗，避免验证预览与模态窗嵌套导致 UI 消息泵卡死
+                            Dispatcher.BeginInvoke(
+                                ShowNinePointQcPopup,
+                                System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                        }
+                        else
+                        {
+                            Dispatcher.Invoke(ShowNinePointQcPopup);
+                        }
                         AppendLog($"[九点标定质检] {brief}（详见弹窗报告）");
                         break;
                     }
@@ -15416,8 +15451,14 @@ namespace CalibOperatorCLI_Example
                             using var linePen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(200, 0, 200, 255), 1.8f);
                             linePen.StartCap = linePen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
                             linePen.LineJoin = System.Drawing.Drawing2D.LineJoin.Round;
-                            bool useBarSplit = ShouldUseBarSplitForPointOverlay(overlayBarIds, overlayPoints.Length, overlayPointLineJoinMode);
-                            if (useBarSplit)
+                            bool useGrid = CalibrationPointGrid.IsGridLineJoinMode(overlayPointLineJoinMode);
+                            bool useBarSplit = !useGrid && ShouldUseBarSplitForPointOverlay(overlayBarIds, overlayPoints.Length, overlayPointLineJoinMode);
+                            if (useGrid)
+                            {
+                                var (gridRows, gridCols) = CalibrationPointGrid.InferLayout(overlayPoints.Length);
+                                CalibrationPointGrid.DrawOnGraphics(linePen, g, overlayPoints, gridRows, gridCols);
+                            }
+                            else if (useBarSplit)
                             {
                                 int segStart = 0;
                                 for (int i = 1; i <= overlayPoints.Length; i++)

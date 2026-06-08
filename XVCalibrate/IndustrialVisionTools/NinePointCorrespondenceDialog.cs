@@ -555,12 +555,71 @@ namespace CalibOperatorCLI_Example
                 }
             }
 
+            if (!ValidateCorrespondenceBeforeConfirm(out string? blockReason))
+            {
+                MessageBox.Show(this, blockReason, "标定", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (!ConfirmIfOrderLikelyWrong())
+                return;
+
             var result = new Point2D[_n];
             for (int i = 0; i < _n; i++)
                 result[i] = _pixelForWorld[i]!.Value;
             ResultImagePoints = result;
             DialogResult = true;
             Close();
+        }
+
+        private bool ValidateCorrespondenceBeforeConfirm(out string? reason)
+        {
+            reason = null;
+            var seen = new HashSet<(int X, int Y)>();
+            for (int i = 0; i < _n; i++)
+            {
+                var p = _pixelForWorld[i]!.Value;
+                var key = ((int)Math.Round(p.X), (int)Math.Round(p.Y));
+                if (!seen.Add(key))
+                {
+                    reason = $"多个世界点指向同一像素位置 ({p.X:F0}, {p.Y:F0})，请重新分配。";
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>与 YX 自动排序对比，顺序明显不一致时二次确认，避免误标后界面长时间无响应。</summary>
+        private bool ConfirmIfOrderLikelyWrong()
+        {
+            if (_referenceImagePts.Length != _n)
+                return true;
+
+            int[] worldOrder = SortIndicesByYx(_worldPts);
+            int[] imageOrder = SortIndicesByYx(_referenceImagePts);
+            int mismatches = 0;
+            for (int k = 0; k < _n; k++)
+            {
+                int wi = worldOrder[k];
+                var expected = _referenceImagePts[imageOrder[k]];
+                var actual = _pixelForWorld[wi]!.Value;
+                if (Math.Abs(expected.X - actual.X) > 1.5 || Math.Abs(expected.Y - actual.Y) > 1.5)
+                    mismatches++;
+            }
+
+            if (mismatches < 2)
+                return true;
+
+            var answer = MessageBox.Show(this,
+                $"检测到 {mismatches}/{_n} 个点的对应顺序与「YX 自动」不一致。\n" +
+                "若顺序选错，标定误差会很大且后续弹窗可能阻塞界面。\n\n" +
+                "建议点「否」后使用「YX 自动」或逐点重新配对。\n\n仍要确定标定吗？",
+                "顺序可能错误",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+            return answer == MessageBoxResult.Yes;
         }
 
         private static BitmapSource CalibImageToBitmapSource(CalibImage img)
