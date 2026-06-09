@@ -126,6 +126,21 @@
         "enable": "true",
         "disable": "false"
       }
+    },
+    {
+      "Id": "fbd8f266-c05c-4e77-aaac-77cd20b7bbc4",
+      "TypeId": "camera_calib_capture",
+      "X": -22,
+      "Y": 103,
+      "Params": {
+        "deviceIndex": "0",
+        "minFrames": "10",
+        "saveDirectory": "captured_chessboard",
+        "namePrefix": "Image_",
+        "fileExtension": ".bmp",
+        "enable": "true",
+        "disable": "false"
+      }
     }
   ],
   "Connections": [
@@ -194,6 +209,24 @@
       "FromPort": "Out",
       "ToNodeId": "60276593-39a1-4b1b-bc80-76c85308b295",
       "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "fbd8f266-c05c-4e77-aaac-77cd20b7bbc4",
+      "FromPort": "ImagePaths",
+      "ToNodeId": "cba52002-1000-4000-8000-000000000001",
+      "ToPort": "ImagePaths"
+    },
+    {
+      "FromNodeId": "fbd8f266-c05c-4e77-aaac-77cd20b7bbc4",
+      "FromPort": "ImageDirectory",
+      "ToNodeId": "524fb92a-5f32-4248-b461-6eea48c0b5e8",
+      "ToPort": "Directory"
+    },
+    {
+      "FromNodeId": "fbd8f266-c05c-4e77-aaac-77cd20b7bbc4",
+      "FromPort": "ImageDirectory",
+      "ToNodeId": "f2b85c56-075d-4cda-bb34-a83c1a455222",
+      "ToPort": "Directory"
     }
   ],
   "Meta": {

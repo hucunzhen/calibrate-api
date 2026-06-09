@@ -4,10 +4,10 @@
       "Id": "b2000001-0001-4001-8001-000000000010",
       "TypeId": "halcon_coarse_shape_match",
       "X": 282.8800000000001,
-      "Y": 28.80000000000001,
+      "Y": 26.80000000000001,
       "Params": {
-        "angleStart": "-3",
-        "angleExtent": "6",
+        "angleStart": "-1",
+        "angleExtent": "2",
         "minScore": "0.2",
         "numMatches": "0",
         "maxOverlap": "0.5",
@@ -588,7 +588,7 @@
     }
   ],
   "Meta": {
-    "standaloneDebugImagePath": "..\\..\\data\\Image_20260602183730305.bmp",
+    "standaloneDebugImagePath": "roi\\preview.png",
     "latticeGridRows": "8",
     "latticeGridCols": "2",
     "mode": "pipeline-A",

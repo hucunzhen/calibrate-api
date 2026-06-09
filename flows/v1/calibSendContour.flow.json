@@ -59,7 +59,7 @@
       "Params": {
         "signalRegister": "",
         "bit": "0",
-        "timeoutMs": "60000",
+        "timeoutMs": "6000000",
         "pollIntervalMs": "20",
         "clearAfter": "true",
         "enable": "true",
@@ -170,8 +170,8 @@
       "Y": 354.96705945775983,
       "Params": {
         "pattern": "\u4E5D\u5BAB\u683C (3\u00D73)",
-        "centerX": "475.416",
-        "centerY": "72.576",
+        "centerX": "478.166",
+        "centerY": "87.377",
         "centerZ": "451.5",
         "stepXmm": "38",
         "stepYmm": "24",
