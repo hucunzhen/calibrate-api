@@ -28,6 +28,25 @@ namespace CalibOperatorCLI_Example
 
         public static string? TryFindFlowsRootDirectory()
         {
+            string? configured = TryGetConfiguredFlowsRootDirectory();
+            if (configured != null)
+                return configured;
+
+            return TryAutoDiscoverFlowsRootDirectory();
+        }
+
+        public static string? TryGetConfiguredFlowsRootDirectory()
+        {
+            var settings = FlowRecipeUiSettings.Load();
+            if (string.IsNullOrWhiteSpace(settings.FlowsRootDirectory))
+                return null;
+
+            string full = Path.GetFullPath(settings.FlowsRootDirectory.Trim());
+            return Directory.Exists(full) ? full : null;
+        }
+
+        public static string? TryAutoDiscoverFlowsRootDirectory()
+        {
             string? repo = FlowCalibrationSmokeTest.FindRepoRoot();
             if (repo != null)
             {
@@ -48,6 +67,30 @@ namespace CalibOperatorCLI_Example
             }
 
             return null;
+        }
+
+        public static bool TrySetFlowsRootDirectory(string? directory, out string error)
+        {
+            error = "";
+            var settings = FlowRecipeUiSettings.Load();
+
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                settings.FlowsRootDirectory = "";
+                settings.Save();
+                return true;
+            }
+
+            string full = Path.GetFullPath(directory.Trim());
+            if (!Directory.Exists(full))
+            {
+                error = "目录不存在。";
+                return false;
+            }
+
+            settings.FlowsRootDirectory = full;
+            settings.Save();
+            return true;
         }
 
         public static IReadOnlyList<FlowRecipeInfo> ListRecipes()
@@ -282,7 +325,7 @@ namespace CalibOperatorCLI_Example
 
             string? flowsRoot = TryFindFlowsRootDirectory();
             if (flowsRoot == null)
-                return FlowRecipeOperationResult.Fail("未找到 flows/ 目录。");
+                return FlowRecipeOperationResult.Fail("未找到配方根目录，请在配方栏点击「目录…」选择。");
 
             string destDir = Path.GetFullPath(Path.Combine(flowsRoot, target));
             if (Directory.Exists(destDir) || File.Exists(destDir))
@@ -338,7 +381,7 @@ namespace CalibOperatorCLI_Example
 
             string? flowsRoot = TryFindFlowsRootDirectory();
             if (flowsRoot == null)
-                return FlowRecipeOperationResult.Fail("未找到 flows/ 目录。");
+                return FlowRecipeOperationResult.Fail("未找到配方根目录，请在配方栏点击「目录…」选择。");
 
             string newDir = Path.GetFullPath(Path.Combine(flowsRoot, newName));
             if (Directory.Exists(newDir) || File.Exists(newDir))

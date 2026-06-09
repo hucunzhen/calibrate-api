@@ -139,9 +139,7 @@ namespace CalibOperatorCLI_Example
 
                 if (recipes.Count == 0)
                 {
-                    TxtRecipeHint.Text = FlowRecipeCatalog.TryFindFlowsRootDirectory() is { } root
-                        ? $"未在 {root} 下发现配方目录"
-                        : "未找到 flows/ 目录";
+                    UpdateFlowsRootHint(null);
                     CmbRecipe.IsEnabled = false;
                     BtnOpenRecipeMain.IsEnabled = false;
                     BtnOpenNinePointCalib.IsEnabled = false;
@@ -174,12 +172,57 @@ namespace CalibOperatorCLI_Example
             }
         }
 
-        private void UpdateRecipePathHint(string recipeName)
+        private void UpdateRecipePathHint(string? recipeName)
         {
-            string? dir = FlowRecipeCatalog.TryGetRecipeDirectory(recipeName);
-            TxtRecipeHint.Text = dir == null
-                ? ""
-                : dir;
+            UpdateFlowsRootHint(recipeName);
+        }
+
+        private void UpdateFlowsRootHint(string? recipeName)
+        {
+            string? root = FlowRecipeCatalog.TryFindFlowsRootDirectory();
+            if (root == null)
+            {
+                TxtRecipeHint.Text = "未设置配方根目录，请点击「目录…」选择";
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(recipeName))
+            {
+                TxtRecipeHint.Text = $"根目录: {root}（未发现含 main.flow.json 的子文件夹）";
+                return;
+            }
+
+            string? recipeDir = FlowRecipeCatalog.TryGetRecipeDirectory(recipeName);
+            TxtRecipeHint.Text = recipeDir == null
+                ? $"根目录: {root}"
+                : $"{root}  →  {recipeDir}";
+        }
+
+        private void BtnSelectFlowsRoot_Click(object sender, RoutedEventArgs e)
+        {
+            using var dlg = new System.Windows.Forms.FolderBrowserDialog
+            {
+                Description = "选择配方根目录（其下每个子文件夹为一个配方，如 v1、v2）",
+                UseDescriptionForTitle = true,
+                ShowNewFolderButton = true
+            };
+
+            string? current = FlowRecipeCatalog.TryFindFlowsRootDirectory()
+                ?? FlowRecipeCatalog.TryAutoDiscoverFlowsRootDirectory();
+            if (!string.IsNullOrWhiteSpace(current) && Directory.Exists(current))
+                dlg.SelectedPath = current;
+
+            if (dlg.ShowDialog() != System.Windows.Forms.DialogResult.OK
+                || string.IsNullOrWhiteSpace(dlg.SelectedPath))
+                return;
+
+            if (!FlowRecipeCatalog.TrySetFlowsRootDirectory(dlg.SelectedPath, out string error))
+            {
+                MessageBox.Show(error, "配方根目录", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            RefreshRecipeCombo(selectFromSettings: true);
         }
 
         private void PersistSelectedRecipe(string recipeName)

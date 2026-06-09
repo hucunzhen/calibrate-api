@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using CalibOperatorPInvoke;
 
 namespace CalibOperatorCLI_Example
@@ -13,42 +14,60 @@ namespace CalibOperatorCLI_Example
             node.Outputs["Image"] = image;
         }
 
-        /// <summary>从上游节点输出中取值；若首选端口为空则尝试 Out/Image/In。</summary>
-        private static object? GetUpstreamOutputValue(FlowNode fromNode, string preferredPortName)
+        /// <summary>严格按连线的上游输出端口名取值，不做 Out/Image/In 互换（避免 save 到错图）。</summary>
+        private static object? GetStrictUpstreamOutputValue(FlowNode fromNode, string fromPortName)
         {
-            if (fromNode.Outputs.TryGetValue(preferredPortName, out var direct) && direct != null)
+            if (fromNode.Outputs.TryGetValue(fromPortName, out var direct))
                 return direct;
-
-            foreach (string alt in new[] { "Out", "Image", "In", "Img" })
-            {
-                if (string.Equals(alt, preferredPortName, StringComparison.Ordinal))
-                    continue;
-                if (fromNode.Outputs.TryGetValue(alt, out var o) && o is CalibImage)
-                    return o;
-            }
-
-            return fromNode.Outputs.GetValueOrDefault(preferredPortName);
+            return null;
         }
 
-        /// <summary>按常见端口名解析 CalibImage 输入（Image / In / Out / Img）。</summary>
+        /// <summary>
+        /// 仅在算子自身输入字典内按 In/Image 别名解析（如 image_rotate 的 In 与 image_flip）。
+        /// 不扫描 Out/Img，也不回退到其它上游端口。
+        /// </summary>
         private static CalibImage? TryResolveCalibImageInput(IReadOnlyDictionary<string, object?>? inputs)
         {
             if (inputs == null || inputs.Count == 0)
                 return null;
 
-            foreach (string key in new[] { "Image", "In", "Out", "Img" })
+            foreach (string key in new[] { "Image", "In" })
             {
                 if (inputs.TryGetValue(key, out var obj) && obj is CalibImage img)
                     return img;
             }
 
-            foreach (var kv in inputs)
-            {
-                if (kv.Value is CalibImage img)
-                    return img;
-            }
-
             return null;
+        }
+
+        /// <summary>save_image：只接受 Image（或旧版 In）端口的连线值。</summary>
+        private CalibImage? ResolveSaveImageInput(FlowNode node, IReadOnlyDictionary<string, object?> inputs)
+        {
+            if (inputs.TryGetValue("Image", out var imgObj) && imgObj is CalibImage img)
+                return img;
+            if (inputs.TryGetValue("In", out imgObj) && imgObj is CalibImage imgIn)
+                return imgIn;
+
+            var wired = GetInputData(node, "Image") as CalibImage;
+            if (wired != null)
+                return wired;
+            return GetInputData(node, "In") as CalibImage;
+        }
+
+        private string? DescribeWiredInputSource(FlowNode node, string portName)
+        {
+            var inPort = node.PortVisuals.FirstOrDefault(pv =>
+                pv.Definition.Direction == PortDirection.Input &&
+                string.Equals(pv.Definition.Name, portName, StringComparison.Ordinal));
+            if (inPort == null)
+                return null;
+
+            var conn = _connections.FirstOrDefault(c => c.ToPort == inPort);
+            if (conn == null)
+                return null;
+
+            var from = conn.FromPort.Owner;
+            return $"{from.Def.DisplayName}.{conn.FromPort.Definition.Name}";
         }
     }
 }

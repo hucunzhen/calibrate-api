@@ -3114,7 +3114,7 @@ namespace CalibOperatorCLI_Example
             var conn = _connections.FirstOrDefault(c => c.ToPort == inPort);
             if (conn == null) return null;
 
-            return GetUpstreamOutputValue(conn.FromPort.Owner, conn.FromPort.Definition.Name);
+            return GetStrictUpstreamOutputValue(conn.FromPort.Owner, conn.FromPort.Definition.Name);
         }
 
         /// <summary>
@@ -3127,7 +3127,7 @@ namespace CalibOperatorCLI_Example
             {
                 var conn = _connections.FirstOrDefault(c => c.ToPort == pv);
                 if (conn != null)
-                    inputs[pv.Definition.Name] = GetUpstreamOutputValue(
+                    inputs[pv.Definition.Name] = GetStrictUpstreamOutputValue(
                         conn.FromPort.Owner, conn.FromPort.Definition.Name);
             }
             return inputs;
@@ -11263,13 +11263,13 @@ namespace CalibOperatorCLI_Example
                         bool perspective = ParseFlowBoolParam(node.Params, "enablePerspective");
                         if (!undistort && !perspective)
                         {
-                            node.Outputs["Out"] = srcImg;
+                            PublishCalibImageOutputs(node, srcImg);
                             node.ResultSummary = "未启用矫正（透传）";
                             break;
                         }
 
                         var corrected = ApplyOptionalCameraCorrection(node, inputs, srcImg, compositeInnerFlowBaseDir);
-                        node.Outputs["Out"] = corrected;
+                        PublishCalibImageOutputs(node, corrected);
                         node.ResultSummary = undistort && perspective
                             ? "undistort + perspective"
                             : undistort
@@ -11295,7 +11295,7 @@ namespace CalibOperatorCLI_Example
                         }
                         CalibAPI.EnsureNativeImageChannels(outImg);
 
-                        node.Outputs["Out"] = outImg;
+                        PublishCalibImageOutputs(node, outImg);
                         node.ResultSummary = $"undistort {srcImg.Width}x{srcImg.Height} alpha={alpha}";
                         break;
                     }
@@ -11318,7 +11318,7 @@ namespace CalibOperatorCLI_Example
 
                         var outImg = CalibAPI.WarpToChessboardPlane(srcImg, calJson, viewIdx, cols, rows, sqMm, pxPerMm, perspMode, assumeUnd, outScale);
                         CalibAPI.EnsureNativeImageChannels(outImg);
-                        node.Outputs["Out"] = outImg;
+                        PublishCalibImageOutputs(node, outImg);
                         node.ResultSummary = $"perspective warp view={viewIdx} {srcImg.Width}x{srcImg.Height} → {outImg.Width}x{outImg.Height}";
                         break;
                     }
@@ -11917,8 +11917,10 @@ namespace CalibOperatorCLI_Example
 
                     case "save_image":
                     {
-                        var inputImg = TryResolveCalibImageInput(inputs)
-                            ?? throw new InvalidOperationException("保存图像: 缺少输入图像");
+                        var inputImg = ResolveSaveImageInput(node, inputs);
+                        if (inputImg == null)
+                            throw new InvalidOperationException(
+                                "保存图像: 缺少输入图像（请将上游算子的 Out 或 Image 输出连到本节点 Image 端口）");
 
                         var pathParam = node.Params.GetValueOrDefault("filePath", "flow_output.bmp");
                         if (string.IsNullOrWhiteSpace(pathParam))
@@ -11933,7 +11935,11 @@ namespace CalibOperatorCLI_Example
                         if (!ok) throw new InvalidOperationException($"保存图像失败: {resolvedPath}");
 
                         node.Outputs["Out"] = toSave;
-                        node.ResultSummary = $"Saved: {System.IO.Path.GetFileName(resolvedPath)} ({toSave.Width}x{toSave.Height})";
+                        string wiredFrom = DescribeWiredInputSource(node, "Image")
+                            ?? DescribeWiredInputSource(node, "In")
+                            ?? "?";
+                        node.ResultSummary =
+                            $"Saved: {System.IO.Path.GetFileName(resolvedPath)} ({toSave.Width}x{toSave.Height}) ← {wiredFrom}";
                         break;
                     }
 
@@ -14438,7 +14444,7 @@ namespace CalibOperatorCLI_Example
                             keepInsideMask,
                             maxMatchCount);
 
-                        node.Outputs["Out"] = masked.MaskedImage;
+                        PublishCalibImageOutputs(node, masked.MaskedImage);
                         node.Outputs["Mask"] = masked.Mask;
                         string modeLabel = keepInsideMask ? "保留区域" : "去掉区域";
                         string countLabel = maxMatchCount > 0
