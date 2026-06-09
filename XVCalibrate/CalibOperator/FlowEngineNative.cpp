@@ -922,13 +922,7 @@ static Value InputOf(NativeFlowEngineImpl* e, const std::string& nodeId, const s
             if (nit == e->outputs.end()) continue;
             auto pit = nit->second.find(c.fromPort);
             if (pit != nit->second.end()) return pit->second;
-            static const char* altOut[] = {"Out", "Image", "In", nullptr};
-            for (int i = 0; altOut[i]; ++i) {
-                if (c.fromPort == altOut[i]) continue;
-                auto ait = nit->second.find(altOut[i]);
-                if (ait != nit->second.end() && ait->second.kind == Value::Kind::Image)
-                    return ait->second;
-            }
+            return Value{};
         }
     }
     return Value{};
@@ -2173,7 +2167,7 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         cv::Mat outMat = FlowCalibImageToMat(dstImg);
         if (dstImg.data) free(dstImg.data);
         if (outMat.empty()) { err = "intrinsics_undistort_image: empty output"; return false; }
-        out["Out"] = MakeImage(outMat);
+        SetCalibImageOutputs(out, outMat);
         return true;
     }
     if (n.type == "chessboard_perspective_warp_image") {
@@ -2244,7 +2238,7 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         cv::Mat outMat = FlowCalibImageToMat(dstImg);
         if (dstImg.data) free(dstImg.data);
         if (outMat.empty()) { err = "chessboard_perspective_warp_image: empty output"; return false; }
-        out["Out"] = MakeImage(outMat);
+        SetCalibImageOutputs(out, outMat);
         return true;
     }
     if (n.type == "polyline_simplify_dp") {
@@ -2484,7 +2478,9 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         return true;
     }
     if (n.type == "save_image") {
-        Value img = InputImagePort(e, n.id);
+        Value img = InputOf(e, n.id, "Image");
+        if (img.kind != Value::Kind::Image)
+            img = InputOf(e, n.id, "In");
         if (img.kind != Value::Kind::Image) { err = "save_image: missing Image"; return false; }
         std::string path = NodeParam(n, "filePath", "flow_output.bmp");
         std::string wp = path;
