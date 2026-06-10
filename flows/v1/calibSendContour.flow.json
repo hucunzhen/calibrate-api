@@ -59,7 +59,7 @@
       "Params": {
         "signalRegister": "",
         "bit": "0",
-        "timeoutMs": "6000000",
+        "timeoutMs": "60000",
         "pollIntervalMs": "20",
         "clearAfter": "true",
         "enable": "true",
@@ -155,8 +155,8 @@
     {
       "Id": "8547de50-b896-4776-a2f8-9725d8952396",
       "TypeId": "save_image",
-      "X": 1389,
-      "Y": 502,
+      "X": 1380,
+      "Y": 482,
       "Params": {
         "filePath": "models\\calibration_nine_point.bmp",
         "enable": "true",

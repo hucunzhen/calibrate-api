@@ -3,7 +3,7 @@
     {
       "Id": "cba52002-1000-4000-8000-000000000001",
       "TypeId": "chessboard_calibrate_intrinsics",
-      "X": 193,
+      "X": 181,
       "Y": 96,
       "Params": {
         "imageDirectory": "captured_chessboard",
@@ -66,8 +66,8 @@
     {
       "Id": "eae3a03c-6966-4713-a792-6cf13c273dac",
       "TypeId": "chessboard_find_corners",
-      "X": 320,
-      "Y": 280,
+      "X": 346,
+      "Y": 284,
       "Params": {
         "cols": "11",
         "rows": "8",
@@ -92,8 +92,8 @@
     {
       "Id": "f2b85c56-075d-4cda-bb34-a83c1a455222",
       "TypeId": "load_image_dir",
-      "X": 60,
-      "Y": 460,
+      "X": 48,
+      "Y": 468,
       "Params": {
         "mode": "single",
         "directory": "captured_chessboard",
@@ -106,8 +106,8 @@
     {
       "Id": "5eecf6d4-3adb-4b50-a6db-d65d7797e666",
       "TypeId": "intrinsics_undistort_image",
-      "X": 320,
-      "Y": 460,
+      "X": 329,
+      "Y": 434,
       "Params": {
         "alpha": "-1",
         "calibrationJsonFile": "",
@@ -123,21 +123,6 @@
       "Params": {
         "dotRadius": "3",
         "pointLineJoin": "auto",
-        "enable": "true",
-        "disable": "false"
-      }
-    },
-    {
-      "Id": "fbd8f266-c05c-4e77-aaac-77cd20b7bbc4",
-      "TypeId": "camera_calib_capture",
-      "X": -22,
-      "Y": 103,
-      "Params": {
-        "deviceIndex": "0",
-        "minFrames": "10",
-        "saveDirectory": "captured_chessboard",
-        "namePrefix": "Image_",
-        "fileExtension": ".bmp",
         "enable": "true",
         "disable": "false"
       }
@@ -209,24 +194,6 @@
       "FromPort": "Out",
       "ToNodeId": "60276593-39a1-4b1b-bc80-76c85308b295",
       "ToPort": "Image"
-    },
-    {
-      "FromNodeId": "fbd8f266-c05c-4e77-aaac-77cd20b7bbc4",
-      "FromPort": "ImagePaths",
-      "ToNodeId": "cba52002-1000-4000-8000-000000000001",
-      "ToPort": "ImagePaths"
-    },
-    {
-      "FromNodeId": "fbd8f266-c05c-4e77-aaac-77cd20b7bbc4",
-      "FromPort": "ImageDirectory",
-      "ToNodeId": "524fb92a-5f32-4248-b461-6eea48c0b5e8",
-      "ToPort": "Directory"
-    },
-    {
-      "FromNodeId": "fbd8f266-c05c-4e77-aaac-77cd20b7bbc4",
-      "FromPort": "ImageDirectory",
-      "ToNodeId": "f2b85c56-075d-4cda-bb34-a83c1a455222",
-      "ToPort": "Directory"
     }
   ],
   "Meta": {

@@ -183,7 +183,7 @@
       "X": 0,
       "Y": 400,
       "Params": {
-        "count": "3",
+        "count": "0",
         "stepValues": "",
         "itemPorts": "",
         "intervalMs": "0",
@@ -207,10 +207,10 @@
       "Id": "e3a0a693-a75c-479f-9f75-3e4f90c5d8bb",
       "TypeId": "chessboard_perspective_warp_image",
       "X": 281,
-      "Y": 438,
+      "Y": 437,
       "Params": {
         "calibrationJsonFile": "models\\calibration_result.json",
-        "viewIndex": "0",
+        "viewIndex": "1",
         "cols": "11",
         "rows": "8",
         "squareSizeMm": "5",
@@ -411,7 +411,7 @@
     }
   ],
   "Meta": {
-    "latticeGridRows": "8",
+    "latticeGridRows": "10",
     "latticeGridCols": "2"
   }
 }

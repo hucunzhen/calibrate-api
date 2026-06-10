@@ -3,8 +3,8 @@
     {
       "Id": "307a2dfa-6cc1-4e0e-a515-51c0504d79fc",
       "TypeId": "load_image",
-      "X": 36,
-      "Y": 281,
+      "X": 25,
+      "Y": 265,
       "Params": {
         "filePath": "models\\calibration_nine_point.bmp",
         "enable": "true",
@@ -29,8 +29,8 @@
     {
       "Id": "91090304-28ba-437e-b090-e4c52c2e6dee",
       "TypeId": "save_calibration_result",
-      "X": 1111,
-      "Y": 237,
+      "X": 1287,
+      "Y": 195,
       "Params": {
         "filePath": "models\\calibration_nine_point.json",
         "enable": "true",
@@ -71,8 +71,8 @@
     {
       "Id": "7021184f-9f6b-41d6-ad3f-abfeded95cca",
       "TypeId": "halcon_mask_image_by_shape_match",
-      "X": 398,
-      "Y": 157,
+      "X": 434,
+      "Y": 185,
       "Params": {
         "contourLevel": "1",
         "insetPx": "-10",
@@ -123,6 +123,8 @@
       "Y": 60,
       "Params": {
         "sortMode": "bl_xy",
+        "gridRows": "0",
+        "gridCols": "0",
         "enable": "true",
         "disable": "false"
       }
@@ -146,7 +148,7 @@
       "Y": 587,
       "Params": {
         "calibrationJsonFile": "models\\calibration_result.json",
-        "viewIndex": "0",
+        "viewIndex": "1",
         "cols": "11",
         "rows": "8",
         "squareSizeMm": "5",
@@ -157,15 +159,40 @@
         "enable": "true",
         "disable": "false"
       }
+    },
+    {
+      "Id": "6930e941-43ea-4713-8ba0-0a5768b487ac",
+      "TypeId": "adjust_affine_calibration",
+      "X": 1034,
+      "Y": 396,
+      "Params": {
+        "interactiveAdjust": "true",
+        "offsetWorldX": "0",
+        "offsetWorldY": "0",
+        "nudgePreset": "none",
+        "nudgeStepMm": "0.5",
+        "scaleStepPercent": "0.1",
+        "scaleX": "1",
+        "scaleY": "1",
+        "pivotWorldX": "0",
+        "pivotWorldY": "0",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "5ce71f6b-d1c8-407b-80ac-165b3ac7c0c2",
+      "TypeId": "image_flip",
+      "X": 149,
+      "Y": 309,
+      "Params": {
+        "flipMode": "vertical",
+        "enable": "true",
+        "disable": "false"
+      }
     }
   ],
   "Connections": [
-    {
-      "FromNodeId": "62879182-0f97-45ea-800c-48cf296b72f1",
-      "FromPort": "Transform",
-      "ToNodeId": "91090304-28ba-437e-b090-e4c52c2e6dee",
-      "ToPort": "Transform"
-    },
     {
       "FromNodeId": "7caa3be5-5003-4181-b717-d7da90c662f8",
       "FromPort": "ModelId",
@@ -227,8 +254,26 @@
       "ToPort": "Image"
     },
     {
+      "FromNodeId": "62879182-0f97-45ea-800c-48cf296b72f1",
+      "FromPort": "Transform",
+      "ToNodeId": "6930e941-43ea-4713-8ba0-0a5768b487ac",
+      "ToPort": "Transform"
+    },
+    {
+      "FromNodeId": "6930e941-43ea-4713-8ba0-0a5768b487ac",
+      "FromPort": "Transform",
+      "ToNodeId": "91090304-28ba-437e-b090-e4c52c2e6dee",
+      "ToPort": "Transform"
+    },
+    {
       "FromNodeId": "307a2dfa-6cc1-4e0e-a515-51c0504d79fc",
       "FromPort": "Image",
+      "ToNodeId": "5ce71f6b-d1c8-407b-80ac-165b3ac7c0c2",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "5ce71f6b-d1c8-407b-80ac-165b3ac7c0c2",
+      "FromPort": "Out",
       "ToNodeId": "e3747c7e-4951-4523-89bd-b6428c6a8f73",
       "ToPort": "Image"
     },
