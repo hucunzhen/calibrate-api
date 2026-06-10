@@ -1470,6 +1470,14 @@ namespace CalibOperatorCLI_Example
                 {
                     new OperatorParam
                     {
+                        Name = "worldRowOrder",
+                        DisplayName = "世界点行序",
+                        DefaultValue = "topFirst",
+                        Description = "bottomFirst/底行优先=顺序不变（Y 小行在前，与 bl_xy 检测一致）；topFirst/上下颠倒=行序上下翻转",
+                        Options = new List<string> { "bottomFirst", "topFirst", "底行优先", "上下颠倒" }
+                    },
+                    new OperatorParam
+                    {
                         Name = "worldPointsFile",
                         DisplayName = "世界坐标文件",
                         DefaultValue = "",
@@ -1628,6 +1636,14 @@ namespace CalibOperatorCLI_Example
                 Category = "标定",
                 Params =
                 {
+                    new OperatorParam
+                    {
+                        Name = "worldRowOrder",
+                        DisplayName = "世界点行序",
+                        DefaultValue = "topFirst",
+                        Description = "bottomFirst/底行优先=顺序不变；topFirst/上下颠倒=行序上下翻转",
+                        Options = new List<string> { "bottomFirst", "topFirst", "底行优先", "上下颠倒" }
+                    },
                     new OperatorParam
                     {
                         Name = "targetSpace",

@@ -69,5 +69,11 @@ namespace CalibOperatorCLI_Example
             var from = conn.FromPort.Owner;
             return $"{from.Def.DisplayName}.{conn.FromPort.Definition.Name}";
         }
+
+        /// <summary>
+        /// 保存 CalibImage，行 0 = 图像顶部（与流程预览 ToBitmap 一致）。
+        /// GDI+ 写 BMP/PNG/JPEG 避免原生 SaveBMP bottom-up 导致上下颠倒。
+        /// </summary>
+        private static bool SaveCalibImageToFile(CalibImage image, string path) => image.Save(path);
     }
 }

@@ -699,10 +699,29 @@ namespace CalibOperatorPInvoke
         }
 
         /// <summary>
-        /// 保存图像到文件（原生 SaveBMP 成功返回 1，失败返回 0，与 LoadImageFile 一致）
+        /// 保存图像到文件。BMP/PNG/JPEG 走 GDI+（行 0 = 顶，与 ToBitmap/预览一致）；
+        /// 其它扩展名仍走原生 SaveBMP。
         /// </summary>
         public bool Save(string filename)
         {
+            string ext = Path.GetExtension(filename).ToLowerInvariant();
+            if (ext is ".bmp" or ".png" or ".jpg" or ".jpeg" or ".tif" or ".tiff")
+            {
+                using var bmp = ToBitmap();
+                if (bmp == null)
+                    return false;
+
+                var fmt = ext switch
+                {
+                    ".png" => ImageFormat.Png,
+                    ".jpg" or ".jpeg" => ImageFormat.Jpeg,
+                    ".tif" or ".tiff" => ImageFormat.Tiff,
+                    _ => ImageFormat.Bmp
+                };
+                bmp.Save(filename, fmt);
+                return File.Exists(filename);
+            }
+
             return NativeAPI.CALIB_SaveBMP(filename, _nativePtr) == 1;
         }
 

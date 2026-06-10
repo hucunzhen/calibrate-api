@@ -188,7 +188,9 @@ int SaveBMP(const char* filename, Image* img) {
     BMPInfoHeader info = { 0 };
     info.size = sizeof(BMPInfoHeader);
     info.width = img->width;
-    info.height = img->height;
+    // 负高度 = top-down DIB：文件第 0 行对应内存第 0 行（与预览/ToBitmap 一致）。
+    // 正高度 bottom-up 会把内存顶行写到文件底行，外部查看器与流程内显示上下颠倒。
+    info.height = -img->height;
     info.planes = 1;
     info.bitCount = (unsigned short)bitCount;
     info.imageSize = bmpRowBytes * img->height;

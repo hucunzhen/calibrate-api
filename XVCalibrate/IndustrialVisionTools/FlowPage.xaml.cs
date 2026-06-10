@@ -7186,9 +7186,14 @@ namespace CalibOperatorCLI_Example
             Dictionary<string, object?> inputs,
             string? flowBaseDir)
         {
+            Point2D[] pts;
             if (inputs.TryGetValue("WorldPts", out var wpObj) && wpObj is Point2D[] fromPort && fromPort.Length > 0)
-                return fromPort;
-            return ResolveCalibrateWorldPoints(node, flowBaseDir);
+                pts = fromPort;
+            else
+                pts = ResolveCalibrateWorldPoints(node, flowBaseDir);
+
+            string rowOrder = node.Params.GetValueOrDefault("worldRowOrder", "topFirst") ?? "topFirst";
+            return CalibrationWorldPointsTransform.ApplyCalibrateWorldRowOrder(pts, rowOrder);
         }
 
         private Point2D[] ResolveCalibrateAlignedImagePoints(
@@ -11326,7 +11331,7 @@ namespace CalibOperatorCLI_Example
                     case "calibrate":
                     {
                         var calibImage = inputs.TryGetValue("Image", out var imgObj) ? imgObj as CalibImage : null;
-                        var worldPts = ResolveCalibrateWorldPoints(node, compositeInnerFlowBaseDir);
+                        var worldPts = ResolveCalibrateWorldPointsForNode(node, inputs, compositeInnerFlowBaseDir);
                         bool manualPick = CalibrateUsesManualPixelPick(node);
                         bool needDialog = CalibrateNeedsCorrespondenceDialog(
                             node,
@@ -12004,7 +12009,7 @@ namespace CalibOperatorCLI_Example
                             System.IO.Directory.CreateDirectory(dir);
 
                         var toSave = CalibAPI.DuplicateImage(inputImg);
-                        var ok = CalibAPI.SaveImage(resolvedPath, toSave);
+                        var ok = SaveCalibImageToFile(toSave, resolvedPath);
                         if (!ok) throw new InvalidOperationException($"保存图像失败: {resolvedPath}");
 
                         node.Outputs["Out"] = toSave;
