@@ -11441,6 +11441,79 @@ namespace CalibOperatorCLI_Example
                         break;
                     }
 
+                    case "adjust_affine_calibration":
+                    {
+                        var source = inputs.TryGetValue("Transform", out var trInObj)
+                            ? CoerceAffineTransform(trInObj)
+                            : null;
+                        if (source == null)
+                            throw new InvalidOperationException("微调九点标定: 缺少 Transform 输入");
+
+                        double offsetX = AffineTransformAdjust.ParseDoubleParam(node.Params, "offsetWorldX", 0);
+                        double offsetY = AffineTransformAdjust.ParseDoubleParam(node.Params, "offsetWorldY", 0);
+                        string nudgePreset = node.Params.GetValueOrDefault("nudgePreset", "none") ?? "none";
+                        double nudgeStep = AffineTransformAdjust.ParseDoubleParam(node.Params, "nudgeStepMm", 0.5);
+                        var (nudgeDx, nudgeDy) = AffineTransformAdjust.ResolveNudgePreset(nudgePreset, nudgeStep);
+                        offsetX += nudgeDx;
+                        offsetY += nudgeDy;
+
+                        double scaleX = AffineTransformAdjust.ParseDoubleParam(node.Params, "scaleX", 1);
+                        double scaleY = AffineTransformAdjust.ParseDoubleParam(node.Params, "scaleY", 1);
+                        double pivotX = AffineTransformAdjust.ParseDoubleParam(node.Params, "pivotWorldX", 0);
+                        double pivotY = AffineTransformAdjust.ParseDoubleParam(node.Params, "pivotWorldY", 0);
+                        double scaleStepPct = AffineTransformAdjust.ParseDoubleParam(node.Params, "scaleStepPercent", 0.1);
+
+                        AffineTransform adjusted;
+                        if (ParseFlowBoolParam(node.Params, "interactiveAdjust", defaultValue: true))
+                        {
+                            AffineTransform? dialogResult = null;
+                            bool? accepted = null;
+                            (double OffsetX, double OffsetY, double ScaleX, double ScaleY, double PivotX, double PivotY) dialogState = default;
+                            RunOnUiThread(() =>
+                            {
+                                var dlg = new AffineCalibrationAdjustDialog(
+                                    source.Value,
+                                    Window.GetWindow(this),
+                                    offsetX,
+                                    offsetY,
+                                    scaleX,
+                                    scaleY,
+                                    pivotX,
+                                    pivotY,
+                                    nudgeStep,
+                                    scaleStepPct);
+                                accepted = dlg.ShowDialog() == true;
+                                if (accepted == true)
+                                {
+                                    dialogResult = dlg.ResultTransform;
+                                    dialogState = dlg.AdjustmentState;
+                                }
+                            });
+                            if (accepted != true || dialogResult == null)
+                                throw new OperationCanceledException("微调九点标定已取消");
+                            adjusted = dialogResult.Value;
+                            node.ResultSummary = "弹窗微调 · " + AffineTransformAdjust.BuildSummary(
+                                dialogState.OffsetX, dialogState.OffsetY, dialogState.ScaleX, dialogState.ScaleY,
+                                dialogState.PivotX, dialogState.PivotY, null);
+                        }
+                        else
+                        {
+                            adjusted = AffineTransformAdjust.Apply(
+                                source.Value,
+                                offsetX,
+                                offsetY,
+                                scaleX,
+                                scaleY,
+                                pivotX,
+                                pivotY);
+                            node.ResultSummary = AffineTransformAdjust.BuildSummary(
+                                offsetX, offsetY, scaleX, scaleY, pivotX, pivotY, nudgePreset);
+                        }
+
+                        node.Outputs["Transform"] = adjusted;
+                        break;
+                    }
+
                     case "calibrate_homography":
                     {
                         var calibImageH = inputs.TryGetValue("Image", out var imgHObj) ? imgHObj as CalibImage : null;

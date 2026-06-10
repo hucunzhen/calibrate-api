@@ -1530,6 +1530,98 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "adjust_affine_calibration",
+                DisplayName = "微调九点标定",
+                Description = "在世界坐标系(mm)下平移/缩放仿射标定结果。interactiveAdjust=true 时弹窗按钮微调；false 时仅按参数一次性修正。接「九点标定」或「读取标定结果」的 Transform。",
+                Category = "标定",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "interactiveAdjust",
+                        DisplayName = "弹窗微调",
+                        DefaultValue = "true",
+                        Description = "true=运行时报弹窗，方向键/按钮逐步修正；false=仅用下方参数一次性应用",
+                        Options = new List<string> { "true", "false" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "offsetWorldX",
+                        DisplayName = "世界 X 偏移(mm)",
+                        DefaultValue = "0",
+                        Description = "正值=整体向右（世界 X+）"
+                    },
+                    new OperatorParam
+                    {
+                        Name = "offsetWorldY",
+                        DisplayName = "世界 Y 偏移(mm)",
+                        DefaultValue = "0",
+                        Description = "正值=整体向上（世界 Y+，与九点 bl_xy 一致）"
+                    },
+                    new OperatorParam
+                    {
+                        Name = "nudgePreset",
+                        DisplayName = "方向预设",
+                        DefaultValue = "none",
+                        Description = "在 offset 之外叠加一步平移；步长见 nudgeStepMm",
+                        Options = new List<string>
+                        {
+                            "none", "up", "down", "left", "right",
+                            "up_left", "up_right", "down_left", "down_right",
+                            "无", "上", "下", "左", "右", "左上", "右上", "左下", "右下"
+                        }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "nudgeStepMm",
+                        DisplayName = "预设/弹窗平移步长(mm)",
+                        DefaultValue = "0.5",
+                        Description = "nudgePreset 非 none/无 时的平移步长；弹窗内默认平移步长"
+                    },
+                    new OperatorParam
+                    {
+                        Name = "scaleStepPercent",
+                        DisplayName = "弹窗缩放步长(%)",
+                        DefaultValue = "0.1",
+                        Description = "弹窗内每次点 X±/Y±/等比± 的缩放百分比"
+                    },
+                    new OperatorParam
+                    {
+                        Name = "scaleX",
+                        DisplayName = "X 缩放",
+                        DefaultValue = "1",
+                        Description = "世界 X 方向缩放；1=不变"
+                    },
+                    new OperatorParam
+                    {
+                        Name = "scaleY",
+                        DisplayName = "Y 缩放",
+                        DefaultValue = "1",
+                        Description = "世界 Y 方向缩放；1=不变"
+                    },
+                    new OperatorParam
+                    {
+                        Name = "pivotWorldX",
+                        DisplayName = "缩放中心 X(mm)",
+                        DefaultValue = "0",
+                        Description = "缩放绕该世界坐标点进行"
+                    },
+                    new OperatorParam
+                    {
+                        Name = "pivotWorldY",
+                        DisplayName = "缩放中心 Y(mm)",
+                        DefaultValue = "0",
+                        Description = "缩放绕该世界坐标点进行"
+                    }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Transform", Direction = PortDirection.Input, DataType = typeof(AffineTransform), ColorHex = "#E91E63" },
+                    new PortDef { Name = "Transform", Direction = PortDirection.Output, DataType = typeof(AffineTransform), ColorHex = "#E91E63" }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "calibrate_homography",
                 DisplayName = "透视标定(H)",
                 Description = "单应矩阵透视标定。默认 targetSpace=image：像素→校正后图像坐标(px)，后续检测/量测仍在图像系。targetSpace=world 时为像素→世界(mm)。目标点可填 worldPoints/worldPointsFile（与九点相同格式）。至少 4 对点。",
