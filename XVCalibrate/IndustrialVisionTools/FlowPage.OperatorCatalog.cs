@@ -1472,8 +1472,8 @@ namespace CalibOperatorCLI_Example
                     {
                         Name = "worldRowOrder",
                         DisplayName = "世界点行序",
-                        DefaultValue = "topFirst",
-                        Description = "bottomFirst/底行优先=顺序不变（Y 小行在前，与 bl_xy 检测一致）；topFirst/上下颠倒=行序上下翻转",
+                        DefaultValue = "bottomFirst",
+                        Description = "bottomFirst/底行优先=与 world_pos.txt、bl_xy 检测一致（W1 左下）；topFirst/上下颠倒=仅当世界点文件顶行在前时使用",
                         Options = new List<string> { "bottomFirst", "topFirst", "底行优先", "上下颠倒" }
                     },
                     new OperatorParam
@@ -1520,6 +1520,9 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "ImagePts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3", IsOptional = true },
                     new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
                     new PortDef { Name = "Transform", Direction = PortDirection.Output, DataType = typeof(AffineTransform), ColorHex = "#E91E63" },
+                    new PortDef { Name = "ImagePts", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "WorldPts", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Image", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "SystemErrorJson", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" }
                 }
             },
@@ -1540,7 +1543,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "adjust_affine_calibration",
                 DisplayName = "微调九点标定",
-                Description = "在世界坐标系(mm)下平移/缩放仿射标定结果。interactiveAdjust=true 时弹窗按钮微调；false 时仅按参数一次性修正。接「九点标定」或「读取标定结果」的 Transform。",
+                Description = "在世界坐标系(mm)下平移/缩放仿射标定结果。interactiveAdjust=true 时弹窗按钮微调；false 时仅按参数一次性修正。接「九点标定」Transform，并建议连 ImagePts（或 WorldPts）以便缩放绕网格中心。",
                 Category = "标定",
                 Params =
                 {
@@ -1611,20 +1614,22 @@ namespace CalibOperatorCLI_Example
                     {
                         Name = "pivotWorldX",
                         DisplayName = "缩放中心 X(mm)",
-                        DefaultValue = "0",
-                        Description = "缩放绕该世界坐标点进行"
+                        DefaultValue = "auto",
+                        Description = "auto/留空=九点网格中心（需连 WorldPts 或 ImagePts）；可手填世界 X"
                     },
                     new OperatorParam
                     {
                         Name = "pivotWorldY",
                         DisplayName = "缩放中心 Y(mm)",
-                        DefaultValue = "0",
-                        Description = "缩放绕该世界坐标点进行"
+                        DefaultValue = "auto",
+                        Description = "auto/留空=九点网格中心（需连 WorldPts 或 ImagePts）；可手填世界 Y"
                     }
                 },
                 Ports =
                 {
                     new PortDef { Name = "Transform", Direction = PortDirection.Input, DataType = typeof(AffineTransform), ColorHex = "#E91E63" },
+                    new PortDef { Name = "WorldPts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3", IsOptional = true },
+                    new PortDef { Name = "ImagePts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3", IsOptional = true },
                     new PortDef { Name = "Transform", Direction = PortDirection.Output, DataType = typeof(AffineTransform), ColorHex = "#E91E63" }
                 }
             },
@@ -1640,8 +1645,8 @@ namespace CalibOperatorCLI_Example
                     {
                         Name = "worldRowOrder",
                         DisplayName = "世界点行序",
-                        DefaultValue = "topFirst",
-                        Description = "bottomFirst/底行优先=顺序不变；topFirst/上下颠倒=行序上下翻转",
+                        DefaultValue = "bottomFirst",
+                        Description = "bottomFirst/底行优先=与 bl_xy 一致；topFirst/上下颠倒=世界点顶行在前时用",
                         Options = new List<string> { "bottomFirst", "topFirst", "底行优先", "上下颠倒" }
                     },
                     new OperatorParam

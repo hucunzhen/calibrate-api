@@ -1,19 +1,31 @@
 using System;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Drawing.Drawing2D;
+using GdiBitmap = System.Drawing.Bitmap;
+using GdiColor = System.Drawing.Color;
+using GdiGraphics = System.Drawing.Graphics;
+using GdiPen = System.Drawing.Pen;
+using GdiPixelFormat = System.Drawing.Imaging.PixelFormat;
 using CalibOperatorPInvoke;
 
 namespace CalibOperatorCLI_Example
 {
     /// <summary>
-    /// 弹窗按钮式微调九点仿射标定（世界 mm 平移 / 绕 pivot 缩放）。
+    /// 弹窗按钮式微调九点仿射标定（世界 mm 平移 / 绕 pivot 缩放），右侧实时预览网格坐标系。
     /// </summary>
     public sealed class AffineCalibrationAdjustDialog : Window
     {
         private readonly AffineTransform _source;
+        private readonly CalibImage? _previewImage;
+        private readonly Point2D[]? _worldPts;
+        private readonly Point2D[]? _imagePts;
         private double _offsetX;
         private double _offsetY;
         private double _scaleX;
@@ -24,6 +36,7 @@ namespace CalibOperatorCLI_Example
         private readonly TextBlock _txtSource;
         private readonly TextBlock _txtCurrent;
         private readonly TextBlock _txtDelta;
+        private readonly System.Windows.Controls.Image _imgPreview;
         private readonly TextBox _txtStepMm;
         private readonly TextBox _txtScaleStepPct;
         private readonly TextBox _txtPivotX;
@@ -32,6 +45,9 @@ namespace CalibOperatorCLI_Example
         private readonly TextBox _txtOffsetY;
         private readonly TextBox _txtScaleX;
         private readonly TextBox _txtScaleY;
+
+        [DllImport("gdi32.dll")]
+        private static extern bool DeleteObject(IntPtr hObject);
 
         public AffineTransform ResultTransform => AffineTransformAdjust.Apply(
             _source, _offsetX, _offsetY, _scaleX, _scaleY, _pivotX, _pivotY);
@@ -49,9 +65,15 @@ namespace CalibOperatorCLI_Example
             double pivotWorldX = 0,
             double pivotWorldY = 0,
             double nudgeStepMm = 0.5,
-            double scaleStepPercent = 0.1)
+            double scaleStepPercent = 0.1,
+            CalibImage? previewImage = null,
+            Point2D[]? worldPts = null,
+            Point2D[]? imagePts = null)
         {
             _source = source;
+            _previewImage = previewImage;
+            _worldPts = worldPts;
+            _imagePts = imagePts;
             _offsetX = initialOffsetX;
             _offsetY = initialOffsetY;
             _scaleX = initialScaleX;
@@ -60,11 +82,11 @@ namespace CalibOperatorCLI_Example
             _pivotY = pivotWorldY;
 
             Title = "微调九点标定";
-            Width = 720;
-            Height = 560;
+            Width = 920;
+            Height = 640;
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
             Owner = owner;
-            Background = new SolidColorBrush(Color.FromRgb(0x2a, 0x2a, 0x2a));
+            Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x2a, 0x2a, 0x2a));
             KeyDown += Window_KeyDown;
 
             var root = new Grid { Margin = new Thickness(12) };
@@ -74,8 +96,8 @@ namespace CalibOperatorCLI_Example
 
             var hint = new TextBlock
             {
-                Text = "在世界坐标 (mm) 下整体平移或绕 pivot 缩放标定结果。Y+ 向上，X+ 向右（与九点 bl_xy 一致）。",
-                Foreground = Brushes.Gainsboro,
+                Text = "在世界坐标 (mm) 下整体平移或绕 pivot 缩放。右侧实时显示网格坐标系（X 红 / Y 绿 / O 中心）。Y+ 向上，X+ 向右。",
+                Foreground = System.Windows.Media.Brushes.Gainsboro,
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 10)
             };
@@ -185,28 +207,45 @@ namespace CalibOperatorCLI_Example
             left.Children.Add(new TextBlock
             {
                 Text = "快捷键：方向键平移 · Shift×10 · Ctrl×0.1",
-                Foreground = Brushes.Gray,
+                Foreground = System.Windows.Media.Brushes.Gray,
                 FontSize = 11,
                 Margin = new Thickness(0, 8, 0, 0),
                 TextWrapping = TextWrapping.Wrap
             });
 
-            var right = new StackPanel();
+            var right = new Grid();
+            right.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            right.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             Grid.SetColumn(right, 1);
             body.Children.Add(right);
 
-            right.Children.Add(SectionTitle("原始 Transform"));
+            _imgPreview = new System.Windows.Controls.Image
+            {
+                Stretch = Stretch.Uniform,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch
+            };
+            var previewBorder = new Border
+            {
+                Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x12, 0x12, 0x12)),
+                BorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x44, 0x44, 0x44)),
+                BorderThickness = new Thickness(1),
+                Child = _imgPreview,
+                Margin = new Thickness(0, 0, 0, 8)
+            };
+            Grid.SetRow(previewBorder, 0);
+            right.Children.Add(previewBorder);
+
             _txtSource = CreateInfoTextBlock();
             _txtSource.Text = _source.ToString();
-            right.Children.Add(WrapInfo(_txtSource));
-
-            right.Children.Add(SectionTitle("当前累计修正"));
             _txtDelta = CreateInfoTextBlock();
-            right.Children.Add(WrapInfo(_txtDelta));
-
-            right.Children.Add(SectionTitle("修正后 Transform"));
             _txtCurrent = CreateInfoTextBlock();
-            right.Children.Add(WrapInfo(_txtCurrent));
+            var infoPanel = new StackPanel { Margin = new Thickness(0, 4, 0, 0) };
+            infoPanel.Children.Add(SectionTitle("Transform"));
+            infoPanel.Children.Add(WrapInfo(_txtDelta));
+            infoPanel.Children.Add(WrapInfo(_txtCurrent));
+            Grid.SetRow(infoPanel, 1);
+            right.Children.Add(infoPanel);
 
             var bottom = new StackPanel
             {
@@ -368,11 +407,62 @@ namespace CalibOperatorCLI_Example
             _txtPivotY.Text = _pivotY.ToString("G4", CultureInfo.InvariantCulture);
 
             _txtDelta.Text =
-                $"ΔX={_offsetX:G4} mm  ΔY={_offsetY:G4} mm\n" +
+                $"原始 Transform:\n{_source}\n\n" +
+                $"累计: ΔX={_offsetX:G4} mm  ΔY={_offsetY:G4} mm\n" +
                 $"scaleX={_scaleX:G6}  scaleY={_scaleY:G6}\n" +
                 $"pivot=({_pivotX:G4}, {_pivotY:G4}) mm";
 
             _txtCurrent.Text = ResultTransform.ToString();
+
+            RefreshPreviewImage();
+        }
+
+        private void RefreshPreviewImage()
+        {
+            if (_previewImage == null || _worldPts == null || _worldPts.Length == 0)
+            {
+                _imgPreview.Source = null;
+                return;
+            }
+
+            using var baseBmp = _previewImage.ToBitmap();
+            if (baseBmp == null)
+            {
+                _imgPreview.Source = null;
+                return;
+            }
+
+            var drawBmp = new GdiBitmap(baseBmp.Width, baseBmp.Height, GdiPixelFormat.Format24bppRgb);
+            using (var gTemp = GdiGraphics.FromImage(drawBmp))
+                gTemp.DrawImage(baseBmp, 0, 0);
+
+            using (var g = GdiGraphics.FromImage(drawBmp))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                if (_imagePts != null)
+                {
+                    using var ptPen = new GdiPen(GdiColor.FromArgb(160, 0, 220, 255), 1.4f);
+                    foreach (var p in _imagePts)
+                        g.DrawEllipse(ptPen, (float)p.X - 3, (float)p.Y - 3, 6, 6);
+                }
+
+                AffineWorldGridOverlay.DrawOnGraphics(
+                    g, ResultTransform, _worldPts, drawBmp.Width, drawBmp.Height, _imagePts);
+            }
+
+            IntPtr hBitmap = drawBmp.GetHbitmap();
+            try
+            {
+                var bitmapSource = Imaging.CreateBitmapSourceFromHBitmap(
+                    hBitmap, IntPtr.Zero, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                bitmapSource.Freeze();
+                _imgPreview.Source = bitmapSource;
+            }
+            finally
+            {
+                DeleteObject(hBitmap);
+                drawBmp.Dispose();
+            }
         }
 
         private static bool TryParseField(TextBox box, out double value) =>
@@ -382,7 +472,7 @@ namespace CalibOperatorCLI_Example
             new TextBlock
             {
                 Text = text,
-                Foreground = Brushes.Silver,
+                Foreground = System.Windows.Media.Brushes.Silver,
                 FontSize = 12,
                 Margin = new Thickness(0, 6, 0, 4)
             };
@@ -391,7 +481,7 @@ namespace CalibOperatorCLI_Example
             new TextBlock
             {
                 Text = text,
-                Foreground = Brushes.Gainsboro,
+                Foreground = System.Windows.Media.Brushes.Gainsboro,
                 VerticalAlignment = VerticalAlignment.Center
             };
 
@@ -401,16 +491,16 @@ namespace CalibOperatorCLI_Example
                 Text = initial,
                 Height = 26,
                 Margin = new Thickness(4, 0, 4, 0),
-                Background = new SolidColorBrush(Color.FromRgb(0x28, 0x28, 0x28)),
-                Foreground = Brushes.White,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55))
+                Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x28, 0x28, 0x28)),
+                Foreground = System.Windows.Media.Brushes.White,
+                BorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x55, 0x55, 0x55))
             };
 
         private static TextBlock CreateInfoTextBlock() =>
             new TextBlock
             {
-                Foreground = Brushes.Gainsboro,
-                FontFamily = new FontFamily("Consolas"),
+                Foreground = System.Windows.Media.Brushes.Gainsboro,
+                FontFamily = new System.Windows.Media.FontFamily("Consolas"),
                 FontSize = 12,
                 TextWrapping = TextWrapping.Wrap
             };
@@ -418,8 +508,8 @@ namespace CalibOperatorCLI_Example
         private static Border WrapInfo(TextBlock text) =>
             new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(0x1e, 0x1e, 0x1e)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(0x44, 0x44, 0x44)),
+                Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x1e, 0x1e, 0x1e)),
+                BorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x44, 0x44, 0x44)),
                 BorderThickness = new Thickness(1),
                 Padding = new Thickness(8),
                 Margin = new Thickness(0, 0, 0, 8),
@@ -434,9 +524,9 @@ namespace CalibOperatorCLI_Example
                 Width = width,
                 Height = 32,
                 Margin = new Thickness(3),
-                Background = new SolidColorBrush(Color.FromRgb(0x3d, 0x3d, 0x3d)),
-                Foreground = Brushes.White,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(0x66, 0x66, 0x66))
+                Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x3d, 0x3d, 0x3d)),
+                Foreground = System.Windows.Media.Brushes.White,
+                BorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x66, 0x66, 0x66))
             };
             btn.Click += (_, _) => onClick();
             return btn;

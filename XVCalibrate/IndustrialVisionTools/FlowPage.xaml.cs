@@ -7192,7 +7192,7 @@ namespace CalibOperatorCLI_Example
             else
                 pts = ResolveCalibrateWorldPoints(node, flowBaseDir);
 
-            string rowOrder = node.Params.GetValueOrDefault("worldRowOrder", "topFirst") ?? "topFirst";
+            string rowOrder = node.Params.GetValueOrDefault("worldRowOrder", "bottomFirst") ?? "bottomFirst";
             return CalibrationWorldPointsTransform.ApplyCalibrateWorldRowOrder(pts, rowOrder);
         }
 
@@ -11346,6 +11346,9 @@ namespace CalibOperatorCLI_Example
                             throw new InvalidOperationException($"标定失败: {calResult.ErrorMessage}");
                         node.Outputs["Transform"] = calResult.Transform;
                         node.Outputs["ImagePts"] = alignedImagePts.ToArray();
+                        node.Outputs["WorldPts"] = worldPts.ToArray();
+                        if (calibImage != null)
+                            node.Outputs["Image"] = calibImage;
 
                         var ninePtReport = NinePointCalibrationQuality.Analyze(
                             calResult.Transform,
@@ -11368,17 +11371,24 @@ namespace CalibOperatorCLI_Example
                             && verifyRaw.Trim() != "0";
                         if (showVerify && calibImage != null)
                         {
-                            var (gridRows, gridCols) = CalibrationPointGrid.InferLayout(alignedImagePts.Length, worldPts);
+                            var previewTransform = calResult.Transform;
+                            var previewWorld = worldPts;
                             ShowImagePreview(
                                 calibImage,
                                 alignedImagePts,
                                 6,
                                 null,
                                 node.Id.ToString("D"),
-                                $"九点标定验证 · {node.Def.DisplayName}",
+                                $"九点标定 · 网格坐标系",
                                 null,
                                 "grid",
-                                null);
+                                null,
+                                bmp =>
+                                {
+                                    using var g = System.Drawing.Graphics.FromImage(bmp);
+                                    AffineWorldGridOverlay.DrawOnGraphics(
+                                        g, previewTransform, previewWorld, bmp.Width, bmp.Height, alignedImagePts);
+                                });
                         }
 
                         string brief = NinePointCalibrationQuality.BuildBriefSummary(ninePtReport);
@@ -11464,8 +11474,21 @@ namespace CalibOperatorCLI_Example
 
                         double scaleX = AffineTransformAdjust.ParseDoubleParam(node.Params, "scaleX", 1);
                         double scaleY = AffineTransformAdjust.ParseDoubleParam(node.Params, "scaleY", 1);
-                        double pivotX = AffineTransformAdjust.ParseDoubleParam(node.Params, "pivotWorldX", 0);
-                        double pivotY = AffineTransformAdjust.ParseDoubleParam(node.Params, "pivotWorldY", 0);
+                        inputs.TryGetValue("WorldPts", out var worldPtsObj);
+                        inputs.TryGetValue("ImagePts", out var imagePtsObj);
+                        var worldPtsForPivot = worldPtsObj as Point2D[];
+                        var imagePtsForPivot = imagePtsObj as Point2D[];
+                        var adjustContext = TryInferAffineAdjustContext(node, compositeInnerFlowBaseDir);
+                        if (worldPtsForPivot == null || worldPtsForPivot.Length == 0)
+                            worldPtsForPivot = adjustContext.WorldPts;
+                        if (imagePtsForPivot == null || imagePtsForPivot.Length == 0)
+                            imagePtsForPivot = adjustContext.ImagePts;
+                        CalibImage? adjustPreviewImage = adjustContext.Image;
+                        Point2D[]? adjustWorldPts = worldPtsForPivot;
+                        Point2D[]? adjustImagePts = imagePtsForPivot;
+
+                        var (pivotX, pivotY, usedGridCenter) = AffineTransformAdjust.ResolvePivotWorld(
+                            node.Params, worldPtsForPivot, imagePtsForPivot, source.Value);
                         double scaleStepPct = AffineTransformAdjust.ParseDoubleParam(node.Params, "scaleStepPercent", 0.1);
 
                         AffineTransform adjusted;
@@ -11486,7 +11509,10 @@ namespace CalibOperatorCLI_Example
                                     pivotX,
                                     pivotY,
                                     nudgeStep,
-                                    scaleStepPct);
+                                    scaleStepPct,
+                                    adjustPreviewImage,
+                                    adjustWorldPts,
+                                    adjustImagePts);
                                 accepted = dlg.ShowDialog() == true;
                                 if (accepted == true)
                                 {
@@ -11499,7 +11525,8 @@ namespace CalibOperatorCLI_Example
                             adjusted = dialogResult.Value;
                             node.ResultSummary = "弹窗微调 · " + AffineTransformAdjust.BuildSummary(
                                 dialogState.OffsetX, dialogState.OffsetY, dialogState.ScaleX, dialogState.ScaleY,
-                                dialogState.PivotX, dialogState.PivotY, null);
+                                dialogState.PivotX, dialogState.PivotY, null)
+                                + (usedGridCenter ? " · pivot=网格中心" : "");
                         }
                         else
                         {
@@ -11512,7 +11539,8 @@ namespace CalibOperatorCLI_Example
                                 pivotX,
                                 pivotY);
                             node.ResultSummary = AffineTransformAdjust.BuildSummary(
-                                offsetX, offsetY, scaleX, scaleY, pivotX, pivotY, nudgePreset);
+                                offsetX, offsetY, scaleX, scaleY, pivotX, pivotY, nudgePreset)
+                                + (usedGridCenter ? " · pivot=网格中心" : "");
                         }
 
                         node.Outputs["Transform"] = adjusted;

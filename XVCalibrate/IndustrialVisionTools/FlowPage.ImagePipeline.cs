@@ -75,5 +75,47 @@ namespace CalibOperatorCLI_Example
         /// GDI+ 写 BMP/PNG/JPEG 避免原生 SaveBMP bottom-up 导致上下颠倒。
         /// </summary>
         private static bool SaveCalibImageToFile(CalibImage image, string path) => image.Save(path);
+
+        /// <summary>
+        /// 微调九点标定：从 Transform 上游节点推断 ImagePts / 世界点 / 预览图（无需额外连线）。
+        /// </summary>
+        private (Point2D[]? WorldPts, Point2D[]? ImagePts, CalibImage? Image) TryInferAffineAdjustContext(
+            FlowNode adjustNode,
+            string? flowBaseDir)
+        {
+            var transformPort = adjustNode.PortVisuals.FirstOrDefault(pv =>
+                pv.Definition.Direction == PortDirection.Input &&
+                string.Equals(pv.Definition.Name, "Transform", StringComparison.Ordinal));
+            if (transformPort == null)
+                return (null, null, null);
+
+            var conn = _connections.FirstOrDefault(c => c.ToPort == transformPort);
+            if (conn == null)
+                return (null, null, null);
+
+            var src = conn.FromPort.Owner;
+            Point2D[]? imagePts = null;
+            if (src.Outputs.TryGetValue("ImagePts", out var ipObj) && ipObj is Point2D[] ip && ip.Length > 0)
+                imagePts = ip;
+
+            Point2D[]? worldPts = null;
+            CalibImage? image = null;
+            if (string.Equals(src.Def.TypeId, "calibrate", StringComparison.Ordinal))
+            {
+                var srcInputs = GetNodeInputs(src);
+                worldPts = ResolveCalibrateWorldPointsForNode(src, srcInputs, flowBaseDir);
+                if (src.Outputs.TryGetValue("Image", out var imgObj) && imgObj is CalibImage ci)
+                    image = ci;
+                if (image == null)
+                    image = GetInputData(src, "Image") as CalibImage;
+            }
+            else
+            {
+                if (src.Outputs.TryGetValue("WorldPts", out var wpObj) && wpObj is Point2D[] wp && wp.Length > 0)
+                    worldPts = wp;
+            }
+
+            return (worldPts, imagePts, image);
+        }
     }
 }

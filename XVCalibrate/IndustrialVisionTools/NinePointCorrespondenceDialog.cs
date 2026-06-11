@@ -53,7 +53,7 @@ namespace CalibOperatorCLI_Example
 
         public Point2D[]? ResultImagePoints { get; private set; }
 
-        /// <param name="referenceImagePts">检测点（可选）；手选模式下仅作参考显示与 YX 自动初值。</param>
+        /// <param name="referenceImagePts">检测点（可选）；手选模式下仅作参考显示与按序自动初值。</param>
         /// <param name="manualPixelPick">true=在图像任意位置点击取像素；false=须点在检测圆心附近。</param>
         public NinePointCorrespondenceDialog(
             CalibImage image,
@@ -101,10 +101,10 @@ namespace CalibOperatorCLI_Example
                 Orientation = Orientation.Horizontal,
                 Margin = new Thickness(8, 0, 8, 8)
             };
-            var btnAuto = new Button { Content = "YX 自动", Width = 72, Margin = new Thickness(0, 0, 6, 0) };
+            var btnAuto = new Button { Content = "按序自动", Width = 72, Margin = new Thickness(0, 0, 6, 0) };
             var btnClear = new Button { Content = "清除", Width = 56, Margin = new Thickness(0, 0, 6, 0) };
             var btnUndo = new Button { Content = "撤销", Width = 56, Margin = new Thickness(0, 0, 6, 0) };
-            btnAuto.Click += (_, _) => { ApplyYxAutoMapping(); RefreshAll(); };
+            btnAuto.Click += (_, _) => { ApplyBlXyAutoMapping(); RefreshAll(); };
             btnClear.Click += (_, _) => { ClearAssignments(); RefreshAll(); };
             btnUndo.Click += (_, _) => { UndoActiveWorld(); RefreshAll(); };
             btnRow.Children.Add(btnAuto);
@@ -292,7 +292,7 @@ namespace CalibOperatorCLI_Example
                 _worldList.SelectedIndex = 0;
                 _activeWorldIndex = 0;
                 if (!_manualPixelPick && _referenceImagePts.Length == _n)
-                    ApplyYxAutoMapping();
+                    ApplyBlXyAutoMapping();
                 FitImageToView();
                 RefreshAll();
             };
@@ -564,32 +564,27 @@ namespace CalibOperatorCLI_Example
                 _pixelForWorld[_activeWorldIndex] = null;
         }
 
-        private void ApplyYxAutoMapping()
+        /// <summary>
+        /// 世界点与检测点按 bl_xy（左下原点、底行优先）一一对应。
+        /// 检测点若已由上游 HALCON bl_xy 排序，则等价于按数组下标直接配对。
+        /// </summary>
+        private void ApplyBlXyAutoMapping()
         {
             if (_referenceImagePts.Length != _n)
             {
                 MessageBox.Show(this,
-                    $"YX 自动需要 {_n} 个检测参考点，当前为 {_referenceImagePts.Length} 个。请手选或调整检测输出。",
-                    "YX 自动", MessageBoxButton.OK, MessageBoxImage.Information);
+                    $"按序自动需要 {_n} 个检测参考点，当前为 {_referenceImagePts.Length} 个。请手选或调整检测输出。",
+                    "按序自动", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
-            int[] worldOrder = SortIndicesByYx(_worldPts);
-            int[] imageOrder = SortIndicesByYx(_referenceImagePts);
             ClearAssignments();
-            for (int k = 0; k < _n; k++)
-                _pixelForWorld[worldOrder[k]] = _referenceImagePts[imageOrder[k]];
-        }
-
-        private static int[] SortIndicesByYx(IReadOnlyList<Point2D> pts)
-        {
-            var order = Enumerable.Range(0, pts.Count).ToArray();
-            Array.Sort(order, (a, b) =>
-            {
-                int cmp = pts[a].Y.CompareTo(pts[b].Y);
-                return cmp != 0 ? cmp : pts[a].X.CompareTo(pts[b].X);
-            });
-            return order;
+            double[] rows = _referenceImagePts.Select(p => p.Y).ToArray();
+            double[] cols = _referenceImagePts.Select(p => p.X).ToArray();
+            var (gridRows, gridCols) = CalibrationPointGrid.InferLayout(_n, _worldPts);
+            int[] imageOrder = NinePointPixelGridSort.SortIndices(_n, rows, cols, gridRows, gridCols);
+            for (int i = 0; i < _n; i++)
+                _pixelForWorld[i] = _referenceImagePts[imageOrder[i]];
         }
 
         private Point GetImagePointFromMouse(MouseEventArgs e)
@@ -825,20 +820,22 @@ namespace CalibOperatorCLI_Example
             return true;
         }
 
-        /// <summary>与 YX 自动排序对比，顺序明显不一致时二次确认，避免误标后界面长时间无响应。</summary>
+        /// <summary>与 bl_xy 按序自动对比，顺序明显不一致时二次确认，避免误标后界面长时间无响应。</summary>
         private bool ConfirmIfOrderLikelyWrong()
         {
             if (_referenceImagePts.Length != _n)
                 return true;
 
-            int[] worldOrder = SortIndicesByYx(_worldPts);
-            int[] imageOrder = SortIndicesByYx(_referenceImagePts);
+            double[] rows = _referenceImagePts.Select(p => p.Y).ToArray();
+            double[] cols = _referenceImagePts.Select(p => p.X).ToArray();
+            var (gridRows, gridCols) = CalibrationPointGrid.InferLayout(_n, _worldPts);
+            int[] imageOrder = NinePointPixelGridSort.SortIndices(_n, rows, cols, gridRows, gridCols);
+
             int mismatches = 0;
-            for (int k = 0; k < _n; k++)
+            for (int i = 0; i < _n; i++)
             {
-                int wi = worldOrder[k];
-                var expected = _referenceImagePts[imageOrder[k]];
-                var actual = _pixelForWorld[wi]!.Value;
+                var expected = _referenceImagePts[imageOrder[i]];
+                var actual = _pixelForWorld[i]!.Value;
                 if (Math.Abs(expected.X - actual.X) > 1.5 || Math.Abs(expected.Y - actual.Y) > 1.5)
                     mismatches++;
             }
@@ -847,9 +844,9 @@ namespace CalibOperatorCLI_Example
                 return true;
 
             var answer = MessageBox.Show(this,
-                $"检测到 {mismatches}/{_n} 个点的对应顺序与「YX 自动」不一致。\n" +
+                $"检测到 {mismatches}/{_n} 个点的对应顺序与「按序自动」(bl_xy) 不一致。\n" +
                 "若顺序选错，标定误差会很大且后续弹窗可能阻塞界面。\n\n" +
-                "建议点「否」后使用「YX 自动」或逐点重新配对。\n\n仍要确定标定吗？",
+                "建议点「否」后使用「按序自动」或逐点重新配对。\n\n仍要确定标定吗？",
                 "顺序可能错误",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning,
