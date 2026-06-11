@@ -7239,13 +7239,34 @@ namespace CalibOperatorCLI_Example
             return ParseOptionalWorldPointsParam(raw);
         }
 
+        private static (int rows, int cols, bool useProximityMatching) ResolveCalibrateGridLayout(FlowNode node, Point2D[] worldPts)
+        {
+            string preset = node.Params.GetValueOrDefault("calibrationGrid", "auto") ?? "auto";
+            bool proximity = CalibrationGridLayout.IsScatteredPreset(preset);
+            int hintRows = int.TryParse(
+                node.Params.GetValueOrDefault("gridRows", "0"),
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var gr) ? gr : 0;
+            int hintCols = int.TryParse(
+                node.Params.GetValueOrDefault("gridCols", "0"),
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var gc) ? gc : 0;
+            var (rows, cols) = CalibrationGridLayout.Resolve(worldPts.Length, worldPts, preset, hintRows, hintCols);
+            return (rows, cols, proximity);
+        }
+
         private Point2D[] ResolveCalibrateAlignedImagePoints(
             FlowNode node,
             Dictionary<string, object?> inputs,
             Point2D[] worldPts,
             CalibImage? calibImage,
             string contextLabel,
-            Point2D[]? probeWorldPts = null)
+            Point2D[]? probeWorldPts = null,
+            int gridRows = 0,
+            int gridCols = 0,
+            bool useProximityMatching = false)
         {
             var imagePts = inputs.TryGetValue("ImagePts", out var ipObj) ? ipObj as Point2D[] : null;
             bool manualPick = CalibrateUsesManualPixelPick(node);
@@ -7264,7 +7285,7 @@ namespace CalibOperatorCLI_Example
                 RunOnUiThread(() =>
                 {
                     var dlg = new NinePointCorrespondenceDialog(
-                        calibImage, imagePts, worldPts, owner, dialogManual, probeWorldPts);
+                        calibImage, imagePts, worldPts, owner, dialogManual, probeWorldPts, gridRows, gridCols, useProximityMatching);
                     accepted = dlg.ShowDialog() == true;
                     if (accepted == true)
                         confirmed = dlg.ResultImagePoints;
@@ -9398,9 +9419,12 @@ namespace CalibOperatorCLI_Example
                         int gcols = int.TryParse(node.Params.GetValueOrDefault("gridCols"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var gc) ? gc : 3;
                         int grows = int.TryParse(node.Params.GetValueOrDefault("gridRows"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var gr) ? gr : 3;
                         int samp = int.TryParse(node.Params.GetValueOrDefault("samplesPerSegment"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var sp) ? sp : 1;
+                        double jitterRatio = double.TryParse(node.Params.GetValueOrDefault("jitterRatio"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var jr) ? jr : 0.15;
+                        int randomSeed = int.TryParse(node.Params.GetValueOrDefault("randomSeed"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var rs) ? rs : 42;
+                        int scatterCount = int.TryParse(node.Params.GetValueOrDefault("scatterCount"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var sc) ? sc : 16;
 
-                        var coords = GenerateWeldTrajectoryWorld(pattern, cx, cy, step, stepX, stepY, arm, legX, legY, ang, gcols, grows, samp);
-                        var coords3 = GenerateWeldTrajectoryWorld3D(pattern, cx, cy, cz, step, stepX, stepY, arm, legX, legY, ang, gcols, grows, samp);
+                        var coords = GenerateWeldTrajectoryWorld(pattern, cx, cy, step, stepX, stepY, arm, legX, legY, ang, gcols, grows, samp, jitterRatio, randomSeed, scatterCount);
+                        var coords3 = GenerateWeldTrajectoryWorld3D(pattern, cx, cy, cz, step, stepX, stepY, arm, legX, legY, ang, gcols, grows, samp, jitterRatio, randomSeed, scatterCount);
                         node.Outputs["Points"] = coords;
                         node.Outputs["Points3D"] = coords3;
                         var (effSx, effSy) = ResolveWeldTrajectorySteps(step, stepX, stepY);
@@ -11377,13 +11401,15 @@ namespace CalibOperatorCLI_Example
                         var calibImage = inputs.TryGetValue("Image", out var imgObj) ? imgObj as CalibImage : null;
                         var worldPts = ResolveCalibrateWorldPointsForNode(node, inputs, compositeInnerFlowBaseDir);
                         var probeWorldPts = ResolveProbeWorldPointsForNode(node, inputs, compositeInnerFlowBaseDir);
+                        var (gridRows, gridCols, useProximityMatching) = ResolveCalibrateGridLayout(node, worldPts);
+                        string calibName = CalibrationGridLayout.FormatQualityName(worldPts.Length, gridRows, gridCols);
                         bool manualPick = CalibrateUsesManualPixelPick(node);
                         bool needDialog = CalibrateNeedsCorrespondenceDialog(
                             node,
                             inputs.TryGetValue("ImagePts", out var ipObj) ? ipObj as Point2D[] : null,
                             worldPts.Length);
                         Point2D[] alignedImagePts = ResolveCalibrateAlignedImagePoints(
-                            node, inputs, worldPts, calibImage, "标定", probeWorldPts);
+                            node, inputs, worldPts, calibImage, "标定", probeWorldPts, gridRows, gridCols, useProximityMatching);
 
                         // 标定计算与下游输出均使用配对后的像素（手选或确认后的 alignedImagePts[i] ↔ worldPts[i]）
                         var calResult = CalibAPI.CalibrateNinePoint(alignedImagePts, worldPts);
@@ -11434,8 +11460,8 @@ namespace CalibOperatorCLI_Example
                                 null,
                                 node.Id.ToString("D"),
                                 probeImagePts.Length > 0
-                                    ? $"九点标定 · 网格坐标系 · 探针 {probeImagePts.Length} 点"
-                                    : $"九点标定 · 网格坐标系",
+                                    ? $"{calibName} · 网格坐标系 · 探针 {probeImagePts.Length} 点"
+                                    : $"{calibName} · 网格坐标系",
                                 null,
                                 "grid",
                                 null,
@@ -11456,9 +11482,9 @@ namespace CalibOperatorCLI_Example
                             brief += $" · 反算探针 {probeImagePts.Length} 点";
                         node.ResultSummary = needDialog
                             ? (manualPick
-                                ? $"标定 OK（{alignedImagePts.Length} 对点，手选像素 · {brief}）"
-                                : $"标定 OK（{alignedImagePts.Length} 对点，图像确认 · {brief}）")
-                            : $"标定 OK（{alignedImagePts.Length} 对点 · {brief}）";
+                                ? $"标定 OK（{gridRows}×{gridCols}={alignedImagePts.Length} 对，手选像素 · {brief}）"
+                                : $"标定 OK（{gridRows}×{gridCols}={alignedImagePts.Length} 对，图像确认 · {brief}）")
+                            : $"标定 OK（{gridRows}×{gridCols}={alignedImagePts.Length} 对 · {brief}）";
 
                         void ShowNinePointQcPopup()
                         {
@@ -11467,7 +11493,7 @@ namespace CalibOperatorCLI_Example
                             {
                                 string title = systemReport != null
                                     ? (systemReport.Passed ? "系统标定质检 · 合格" : "系统标定质检 · 不合格")
-                                    : (ninePtReport.Passed ? "九点标定质检 · 合格" : "九点标定质检 · 不合格");
+                                    : (ninePtReport.Passed ? $"{calibName}质检 · 合格" : $"{calibName}质检 · 不合格");
                                 ChessboardCalibrationReportDialog.ShowTextReport(
                                     Window.GetWindow(this),
                                     title,
@@ -11496,7 +11522,7 @@ namespace CalibOperatorCLI_Example
                             else
                                 Dispatcher.Invoke(() => StatusText.Text = brief);
                         }
-                        AppendLog($"[九点标定质检] {brief}（详见弹窗报告）");
+                        AppendLog($"[{calibName}质检] {brief}（详见弹窗报告）");
                         break;
                     }
 

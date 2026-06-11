@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
@@ -18,21 +19,92 @@ namespace CalibOperatorCLI_Example
         public static bool IsGridLineJoinMode(string? mode)
         {
             string m = (mode ?? "").Trim().ToLowerInvariant();
-            return m is "grid" or "nine" or "nine_grid" or "3x3" or "九宫格";
+            return m is "grid" or "nine" or "nine_grid" or "3x3" or "4x4" or "5x5" or "6x6" or "九宫格";
         }
 
-        /// <summary>默认按完全平方数推断；worldPts 与点数一致时优先 sqrt(n)。</summary>
+        /// <summary>按点数、世界点坐标或显式 hint 推断 N×M 网格（底行优先行优先顺序）。</summary>
         public static (int rows, int cols) InferLayout(int pointCount, Point2D[]? worldPts = null)
         {
             int n = worldPts?.Length ?? pointCount;
             if (worldPts != null && worldPts.Length != pointCount)
                 n = pointCount;
 
+            if (worldPts != null && worldPts.Length == n && n >= 4)
+            {
+                var fromWorld = TryInferFromWorldCoordinates(worldPts);
+                if (fromWorld.HasValue)
+                    return fromWorld.Value;
+            }
+
             int side = (int)Math.Round(Math.Sqrt(n));
             if (side >= 2 && side * side == n)
                 return (side, side);
 
+            for (int rows = (int)Math.Floor(Math.Sqrt(n)); rows >= 2; rows--)
+            {
+                if (n % rows == 0)
+                    return (rows, n / rows);
+            }
+
             return (1, Math.Max(1, n));
+        }
+
+        public static (int rows, int cols) ResolveLayout(
+            int pointCount,
+            Point2D[]? worldPts,
+            int hintRows = 0,
+            int hintCols = 0)
+        {
+            if (hintRows > 0 && hintCols > 0 && hintRows * hintCols == pointCount)
+                return (hintRows, hintCols);
+            return InferLayout(pointCount, worldPts);
+        }
+
+        private static (int rows, int cols)? TryInferFromWorldCoordinates(Point2D[] worldPts)
+        {
+            int rowLevels = CountDistinctLevels(worldPts.Select(p => p.Y).ToArray());
+            int colLevels = CountDistinctLevels(worldPts.Select(p => p.X).ToArray());
+            if (rowLevels >= 2 && colLevels >= 2 && rowLevels * colLevels == worldPts.Length)
+                return (rowLevels, colLevels);
+            return null;
+        }
+
+        /// <summary>按间距聚类统计轴向上不同层级数（允许坐标有小偏差）。</summary>
+        private static int CountDistinctLevels(double[] values)
+        {
+            if (values.Length == 0)
+                return 0;
+            if (values.Length == 1)
+                return 1;
+
+            var order = values.Select((v, i) => (v, i)).OrderBy(x => x.v).ToArray();
+            var gaps = new List<double>();
+            for (int j = 0; j < order.Length - 1; j++)
+            {
+                double g = order[j + 1].v - order[j].v;
+                if (g > 1e-6)
+                    gaps.Add(g);
+            }
+
+            if (gaps.Count == 0)
+                return 1;
+
+            gaps.Sort();
+            double pitch = gaps[gaps.Count / 2];
+            double mergeTol = Math.Max(pitch * 0.35, 1e-3);
+
+            int levels = 1;
+            double last = order[0].v;
+            for (int j = 1; j < order.Length; j++)
+            {
+                if (order[j].v - last > mergeTol)
+                {
+                    levels++;
+                    last = order[j].v;
+                }
+            }
+
+            return levels;
         }
 
         public static void DrawOnGraphics(GdiPen pen, Graphics g, Point2D[] pts, int rows, int cols)

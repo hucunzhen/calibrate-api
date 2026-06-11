@@ -14,15 +14,105 @@ namespace CalibOperatorCLI_Example
         private const double RowBandSnapRatio = 0.42;
 
         /// <summary>imageIndexForWorld[i] = 与 worldPts[i] 配对的 imagePts 下标。</summary>
-        public static int[] Match(Point2D[] worldPts, Point2D[] imagePts)
+        public static int[] Match(Point2D[] worldPts, Point2D[] imagePts) =>
+            Match(worldPts, imagePts, 0, 0);
+
+        public static int[] Match(Point2D[] worldPts, Point2D[] imagePts, int hintRows, int hintCols) =>
+            Match(worldPts, imagePts, hintRows, hintCols, useProximityOnly: false);
+
+        public static int[] Match(
+            Point2D[] worldPts,
+            Point2D[] imagePts,
+            int hintRows,
+            int hintCols,
+            bool useProximityOnly)
         {
             int n = worldPts.Length;
             if (n == 0 || imagePts == null || imagePts.Length != n)
                 throw new ArgumentException("世界点与像素点数量须一致且非空");
 
-            var (gridRows, gridCols) = CalibrationPointGrid.InferLayout(n, worldPts);
+            if (useProximityOnly)
+                return MatchByNormalizedProximity(worldPts, imagePts);
+
+            if (TryMatchGrid(worldPts, imagePts, hintRows, hintCols, out int[]? gridMapping))
+                return gridMapping!;
+
+            return MatchByNormalizedProximity(worldPts, imagePts);
+        }
+
+        /// <summary>散点/强扰动网格：归一化坐标下贪心最近邻一对一配对。</summary>
+        public static int[] MatchByNormalizedProximity(Point2D[] worldPts, Point2D[] imagePts)
+        {
+            int n = worldPts.Length;
+            double[] wX = worldPts.Select(p => p.X).ToArray();
+            double[] wY = worldPts.Select(p => p.Y).ToArray();
+            double maxImgRow = imagePts.Max(p => p.Y);
+            double[] iX = imagePts.Select(p => p.X).ToArray();
+            double[] iY = imagePts.Select(p => maxImgRow - p.Y).ToArray();
+
+            double[] wNx = NormalizeAxis(wX);
+            double[] wNy = NormalizeAxis(wY);
+            double[] iNx = NormalizeAxis(iX);
+            double[] iNy = NormalizeAxis(iY);
+
+            var candidates = new List<(double cost, int wi, int ii)>(n * n);
+            for (int wi = 0; wi < n; wi++)
+            {
+                for (int ii = 0; ii < n; ii++)
+                {
+                    double dx = wNx[wi] - iNx[ii];
+                    double dy = wNy[wi] - iNy[ii];
+                    candidates.Add((dx * dx + dy * dy, wi, ii));
+                }
+            }
+
+            candidates.Sort((a, b) => a.cost.CompareTo(b.cost));
+            var imageForWorld = new int[n];
+            var usedWorld = new bool[n];
+            var usedImage = new bool[n];
+            int assigned = 0;
+            foreach (var (cost, wi, ii) in candidates)
+            {
+                if (usedWorld[wi] || usedImage[ii])
+                    continue;
+                imageForWorld[wi] = ii;
+                usedWorld[wi] = true;
+                usedImage[ii] = true;
+                assigned++;
+                if (assigned == n)
+                    break;
+            }
+
+            if (assigned != n)
+                throw new InvalidOperationException("散点近邻配对未完成，请检查世界点与检测点数量/分布");
+
+            return imageForWorld;
+        }
+
+        private static double[] NormalizeAxis(double[] values)
+        {
+            if (values.Length == 0)
+                return Array.Empty<double>();
+            double min = values.Min();
+            double max = values.Max();
+            double span = max - min;
+            if (span < 1e-9)
+                return values.Select(_ => 0.5).ToArray();
+            return values.Select(v => (v - min) / span).ToArray();
+        }
+
+        private static bool TryMatchGrid(
+            Point2D[] worldPts,
+            Point2D[] imagePts,
+            int hintRows,
+            int hintCols,
+            out int[]? imageForWorld)
+        {
+            imageForWorld = null;
+            int n = worldPts.Length;
+            var (gridRows, gridCols) = CalibrationPointGrid.ResolveLayout(n, worldPts, hintRows, hintCols);
             if (gridRows * gridCols != n)
-                return FallbackImageSortOnly(worldPts, imagePts, gridRows, gridCols);
+                return false;
 
             double maxImgRow = imagePts.Max(p => p.Y);
             double[] wX = worldPts.Select(p => p.X).ToArray();
@@ -33,12 +123,12 @@ namespace CalibOperatorCLI_Example
             var worldRows = ClusterRows(wY, gridRows);
             var imageRows = ClusterRows(iY, gridRows);
             if (worldRows.Length != gridRows || imageRows.Length != gridRows)
-                return FallbackImageSortOnly(worldPts, imagePts, gridRows, gridCols);
+                return false;
 
             int[] worldRowOrder = OrderClustersByMean(worldRows, wY);
             int[] imageRowOrder = OrderClustersByMean(imageRows, iY);
 
-            var imageForWorld = new int[n];
+            var mapping = new int[n];
             var usedImage = new bool[n];
             int matched = 0;
 
@@ -49,13 +139,14 @@ namespace CalibOperatorCLI_Example
                 matched += MatchRowMembers(
                     worldRows[wCluster], wX,
                     imageRows[iCluster], iX,
-                    imageForWorld, usedImage);
+                    mapping, usedImage);
             }
 
             if (matched != n)
-                return FallbackImageSortOnly(worldPts, imagePts, gridRows, gridCols);
+                return false;
 
-            return imageForWorld;
+            imageForWorld = mapping;
+            return true;
         }
 
         private static int MatchRowMembers(
@@ -74,7 +165,7 @@ namespace CalibOperatorCLI_Example
             double[] wNorm = NormalizePositions(wOrder, worldX);
             double[] iNorm = NormalizePositions(iOrder, imageX);
 
-            if (wOrder.Length == iOrder.Length && wOrder.Length <= 7)
+            if (wOrder.Length == iOrder.Length && wOrder.Length <= 8)
             {
                 int[] bestPerm = FindBestColumnPermutation(wNorm, iNorm, ColumnMatchCostTolerance);
                 if (bestPerm != null)

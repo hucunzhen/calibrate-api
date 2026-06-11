@@ -13,7 +13,116 @@ namespace FlowSmokeTests
             fails += CheckWorldFileToBottomLeftGrid();
             fails += CheckWithPixelJitter();
             fails += CheckRotatedImageGrid();
+            fails += CheckSquareGrid(4);
+            fails += CheckSquareGrid(5);
+            fails += CheckSquareGrid(6);
+            fails += CheckJitteredGrid4x4();
+            fails += CheckScatteredProximity();
             return fails;
+        }
+
+        private static int CheckJitteredGrid4x4()
+        {
+            const int side = 4;
+            var world = CalibrationWorldPointGenerator.BuildJitteredGrid(400, 300, 60, 40, side, side, 0.15, 77);
+            var expectedCols = new double[world.Length];
+            var expectedRows = new double[world.Length];
+            for (int i = 0; i < world.Length; i++)
+            {
+                expectedCols[i] = 100 + (world[i].X - 400) * 0.75;
+                expectedRows[i] = 500 - (world[i].Y - 300) * 1.1;
+            }
+
+            var image = ToPoints(expectedCols, expectedRows);
+            ShuffleInPlace(image, new Random(88));
+
+            var map = NinePointGridCorrespondenceMatcher.Match(world, image, side, side);
+            if (!VerifyMapping(world, image, map, expectedCols, expectedRows, "jitter-4x4"))
+                return 1;
+
+            Console.WriteLine("  OK matcher jitter 4x4");
+            return 0;
+        }
+
+        private static int CheckScatteredProximity()
+        {
+            const int count = 12;
+            var world = CalibrationWorldPointGenerator.BuildScatteredInRect(200, 150, 80, 60, count, 123);
+            var image = new Point2D[count];
+            var rng = new Random(123);
+            for (int i = 0; i < count; i++)
+            {
+                image[i] = new Point2D
+                {
+                    X = 50 + (world[i].X - 200) * 0.9 + (rng.NextDouble() * 2 - 1) * 2,
+                    Y = 400 - (world[i].Y - 150) * 0.85 + (rng.NextDouble() * 2 - 1) * 2
+                };
+            }
+
+            ShuffleInPlace(image, new Random(456));
+            var map = NinePointGridCorrespondenceMatcher.Match(world, image, 0, 0, useProximityOnly: true);
+
+            var calImg = new Point2D[count];
+            for (int i = 0; i < count; i++)
+                calImg[i] = image[map[i]];
+            var cal = CalibAPI.CalibrateNinePoint(calImg, world);
+            if (!cal.Success || cal.AverageError > 3.0)
+            {
+                Console.Error.WriteLine($"  FAIL matcher scattered: success={cal.Success} avg={cal.AverageError:F3}");
+                return 1;
+            }
+
+            Console.WriteLine("  OK matcher scattered proximity");
+            return 0;
+        }
+
+        private static int CheckSquareGrid(int side)
+        {
+            var world = BuildWorldGrid(side, 400, 60, 40, 25);
+            FillImageGridBottomFirst(side, out var cols, out var rows, 100, 300, 45, 40);
+            var image = ToPoints(cols, rows);
+            ShuffleInPlace(image, new Random(side * 17));
+
+            var map = NinePointGridCorrespondenceMatcher.Match(world, image, side, side);
+            if (!VerifyMapping(world, image, map, cols, rows, $"{side}x{side}"))
+                return 1;
+
+            Console.WriteLine($"  OK matcher {side}x{side}");
+            return 0;
+        }
+
+        private static Point2D[] BuildWorldGrid(int side, double x0, double y0, double stepX, double stepY)
+        {
+            var pts = new Point2D[side * side];
+            int idx = 0;
+            for (int r = 0; r < side; r++)
+            {
+                for (int c = 0; c < side; c++)
+                {
+                    pts[idx++] = new Point2D { X = x0 + c * stepX, Y = y0 + r * stepY };
+                }
+            }
+
+            return pts;
+        }
+
+        private static void FillImageGridBottomFirst(
+            int side, out double[] cols, out double[] rows,
+            double x0, double y0, double stepX, double stepY)
+        {
+            int n = side * side;
+            cols = new double[n];
+            rows = new double[n];
+            int idx = 0;
+            for (int r = side - 1; r >= 0; r--)
+            {
+                for (int c = 0; c < side; c++)
+                {
+                    cols[idx] = x0 + c * stepX;
+                    rows[idx] = y0 + r * stepY;
+                    idx++;
+                }
+            }
         }
 
         private static int CheckWorldFileToBottomLeftGrid()

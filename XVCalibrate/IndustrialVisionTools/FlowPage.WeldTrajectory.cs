@@ -22,6 +22,14 @@ namespace CalibOperatorCLI_Example
             switch (p)
             {
                 case "九宫格 (3×3)": return "nine_3x3";
+                case "方格 (4×4)": return "grid_4x4";
+                case "方格 (5×5)": return "grid_5x5";
+                case "方格 (6×6)": return "grid_6x6";
+                case "网格+扰动 (3×3)": return "grid_jitter_3x3";
+                case "网格+扰动 (4×4)": return "grid_jitter_4x4";
+                case "网格+扰动 (5×5)": return "grid_jitter_5x5";
+                case "网格+扰动 (6×6)": return "grid_jitter_6x6";
+                case "工作区散点": return "scattered";
                 case "十字交叉折线": return "cross_lines";
                 case "五点十字": return "cross_5";
                 case "L形轨迹": return "l_shape";
@@ -35,6 +43,14 @@ namespace CalibOperatorCLI_Example
             switch (key)
             {
                 case "nine_3x3":
+                case "grid_4x4":
+                case "grid_5x5":
+                case "grid_6x6":
+                case "grid_jitter_3x3":
+                case "grid_jitter_4x4":
+                case "grid_jitter_5x5":
+                case "grid_jitter_6x6":
+                case "scattered":
                 case "cross_lines":
                 case "cross_5":
                 case "l_shape":
@@ -46,6 +62,11 @@ namespace CalibOperatorCLI_Example
 
             // 旧版 / 手写别名
             if (key is "九点" or "9点" or "九宫格") return "nine_3x3";
+            if (key is "4x4" or "四点" or "16点") return "grid_4x4";
+            if (key is "5x5" or "25点") return "grid_5x5";
+            if (key is "6x6" or "36点") return "grid_6x6";
+            if (key is "jitter" or "扰动" or "grid_jitter") return "grid_jitter_4x4";
+            if (key is "scattered" or "散点" or "random") return "scattered";
             if (key is "十字" or "十字线" or "交叉") return "cross_lines";
             if (key is "五点十字" or "十字五点") return "cross_5";
             if (key is "l形" or "l型") return "l_shape";
@@ -54,7 +75,7 @@ namespace CalibOperatorCLI_Example
             if (key is "网格蛇形" or "蛇形") return "grid_snake";
 
             throw new InvalidOperationException(
-                $"焊接轨迹: 未知 pattern「{p}」。请从下拉选择，或使用: nine_3x3, cross_lines, cross_5, l_shape, line, rect, grid_snake");
+                $"焊接轨迹: 未知 pattern「{p}」。请从下拉选择，或使用: nine_3x3, grid_4x4, grid_jitter_4x4, scattered, cross_lines 等");
         }
 
         /// <summary>
@@ -81,7 +102,10 @@ namespace CalibOperatorCLI_Example
             double angleDeg,
             int gridCols,
             int gridRows,
-            int samplesPerSegment)
+            int samplesPerSegment,
+            double jitterRatio = 0.15,
+            int randomSeed = 42,
+            int scatterCount = 16)
         {
             string key = NormalizeWeldPatternToKey(patternRaw);
 
@@ -94,6 +118,19 @@ namespace CalibOperatorCLI_Example
             return key switch
             {
                 "nine_3x3" => BuildNineGrid(centerX, centerY, stepX, stepY, 3, 3),
+                "grid_4x4" => BuildNineGrid(centerX, centerY, stepX, stepY, 4, 4),
+                "grid_5x5" => BuildNineGrid(centerX, centerY, stepX, stepY, 5, 5),
+                "grid_6x6" => BuildNineGrid(centerX, centerY, stepX, stepY, 6, 6),
+                "grid_jitter_3x3" => CalibrationWorldPointGenerator.BuildJitteredGrid(
+                    centerX, centerY, stepX, stepY, 3, 3, jitterRatio, randomSeed),
+                "grid_jitter_4x4" => CalibrationWorldPointGenerator.BuildJitteredGrid(
+                    centerX, centerY, stepX, stepY, 4, 4, jitterRatio, randomSeed),
+                "grid_jitter_5x5" => CalibrationWorldPointGenerator.BuildJitteredGrid(
+                    centerX, centerY, stepX, stepY, 5, 5, jitterRatio, randomSeed),
+                "grid_jitter_6x6" => CalibrationWorldPointGenerator.BuildJitteredGrid(
+                    centerX, centerY, stepX, stepY, 6, 6, jitterRatio, randomSeed),
+                "scattered" => CalibrationWorldPointGenerator.BuildScatteredInRect(
+                    centerX, centerY, armMm, armMm, scatterCount, randomSeed),
                 "cross_lines" => BuildCrossLines(centerX, centerY, armMm, samplesPerSegment),
                 "cross_5" => BuildCrossFive(centerX, centerY, armMm),
                 "l_shape" => BuildLShape(centerX, centerY, legXmm, legYmm, stepX, stepY),
@@ -119,10 +156,14 @@ namespace CalibOperatorCLI_Example
             double angleDeg,
             int gridCols,
             int gridRows,
-            int samplesPerSegment)
+            int samplesPerSegment,
+            double jitterRatio = 0.15,
+            int randomSeed = 42,
+            int scatterCount = 16)
         {
             Point2D[] xy = GenerateWeldTrajectoryWorld(
-                patternRaw, centerX, centerY, stepMm, stepXmm, stepYmm, armMm, legXmm, legYmm, angleDeg, gridCols, gridRows, samplesPerSegment);
+                patternRaw, centerX, centerY, stepMm, stepXmm, stepYmm, armMm, legXmm, legYmm, angleDeg,
+                gridCols, gridRows, samplesPerSegment, jitterRatio, randomSeed, scatterCount);
             return xy.Select(p => new CalibPoint3D(p.X, p.Y, centerZ)).ToArray();
         }
 

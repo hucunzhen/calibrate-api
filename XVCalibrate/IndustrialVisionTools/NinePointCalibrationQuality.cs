@@ -77,7 +77,9 @@ namespace CalibOperatorCLI_Example
             else if (!ratioOk)
                 verdict = "✗ 九点标定：不合格（个别点误差显著偏大，疑似配对错误或检测偏了）";
             else if (!countOk)
-                verdict = $"△ 九点标定：可用（当前 {imagePts.Length} 点，建议补至 {RecommendedPointCount} 点）";
+                verdict = imagePts.Length >= 16
+                    ? $"△ 网格标定：可用（{imagePts.Length} 点超定，覆盖较密）"
+                    : $"△ 九点标定：可用（当前 {imagePts.Length} 点，建议补至 {RecommendedPointCount} 点或加密 4×4）";
 
             return new QualityReport
             {
@@ -110,7 +112,7 @@ namespace CalibOperatorCLI_Example
             headline = report.VerdictLine;
             var sb = new StringBuilder();
             sb.AppendLine($"等级：{report.Grade}    平均误差：{report.AverageErrorMm:F3} mm    最大误差：{report.MaxErrorMm:F3} mm");
-            sb.AppendLine($"标定点数：{report.Points.Count}（推荐 {RecommendedPointCount} 点，3×3 行优先顺序）");
+            sb.AppendLine($"标定点数：{report.Points.Count}（支持 3×3/4×4/5×5/6×6 方阵；点数越多重投影越稳）");
             sb.AppendLine();
             sb.AppendLine("──────────────────────────────────────");
             sb.AppendLine("[1 · 标定结果好坏]");
@@ -213,7 +215,13 @@ namespace CalibOperatorCLI_Example
             }
 
             if (report.Points.Count < RecommendedPointCount)
-                sb.AppendLine($"  · 当前仅 {report.Points.Count} 点，产线建议 {RecommendedPointCount} 点（3×3）覆盖工作区域。");
+                sb.AppendLine($"  · 当前仅 {report.Points.Count} 点，产线建议 ≥{RecommendedPointCount} 点（3×3）；精度不足可加密至 4×4/5×5。");
+            else if (report.Points.Count >= 36)
+                sb.AppendLine("  · 当前 6×6=36 点超定标定，覆盖与精度均较好。");
+            else if (report.Points.Count >= 25)
+                sb.AppendLine("  · 当前 5×5=25 点超定标定，有利于压低随机误差。");
+            else if (report.Points.Count >= 16)
+                sb.AppendLine("  · 当前 4×4=16 点超定标定，有利于压低随机误差。");
 
             sb.AppendLine("  · 世界坐标须与 PLC 九点焊接坐标一致（来自 caliSendContour / world_pos.txt）。");
             sb.AppendLine("  · 标定图须清晰、九点特征完整；检测链 findCircle 等排序须与 worldPoints 顺序一致。");

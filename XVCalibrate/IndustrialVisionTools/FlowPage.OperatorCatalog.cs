@@ -1419,7 +1419,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "weld_trajectory_world",
                 DisplayName = "焊接轨迹(世界mm)",
-                Description = "在工件世界坐标系(mm)生成规则点列（含 Z）：轨迹类型用下拉选择；兼容旧流程英文键。输出 Points(XY) 与 Points3D(XYZ)。接「发送PLC」/「发送PLC(每点一点)」或后续标定。",
+                Description = "在工件世界坐标系(mm)生成点列（含 Z）：规则方格、带扰动网格、工作区散点等。扰动约 10–20% 步距可提升标定条件数；散点须标定节点选「散点」配对模式。",
                 Category = "标定",
                 Params =
                 {
@@ -1432,6 +1432,14 @@ namespace CalibOperatorCLI_Example
                         Options = new List<string>
                         {
                             "九宫格 (3×3)",
+                            "方格 (4×4)",
+                            "方格 (5×5)",
+                            "方格 (6×6)",
+                            "网格+扰动 (3×3)",
+                            "网格+扰动 (4×4)",
+                            "网格+扰动 (5×5)",
+                            "网格+扰动 (6×6)",
+                            "工作区散点",
                             "十字交叉折线",
                             "五点十字",
                             "L形轨迹",
@@ -1446,13 +1454,16 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "stepXmm", DisplayName = "X步距(mm)", DefaultValue = "10", Description = "九宫格/网格蛇形：列方向(世界X)点间距；L形水平段、矩形水平边插补步长" },
                     new OperatorParam { Name = "stepYmm", DisplayName = "Y步距(mm)", DefaultValue = "10", Description = "九宫格/网格蛇形：行方向(世界Y)点间距；L形垂直段、矩形垂直边插补步长" },
                     new OperatorParam { Name = "stepMm", DisplayName = "步距(mm,兼容)", DefaultValue = "10", Description = "旧参数：未填 stepXmm/stepYmm 或填 0 时，X、Y 均用本值" },
-                    new OperatorParam { Name = "armMm", DisplayName = "臂长/半长(mm)", DefaultValue = "50", Description = "十字/直线：半边长；矩形：半边宽=armMm、半边高=armMm（与 line 总长=2×armMm）" },
+                    new OperatorParam { Name = "armMm", DisplayName = "臂长/半长(mm)", DefaultValue = "50", Description = "十字/直线：半边长；矩形：半边宽=armMm；工作区散点：工作区半宽/半高" },
                     new OperatorParam { Name = "legXmm", DisplayName = "L水平腿长(mm)", DefaultValue = "50", Description = "l_shape 水平段总长" },
                     new OperatorParam { Name = "legYmm", DisplayName = "L垂直腿长(mm)", DefaultValue = "50", Description = "l_shape 垂直段总长" },
                     new OperatorParam { Name = "angleDeg", DisplayName = "直线角度(°)", DefaultValue = "0", Description = "line：与 +X 夹角，0=水平" },
                     new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "3", Description = "grid_snake 列数" },
                     new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "3", Description = "grid_snake 行数" },
-                    new OperatorParam { Name = "samplesPerSegment", DisplayName = "段内插值点数", DefaultValue = "1", Description = "cross_lines/line：每段≥1 时仅端点；>1 时沿线插值细分" }
+                    new OperatorParam { Name = "samplesPerSegment", DisplayName = "段内插值点数", DefaultValue = "1", Description = "cross_lines/line：每段≥1 时仅端点；>1 时沿线插值细分" },
+                    new OperatorParam { Name = "jitterRatio", DisplayName = "扰动比例", DefaultValue = "0.15", Description = "网格+扰动：每点随机偏移 ±(比例×步距)，建议 0.10–0.20；0=规则网格" },
+                    new OperatorParam { Name = "randomSeed", DisplayName = "随机种子", DefaultValue = "42", Description = "扰动/散点可复现；改种子可换一组布局" },
+                    new OperatorParam { Name = "scatterCount", DisplayName = "散点数量", DefaultValue = "16", Description = "工作区散点：生成点数（≥4）" }
                 },
                 Ports =
                 {
@@ -1463,8 +1474,8 @@ namespace CalibOperatorCLI_Example
             new OperatorDef
             {
                 TypeId = "calibrate",
-                DisplayName = "九点标定",
-                Description = "九点标定（像素→世界）。弹窗内可手选/确认对应，并对已选点拖拽、方向键或 X/Y 输入微调。ProbeWorldPts/探针世界点不参与标定，标定完成后反算其在图像上的像素位置。连接 CalibrationJson 或填写 calibrationJsonFile 可输出系统整体误差。",
+                DisplayName = "网格标定",
+                Description = "仿射标定（像素→世界）。支持 3×3～6×6 方阵、带扰动网格与散点布局；SVD 超定最小二乘。散点/强扰动时选「散点」启用近邻配对。ProbeWorldPts 不参与标定，仅反算图像位置。",
                 Category = "标定",
                 Params =
                 {
@@ -1488,7 +1499,38 @@ namespace CalibOperatorCLI_Example
                         Name = "worldPoints",
                         DisplayName = "世界坐标点",
                         DefaultValue = "100,100;400,100;700,100;100,300;400,300;700,300;100,500;400,500;700,500",
-                        Description = "未填 worldPointsFile 时使用。格式 x,y 每行或 x,y;x,y;...（建议 9 点行优先）。至少 4 点。"
+                        Description = "未填 worldPointsFile 时使用。N×M 网格、底行优先。支持 3×3(9)、4×4(16)、5×5(25)、6×6(36) 点；至少 4 点。"
+                    },
+                    new OperatorParam
+                    {
+                        Name = "calibrationGrid",
+                        DisplayName = "标定网格",
+                        DefaultValue = "auto",
+                        Description = "auto/自动=按点数推断；3×3～6×6=规则方阵；散点=工作区随机布点（近邻配对）；扰动=带偏移网格（仍可按行列配对，失败时自动近邻）",
+                        Options = new List<string>
+                        {
+                            "auto", "自动",
+                            "3×3", "3x3",
+                            "4×4", "4x4",
+                            "5×5", "5x5",
+                            "6×6", "6x6",
+                            "散点", "scattered",
+                            "扰动", "jitter"
+                        }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "gridRows",
+                        DisplayName = "网格行数(高级)",
+                        DefaultValue = "0",
+                        Description = "0=由「标定网格」或点数自动推断；非 0 时须 gridRows×gridCols=标定点数"
+                    },
+                    new OperatorParam
+                    {
+                        Name = "gridCols",
+                        DisplayName = "网格列数(高级)",
+                        DefaultValue = "0",
+                        Description = "0=自动；与 gridRows 配合可指定非 preset 布局"
                     },
                     new OperatorParam
                     {
@@ -3695,7 +3737,7 @@ namespace CalibOperatorCLI_Example
                         Name = "gridRows",
                         DisplayName = "阵列行数",
                         DefaultValue = "0",
-                        Description = "sortMode=bl_xy/nine 时可选；0=按点数自动推断（如 9→3×3）"
+                        Description = "sortMode=bl_xy/nine 时可选；0=自动（9→3×3，16→4×4，25→5×5，36→6×6）；须 gridRows×gridCols=点数"
                     },
                     new OperatorParam
                     {

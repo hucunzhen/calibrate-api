@@ -35,6 +35,9 @@ namespace CalibOperatorCLI_Example
         private readonly Point2D[] _referenceImagePts;
         private readonly Point2D[] _worldPts;
         private readonly Point2D[] _probeWorldPts;
+        private readonly int _gridRows;
+        private readonly int _gridCols;
+        private readonly bool _useProximityMatching;
         private readonly int _n;
         private readonly bool _manualPixelPick;
         private readonly Point2D?[] _pixelForWorld;
@@ -75,12 +78,19 @@ namespace CalibOperatorCLI_Example
             Point2D[] worldPts,
             Window? owner,
             bool manualPixelPick = true,
-            Point2D[]? probeWorldPts = null)
+            Point2D[]? probeWorldPts = null,
+            int gridRows = 0,
+            int gridCols = 0,
+            bool useProximityMatching = false)
         {
             _image = image ?? throw new ArgumentNullException(nameof(image));
             _referenceImagePts = referenceImagePts ?? Array.Empty<Point2D>();
             _worldPts = worldPts ?? throw new ArgumentNullException(nameof(worldPts));
             _probeWorldPts = probeWorldPts ?? Array.Empty<Point2D>();
+            _useProximityMatching = useProximityMatching;
+            (_gridRows, _gridCols) = gridRows > 0 && gridCols > 0
+                ? (gridRows, gridCols)
+                : CalibrationPointGrid.InferLayout(worldPts.Length, worldPts);
             _n = worldPts.Length;
             if (_n < 4)
                 throw new ArgumentException("标定至少需要 4 对世界/像素点");
@@ -88,7 +98,8 @@ namespace CalibOperatorCLI_Example
             _manualPixelPick = manualPixelPick;
             _pixelForWorld = new Point2D?[_n];
 
-            Title = manualPixelPick ? "九点标定 — 手选像素点" : "九点标定 — 匹配检测点";
+            string gridTitle = CalibrationGridLayout.FormatDialogTitle(_gridRows, _gridCols);
+            Title = manualPixelPick ? $"{gridTitle} — 手选像素点" : $"{gridTitle} — 匹配检测点";
             Width = 1100;
             Height = 760;
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
@@ -745,7 +756,8 @@ namespace CalibOperatorCLI_Example
             }
 
             ClearAssignments();
-            int[] imageForWorld = NinePointGridCorrespondenceMatcher.Match(_worldPts, _referenceImagePts);
+            int[] imageForWorld = NinePointGridCorrespondenceMatcher.Match(
+                _worldPts, _referenceImagePts, _gridRows, _gridCols, _useProximityMatching);
             for (int i = 0; i < _n; i++)
                 _pixelForWorld[i] = _referenceImagePts[imageForWorld[i]];
         }
@@ -989,7 +1001,8 @@ namespace CalibOperatorCLI_Example
             if (_referenceImagePts.Length != _n)
                 return true;
 
-            int[] imageForWorld = NinePointGridCorrespondenceMatcher.Match(_worldPts, _referenceImagePts);
+            int[] imageForWorld = NinePointGridCorrespondenceMatcher.Match(
+                _worldPts, _referenceImagePts, _gridRows, _gridCols, _useProximityMatching);
 
             int mismatches = 0;
             for (int i = 0; i < _n; i++)
