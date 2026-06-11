@@ -1,13 +1,20 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using GdiBitmap = System.Drawing.Bitmap;
+using GdiColor = System.Drawing.Color;
+using GdiGraphics = System.Drawing.Graphics;
+using GdiPixelFormat = System.Drawing.Imaging.PixelFormat;
 using CalibOperatorPInvoke;
 
 namespace CalibOperatorCLI_Example
@@ -33,6 +40,8 @@ namespace CalibOperatorCLI_Example
 
         private readonly ListBox _worldList;
         private readonly TextBlock _hintText;
+        private readonly TextBlock _txtLiveCal;
+        private readonly Image _gridLayer;
         private readonly TextBox _txtPixelX;
         private readonly TextBox _txtPixelY;
         private readonly StackPanel _pnlFineTune;
@@ -52,6 +61,9 @@ namespace CalibOperatorCLI_Example
         private Point _lastPanOffset;
 
         public Point2D[]? ResultImagePoints { get; private set; }
+
+        [DllImport("gdi32.dll")]
+        private static extern bool DeleteObject(IntPtr hObject);
 
         /// <param name="referenceImagePts">检测点（可选）；手选模式下仅作参考显示与按序自动初值。</param>
         /// <param name="manualPixelPick">true=在图像任意位置点击取像素；false=须点在检测圆心附近。</param>
@@ -74,7 +86,7 @@ namespace CalibOperatorCLI_Example
 
             Title = manualPixelPick ? "九点标定 — 手选像素点" : "九点标定 — 匹配检测点";
             Width = 1100;
-            Height = 720;
+            Height = 760;
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
             Owner = owner;
             Background = new SolidColorBrush(Color.FromRgb(0x2a, 0x2a, 0x2a));
@@ -95,6 +107,17 @@ namespace CalibOperatorCLI_Example
             };
             DockPanel.SetDock(_hintText, Dock.Top);
             left.Children.Add(_hintText);
+
+            _txtLiveCal = new TextBlock
+            {
+                Text = "配对完成后将实时计算标定误差并叠加网格坐标系。",
+                Foreground = Brushes.PaleGoldenrod,
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 12,
+                Margin = new Thickness(8, 0, 8, 8)
+            };
+            DockPanel.SetDock(_txtLiveCal, Dock.Top);
+            left.Children.Add(_txtLiveCal);
 
             var btnRow = new StackPanel
             {
@@ -227,7 +250,7 @@ namespace CalibOperatorCLI_Example
                 HorizontalAlignment = HorizontalAlignment.Right,
                 Margin = new Thickness(0, 8, 0, 0)
             };
-            var btnOk = new Button { Content = "确定标定", Width = 96, Margin = new Thickness(0, 0, 8, 0), IsDefault = true };
+            var btnOk = new Button { Content = "确认完成", Width = 96, Margin = new Thickness(0, 0, 8, 0), IsDefault = true };
             var btnCancel = new Button { Content = "取消", Width = 72, IsCancel = true };
             btnOk.Click += OnConfirm;
             btnCancel.Click += (_, _) => { DialogResult = false; Close(); };
@@ -271,6 +294,15 @@ namespace CalibOperatorCLI_Example
             };
             canvasRoot.Children.Add(wpfImage);
 
+            _gridLayer = new Image
+            {
+                Width = _image.Width,
+                Height = _image.Height,
+                Stretch = Stretch.None,
+                IsHitTestVisible = false
+            };
+            canvasRoot.Children.Add(_gridLayer);
+
             _overlay = new Canvas
             {
                 Width = _image.Width,
@@ -301,9 +333,11 @@ namespace CalibOperatorCLI_Example
         private string BuildHintText() =>
             _manualPixelPick
                 ? "左侧选中世界点，在图像上左键点击取该点的像素坐标。\n" +
-                  "已选点可拖拽或方向键微调。浅蓝圆=检测参考；绿=已选；黄=当前。"
+                  "已选点可拖拽或方向键微调；至少 4 对后实时显示标定网格与误差。\n" +
+                  "浅蓝圆=检测参考；绿=已选；黄=当前。"
                 : "左侧选中世界点，在图像上点击检测圆心附近。\n" +
-                  "已配对点可拖拽或方向键微调。绿=已配对，黄=当前，灰蓝=未配对。";
+                  "已配对点可拖拽或方向键微调；至少 4 对后实时显示标定网格与误差。\n" +
+                  "绿=已配对，黄=当前，灰蓝=未配对。确认无误后点「确认完成」。";
 
         private void UpdateHint()
         {
@@ -440,7 +474,134 @@ namespace CalibOperatorCLI_Example
         {
             RefreshWorldList();
             RefreshFineTuneFields();
+            RefreshLiveCalibration();
             RefreshOverlay();
+        }
+
+        private int CountAssignedPoints()
+        {
+            int count = 0;
+            for (int i = 0; i < _n; i++)
+            {
+                if (_pixelForWorld[i] != null)
+                    count++;
+            }
+
+            return count;
+        }
+
+        private bool TryBuildCalibrationPairs(out Point2D[] imagePts, out Point2D[] worldPts, out bool allAssigned)
+        {
+            allAssigned = CountAssignedPoints() == _n;
+            if (allAssigned)
+            {
+                imagePts = new Point2D[_n];
+                for (int i = 0; i < _n; i++)
+                    imagePts[i] = _pixelForWorld[i]!.Value;
+                worldPts = _worldPts;
+                return true;
+            }
+
+            var img = new List<Point2D>();
+            var wld = new List<Point2D>();
+            for (int i = 0; i < _n; i++)
+            {
+                if (_pixelForWorld[i] is Point2D p)
+                {
+                    img.Add(p);
+                    wld.Add(_worldPts[i]);
+                }
+            }
+
+            if (img.Count < 4)
+            {
+                imagePts = Array.Empty<Point2D>();
+                worldPts = Array.Empty<Point2D>();
+                return false;
+            }
+
+            imagePts = img.ToArray();
+            worldPts = wld.ToArray();
+            return true;
+        }
+
+        private void RefreshLiveCalibration()
+        {
+            int assigned = CountAssignedPoints();
+            if (assigned < 4)
+            {
+                _gridLayer.Source = null;
+                _txtLiveCal.Text = assigned == 0
+                    ? "配对完成后将实时计算标定误差并叠加网格坐标系。"
+                    : $"已配对 {assigned}/{_n}，至少 4 对后可预览标定。";
+                _txtLiveCal.Foreground = Brushes.PaleGoldenrod;
+                return;
+            }
+
+            if (!TryBuildCalibrationPairs(out var imagePts, out var worldPts, out bool allAssigned))
+            {
+                _gridLayer.Source = null;
+                _txtLiveCal.Text = "点数不足，无法预览标定。";
+                return;
+            }
+
+            var calResult = CalibAPI.CalibrateNinePoint(imagePts, worldPts);
+            if (!calResult.Success)
+            {
+                _gridLayer.Source = null;
+                _txtLiveCal.Text = $"标定计算失败：{calResult.ErrorMessage}";
+                _txtLiveCal.Foreground = Brushes.OrangeRed;
+                return;
+            }
+
+            var report = NinePointCalibrationQuality.Analyze(
+                calResult.Transform,
+                imagePts,
+                worldPts,
+                calResult.AverageError,
+                calResult.MaxError);
+            string brief = NinePointCalibrationQuality.BuildBriefSummary(report);
+            _txtLiveCal.Text = allAssigned
+                ? $"实时标定 · {brief}\n确认无误后点「确认完成」。"
+                : $"实时预览（{assigned}/{_n} 对）· {brief}";
+            _txtLiveCal.Foreground = report.Passed ? Brushes.LightGreen : Brushes.Salmon;
+
+            RefreshGridLayer(calResult.Transform, allAssigned ? _worldPts : worldPts,
+                allAssigned ? BuildFullAlignedImagePoints() : imagePts);
+        }
+
+        private Point2D[] BuildFullAlignedImagePoints()
+        {
+            var pts = new Point2D[_n];
+            for (int i = 0; i < _n; i++)
+                pts[i] = _pixelForWorld[i]!.Value;
+            return pts;
+        }
+
+        private void RefreshGridLayer(in AffineTransform transform, Point2D[] worldPts, Point2D[] imagePts)
+        {
+            var overlayBmp = new GdiBitmap(_image.Width, _image.Height, GdiPixelFormat.Format32bppArgb);
+            using (var g = GdiGraphics.FromImage(overlayBmp))
+            {
+                g.Clear(GdiColor.Transparent);
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                AffineWorldGridOverlay.DrawOnGraphics(
+                    g, transform, worldPts, _image.Width, _image.Height, imagePts);
+            }
+
+            IntPtr hBitmap = overlayBmp.GetHbitmap();
+            try
+            {
+                var bitmapSource = Imaging.CreateBitmapSourceFromHBitmap(
+                    hBitmap, IntPtr.Zero, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                bitmapSource.Freeze();
+                _gridLayer.Source = bitmapSource;
+            }
+            finally
+            {
+                DeleteObject(hBitmap);
+                overlayBmp.Dispose();
+            }
         }
 
         private void RefreshFineTuneFields()

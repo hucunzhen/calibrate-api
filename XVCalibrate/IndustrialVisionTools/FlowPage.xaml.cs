@@ -11369,7 +11369,7 @@ namespace CalibOperatorCLI_Example
                         string verifyRaw = node.Params.GetValueOrDefault("showVerifyPreview", "true") ?? "true";
                         bool showVerify = !string.Equals(verifyRaw.Trim(), "false", StringComparison.OrdinalIgnoreCase)
                             && verifyRaw.Trim() != "0";
-                        if (showVerify && calibImage != null)
+                        if (showVerify && calibImage != null && !needDialog)
                         {
                             var previewTransform = calResult.Transform;
                             var previewWorld = worldPts;
@@ -11421,14 +11421,20 @@ namespace CalibOperatorCLI_Example
                         if (Dispatcher.CheckAccess())
                         {
                             StatusText.Text = brief;
-                            // 延后弹窗，避免验证预览与模态窗嵌套导致 UI 消息泵卡死
-                            Dispatcher.BeginInvoke(
-                                ShowNinePointQcPopup,
-                                System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                            if (!needDialog)
+                            {
+                                // 延后弹窗，避免验证预览与模态窗嵌套导致 UI 消息泵卡死
+                                Dispatcher.BeginInvoke(
+                                    ShowNinePointQcPopup,
+                                    System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                            }
                         }
                         else
                         {
-                            Dispatcher.Invoke(ShowNinePointQcPopup);
+                            if (!needDialog)
+                                Dispatcher.Invoke(ShowNinePointQcPopup);
+                            else
+                                Dispatcher.Invoke(() => StatusText.Text = brief);
                         }
                         AppendLog($"[九点标定质检] {brief}（详见弹窗报告）");
                         break;
