@@ -1464,7 +1464,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "calibrate",
                 DisplayName = "九点标定",
-                Description = "九点标定（像素→世界）。弹窗内可手选/确认对应，并对已选点拖拽、方向键或 X/Y 输入微调。连接 CalibrationJson 或填写 calibrationJsonFile 可输出系统整体误差。",
+                Description = "九点标定（像素→世界）。弹窗内可手选/确认对应，并对已选点拖拽、方向键或 X/Y 输入微调。ProbeWorldPts/探针世界点不参与标定，标定完成后反算其在图像上的像素位置。连接 CalibrationJson 或填写 calibrationJsonFile 可输出系统整体误差。",
                 Category = "标定",
                 Params =
                 {
@@ -1508,6 +1508,20 @@ namespace CalibOperatorCLI_Example
                     },
                     new OperatorParam
                     {
+                        Name = "probeWorldPointsFile",
+                        DisplayName = "探针世界坐标文件",
+                        DefaultValue = "",
+                        Description = "可选；不参与标定，仅用于标定完成后反算图像像素位置。格式同 worldPointsFile；相对路径相对当前 .flow.json"
+                    },
+                    new OperatorParam
+                    {
+                        Name = "probeWorldPoints",
+                        DisplayName = "探针世界坐标点",
+                        DefaultValue = "",
+                        Description = "可选；未填 probeWorldPointsFile 时使用。格式 x,y 每行或 x,y;...；可连接 ProbeWorldPts 端口覆盖"
+                    },
+                    new OperatorParam
+                    {
                         Name = "calibrationJsonFile",
                         DisplayName = "棋盘标定 JSON",
                         DefaultValue = "",
@@ -1518,10 +1532,13 @@ namespace CalibOperatorCLI_Example
                 {
                     new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "ImagePts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3", IsOptional = true },
+                    new PortDef { Name = "ProbeWorldPts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#FF4081", IsOptional = true },
                     new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
                     new PortDef { Name = "Transform", Direction = PortDirection.Output, DataType = typeof(AffineTransform), ColorHex = "#E91E63" },
                     new PortDef { Name = "ImagePts", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "WorldPts", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "ProbeWorldPts", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#FF4081" },
+                    new PortDef { Name = "ProbeImagePts", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#FF4081" },
                     new PortDef { Name = "Image", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "SystemErrorJson", Direction = PortDirection.Output, DataType = typeof(string), ColorHex = "#607D8B" }
                 }

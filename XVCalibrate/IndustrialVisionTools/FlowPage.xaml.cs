@@ -6285,7 +6285,7 @@ namespace CalibOperatorCLI_Example
 
         private static bool IsFlowRelativePathParam(string paramName) =>
             paramName is "filePath" or "directory" or "imageDirectory" or "innerFlowPath"
-                or "calibrationJsonFile" or "worldPointsFile" or "templatePath" or "debugDumpPrefix"
+                or "calibrationJsonFile" or "worldPointsFile" or "probeWorldPointsFile" or "templatePath" or "debugDumpPrefix"
                 or "uvProjectionSvg" or "encoderPath" or "decoderPath" or "owlv2OnnxPath" or "tokenizerPath"
                 or "scriptPath" or "launcherScript" or "checkpointPath" or "jitRepoRoot" or "weightsPath";
 
@@ -7159,6 +7159,26 @@ namespace CalibOperatorCLI_Example
             return points.ToArray();
         }
 
+        private static Point2D[] ParseOptionalWorldPointsParam(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return Array.Empty<Point2D>();
+
+            var parts = raw.Split(new[] { ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+            var points = new List<Point2D>(parts.Length);
+            foreach (var p in parts)
+            {
+                var xy = p.Trim().Split(',', StringSplitOptions.RemoveEmptyEntries);
+                if (xy.Length != 2 ||
+                    !double.TryParse(xy[0].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var x) ||
+                    !double.TryParse(xy[1].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+                    throw new InvalidOperationException($"探针世界坐标格式错误: '{p}'，应为 x,y");
+                points.Add(new Point2D(x, y));
+            }
+
+            return points.ToArray();
+        }
+
         private static bool NodeUsesCalibrateWorldPointParams(FlowNode node) =>
             node.Def.TypeId is "calibrate" or "calibrate_homography";
 
@@ -7196,12 +7216,36 @@ namespace CalibOperatorCLI_Example
             return CalibrationWorldPointsTransform.ApplyCalibrateWorldRowOrder(pts, rowOrder);
         }
 
+        /// <summary>探针世界点：不参与标定，仅用于标定后反算图像坐标。ProbeWorldPts 端口优先。</summary>
+        private Point2D[] ResolveProbeWorldPointsForNode(
+            FlowNode node,
+            Dictionary<string, object?> inputs,
+            string? flowBaseDir)
+        {
+            if (inputs.TryGetValue("ProbeWorldPts", out var probeObj) && probeObj is Point2D[] fromPort && fromPort.Length > 0)
+                return fromPort;
+
+            string? fileParam = node.Params.GetValueOrDefault("probeWorldPointsFile", "")?.Trim();
+            if (!string.IsNullOrWhiteSpace(fileParam))
+            {
+                string path = ResolveCompositeFlowPath(fileParam, flowBaseDir);
+                if (!System.IO.File.Exists(path))
+                    throw new System.IO.FileNotFoundException($"标定: 探针世界坐标文件不存在: {path}");
+                string content = System.IO.File.ReadAllText(path, Encoding.UTF8);
+                return ParseOptionalWorldPointsParam(content);
+            }
+
+            string raw = node.Params.GetValueOrDefault("probeWorldPoints", "") ?? "";
+            return ParseOptionalWorldPointsParam(raw);
+        }
+
         private Point2D[] ResolveCalibrateAlignedImagePoints(
             FlowNode node,
             Dictionary<string, object?> inputs,
             Point2D[] worldPts,
             CalibImage? calibImage,
-            string contextLabel)
+            string contextLabel,
+            Point2D[]? probeWorldPts = null)
         {
             var imagePts = inputs.TryGetValue("ImagePts", out var ipObj) ? ipObj as Point2D[] : null;
             bool manualPick = CalibrateUsesManualPixelPick(node);
@@ -7220,7 +7264,7 @@ namespace CalibOperatorCLI_Example
                 RunOnUiThread(() =>
                 {
                     var dlg = new NinePointCorrespondenceDialog(
-                        calibImage, imagePts, worldPts, owner, dialogManual);
+                        calibImage, imagePts, worldPts, owner, dialogManual, probeWorldPts);
                     accepted = dlg.ShowDialog() == true;
                     if (accepted == true)
                         confirmed = dlg.ResultImagePoints;
@@ -11332,13 +11376,14 @@ namespace CalibOperatorCLI_Example
                     {
                         var calibImage = inputs.TryGetValue("Image", out var imgObj) ? imgObj as CalibImage : null;
                         var worldPts = ResolveCalibrateWorldPointsForNode(node, inputs, compositeInnerFlowBaseDir);
+                        var probeWorldPts = ResolveProbeWorldPointsForNode(node, inputs, compositeInnerFlowBaseDir);
                         bool manualPick = CalibrateUsesManualPixelPick(node);
                         bool needDialog = CalibrateNeedsCorrespondenceDialog(
                             node,
                             inputs.TryGetValue("ImagePts", out var ipObj) ? ipObj as Point2D[] : null,
                             worldPts.Length);
                         Point2D[] alignedImagePts = ResolveCalibrateAlignedImagePoints(
-                            node, inputs, worldPts, calibImage, "标定");
+                            node, inputs, worldPts, calibImage, "标定", probeWorldPts);
 
                         // 标定计算与下游输出均使用配对后的像素（手选或确认后的 alignedImagePts[i] ↔ worldPts[i]）
                         var calResult = CalibAPI.CalibrateNinePoint(alignedImagePts, worldPts);
@@ -11349,6 +11394,14 @@ namespace CalibOperatorCLI_Example
                         node.Outputs["WorldPts"] = worldPts.ToArray();
                         if (calibImage != null)
                             node.Outputs["Image"] = calibImage;
+
+                        Point2D[] probeImagePts = Array.Empty<Point2D>();
+                        if (probeWorldPts.Length > 0)
+                        {
+                            probeImagePts = AffineWorldGridOverlay.ProjectWorldPoints(calResult.Transform, probeWorldPts);
+                            node.Outputs["ProbeWorldPts"] = probeWorldPts.ToArray();
+                            node.Outputs["ProbeImagePts"] = probeImagePts;
+                        }
 
                         var ninePtReport = NinePointCalibrationQuality.Analyze(
                             calResult.Transform,
@@ -11369,17 +11422,20 @@ namespace CalibOperatorCLI_Example
                         string verifyRaw = node.Params.GetValueOrDefault("showVerifyPreview", "true") ?? "true";
                         bool showVerify = !string.Equals(verifyRaw.Trim(), "false", StringComparison.OrdinalIgnoreCase)
                             && verifyRaw.Trim() != "0";
-                        if (showVerify && calibImage != null && !needDialog)
+                        if (showVerify && calibImage != null && (!needDialog || probeImagePts.Length > 0))
                         {
                             var previewTransform = calResult.Transform;
                             var previewWorld = worldPts;
+                            var previewProbeWorld = probeWorldPts;
                             ShowImagePreview(
                                 calibImage,
                                 alignedImagePts,
                                 6,
                                 null,
                                 node.Id.ToString("D"),
-                                $"九点标定 · 网格坐标系",
+                                probeImagePts.Length > 0
+                                    ? $"九点标定 · 网格坐标系 · 探针 {probeImagePts.Length} 点"
+                                    : $"九点标定 · 网格坐标系",
                                 null,
                                 "grid",
                                 null,
@@ -11388,12 +11444,16 @@ namespace CalibOperatorCLI_Example
                                     using var g = System.Drawing.Graphics.FromImage(bmp);
                                     AffineWorldGridOverlay.DrawOnGraphics(
                                         g, previewTransform, previewWorld, bmp.Width, bmp.Height, alignedImagePts);
+                                    AffineWorldGridOverlay.DrawProbeWorldPointsOnGraphics(
+                                        g, previewTransform, previewProbeWorld);
                                 });
                         }
 
                         string brief = NinePointCalibrationQuality.BuildBriefSummary(ninePtReport);
                         if (systemReport != null)
                             brief += " · " + SystemCalibrationQuality.BuildBriefSummary(systemReport);
+                        if (probeImagePts.Length > 0)
+                            brief += $" · 反算探针 {probeImagePts.Length} 点";
                         node.ResultSummary = needDialog
                             ? (manualPick
                                 ? $"标定 OK（{alignedImagePts.Length} 对点，手选像素 · {brief}）"
@@ -14895,7 +14955,8 @@ namespace CalibOperatorCLI_Example
                     cb.SelectedItem = param.Options.Contains(currentValue) ? currentValue : param.DefaultValue;
                     input = cb;
                 }
-                else if (param.Name == "worldPoints" && NodeUsesCalibrateWorldPointParams(node))
+                else if ((param.Name == "worldPoints" || param.Name == "probeWorldPoints")
+                    && (NodeUsesCalibrateWorldPointParams(node) || (param.Name == "probeWorldPoints" && node.Def.TypeId == "calibrate")))
                 {
                     input = new TextBox
                     {
@@ -15039,7 +15100,8 @@ namespace CalibOperatorCLI_Example
                             pathBox.Text = FormatPathForFlowParam(ofd.FileName);
                     };
                 }
-                else if (param.Name == "worldPointsFile" && NodeUsesCalibrateWorldPointParams(node))
+                else if ((param.Name == "worldPointsFile" || param.Name == "probeWorldPointsFile")
+                    && (NodeUsesCalibrateWorldPointParams(node) || (param.Name == "probeWorldPointsFile" && node.Def.TypeId == "calibrate")))
                 {
                     browseBtn = new Button
                     {
@@ -15052,7 +15114,9 @@ namespace CalibOperatorCLI_Example
                     {
                         var ofd = new OpenFileDialog
                         {
-                            Title = "选择世界坐标文本（点列转文本）",
+                            Title = param.Name == "probeWorldPointsFile"
+                                ? "选择探针世界坐标文本"
+                                : "选择世界坐标文本（点列转文本）",
                             Filter = "文本|*.txt;*.csv|所有文件|*.*"
                         };
                         if (ofd.ShowDialog() == true && input is TextBox pathBox)

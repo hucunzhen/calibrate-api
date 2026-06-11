@@ -34,6 +34,7 @@ namespace CalibOperatorCLI_Example
         private readonly CalibImage _image;
         private readonly Point2D[] _referenceImagePts;
         private readonly Point2D[] _worldPts;
+        private readonly Point2D[] _probeWorldPts;
         private readonly int _n;
         private readonly bool _manualPixelPick;
         private readonly Point2D?[] _pixelForWorld;
@@ -67,16 +68,19 @@ namespace CalibOperatorCLI_Example
 
         /// <param name="referenceImagePts">检测点（可选）；手选模式下仅作参考显示与按序自动初值。</param>
         /// <param name="manualPixelPick">true=在图像任意位置点击取像素；false=须点在检测圆心附近。</param>
+        /// <param name="probeWorldPts">探针世界点（可选）；不参与标定，实时反算并叠加显示为 P1…Pn。</param>
         public NinePointCorrespondenceDialog(
             CalibImage image,
             Point2D[]? referenceImagePts,
             Point2D[] worldPts,
             Window? owner,
-            bool manualPixelPick = true)
+            bool manualPixelPick = true,
+            Point2D[]? probeWorldPts = null)
         {
             _image = image ?? throw new ArgumentNullException(nameof(image));
             _referenceImagePts = referenceImagePts ?? Array.Empty<Point2D>();
             _worldPts = worldPts ?? throw new ArgumentNullException(nameof(worldPts));
+            _probeWorldPts = probeWorldPts ?? Array.Empty<Point2D>();
             _n = worldPts.Length;
             if (_n < 4)
                 throw new ArgumentException("标定至少需要 4 对世界/像素点");
@@ -124,7 +128,7 @@ namespace CalibOperatorCLI_Example
                 Orientation = Orientation.Horizontal,
                 Margin = new Thickness(8, 0, 8, 8)
             };
-            var btnAuto = new Button { Content = "按序自动", Width = 72, Margin = new Thickness(0, 0, 6, 0) };
+            var btnAuto = new Button { Content = "分行分列", Width = 72, Margin = new Thickness(0, 0, 6, 0) };
             var btnClear = new Button { Content = "清除", Width = 56, Margin = new Thickness(0, 0, 6, 0) };
             var btnUndo = new Button { Content = "撤销", Width = 56, Margin = new Thickness(0, 0, 6, 0) };
             btnAuto.Click += (_, _) => { ApplyBlXyAutoMapping(); RefreshAll(); };
@@ -337,7 +341,7 @@ namespace CalibOperatorCLI_Example
                   "浅蓝圆=检测参考；绿=已选；黄=当前。"
                 : "左侧选中世界点，在图像上点击检测圆心附近。\n" +
                   "已配对点可拖拽或方向键微调；至少 4 对后实时显示标定网格与误差。\n" +
-                  "绿=已配对，黄=当前，灰蓝=未配对。确认无误后点「确认完成」。";
+                  "默认按世界点分行分列匹配检测点（允许小幅偏差）。绿=已选，黄=当前，灰蓝=未配对；粉=P 探针反算点。确认无误后点「确认完成」。";
 
         private void UpdateHint()
         {
@@ -561,9 +565,10 @@ namespace CalibOperatorCLI_Example
                 calResult.AverageError,
                 calResult.MaxError);
             string brief = NinePointCalibrationQuality.BuildBriefSummary(report);
+            string probeHint = _probeWorldPts.Length > 0 ? $" · 探针 {_probeWorldPts.Length} 点已反算" : "";
             _txtLiveCal.Text = allAssigned
-                ? $"实时标定 · {brief}\n确认无误后点「确认完成」。"
-                : $"实时预览（{assigned}/{_n} 对）· {brief}";
+                ? $"实时标定 · {brief}{probeHint}\n确认无误后点「确认完成」。"
+                : $"实时预览（{assigned}/{_n} 对）· {brief}{probeHint}";
             _txtLiveCal.Foreground = report.Passed ? Brushes.LightGreen : Brushes.Salmon;
 
             RefreshGridLayer(calResult.Transform, allAssigned ? _worldPts : worldPts,
@@ -587,6 +592,7 @@ namespace CalibOperatorCLI_Example
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 AffineWorldGridOverlay.DrawOnGraphics(
                     g, transform, worldPts, _image.Width, _image.Height, imagePts);
+                AffineWorldGridOverlay.DrawProbeWorldPointsOnGraphics(g, transform, _probeWorldPts);
             }
 
             IntPtr hBitmap = overlayBmp.GetHbitmap();
@@ -726,26 +732,22 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>
-        /// 世界点与检测点按 bl_xy（左下原点、底行优先）一一对应。
-        /// 检测点若已由上游 HALCON bl_xy 排序，则等价于按数组下标直接配对。
+        /// 世界点与像素点分行、分列匹配（允许小幅检测偏差）；失败时回退 bl_xy 图像排序。
         /// </summary>
         private void ApplyBlXyAutoMapping()
         {
             if (_referenceImagePts.Length != _n)
             {
                 MessageBox.Show(this,
-                    $"按序自动需要 {_n} 个检测参考点，当前为 {_referenceImagePts.Length} 个。请手选或调整检测输出。",
-                    "按序自动", MessageBoxButton.OK, MessageBoxImage.Information);
+                    $"分行分列需要 {_n} 个检测参考点，当前为 {_referenceImagePts.Length} 个。请手选或调整检测输出。",
+                    "分行分列", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
             ClearAssignments();
-            double[] rows = _referenceImagePts.Select(p => p.Y).ToArray();
-            double[] cols = _referenceImagePts.Select(p => p.X).ToArray();
-            var (gridRows, gridCols) = CalibrationPointGrid.InferLayout(_n, _worldPts);
-            int[] imageOrder = NinePointPixelGridSort.SortIndices(_n, rows, cols, gridRows, gridCols);
+            int[] imageForWorld = NinePointGridCorrespondenceMatcher.Match(_worldPts, _referenceImagePts);
             for (int i = 0; i < _n; i++)
-                _pixelForWorld[i] = _referenceImagePts[imageOrder[i]];
+                _pixelForWorld[i] = _referenceImagePts[imageForWorld[i]];
         }
 
         private Point GetImagePointFromMouse(MouseEventArgs e)
@@ -987,15 +989,12 @@ namespace CalibOperatorCLI_Example
             if (_referenceImagePts.Length != _n)
                 return true;
 
-            double[] rows = _referenceImagePts.Select(p => p.Y).ToArray();
-            double[] cols = _referenceImagePts.Select(p => p.X).ToArray();
-            var (gridRows, gridCols) = CalibrationPointGrid.InferLayout(_n, _worldPts);
-            int[] imageOrder = NinePointPixelGridSort.SortIndices(_n, rows, cols, gridRows, gridCols);
+            int[] imageForWorld = NinePointGridCorrespondenceMatcher.Match(_worldPts, _referenceImagePts);
 
             int mismatches = 0;
             for (int i = 0; i < _n; i++)
             {
-                var expected = _referenceImagePts[imageOrder[i]];
+                var expected = _referenceImagePts[imageForWorld[i]];
                 var actual = _pixelForWorld[i]!.Value;
                 if (Math.Abs(expected.X - actual.X) > 1.5 || Math.Abs(expected.Y - actual.Y) > 1.5)
                     mismatches++;
@@ -1005,9 +1004,9 @@ namespace CalibOperatorCLI_Example
                 return true;
 
             var answer = MessageBox.Show(this,
-                $"检测到 {mismatches}/{_n} 个点的对应顺序与「按序自动」(bl_xy) 不一致。\n" +
+                $"检测到 {mismatches}/{_n} 个点的对应顺序与「按序自动」(分行分列) 不一致。\n" +
                 "若顺序选错，标定误差会很大且后续弹窗可能阻塞界面。\n\n" +
-                "建议点「否」后使用「按序自动」或逐点重新配对。\n\n仍要确定标定吗？",
+                "建议点「否」后使用「分行分列」或逐点重新配对。\n\n仍要确定标定吗？",
                 "顺序可能错误",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning,

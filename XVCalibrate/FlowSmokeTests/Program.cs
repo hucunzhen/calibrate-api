@@ -39,6 +39,12 @@ namespace FlowSmokeTests
                     Console.WriteLine("=== NinePointPixelGridSortSmokeTest ===");
                     return NinePointPixelGridSortSmokeTest.Run();
                 }
+
+                if (args[i] == "--nine-point-match")
+                {
+                    Console.WriteLine("=== NinePointGridCorrespondenceMatcherSmokeTest ===");
+                    return NinePointGridCorrespondenceMatcherSmokeTest.Run();
+                }
             }
 
             Console.WriteLine("=== FlowCalibrationSmokeTest ===");

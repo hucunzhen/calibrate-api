@@ -30,6 +30,43 @@ namespace CalibOperatorCLI_Example
                 : null;
         }
 
+        public static Point2D[] ProjectWorldPoints(in AffineTransform t, Point2D[] worldPts)
+        {
+            if (worldPts == null || worldPts.Length == 0)
+                return Array.Empty<Point2D>();
+
+            var result = new Point2D[worldPts.Length];
+            for (int i = 0; i < worldPts.Length; i++)
+            {
+                var p = WorldToImage(t, worldPts[i])
+                    ?? throw new InvalidOperationException(
+                        $"世界点 ({worldPts[i].X:G4}, {worldPts[i].Y:G4}) mm 无法反算到图像坐标");
+                result[i] = p;
+            }
+
+            return result;
+        }
+
+        public static void DrawProbeWorldPointsOnGraphics(Graphics g, in AffineTransform transform, Point2D[]? probeWorldPts)
+        {
+            if (probeWorldPts == null || probeWorldPts.Length == 0)
+                return;
+
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using var pen = new Pen(Color.FromArgb(220, 255, 105, 180), 2f);
+            using var fill = new SolidBrush(Color.FromArgb(80, 255, 105, 180));
+            using var labelBrush = new SolidBrush(Color.FromArgb(240, 255, 182, 193));
+            using var font = new Font("Segoe UI", 8f, FontStyle.Bold);
+            for (int i = 0; i < probeWorldPts.Length; i++)
+            {
+                if (!TryWorldToImage(transform, probeWorldPts[i].X, probeWorldPts[i].Y, out double px, out double py))
+                    continue;
+                g.FillEllipse(fill, (float)px - 5, (float)py - 5, 10, 10);
+                g.DrawEllipse(pen, (float)px - 5, (float)py - 5, 10, 10);
+                g.DrawString($"P{i + 1}", font, labelBrush, (float)px + 6, (float)py - 8);
+            }
+        }
+
         public static void DrawOnGraphics(
             Graphics g,
             in AffineTransform transform,
