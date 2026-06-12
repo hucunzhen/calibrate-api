@@ -3728,8 +3728,8 @@ namespace CalibOperatorCLI_Example
                     {
                         Name = "sortMode",
                         DisplayName = "排序方式",
-                        DefaultValue = "yx",
-                        Description = "bl_xy/nine=九点世界坐标序（左下原点 Y 向上，底行→顶行、行内左→右，PCA 抗小角度旋转）；yx=图像行Y向下顶行优先；xy=先列X再行Y；grid=按 GridRow/GridCol（须连接）；none=保持输入顺序",
+                        DefaultValue = "bl_xy",
+                        Description = "bl_xy/nine=九点/网格世界坐标序（左下原点 Y 向上，底行→顶行、行内左→右，PCA 抗小角度旋转，标定推荐）；yx=图像行Y向下顶行优先；xy=先列X再行Y；grid=按 GridRow/GridCol（须连接）；none=保持输入顺序",
                         Options = new List<string> { "bl_xy", "nine", "yx", "xy", "grid", "none" }
                     },
                     new OperatorParam

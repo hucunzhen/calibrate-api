@@ -7300,7 +7300,23 @@ namespace CalibOperatorCLI_Example
             if (imagePts.Length != worldPts.Length)
                 throw new InvalidOperationException(
                     $"{contextLabel}: 图像点 {imagePts.Length} 个，世界点 {worldPts.Length} 个，数量须一致（请调整 worldPoints/worldPointsFile 或检测数量）");
-            return imagePts;
+            return AlignImagePointsToWorldOrder(worldPts, imagePts, gridRows, gridCols, useProximityMatching);
+        }
+
+        /// <summary>检测点列按世界点顺序重排（分行分列或近邻配对），避免仅依赖上游 sortMode 顺序。</summary>
+        private static Point2D[] AlignImagePointsToWorldOrder(
+            Point2D[] worldPts,
+            Point2D[] imagePts,
+            int gridRows,
+            int gridCols,
+            bool useProximityMatching)
+        {
+            int[] map = NinePointGridCorrespondenceMatcher.Match(
+                worldPts, imagePts, gridRows, gridCols, useProximityMatching);
+            var aligned = new Point2D[worldPts.Length];
+            for (int i = 0; i < aligned.Length; i++)
+                aligned[i] = imagePts[map[i]];
+            return aligned;
         }
 
         private static bool HomographyTargetSpaceIsImage(string? targetSpace) =>

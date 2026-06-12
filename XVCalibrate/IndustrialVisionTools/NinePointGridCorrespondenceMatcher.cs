@@ -286,6 +286,15 @@ namespace CalibOperatorCLI_Example
 
         private static int[][] ClusterRows(double[] y, int gridRows)
         {
+            int n = y.Length;
+            // 大行数方阵：间距落格比「取最大间隙」更稳，避免 6×6 等场景错分行
+            if (gridRows >= 4 && n >= gridRows * gridRows)
+            {
+                var bands = AssignToPitchBands(y, gridRows);
+                if (bands.Length == gridRows && bands.All(c => c.Length > 0))
+                    return bands;
+            }
+
             var gap = ClusterIndicesByLargestGaps(y, gridRows);
             if (gap.Length == gridRows && gap.All(c => c.Length > 0))
                 return gap;

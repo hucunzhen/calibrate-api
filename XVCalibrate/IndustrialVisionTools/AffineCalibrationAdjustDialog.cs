@@ -22,6 +22,9 @@ namespace CalibOperatorCLI_Example
     /// </summary>
     public sealed class AffineCalibrationAdjustDialog : Window
     {
+        private const double MinViewScale = 0.05;
+        private const double MaxViewScale = 20;
+
         private readonly AffineTransform _source;
         private readonly CalibImage? _previewImage;
         private readonly Point2D[]? _worldPts;
@@ -33,10 +36,19 @@ namespace CalibOperatorCLI_Example
         private double _pivotX;
         private double _pivotY;
 
+        private readonly Border _viewHost;
+        private readonly System.Windows.Controls.Image _imgPreview;
+        private readonly ScaleTransform _viewScaleTransform = new ScaleTransform();
+        private readonly TranslateTransform _viewTranslate = new TranslateTransform();
+        private double _viewZoom = 1;
+        private double _viewPanX;
+        private double _viewPanY;
+        private bool _isPanning;
+        private Point _panStart;
+        private Point _lastPanOffset;
         private readonly TextBlock _txtSource;
         private readonly TextBlock _txtCurrent;
         private readonly TextBlock _txtDelta;
-        private readonly System.Windows.Controls.Image _imgPreview;
         private readonly TextBox _txtStepMm;
         private readonly TextBox _txtScaleStepPct;
         private readonly TextBox _txtPivotX;
@@ -206,7 +218,7 @@ namespace CalibOperatorCLI_Example
 
             left.Children.Add(new TextBlock
             {
-                Text = "快捷键：方向键平移 · Shift×10 · Ctrl×0.1",
+                Text = "快捷键：方向键平移 · Shift×10 · Ctrl×0.1\n预览：滚轮缩放 · 左键/右键拖动平移",
                 Foreground = System.Windows.Media.Brushes.Gray,
                 FontSize = 11,
                 Margin = new Thickness(0, 8, 0, 0),
@@ -219,22 +231,40 @@ namespace CalibOperatorCLI_Example
             Grid.SetColumn(right, 1);
             body.Children.Add(right);
 
-            _imgPreview = new System.Windows.Controls.Image
-            {
-                Stretch = Stretch.Uniform,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                VerticalAlignment = VerticalAlignment.Stretch
-            };
-            var previewBorder = new Border
+            _viewHost = new Border
             {
                 Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x12, 0x12, 0x12)),
                 BorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x44, 0x44, 0x44)),
                 BorderThickness = new Thickness(1),
-                Child = _imgPreview,
+                ClipToBounds = true,
+                Focusable = true,
                 Margin = new Thickness(0, 0, 0, 8)
             };
-            Grid.SetRow(previewBorder, 0);
-            right.Children.Add(previewBorder);
+            _viewHost.MouseWheel += ViewHost_MouseWheel;
+            _viewHost.MouseLeftButtonDown += ViewHost_MouseLeftButtonDown;
+            _viewHost.MouseLeftButtonUp += ViewHost_MouseLeftButtonUp;
+            _viewHost.PreviewMouseRightButtonDown += ViewHost_PreviewMouseRightButtonDown;
+            _viewHost.PreviewMouseRightButtonUp += ViewHost_PreviewMouseRightButtonUp;
+            _viewHost.MouseMove += ViewHost_MouseMove;
+
+            _imgPreview = new System.Windows.Controls.Image
+            {
+                Stretch = Stretch.None,
+                IsHitTestVisible = false
+            };
+
+            var canvasRoot = new Canvas
+            {
+                Background = System.Windows.Media.Brushes.Transparent,
+                RenderTransform = new TransformGroup
+                {
+                    Children = new TransformCollection { _viewScaleTransform, _viewTranslate }
+                }
+            };
+            canvasRoot.Children.Add(_imgPreview);
+            _viewHost.Child = canvasRoot;
+            Grid.SetRow(_viewHost, 0);
+            right.Children.Add(_viewHost);
 
             _txtSource = CreateInfoTextBlock();
             _txtSource.Text = _source.ToString();
@@ -273,7 +303,104 @@ namespace CalibOperatorCLI_Example
             root.Children.Add(bottom);
 
             Content = root;
-            Loaded += (_, _) => RefreshPreview();
+            Loaded += (_, _) =>
+            {
+                RefreshPreview();
+                Dispatcher.BeginInvoke(FitImageToView, System.Windows.Threading.DispatcherPriority.Loaded);
+            };
+        }
+
+        private void BeginPan(Point start)
+        {
+            _isPanning = true;
+            _panStart = start;
+            _lastPanOffset = new Point(_viewPanX, _viewPanY);
+            _viewHost.CaptureMouse();
+        }
+
+        private void EndPan()
+        {
+            if (!_isPanning)
+                return;
+            _isPanning = false;
+            _viewHost.ReleaseMouseCapture();
+        }
+
+        private void ViewHost_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            BeginPan(e.GetPosition(_viewHost));
+            e.Handled = true;
+        }
+
+        private void ViewHost_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            EndPan();
+        }
+
+        private void ViewHost_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (!_isPanning)
+                return;
+            var current = e.GetPosition(_viewHost);
+            _viewPanX = _lastPanOffset.X + (current.X - _panStart.X);
+            _viewPanY = _lastPanOffset.Y + (current.Y - _panStart.Y);
+            ApplyViewTransform();
+        }
+
+        private void ViewHost_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            BeginPan(e.GetPosition(_viewHost));
+            e.Handled = true;
+        }
+
+        private void ViewHost_PreviewMouseRightButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            EndPan();
+            e.Handled = true;
+        }
+
+        private void ViewHost_MouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            var mouseCanvas = e.GetPosition(_viewHost);
+            double factor = e.Delta > 0 ? 1.1 : 1.0 / 1.1;
+            double newScale = Math.Max(MinViewScale, Math.Min(MaxViewScale, _viewZoom * factor));
+            if (Math.Abs(newScale - _viewZoom) < 0.001)
+                return;
+
+            double parentX = _viewZoom * mouseCanvas.X + _viewPanX;
+            double parentY = _viewZoom * mouseCanvas.Y + _viewPanY;
+            _viewZoom = newScale;
+            _viewPanX = parentX - newScale * mouseCanvas.X;
+            _viewPanY = parentY - newScale * mouseCanvas.Y;
+            ApplyViewTransform();
+        }
+
+        private void FitImageToView()
+        {
+            if (_previewImage == null || _imgPreview.Source == null)
+                return;
+
+            double viewW = _viewHost.ActualWidth > 1 ? _viewHost.ActualWidth : 520;
+            double viewH = _viewHost.ActualHeight > 1 ? _viewHost.ActualHeight : 400;
+            double imgW = _previewImage.Width;
+            double imgH = _previewImage.Height;
+            if (imgW < 1 || imgH < 1)
+                return;
+
+            double fit = Math.Min(viewW / imgW, viewH / imgH) * 0.95;
+            fit = Math.Max(MinViewScale, Math.Min(MaxViewScale, fit));
+            _viewZoom = fit;
+            _viewPanX = (viewW - imgW * _viewZoom) / 2;
+            _viewPanY = (viewH - imgH * _viewZoom) / 2;
+            ApplyViewTransform();
+        }
+
+        private void ApplyViewTransform()
+        {
+            _viewScaleTransform.ScaleX = _viewZoom;
+            _viewScaleTransform.ScaleY = _viewZoom;
+            _viewTranslate.X = _viewPanX;
+            _viewTranslate.Y = _viewPanY;
         }
 
         private Grid BuildNudgePad()
@@ -457,6 +584,15 @@ namespace CalibOperatorCLI_Example
                     hBitmap, IntPtr.Zero, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
                 bitmapSource.Freeze();
                 _imgPreview.Source = bitmapSource;
+                _imgPreview.Width = drawBmp.Width;
+                _imgPreview.Height = drawBmp.Height;
+                if (_viewHost.Child is Canvas canvas)
+                {
+                    canvas.Width = drawBmp.Width;
+                    canvas.Height = drawBmp.Height;
+                }
+
+                ApplyViewTransform();
             }
             finally
             {
