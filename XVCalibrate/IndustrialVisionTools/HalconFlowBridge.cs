@@ -2481,6 +2481,55 @@ namespace CalibOperatorCLI_Example
             return (marginStart, marginExtent);
         }
 
+        /// <summary>解析变形轮廓输出选择：outer/inner/all/first；双轮廓建模时默认 outer。</summary>
+        public static string ResolveDeformedContourSelectFromParams(
+            IReadOnlyDictionary<string, string?>? paramBag,
+            string defaultSelect = "outer")
+        {
+            if (paramBag == null)
+                return defaultSelect;
+
+            static string Normalize(string? raw, string fallback)
+            {
+                if (string.IsNullOrWhiteSpace(raw))
+                    return fallback;
+                string mode = raw.Trim().ToLowerInvariant();
+                return mode is "outer" or "inner" or "all" or "first" ? mode : fallback;
+            }
+
+            if (paramBag.TryGetValue("deformedContourSelect", out string? primary) && !string.IsNullOrWhiteSpace(primary))
+                return Normalize(primary, defaultSelect);
+            if (paramBag.TryGetValue("deformedContourMode", out string? legacy) && !string.IsNullOrWhiteSpace(legacy))
+            {
+                string mode = legacy.Trim().ToLowerInvariant();
+                if (mode is "outer" or "inner" or "all" or "first")
+                    return mode;
+            }
+
+            return defaultSelect;
+        }
+
+        /// <summary>
+        /// FindLocal 的 deformation_smoothness；≤0 不传参；&lt;3 视为无效并忽略（HALCON 最小 3，典型 11）。
+        /// </summary>
+        public static double ResolveFineDeformationSmoothnessFromParams(
+            IReadOnlyDictionary<string, string?>? paramBag,
+            string primaryKey = "fineDeformationSmoothness",
+            string legacyKey = "deformationSmoothness")
+        {
+            if (TryParseFlowParamDouble(paramBag, primaryKey, out double v)
+                || TryParseFlowParamDouble(paramBag, legacyKey, out v))
+            {
+                if (double.IsNaN(v) || v <= 0)
+                    return 0;
+                if (v < 3)
+                    return 0;
+                return v;
+            }
+
+            return 0;
+        }
+
         /// <summary>
         /// FindShapeModel：在图像中查找形状模板（兼容旧签名，不返回 scale）。
         /// </summary>

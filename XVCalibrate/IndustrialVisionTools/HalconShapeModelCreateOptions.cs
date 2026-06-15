@@ -72,6 +72,12 @@ namespace CalibOperatorCLI_Example
         /// <summary>仅 ModelKind 为 Deformable/PlanarDeformable 时有效。</summary>
         public HalconDeformableModelSubtype DeformableSubtype { get; set; } = HalconDeformableModelSubtype.Local;
 
+        /// <summary>
+        /// FindLocalDeformableModel 的 GenParam deformation_smoothness（建模时不设置）。
+        /// 0=Find 时不传；有效值须为 ≥3 的整数（HALCON 典型 11）。
+        /// </summary>
+        public double DeformationSmoothness { get; set; } = 0;
+
         // —— 轮廓提取 ——
         public string GenContourMode { get; set; } = "border";
         public int MinContourPoints { get; set; } = 10;

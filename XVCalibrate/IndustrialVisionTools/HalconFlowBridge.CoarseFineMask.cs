@@ -1270,7 +1270,29 @@ namespace CalibOperatorCLI_Example
             return result;
         }
 
-        /// <summary>可变形模板（轮廓）：局部 或 平面未标定（透视）。</summary>
+        /// <summary>
+        /// FindLocalDeformableModel 用 GenParam deformation_smoothness（建模算子不支持此参数）。
+        /// HALCON 最小值 3，典型值 11；&lt;3 时不传，沿用 HALCON 默认。
+        /// </summary>
+        public const double DefaultDeformationSmoothness = 11.0;
+
+        private static (HTuple names, HTuple values) BuildDeformableFindSmoothnessGenParams(
+            long deformableModelId,
+            double smoothness)
+        {
+            if (deformableModelId >= 0
+                && HalconDeformableModelRegistry.GetSubtype(deformableModelId) != HalconDeformableModelSubtype.Local)
+                return (new HTuple(), new HTuple());
+
+            if (double.IsNaN(smoothness) || smoothness < 3)
+                return (new HTuple(), new HTuple());
+
+            int smoothInt = (int)Math.Round(smoothness);
+            if (smoothInt < 3)
+                return (new HTuple(), new HTuple());
+            return (new HTuple("deformation_smoothness"), new HTuple((long)smoothInt));
+        }
+
         public static long CreateDeformableModelFromXld(HalconXldContourBundle? xldBundle, HalconShapeModelCreateOptions opt)
         {
             HalconDeformableModelSubtype subtype = ResolveDeformableSubtype(opt);
@@ -1465,21 +1487,123 @@ namespace CalibOperatorCLI_Example
             return (row[0].D, col[0].D);
         }
 
-        private static Point2D[]? ProjectDeformableContourWithHomMat(HDeformableModel model, HTuple homMat, int level = 1)
+        private static Point2D[]? ProjectDeformableContourWithHomMat(HDeformableModel model, HTuple homMat, int level = 1) =>
+            ProjectDeformableContoursWithHomMat(model, homMat, "outer", level).FirstOrDefault();
+
+        private static List<Point2D[]> ProjectDeformableContoursWithHomMat(
+            HDeformableModel model,
+            HTuple homMat,
+            string deformedContourSelect,
+            int level = 1)
         {
             using HXLDCont modelXld = model.GetDeformableModelContours(level);
             if (!modelXld.IsInitialized() || modelXld.CountObj() == 0)
-                return null;
+                return new List<Point2D[]>();
             HOperatorSet.ProjectiveTransContourXld(modelXld, out HObject trans, homMat);
             try
             {
-                var list = ParseXldContArrayToContourList(new HXLDCont(trans), 1);
-                return list.Count > 0 && list[0].Length >= 2 ? list[0] : null;
+                var list = ParseXldContArrayToContourList(new HXLDCont(trans), 0);
+                return SelectDeformedContoursForOutput(list, deformedContourSelect);
             }
             finally
             {
                 trans.Dispose();
             }
+        }
+
+        private static List<Point2D[]> ExtractSelectedDeformedContoursFromXld(
+            HXLDCont? deformedContours,
+            string deformedContourSelect,
+            double coordOffsetRow,
+            double coordOffsetCol)
+        {
+            if (deformedContours == null || !deformedContours.IsInitialized() || deformedContours.CountObj() == 0)
+                return new List<Point2D[]>();
+
+            var list = ParseXldContArrayToContourList(deformedContours, 0);
+            var selected = SelectDeformedContoursForOutput(list, deformedContourSelect);
+            var result = new List<Point2D[]>(selected.Count);
+            foreach (Point2D[] c in selected)
+            {
+                if (c.Length >= 2)
+                    result.Add(OffsetContourToFullImage(c, coordOffsetRow, coordOffsetCol));
+            }
+
+            return result;
+        }
+
+        /// <summary>双轮廓建模时 HALCON 返回多条变形轮廓；按模式筛选输出（匹配仍用全部轮廓）。</summary>
+        private static List<Point2D[]> SelectDeformedContoursForOutput(
+            IReadOnlyList<Point2D[]> contours,
+            string selectMode)
+        {
+            var valid = contours.Where(c => c != null && c.Length >= 2).ToList();
+            if (valid.Count == 0)
+                return new List<Point2D[]>();
+
+            string mode = string.IsNullOrWhiteSpace(selectMode) ? "outer" : selectMode.Trim().ToLowerInvariant();
+            switch (mode)
+            {
+                case "all":
+                    return valid;
+                case "inner":
+                    if (valid.Count == 1)
+                        return valid;
+                    if (AreShapeModelContoursNested(valid))
+                    {
+                        int outerIdx = FindLargestSignedAreaContourIndex(valid);
+                        for (int i = 0; i < valid.Count; i++)
+                        {
+                            if (i == outerIdx)
+                                continue;
+                            if (IsContourMostlyInsideOther(valid[i], valid[outerIdx]))
+                                return new List<Point2D[]> { valid[i] };
+                        }
+                    }
+
+                    return new List<Point2D[]> { valid[FindSmallestSignedAreaContourIndex(valid)] };
+                case "first":
+                    return new List<Point2D[]> { valid[0] };
+                case "outer":
+                default:
+                    if (valid.Count == 1)
+                        return valid;
+                    return new List<Point2D[]> { valid[FindLargestSignedAreaContourIndex(valid)] };
+            }
+        }
+
+        private static int FindLargestSignedAreaContourIndex(IReadOnlyList<Point2D[]> contours)
+        {
+            int best = 0;
+            double bestArea = 0;
+            for (int i = 0; i < contours.Count; i++)
+            {
+                double area = Math.Abs(ShapeContourSignedArea(contours[i]));
+                if (area > bestArea)
+                {
+                    bestArea = area;
+                    best = i;
+                }
+            }
+
+            return best;
+        }
+
+        private static int FindSmallestSignedAreaContourIndex(IReadOnlyList<Point2D[]> contours)
+        {
+            int best = 0;
+            double bestArea = double.MaxValue;
+            for (int i = 0; i < contours.Count; i++)
+            {
+                double area = Math.Abs(ShapeContourSignedArea(contours[i]));
+                if (area > 0 && area < bestArea)
+                {
+                    bestArea = area;
+                    best = i;
+                }
+            }
+
+            return best;
         }
 
         private static void FindPlanarUncalibOnImage(
@@ -1551,6 +1675,7 @@ namespace CalibOperatorCLI_Example
 
                 HTuple score, row, column;
                 int findLevels = numLevels > 0 ? numLevels : 4;
+                var (smoothGpName, smoothGpVal) = BuildDeformableFindSmoothnessGenParams(modelId, scaleOpt?.DeformationSmoothness ?? 0);
                 model.FindLocalDeformableModel(
                     hImg,
                     out HImage? vectorField,
@@ -1567,8 +1692,8 @@ namespace CalibOperatorCLI_Example
                     findLevels,
                     greediness,
                     new HTuple("deformed_contours"),
-                    new HTuple(),
-                    new HTuple(),
+                    smoothGpName,
+                    smoothGpVal,
                     out score,
                     out row,
                     out column);
@@ -2310,7 +2435,9 @@ namespace CalibOperatorCLI_Example
             double fineEndScoreWeight = 0,
             double fineEndArcFraction = DefaultEndArcFraction,
             double angleSearchCenterDeg = double.NaN,
-            double angleSearchMarginDeg = double.NaN)
+            double angleSearchMarginDeg = double.NaN,
+            double fineDeformationSmoothness = 0,
+            string deformedContourSelect = "outer")
         {
             if (domainImg == null)
                 throw new ArgumentNullException(nameof(domainImg));
@@ -2326,30 +2453,32 @@ namespace CalibOperatorCLI_Example
             var scaleOpt = new HalconShapeModelCreateOptions
             {
                 ScaleMin = fineScaleMin,
-                ScaleMax = fineScaleMax
+                ScaleMax = fineScaleMax,
+                DeformationSmoothness = fineDeformationSmoothness
             };
 
             if (!TryFineMatchSingleDomainImage(
                     domainImg, deformableModelId, anchorRow, anchorCol, poseAngleDeg,
                     fineAngleMarginDeg, fineMinScore, fineNumLevels, fineGreediness, scaleOpt,
                     wantDeformed, fineAllowFallback, roiMarginPx, maxRoiHalfPx, fullImage,
-                    out double row, out double col, out double ang, out double score, out Point2D[]? contour,
-                    angleSearchCenterDeg, angleSearchMarginDeg))
+                    out double row, out double col, out double ang, out double score, out List<Point2D[]>? contours,
+                    angleSearchCenterDeg, angleSearchMarginDeg, deformedContourSelect))
                 return HalconCoarseFineMatchResult.Empty;
 
+            Point2D[]? primaryContour = contours is { Count: > 0 } ? contours[0] : null;
             CalibImage scoreImg = fullImage ?? domainImg;
             score = ApplyFineMatchEndScoreWeight(
-                scoreImg, rigidModelId, deformableModelId, contour, row, col, ang, score,
+                scoreImg, rigidModelId, deformableModelId, primaryContour, row, col, ang, score,
                 fineEndScoreWeight, fineEndArcFraction);
 
             int xldW = fullImage?.Width ?? domainImg.Width;
             int xldH = fullImage?.Height ?? domainImg.Height;
-            HalconXldContourBundle? xld = contour != null && contour.Length >= 2
+            HalconXldContourBundle? xld = contours is { Count: > 0 }
                 ? new HalconXldContourBundle
                 {
                     Width = xldW,
                     Height = xldH,
-                    Contours = new List<Point2D[]> { contour }
+                    Contours = contours
                 }
                 : null;
 
@@ -2400,15 +2529,15 @@ namespace CalibOperatorCLI_Example
                         new HalconShapeModelCreateOptions { ScaleMin = 0.97, ScaleMax = 1.03 },
                         wantDeformed: true, fineAllowFallback: false, roiMarginPx: 12, maxRoiHalfPx: 120,
                         null,
-                        out double row, out double col, out double ang, out double score, out Point2D[]? contour))
+                        out double row, out double col, out double ang, out double score, out List<Point2D[]>? contourList))
                     continue;
 
                 fineRows.Add(row);
                 fineCols.Add(col);
                 fineAngles.Add(ang);
                 fineScores.Add(score);
-                if (contour != null && contour.Length >= 2)
-                    contours.Add(contour);
+                if (contourList != null)
+                    contours.AddRange(contourList.Where(c => c.Length >= 2));
             }
 
             HalconXldContourBundle? xld = contours.Count > 0
@@ -2484,15 +2613,15 @@ namespace CalibOperatorCLI_Example
                             wantDeformed: true, fineAllowFallback: false, roiMarginPx: 12,
                             maxRoiHalfPx: 120,
                             null,
-                            out double row, out double col, out double ang, out double score, out Point2D[]? contour))
+                            out double row, out double col, out double ang, out double score, out List<Point2D[]>? contourList))
                         continue;
 
                     fineRows.Add(row);
                     fineCols.Add(col);
                     fineAngles.Add(ang);
                     fineScores.Add(score);
-                    if (contour != null && contour.Length >= 2)
-                        contours.Add(contour);
+                    if (contourList != null)
+                        contours.AddRange(contourList.Where(c => c.Length >= 2));
                 }
                 finally
                 {
@@ -2580,12 +2709,13 @@ namespace CalibOperatorCLI_Example
             out double fineCol,
             out double fineAngleDeg,
             out double fineScore,
-            out Point2D[]? deformedContour,
+            out List<Point2D[]>? deformedContours,
             double angleSearchCenterDeg = double.NaN,
-            double angleSearchMarginDeg = double.NaN)
+            double angleSearchMarginDeg = double.NaN,
+            string deformedContourSelect = "outer")
         {
             fineRow = fineCol = fineAngleDeg = fineScore = 0;
-            deformedContour = null;
+            deformedContours = null;
 
             double searchCenter = double.IsNaN(angleSearchCenterDeg) ? poseAngleDeg : angleSearchCenterDeg;
             double searchMargin = double.IsNaN(angleSearchMarginDeg)
@@ -2615,8 +2745,8 @@ namespace CalibOperatorCLI_Example
                                         hFull, deformableModelId, anchorRow, anchorCol, poseAngleDeg,
                                         halfR, halfC, searchMargin, fineMinScore, fineNumLevels, fineGreediness,
                                         scaleOpt, wantDeformed, fineAllowFallback,
-                                        out fineRow, out fineCol, out fineScore, out deformedContour,
-                                        searchCenter, searchMargin))
+                                        out fineRow, out fineCol, out fineScore, out deformedContours,
+                                        searchCenter, searchMargin, deformedContourSelect))
                                 {
                                     fineAngleDeg = searchCenter;
                                     return true;
@@ -2648,8 +2778,8 @@ namespace CalibOperatorCLI_Example
                                 searchImg, deformableModelId, anchorRow, anchorCol, poseAngleDeg,
                                 searchMargin, fineMinScore, fineNumLevels, fineGreediness,
                                 scaleOpt, wantDeformed, fineAllowFallback, cropRow1, cropCol1,
-                                out fineRow, out fineCol, out fineScore, out deformedContour,
-                                searchCenter))
+                                out fineRow, out fineCol, out fineScore, out deformedContours,
+                                searchCenter, deformedContourSelect))
                             return false;
 
                         fineAngleDeg = searchCenter;
@@ -2874,7 +3004,9 @@ namespace CalibOperatorCLI_Example
             double endScoreWeight = DefaultEndScoreWeight,
             double endArcFraction = DefaultEndArcFraction,
             double fineAngleRelativeStartDeg = double.NaN,
-            double fineAngleRelativeExtentDeg = double.NaN)
+            double fineAngleRelativeExtentDeg = double.NaN,
+            double fineDeformationSmoothness = 0,
+            string deformedContourSelect = "outer")
         {
             if (coarseRows == null || coarseCols == null || coarseAngles == null
                 || coarseRows.Length == 0 || coarseRows.Length != coarseCols.Length || coarseRows.Length != coarseAngles.Length)
@@ -2901,7 +3033,8 @@ namespace CalibOperatorCLI_Example
             var scaleOpt = new HalconShapeModelCreateOptions
             {
                 ScaleMin = fineScaleMin,
-                ScaleMax = fineScaleMax
+                ScaleMax = fineScaleMax,
+                DeformationSmoothness = fineDeformationSmoothness
             };
 
             var fineRows = new List<double>(processCount);
@@ -2934,6 +3067,7 @@ namespace CalibOperatorCLI_Example
                         cAng, fineAngleRelativeStartDeg, fineAngleRelativeExtentDeg);
 
                     double fRow = 0, fCol = 0, fAng = 0, fScore = 0;
+                    List<Point2D[]>? deformedList = null;
                     Point2D[]? deformed = null;
                     bool matched = false;
 
@@ -2949,8 +3083,8 @@ namespace CalibOperatorCLI_Example
                                 fineSearchMargin, fineMinScore, fineNumLevels, fineGreediness, scaleOpt,
                                 wantDeformed, fineAllowFallback, roiMarginPx, maxRoiHalfPx,
                                 null,
-                                out fRow, out fCol, out fAng, out fScore, out deformed,
-                                fineSearchCenter, fineSearchMargin);
+                                out fRow, out fCol, out fAng, out fScore, out deformedList,
+                                fineSearchCenter, fineSearchMargin, deformedContourSelect);
                         }
                         finally
                         {
@@ -2968,8 +3102,8 @@ namespace CalibOperatorCLI_Example
                                 cRow, cCol, cAng, halfLenRow, halfLenCol,
                                 fineSearchMargin, fineMinScore, fineNumLevels, fineGreediness, scaleOpt,
                                 wantDeformed, fineAllowFallback, rigidContourFallback,
-                                out fRow, out fCol, out fAng, out fScore, out deformed,
-                                fineSearchCenter, fineSearchMargin);
+                                out fRow, out fCol, out fAng, out fScore, out deformedList,
+                                fineSearchCenter, fineSearchMargin, deformedContourSelect);
                         }
                         finally
                         {
@@ -2991,17 +3125,23 @@ namespace CalibOperatorCLI_Example
                                 deformed = TryExtractDeformableContourAtPose(
                                     hFull, deformableModelId, fRow, fCol, fAng,
                                     halfLenRow, halfLenCol, fineSearchMargin, fineMinScore,
-                                    fineNumLevels, fineGreediness, scaleOpt);
-                                if (deformed == null && rigidContourFallback)
+                                    fineNumLevels, fineGreediness, scaleOpt, deformedContourSelect);
+                                if (deformed != null)
+                                    deformedList = new List<Point2D[]> { deformed };
+                                else if (rigidContourFallback)
+                                {
                                     deformed = BuildShapeModelContourAtPose(rigidModelId, fRow, fCol, fAng);
+                                    if (deformed != null)
+                                        deformedList = new List<Point2D[]> { deformed };
+                                }
                             }
                         }
                         else if (!TryFindDeformableNearPose(
                                 hFull, deformableModelId, cRow, cCol, cAng,
                                 halfLenRow, halfLenCol, fineSearchMargin,
                                 fineMinScore, fineNumLevels, fineGreediness, scaleOpt, wantDeformed, fineAllowFallback,
-                                out fRow, out fCol, out fScore, out deformed,
-                                fineSearchCenter, fineSearchMargin))
+                                out fRow, out fCol, out fScore, out deformedList,
+                                fineSearchCenter, fineSearchMargin, deformedContourSelect))
                         {
                             continue;
                         }
@@ -3015,6 +3155,7 @@ namespace CalibOperatorCLI_Example
                     if (!matched)
                         continue;
 
+                    deformed = deformedList is { Count: > 0 } ? deformedList[0] : null;
                     if (deformed != null)
                         deformedEmitted = true;
 
@@ -3029,8 +3170,11 @@ namespace CalibOperatorCLI_Example
                     fineCols.Add(fCol);
                     fineAngles.Add(fAng);
                     fineScores.Add(fScore);
-                    if (deformed != null && deformed.Length >= 2)
-                        deformedContours.Add(deformed);
+                    if (deformedList != null)
+                    {
+                        foreach (Point2D[] c in deformedList.Where(c => c.Length >= 2))
+                            deformedContours.Add(c);
+                    }
                 }
             }
             finally
@@ -3098,7 +3242,9 @@ namespace CalibOperatorCLI_Example
             double fineEndScoreWeight = double.NaN,
             double fineEndArcFraction = double.NaN,
             double fineAngleRelativeStartDeg = double.NaN,
-            double fineAngleRelativeExtentDeg = double.NaN)
+            double fineAngleRelativeExtentDeg = double.NaN,
+            double fineDeformationSmoothness = 0,
+            string deformedContourSelect = "outer")
         {
             double fineWeight = double.IsNaN(fineEndScoreWeight) ? endScoreWeight : fineEndScoreWeight;
             double fineArc = double.IsNaN(fineEndArcFraction) ? endArcFraction : fineEndArcFraction;
@@ -3125,7 +3271,9 @@ namespace CalibOperatorCLI_Example
                 fineAllowFallback, rigidContourFallback,
                 endScoreWeight: fineWeight, endArcFraction: fineArc,
                 fineAngleRelativeStartDeg: fineAngleRelativeStartDeg,
-                fineAngleRelativeExtentDeg: fineAngleRelativeExtentDeg);
+                fineAngleRelativeExtentDeg: fineAngleRelativeExtentDeg,
+                fineDeformationSmoothness: fineDeformationSmoothness,
+                deformedContourSelect: deformedContourSelect);
         }
 
         /// <summary>由粗位姿与刚性模板估计精匹配旋转矩形 ROI 半长（行/列方向，像素）。</summary>
@@ -3354,12 +3502,13 @@ namespace CalibOperatorCLI_Example
             out double fineCol,
             out double fineAngleDeg,
             out double fineScore,
-            out Point2D[]? deformedContour,
+            out List<Point2D[]>? deformedContours,
             double angleSearchCenterDeg = double.NaN,
-            double angleSearchMarginDeg = double.NaN)
+            double angleSearchMarginDeg = double.NaN,
+            string deformedContourSelect = "outer")
         {
             fineRow = fineCol = fineAngleDeg = fineScore = 0;
-            deformedContour = null;
+            deformedContours = null;
 
             if (!TryReduceDomainImage(hFullGray, maskRegion, out HImage hMasked))
                 return false;
@@ -3371,8 +3520,8 @@ namespace CalibOperatorCLI_Example
                     coarseRow, coarseCol, poseAngleDeg,
                     fineAngleMarginDeg, fineMinScore, fineNumLevels, fineGreediness, scaleOpt,
                     wantDeformed, fineAllowFallback, rigidContourFallback,
-                    out fineRow, out fineCol, out fineAngleDeg, out fineScore, out deformedContour,
-                    angleSearchCenterDeg, angleSearchMarginDeg);
+                    out fineRow, out fineCol, out fineAngleDeg, out fineScore, out deformedContours,
+                    angleSearchCenterDeg, angleSearchMarginDeg, deformedContourSelect);
             }
             finally
             {
@@ -3400,12 +3549,13 @@ namespace CalibOperatorCLI_Example
             out double fineCol,
             out double fineAngleDeg,
             out double fineScore,
-            out Point2D[]? deformedContour,
+            out List<Point2D[]>? deformedContours,
             double angleSearchCenterDeg = double.NaN,
-            double angleSearchMarginDeg = double.NaN)
+            double angleSearchMarginDeg = double.NaN,
+            string deformedContourSelect = "outer")
         {
             fineRow = fineCol = fineAngleDeg = fineScore = 0;
-            deformedContour = null;
+            deformedContours = null;
 
             double searchCenter = double.IsNaN(angleSearchCenterDeg) ? poseAngleDeg : angleSearchCenterDeg;
             double searchMargin = double.IsNaN(angleSearchMarginDeg)
@@ -3419,11 +3569,15 @@ namespace CalibOperatorCLI_Example
             {
                 if (wantDeformed)
                 {
-                    deformedContour = TryExtractDeformableContourInMaskedImage(
+                    deformedContours = TryExtractDeformableContoursInMaskedImage(
                         hMasked, deformableModelId, coarseRow, coarseCol, searchCenter,
-                        searchMargin, fineMinScore, fineNumLevels, fineGreediness, scaleOpt);
-                    if (deformedContour == null && rigidContourFallback)
-                        deformedContour = BuildShapeModelContourAtPose(rigidModelId, fineRow, fineCol, fineAngleDeg);
+                        searchMargin, fineMinScore, fineNumLevels, fineGreediness, scaleOpt, deformedContourSelect);
+                    if ((deformedContours == null || deformedContours.Count == 0) && rigidContourFallback)
+                    {
+                        Point2D[]? fallback = BuildShapeModelContourAtPose(rigidModelId, fineRow, fineCol, fineAngleDeg);
+                        if (fallback != null)
+                            deformedContours = new List<Point2D[]> { fallback };
+                    }
                 }
                 return true;
             }
@@ -3432,8 +3586,8 @@ namespace CalibOperatorCLI_Example
                     hMasked, deformableModelId, coarseRow, coarseCol, poseAngleDeg,
                     searchMargin, fineMinScore, fineNumLevels, fineGreediness,
                     scaleOpt, wantDeformed, fineAllowFallback, 0, 0,
-                    out fineRow, out fineCol, out fineScore, out deformedContour,
-                    searchCenter))
+                    out fineRow, out fineCol, out fineScore, out deformedContours,
+                    searchCenter, deformedContourSelect))
                 return false;
 
             fineAngleDeg = searchCenter;
@@ -3504,8 +3658,9 @@ namespace CalibOperatorCLI_Example
             out double fineRow,
             out double fineCol,
             out double fineScore,
-            out Point2D[]? deformedContour,
-            double angleSearchCenterDeg = double.NaN)
+            out List<Point2D[]>? deformedContours,
+            double angleSearchCenterDeg = double.NaN,
+            string deformedContourSelect = "outer")
         {
             double marginDeg = Math.Max(3.0, fineAngleMarginDeg);
             double searchAngleDeg = double.IsNaN(angleSearchCenterDeg) ? poseAngleDeg : angleSearchCenterDeg;
@@ -3518,7 +3673,8 @@ namespace CalibOperatorCLI_Example
                     hMasked, deformableModelId, coarseRow, coarseCol, searchAngleDeg,
                     marginDeg, fineMinScore, fineNumLevels, fineGreediness, scaleOpt,
                     crop, wantDeformed, coordOffsetRow, coordOffsetCol,
-                    out fineRow, out fineCol, out fineScore, out deformedContour))
+                    out fineRow, out fineCol, out fineScore, out deformedContours,
+                    deformedContourSelect))
                 return true;
 
             if (!fineAllowFallback)
@@ -3531,10 +3687,11 @@ namespace CalibOperatorCLI_Example
                 hMasked, deformableModelId, coarseRow, coarseCol, searchAngleDeg,
                 retryMargin, retryScore, fineNumLevels, retryGreed, scaleOpt,
                 crop, wantDeformed, coordOffsetRow, coordOffsetCol,
-                out fineRow, out fineCol, out fineScore, out deformedContour);
+                out fineRow, out fineCol, out fineScore, out deformedContours,
+                deformedContourSelect);
         }
 
-        private static Point2D[]? TryExtractDeformableContourInMaskedImage(
+        private static List<Point2D[]>? TryExtractDeformableContoursInMaskedImage(
             HImage hMasked,
             long deformableModelId,
             double anchorRow,
@@ -3544,7 +3701,8 @@ namespace CalibOperatorCLI_Example
             double minScore,
             int fineNumLevels,
             double greediness,
-            HalconShapeModelCreateOptions scaleOpt)
+            HalconShapeModelCreateOptions scaleOpt,
+            string deformedContourSelect = "outer")
         {
             HalconDeformableModelSubtype subtype = HalconDeformableModelRegistry.GetSubtype(deformableModelId);
             double marginDeg = Math.Max(3.0, angleMarginDeg);
@@ -3557,8 +3715,9 @@ namespace CalibOperatorCLI_Example
                     hMasked, deformableModelId, anchorRow, anchorCol, anchorAngleDeg,
                     marginDeg, contourMinScore, fineNumLevels, greediness, scaleOpt,
                     crop, includeDeformedContours: true, 0, 0,
-                    out double dRow, out double dCol, out _, out Point2D[]? contour)
-                && contour != null && contour.Length >= 2)
+                    out double dRow, out double dCol, out _, out List<Point2D[]>? contour,
+                    deformedContourSelect)
+                && contour != null && contour.Count > 0)
             {
                 double dr = dRow - anchorRow;
                 double dc = dCol - anchorCol;
@@ -3568,6 +3727,23 @@ namespace CalibOperatorCLI_Example
 
             return null;
         }
+
+        private static Point2D[]? TryExtractDeformableContourInMaskedImage(
+            HImage hMasked,
+            long deformableModelId,
+            double anchorRow,
+            double anchorCol,
+            double anchorAngleDeg,
+            double angleMarginDeg,
+            double minScore,
+            int fineNumLevels,
+            double greediness,
+            HalconShapeModelCreateOptions scaleOpt,
+            string deformedContourSelect = "outer") =>
+            TryExtractDeformableContoursInMaskedImage(
+                hMasked, deformableModelId, anchorRow, anchorCol, anchorAngleDeg,
+                angleMarginDeg, minScore, fineNumLevels, greediness, scaleOpt, deformedContourSelect)
+                ?.FirstOrDefault();
 
         private const double FineFixedPositionRoiHalfPx = 3.0;
 
@@ -4174,7 +4350,8 @@ namespace CalibOperatorCLI_Example
             double minScore,
             int fineNumLevels,
             double greediness,
-            HalconShapeModelCreateOptions scaleOpt)
+            HalconShapeModelCreateOptions scaleOpt,
+            string deformedContourSelect = "outer")
         {
             HalconDeformableModelSubtype subtype = HalconDeformableModelRegistry.GetSubtype(deformableModelId);
             double halfSq = Math.Max(halfLenRow, halfLenCol);
@@ -4190,14 +4367,19 @@ namespace CalibOperatorCLI_Example
                     hFullGray, deformableModelId, anchorRow, anchorCol, anchorAngleDeg,
                     halfSq, halfSq, marginDeg, contourMinScore, levels, greediness, scaleOpt,
                     crop, includeDeformedContours: true,
-                    out double dRow, out double dCol, out _, out Point2D[]? contour)
-                && contour != null && contour.Length >= 2)
+                    out double dRow, out double dCol, out _, out List<Point2D[]>? contours,
+                    anchorAngleDeg, deformedContourSelect)
+                && contours is { Count: > 0 })
             {
-                double dr = dRow - anchorRow;
-                double dc = dCol - anchorCol;
-                double maxDrift = Math.Max(32, halfSq * 0.95);
-                if (dr * dr + dc * dc <= maxDrift * maxDrift)
-                    return contour;
+                Point2D[]? contour = contours[0];
+                if (contour != null && contour.Length >= 2)
+                {
+                    double dr = dRow - anchorRow;
+                    double dc = dCol - anchorCol;
+                    double maxDrift = Math.Max(32, halfSq * 0.95);
+                    if (dr * dr + dc * dc <= maxDrift * maxDrift)
+                        return contour;
+                }
             }
 
             if (subtype == HalconDeformableModelSubtype.PlanarUncalib
@@ -4205,9 +4387,10 @@ namespace CalibOperatorCLI_Example
                     hFullGray, deformableModelId, anchorRow, anchorCol, anchorAngleDeg,
                     halfSq, halfSq, marginDeg, contourMinScore, levels, greediness, scaleOpt,
                     FineRoiCropMode.CropRectangle2, includeDeformedContours: true,
-                    out _, out _, out _, out contour)
-                && contour != null && contour.Length >= 2)
-                return contour;
+                    out _, out _, out _, out List<Point2D[]>? retryContours,
+                    anchorAngleDeg, deformedContourSelect)
+                && retryContours is { Count: > 0 })
+                return retryContours[0];
 
             return null;
         }
@@ -4242,12 +4425,13 @@ namespace CalibOperatorCLI_Example
             out double fineRow,
             out double fineCol,
             out double fineScore,
-            out Point2D[]? deformedContour,
+            out List<Point2D[]>? deformedContours,
             double angleSearchCenterDeg = double.NaN,
-            double angleSearchMarginDeg = double.NaN)
+            double angleSearchMarginDeg = double.NaN,
+            string deformedContourSelect = "outer")
         {
             fineRow = fineCol = fineScore = 0;
-            deformedContour = null;
+            deformedContours = null;
 
             int findLevels = ClampFineRoiFindLevels(deformableModelId, fineNumLevels);
             double marginDeg = double.IsNaN(angleSearchMarginDeg)
@@ -4263,15 +4447,15 @@ namespace CalibOperatorCLI_Example
                         hFullGray, deformableModelId, coarseRow, coarseCol, poseAngleDeg,
                         halfSq, halfSq, marginDeg, fineMinScore, findLevels, fineGreediness, scaleOpt,
                         FineRoiCropMode.CropRectangle2AlignAxis, includeDeformedContours,
-                        out fineRow, out fineCol, out fineScore, out deformedContour,
-                        searchCenter))
+                        out fineRow, out fineCol, out fineScore, out deformedContours,
+                        searchCenter, deformedContourSelect))
                     return true;
 
                 if (TryLocalDeformableFineInRoi(
                         hFullGray, deformableModelId, coarseRow, coarseCol, poseAngleDeg,
                         halfSq, halfSq, marginDeg, fineMinScore, findLevels, fineGreediness, scaleOpt,
                         includeDeformedContours,
-                        out fineRow, out fineCol, out fineScore, out deformedContour,
+                        out fineRow, out fineCol, out fineScore, out deformedContours,
                         searchCenter))
                     return true;
             }
@@ -4279,8 +4463,8 @@ namespace CalibOperatorCLI_Example
                     hFullGray, deformableModelId, coarseRow, coarseCol, poseAngleDeg,
                     halfSq, halfSq, marginDeg, fineMinScore, findLevels, fineGreediness, scaleOpt,
                     FineRoiCropMode.CropRectangle2, includeDeformedContours,
-                    out fineRow, out fineCol, out fineScore, out deformedContour,
-                    searchCenter))
+                    out fineRow, out fineCol, out fineScore, out deformedContours,
+                    searchCenter, deformedContourSelect))
             {
                 return true;
             }
@@ -4298,8 +4482,8 @@ namespace CalibOperatorCLI_Example
                 hFullGray, deformableModelId, coarseRow, coarseCol, poseAngleDeg,
                 halfSq, halfSq, retryMargin, retryScore, findLevels, retryGreed, scaleOpt,
                 retryCrop, includeDeformedContours,
-                out fineRow, out fineCol, out fineScore, out deformedContour,
-                searchCenter);
+                out fineRow, out fineCol, out fineScore, out deformedContours,
+                searchCenter, deformedContourSelect);
         }
 
         private enum FineRoiCropMode
@@ -4371,11 +4555,12 @@ namespace CalibOperatorCLI_Example
             out double fineRow,
             out double fineCol,
             out double fineScore,
-            out Point2D[]? deformedContour,
-            double angleSearchCenterDeg = double.NaN)
+            out List<Point2D[]>? deformedContours,
+            double angleSearchCenterDeg = double.NaN,
+            string deformedContourSelect = "outer")
         {
             fineRow = fineCol = fineScore = 0;
-            deformedContour = null;
+            deformedContours = null;
 
             findLevels = ClampFineRoiFindLevels(deformableModelId, findLevels);
             double searchAngleDeg = double.IsNaN(angleSearchCenterDeg) ? poseAngleDeg : angleSearchCenterDeg;
@@ -4394,7 +4579,8 @@ namespace CalibOperatorCLI_Example
                     hRoi, deformableModelId, coarseRow, coarseCol, searchAngleDeg,
                     angleMarginDeg, minScore, findLevels, greediness, scaleOpt, cropMode, includeDeformedContours,
                     cropRow1, cropCol1,
-                    out fineRow, out fineCol, out fineScore, out deformedContour);
+                    out fineRow, out fineCol, out fineScore, out deformedContours,
+                    deformedContourSelect);
             }
             finally
             {
@@ -4421,10 +4607,11 @@ namespace CalibOperatorCLI_Example
             out double fineRow,
             out double fineCol,
             out double fineScore,
-            out Point2D[]? deformedContour)
+            out List<Point2D[]>? deformedContours,
+            string deformedContourSelect = "outer")
         {
             fineRow = fineCol = fineScore = 0;
-            deformedContour = null;
+            deformedContours = null;
 
             findLevels = ClampFineRoiFindLevels(deformableModelId, findLevels);
             if (HalconRuntimeSettings.IsTraceEnabled())
@@ -4461,19 +4648,24 @@ namespace CalibOperatorCLI_Example
 
                 if (includeDeformedContours)
                 {
-                    Point2D[]? projected = ProjectDeformableContourWithHomMat(model, hom);
-                    if (projected != null)
-                        deformedContour = OffsetContourToFullImage(projected, coordOffsetRow, coordOffsetCol);
+                    var projected = ProjectDeformableContoursWithHomMat(model, hom, deformedContourSelect);
+                    if (projected.Count > 0)
+                    {
+                        deformedContours = projected
+                            .Select(c => OffsetContourToFullImage(c, coordOffsetRow, coordOffsetCol))
+                            .ToList();
+                    }
                 }
 
                 return true;
             }
 
             HTuple localResultType = new HTuple("deformed_contours");
+            var (smoothGpName, smoothGpVal) = BuildDeformableFindSmoothnessGenParams(deformableModelId, scaleOpt?.DeformationSmoothness ?? 0);
             model.FindLocalDeformableModel(
                 hSearch,
                 out HImage? vectorField,
-                out HXLDCont? deformedContours,
+                out HXLDCont? deformedContoursHo,
                 angleStartRad,
                 angleExtentRad,
                 scaleOpt.ScaleMin,
@@ -4486,8 +4678,8 @@ namespace CalibOperatorCLI_Example
                 findLevels,
                 greediness,
                 localResultType,
-                new HTuple(),
-                new HTuple(),
+                smoothGpName,
+                smoothGpVal,
                 out HTuple score,
                 out HTuple row,
                 out HTuple column);
@@ -4495,7 +4687,7 @@ namespace CalibOperatorCLI_Example
             vectorField?.Dispose();
             if (score.Length == 0)
             {
-                deformedContours?.Dispose();
+                deformedContoursHo?.Dispose();
                 return false;
             }
 
@@ -4503,15 +4695,13 @@ namespace CalibOperatorCLI_Example
             fineCol = column[0].D + coordOffsetCol;
             fineScore = score[0].D;
 
-            if (includeDeformedContours && deformedContours != null && deformedContours.IsInitialized() && deformedContours.CountObj() > 0)
+            if (includeDeformedContours)
             {
-                var list = ParseXldContArrayToContourList(deformedContours, 1);
-                deformedContours.Dispose();
-                if (list.Count > 0 && list[0].Length >= 2)
-                    deformedContour = OffsetContourToFullImage(list[0], coordOffsetRow, coordOffsetCol);
+                deformedContours = ExtractSelectedDeformedContoursFromXld(
+                    deformedContoursHo, deformedContourSelect, coordOffsetRow, coordOffsetCol);
             }
-            else
-                deformedContours?.Dispose();
+
+            deformedContoursHo?.Dispose();
 
             return true;
         }
@@ -4534,11 +4724,11 @@ namespace CalibOperatorCLI_Example
             out double fineRow,
             out double fineCol,
             out double fineScore,
-            out Point2D[]? deformedContour,
+            out List<Point2D[]>? deformedContours,
             double angleSearchCenterDeg = double.NaN)
         {
             fineRow = fineCol = fineScore = 0;
-            deformedContour = null;
+            deformedContours = null;
 
             double searchAngleDeg = double.IsNaN(angleSearchCenterDeg) ? poseAngleDeg : angleSearchCenterDeg;
             double phi = poseAngleDeg * Math.PI / 180.0;

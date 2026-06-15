@@ -13771,6 +13771,8 @@ namespace CalibOperatorCLI_Example
                         string contourMode = Pfs(node.Params, "deformedContourMode", "first");
                         bool wantDeformed = !string.Equals(contourMode, "none", StringComparison.OrdinalIgnoreCase);
 
+                        string contourSelect = HalconFlowBridge.ResolveDeformedContourSelectFromParams(node.Params);
+
                         HalconCoarseFineMatchResult fineResult = HalconFlowBridge.FineDeformableMatchOnDomainImage(
                             domainImg,
                             deformId,
@@ -13792,7 +13794,9 @@ namespace CalibOperatorCLI_Example
                             Pf(node.Params, "fineEndScoreWeight", HalconFlowBridge.DefaultEndScoreWeight),
                             Pf(node.Params, "fineEndArcFraction", HalconFlowBridge.DefaultEndArcFraction),
                             angleSearchCenterDeg: fineSearchCenter,
-                            angleSearchMarginDeg: fineSearchMargin);
+                            angleSearchMarginDeg: fineSearchMargin,
+                            fineDeformationSmoothness: HalconFlowBridge.ResolveFineDeformationSmoothnessFromParams(node.Params),
+                            deformedContourSelect: contourSelect);
 
                         domainImg.RefreshProperties();
                         AppendLog(
@@ -13895,7 +13899,9 @@ namespace CalibOperatorCLI_Example
                             fineEndScoreWeight: Popt(node.Params, "fineEndScoreWeight", coarseEndW),
                             fineEndArcFraction: Popt(node.Params, "fineEndArcFraction", coarseEndArc),
                             fineAngleRelativeStartDeg: fineRelStart,
-                            fineAngleRelativeExtentDeg: fineRelExtent);
+                            fineAngleRelativeExtentDeg: fineRelExtent,
+                            fineDeformationSmoothness: HalconFlowBridge.ResolveFineDeformationSmoothnessFromParams(node.Params),
+                            deformedContourSelect: HalconFlowBridge.ResolveDeformedContourSelectFromParams(node.Params));
 
                         node.Outputs["Row"] = result.FineRows;
                         node.Outputs["Column"] = result.FineCols;

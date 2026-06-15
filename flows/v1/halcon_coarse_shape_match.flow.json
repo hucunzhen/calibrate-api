@@ -74,8 +74,8 @@
     {
       "Id": "aed55a5c-a7ff-465f-99ef-132724859ec0",
       "TypeId": "halcon_chain_strip_bootstrap",
-      "X": 530.8800000000001,
-      "Y": 181,
+      "X": 526.8800000000001,
+      "Y": 163,
       "Params": {
         "gridRows": "",
         "gridCols": "",
@@ -108,7 +108,7 @@
       "Params": {
         "contourLevel": "1",
         "crossHalf": "14",
-        "strokeWidth": "2.5",
+        "strokeWidth": "1",
         "drawScores": "true",
         "enable": "true",
         "disable": "false"
@@ -256,7 +256,7 @@
       "Params": {
         "contourLevel": "1",
         "crossHalf": "14",
-        "strokeWidth": "2.5",
+        "strokeWidth": "1",
         "drawScores": "true",
         "enable": "true",
         "disable": "false"

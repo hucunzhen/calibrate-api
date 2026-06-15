@@ -3602,11 +3602,13 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "fineScaleMin", DisplayName = "精 ScaleMin", DefaultValue = "0.97", Description = "精匹配缩放下限" },
                     new OperatorParam { Name = "fineScaleMax", DisplayName = "精 ScaleMax", DefaultValue = "1.03", Description = "精匹配缩放上限" },
                     new OperatorParam { Name = "deformedContourMode", DisplayName = "变形轮廓", DefaultValue = "first", Description = "none=不输出(最快)；first=输出变形轮廓" },
+                    new OperatorParam { Name = "deformedContourSelect", DisplayName = "变形轮廓选择", DefaultValue = "outer", Description = "双轮廓建模时 HALCON 返回多条变形轮廓：outer=外圈(默认)；inner=内圈；all=全部；first=HALCON首条" },
                     new OperatorParam { Name = "fineAllowFallback", DisplayName = "精失败放宽重试", DefaultValue = "false", Description = "精匹配失败时降分/扩角再搜" },
                     new OperatorParam { Name = "roiMarginPx", DisplayName = "ROI边距(px)", DefaultValue = "12", Description = "粗位姿周围 CropRectangle2 的额外边距（透视 .dfm 必用）" },
                     new OperatorParam { Name = "maxRoiHalfPx", DisplayName = "ROI半长上限(px)", DefaultValue = "120", Description = "限制精匹配裁剪区半长，0=不限制" },
                     new OperatorParam { Name = "fineEndScoreWeight", DisplayName = "精端部得分权重", DefaultValue = "0.8", Description = "精匹配 Score 端部修正，0=关闭；优先用变形轮廓，否则 RigidModelId/ModelId 或 .dfm 模板" },
-                    new OperatorParam { Name = "fineEndArcFraction", DisplayName = "精端部弧长占比", DefaultValue = "0.12", Description = "刚性模板轮廓端部分段占比" }
+                    new OperatorParam { Name = "fineEndArcFraction", DisplayName = "精端部弧长占比", DefaultValue = "0.12", Description = "刚性模板轮廓端部分段占比" },
+                    new OperatorParam { Name = "fineDeformationSmoothness", DisplayName = "精形变平滑度", DefaultValue = "0", Description = "FindLocal 的 deformation_smoothness；0=HALCON默认(约11)；有效范围≥3的整数，越大形变越刚性；仅 local 可变形" }
                 },
                 Ports =
                 {
@@ -3697,7 +3699,9 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "maxRoiHalfPx", DisplayName = "ROI半长上限(px)", DefaultValue = "120", Description = "限制精匹配裁剪区，0=不限制" },
                     new OperatorParam { Name = "maxFineMatches", DisplayName = "最多精匹配数", DefaultValue = "2", Description = "对分数最高的前 N 个粗候选做精匹配" },
                     new OperatorParam { Name = "deformedContourMode", DisplayName = "变形轮廓", DefaultValue = "first", Description = "none=不输出(最快)；first=仅首个精匹配；all=全部" },
-                    new OperatorParam { Name = "fineAllowFallback", DisplayName = "精失败放宽重试", DefaultValue = "false", Description = "精匹配失败时降分/扩角再搜；默认关" }
+                    new OperatorParam { Name = "deformedContourSelect", DisplayName = "变形轮廓选择", DefaultValue = "outer", Description = "双轮廓建模时：outer=外圈；inner=内圈；all=全部；first=HALCON首条" },
+                    new OperatorParam { Name = "fineAllowFallback", DisplayName = "精失败放宽重试", DefaultValue = "false", Description = "精匹配失败时降分/扩角再搜；默认关" },
+                    new OperatorParam { Name = "fineDeformationSmoothness", DisplayName = "精形变平滑度", DefaultValue = "0", Description = "FindLocal 的 deformation_smoothness；0=HALCON默认(约11)；有效范围≥3的整数，越大形变越刚性；仅 local 可变形" }
                 },
                 Ports =
                 {
