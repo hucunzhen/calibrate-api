@@ -2598,7 +2598,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "sam_onnx_segment",
                 DisplayName = "SAM 图像分割",
-                Description = "Segment Anything ONNX：点提示或文本提示（OWLv2 ONNX→多框→SAM）。OWLv2 经 NMS 保留的目标数由 textMaxDetections 决定（见 GroundingJson）。仅 1 目标时 Mask～Mask4 为 SAM 多掩码候选；多目标时 encoder 一次、decoder 次数为 min(检出数, maskMergeMax)。MaskAll 为 3 通道图：黑底上各路掩码用不同颜色、固定 alpha 叠加以模拟透明。Mask～Mask4 仍为前 4 实例单通道掩码。Flow 参数上限见 FlowSamMaskMergeParamUpperBound。需 OWLv2 ONNX + tokenizer.json。",
+                Description = "Segment Anything ONNX：点提示、粗匹配中心（CoarseRow/Column）或文本提示（OWLv2 ONNX→多框→SAM，需额外模型）。无 textPrompt 时优先 Points，其次 CoarseColumn/CoarseRow（HALCON 行/列，即 Y/X），最后 clickX/Y。",
                 Category = "AI模型",
                 Params =
                 {
@@ -2621,6 +2621,8 @@ namespace CalibOperatorCLI_Example
                 {
                     new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "CoarseRow", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#8BC34A", IsOptional = true },
+                    new PortDef { Name = "CoarseColumn", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#03A9F4", IsOptional = true },
                     new PortDef { Name = "Mask", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Mask2", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#66BB6A" },
                     new PortDef { Name = "Mask3", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#81C784" },
@@ -2638,10 +2640,10 @@ namespace CalibOperatorCLI_Example
                 Category = "标定",
                 Params =
                 {
-                    new OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "9", Description = "棋盘格内侧角点列数（宽方向）" },
-                    new OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "6", Description = "棋盘格内侧角点行数（高方向）" },
+                    new OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "11", Description = "OpenCV patternSize 的列数 = 内侧角点列数（不是方格数、不是毫米）。方格列数 N → 填 N−1。例：10 列方格填 9；67×50 mm、5 mm 方格约 12×9" },
+                    new OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "8", Description = "内侧角点行数 = 方格行数 − 1。须与物理棋盘一致；填成毫米尺寸（如 67、50）会导致检不出" },
                     new OperatorParam { Name = "refine", DisplayName = "亚像素细化", DefaultValue = "true", Description = "cornerSubPix 细化" },
-                    new OperatorParam { Name = "fastCheck", DisplayName = "快速检测", DefaultValue = "true", Description = "CALIB_CB_FAST_CHECK，失败时可改为 false" },
+                    new OperatorParam { Name = "fastCheck", DisplayName = "快速检测", DefaultValue = "true", Description = "CALIB_CB_FAST_CHECK；0.5 mm 小方格/67×50 等密点棋盘建议 false" },
                     new OperatorParam
                     {
                         Name = "cornerPreprocess",
@@ -2673,9 +2675,9 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "extensions", DisplayName = "目录扩展名", DefaultValue = ".bmp", Description = "目录模式下匹配扩展名，分号分隔，如 .bmp 或 .bmp;.png" },
                     new OperatorParam { Name = "namePrefix", DisplayName = "文件名前缀", DefaultValue = "Image_", Description = "目录模式下仅保留文件名此前缀的图像；留空则不过滤" },
                     new OperatorParam { Name = "imagePaths", DisplayName = "图像路径列表", DefaultValue = "", Description = "可选：分号分隔单张路径；相对路径相对流程文件目录" },
-                    new OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "9", Description = "与检测算子一致，用于构造已知三维棋盘角点" },
-                    new OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "6", Description = "与检测算子一致，用于构造已知三维棋盘角点" },
-                    new OperatorParam { Name = "squareSizeMm", DisplayName = "方格边长(mm)", DefaultValue = "25", Description = "棋盘方格物理边长(mm)，与世界坐标尺度一致，参与内参求解" },
+                    new OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "11", Description = "与「棋盘格角点」一致：内侧角点列数（方格列数−1），勿填毫米尺寸" },
+                    new OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "8", Description = "内侧角点行数（方格行数−1）" },
+                    new OperatorParam { Name = "squareSizeMm", DisplayName = "方格边长(mm)", DefaultValue = "5", Description = "棋盘方格物理边长(mm)，与世界坐标尺度一致，参与内参求解" },
                     new OperatorParam
                     {
                         Name = "cornerPreprocess",
@@ -2755,32 +2757,32 @@ namespace CalibOperatorCLI_Example
                 {
                     new OperatorParam { Name = "calibrationJsonFile", DisplayName = "标定 JSON 文件", DefaultValue = "", Description = "可选；未接端口时读取完整标定 JSON（须含 extrinsicsPerView，如 chessboard_calibration_from_dir.json）" },
                     new OperatorParam { Name = "viewIndex", DisplayName = "外参视图序号", DefaultValue = "0", Description = "0..n-1=extrinsicsPerView 下标；axis/-1=光轴对称（多视图平均旋转，棋盘中心对齐主点 cx,cy，无需手选视图）" },
-                    new OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "9", Description = "与棋盘格标定一致" },
-                    new OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "6", Description = "与棋盘格标定一致" },
-                    new OperatorParam { Name = "squareSizeMm", DisplayName = "方格边长(mm)", DefaultValue = "25", Description = "与标定 squareSizeMm 一致" },
-                    new OperatorParam { Name = "pxPerMm", DisplayName = "mm/像素", DefaultValue = "1", Description = "输出鸟瞰图尺度，1=1像素1mm" },
+                    new OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "11", Description = "与棋盘格标定一致" },
+                    new OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "8", Description = "与棋盘格标定一致" },
+                    new OperatorParam { Name = "squareSizeMm", DisplayName = "方格边长(mm)", DefaultValue = "5", Description = "与标定 squareSizeMm 一致" },
+                    new OperatorParam { Name = "pxPerMm", DisplayName = "mm/像素", DefaultValue = "32", Description = "透视输出缩放（像素/毫米），默认 32；metric 下输出约 (cols-1)×squareSizeMm×32 像素" },
                     new OperatorParam
                     {
                         Name = "perspectiveOutputFrame",
                         DisplayName = "透视输出范围",
-                        DefaultValue = "board",
-                        Description = "board=仅标定板；local=原图仅板内；plane=整图平面透视(共面)",
+                        DefaultValue = "plane",
+                        Description = "board=仅标定板；local=原图仅板内；plane=整图平面透视(共面，产线默认)",
                         Options = new List<string> { "board", "local", "plane" }
                     },
                     new OperatorParam
                     {
                         Name = "perspectiveOutputScale",
                         DisplayName = "输出尺度",
-                        DefaultValue = "metric",
-                        Description = "metric=固定 (cols-1)×squareSizeMm×pxPerMm，各 viewIndex/角度输出尺寸一致；board_pixels=按图中棋盘边长（随距离/倾角变化）",
+                        DefaultValue = "board_pixels",
+                        Description = "board_pixels=按外参投影棋盘边长（产线默认）；metric=固定 (cols-1)×squareSizeMm×pxPerMm",
                         Options = new List<string> { "metric", "board_pixels" }
                     },
                     new OperatorParam
                     {
                         Name = "assumeUndistorted",
                         DisplayName = "输入已去畸变",
-                        DefaultValue = "false",
-                        Description = "上游已 undistort 时选 true，避免角点错位",
+                        DefaultValue = "true",
+                        Description = "上游已 undistort 时选 true（默认）；未先去畸变时选 false",
                         Options = new List<string> { "true", "false" }
                     }
                 },
@@ -4398,32 +4400,32 @@ namespace CalibOperatorCLI_Example
             },
             new FlowPage.OperatorParam { Name = "undistortAlpha", DisplayName = "去畸变裁剪α", DefaultValue = "-1", Description = "-1=保持原尺寸；0..1 裁剪黑边" },
             new FlowPage.OperatorParam { Name = "viewIndex", DisplayName = "外参视图序号", DefaultValue = "0", Description = "0..n-1=extrinsicsPerView；axis/-1=光轴对称" },
-            new FlowPage.OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "9", Description = "与棋盘标定一致" },
-            new FlowPage.OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "6", Description = "与棋盘标定一致" },
-            new FlowPage.OperatorParam { Name = "squareSizeMm", DisplayName = "方格边长(mm)", DefaultValue = "25", Description = "与标定一致" },
-            new FlowPage.OperatorParam { Name = "pxPerMm", DisplayName = "mm/像素", DefaultValue = "1", Description = "透视输出缩放，1≈1像素1mm" },
+            new FlowPage.OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "11", Description = "与棋盘标定一致" },
+            new FlowPage.OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "8", Description = "与棋盘标定一致" },
+            new FlowPage.OperatorParam { Name = "squareSizeMm", DisplayName = "方格边长(mm)", DefaultValue = "5", Description = "与标定一致" },
+            new FlowPage.OperatorParam { Name = "pxPerMm", DisplayName = "mm/像素", DefaultValue = "32", Description = "透视输出缩放（像素/毫米），默认 32" },
             new FlowPage.OperatorParam
             {
                 Name = "perspectiveOutputFrame",
                 DisplayName = "透视输出范围",
-                DefaultValue = "board",
-                Description = "board=仅标定板；local=原图仅板内；plane=整图共面鸟瞰(原图尺寸、均匀缩放，须共面)",
+                DefaultValue = "plane",
+                Description = "board=仅标定板；local=原图仅板内；plane=整图共面鸟瞰(原图尺寸、均匀缩放，产线默认)",
                 Options = new List<string> { "board", "local", "plane" }
             },
             new FlowPage.OperatorParam
             {
                 Name = "perspectiveOutputScale",
                 DisplayName = "输出尺度",
-                DefaultValue = "metric",
-                Description = "metric=固定物理尺寸，各角度一致；board_pixels=按图中棋盘边长（随距离/倾角变化）",
+                DefaultValue = "board_pixels",
+                Description = "board_pixels=按外参投影棋盘边长（产线默认）；metric=固定物理尺寸，各角度一致",
                 Options = new List<string> { "metric", "board_pixels" }
             },
             new FlowPage.OperatorParam
             {
                 Name = "assumeUndistorted",
                 DisplayName = "输入已去畸变",
-                DefaultValue = "auto",
-                Description = "透视角点投影：auto=与同节点「内参畸变矫正」一致；true/false 手动",
+                DefaultValue = "true",
+                Description = "透视角点投影：true=输入已去畸变（默认）；auto=与同节点「内参畸变矫正」一致；false=未去畸变",
                 Options = new List<string> { "auto", "true", "false" }
             }
         };

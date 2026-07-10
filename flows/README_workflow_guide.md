@@ -38,7 +38,7 @@ flowchart LR
 - 多张图**分布均匀、姿态多样**（俯仰、偏航变化）；
 - **至少一张较正**，专门作为透视展开的参考视角。
 
-**输出尺度**：多视角批处理若需输出图尺寸一致，透视参数 **`perspectiveOutputScale = metric`**（默认）。详见 [chessboard/README.md](chessboard/README.md)。
+**输出尺度**：产线推荐 **`perspectiveOutputFrame=plane`** + **`perspectiveOutputScale=board_pixels`**（默认）。多视角批处理若需固定物理尺寸小图，可改 `metric`。详见 [chessboard/README.md](chessboard/README.md)。
 
 ---
 

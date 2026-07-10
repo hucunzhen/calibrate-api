@@ -18,12 +18,12 @@
     {
       "Id": "6e9ddbe1-6fe9-4610-934e-35daed362ed6",
       "TypeId": "composite",
-      "X": 810,
-      "Y": 117,
+      "X": 823,
+      "Y": 136,
       "Params": {
         "inputPorts": "In,In2,In3,In4,In5",
         "outputPorts": "Out,Out2",
-        "innerFlowPath": "halcon_fine_shape_match.flow.json",
+        "innerFlowPath": "nn_contour_after_mask.flow.json",
         "innerFlowJson": "",
         "bindingsJson": "{}",
         "enable": "true",
@@ -33,8 +33,8 @@
     {
       "Id": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
       "TypeId": "flow_loop",
-      "X": 560,
-      "Y": 80,
+      "X": 554,
+      "Y": 69,
       "Params": {
         "count": "3",
         "stepValues": "",
@@ -321,12 +321,6 @@
     },
     {
       "FromNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
-      "FromPort": "In",
-      "ToNodeId": "6e9ddbe1-6fe9-4610-934e-35daed362ed6",
-      "ToPort": "In"
-    },
-    {
-      "FromNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
       "FromPort": "In2",
       "ToNodeId": "6e9ddbe1-6fe9-4610-934e-35daed362ed6",
       "ToPort": "In2"
@@ -366,11 +360,18 @@
       "FromPort": "PointsList",
       "ToNodeId": "7f2db516-26a3-4dc5-bb27-d8ca907accf9",
       "ToPort": "PointsList"
+    },
+    {
+      "FromNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "FromPort": "In",
+      "ToNodeId": "6e9ddbe1-6fe9-4610-934e-35daed362ed6",
+      "ToPort": "In"
     }
   ],
   "Meta": {
     "latticeGridRows": "8",
     "latticeGridCols": "2",
-    "standaloneDebugImagePath": "preview.22png.png"
+    "standaloneDebugImagePath": "..\\..\\data\\Image_20260602183730305.bmp",
+    "note": "粗匹配+Mask 后接 nn_contour_after_mask（SAM ONNX 推理轮廓），替代 HALCON 可变形精匹配"
   }
 }

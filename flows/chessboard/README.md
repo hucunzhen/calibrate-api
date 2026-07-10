@@ -72,18 +72,18 @@ load_image / camera_snap ── Image ── calibration_correct_image ── Ou
 
 | 值 | 含义 | 输出尺寸 |
 |----|------|----------|
-| `board`（默认） | 裁剪到标定板区域 | 见下方「输出尺度」 |
+| `plane`（产线默认） | 整图按共面单应展开 | 与原图相同 |
+| `board` | 裁剪到标定板区域 | 见下方「输出尺度」 |
 | `local` | 原图尺寸，仅板内有效 | 与原图相同 |
-| `plane` | 整图按共面单应展开 | 与原图相同 |
 
 ### 输出尺度 `perspectiveOutputScale`
 
 | 值 | 输出宽高 | 多视角 / 不同角度 |
 |----|----------|-------------------|
-| **`metric`**（默认） | 固定 `(cols-1)×squareSizeMm×pxPerMm` × `(rows-1)×…` | **各 viewIndex 一致** |
-| `board_pixels` | 按**当前图中**棋盘四边像素长度估算 | 随拍摄距离、倾角变化 |
+| **`board_pixels`**（产线默认） | 按**外参投影**的棋盘边长定尺寸 | 与 plane 联用输出仍为原图尺寸 |
+| `metric` | 固定 `(cols-1)×squareSizeMm×pxPerMm` × `(rows-1)×…` | **各 viewIndex 一致** |
 
-示例：9×6 棋盘、`squareSizeMm=25`、`pxPerMm=1` → `metric` 固定 **200×125** 像素。
+示例：11×8 棋盘、`squareSizeMm=5`、`pxPerMm=32`（默认）→ `metric` 固定 **1600×1120** 像素。
 
 **若多视角批处理需要相同画布尺寸**，请使用 `metric`（默认），不要用 `board_pixels`。
 
@@ -99,8 +99,8 @@ load_image / camera_snap ── Image ── calibration_correct_image ── Ou
 |------|------|
 | `cols` / `rows` | 内侧角点列/行数，须与标定一致 |
 | `squareSizeMm` | 方格物理边长 (mm) |
-| `pxPerMm` | 输出缩放，`metric` 下 1≈1 像素 1 mm |
-| `assumeUndistorted` | 透射时角点是否已去畸变；`auto` 与同节点「内参畸变矫正」一致 |
+| `pxPerMm` | 输出缩放（像素/毫米），默认 **32** |
+| `assumeUndistorted` | 默认 **true**；透射前须已去畸变 |
 
 ---
 
@@ -153,6 +153,24 @@ load_image / camera_snap ── Image ── calibration_correct_image ── Ou
 ---
 
 ## 常见问题
+
+**Q: 填了 67×50（或更大）检不出角点？**  
+A: `cols` / `rows` 是 **内侧角点个数**（您说的 67×50 点数填法是对的），不是毫米尺寸。
+
+更常见的原因是 **方格在图像里太小**（例如 0.5 mm 方格只有 4～5 像素/格）：
+
+| 指标 | 建议 | 您当前约 |
+|------|------|----------|
+| 方格边长（像素） | **≥ 15 px**（标定稳定）；最低不宜 **< 8 px** | 4～5 px |
+| 成像 mm/px | ≤ 0.05 mm/px（0.1 mm 精度） | 0.5÷4.5 ≈ **0.11 mm/px** |
+| 角点总数 | 内参标定 **11×8** 足够；67×50=3350 点非必需 | 3350 |
+
+**怎么办（按优先级）：**
+
+1. **拉近相机 / 长焦 / ROI 裁切**，使 0.5 mm 方格在图上 **≥ 15 像素**（约需比现在还大 **3～4 倍**）。
+2. 专用于标定的棋盘改用 **2～5 mm 方格**（产线默认 5 mm）；密点棋盘可留给别的用途。
+3. 流程里 `cols=67`、`rows=50`、`squareSizeMm=0.5` 保持一致；**快速检测** 先设 **false**。
+4. 程序已对过小方格 **自动 2×/4× 放大再检测**，并缩小亚像素窗口（须 **重新编译 CalibOperator** 后生效）；放大只能缓解检出，**不能替代光学放大**，0.1 mm 验收仍须提高像素尺度。
 
 **Q: 换 viewIndex 后透视图大小变了？**  
 A: 检查 `perspectiveOutputScale` 是否为 `metric`；`board_pixels` 会随图中棋盘大小变化。未检测到角点时，程序会回退 `metric`，避免外参投影导致尺寸乱跳。

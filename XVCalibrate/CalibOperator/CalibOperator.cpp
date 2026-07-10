@@ -5043,13 +5043,11 @@ static bool FindChessboardCornersSb(const cv::Mat& gray, const cv::Size& pattern
 #endif
 }
 
-static int FindChessboardCornersGrayMat(const cv::Mat& gray, int boardCols, int boardRows,
-    std::vector<cv::Point2f>& corners, int refineSubPix, int fastCheck,
-    int cornerPreprocessMode = kChessboardPreprocessAuto,
-    double claheClipLimit = 2.5, int claheTileSize = 8) {
-    if (gray.empty() || gray.type() != CV_8UC1 || boardCols < 2 || boardRows < 2) return -1;
-    const cv::Size pattern(boardCols, boardRows);
-    const int need = boardCols * boardRows;
+static bool TryFindChessboardOnImage(const cv::Mat& gray, const cv::Size& pattern,
+    std::vector<cv::Point2f>& corners, int fastCheck,
+    int cornerPreprocessMode, double claheClipLimit, int claheTileSize,
+    cv::Mat& outRefineGray) {
+    const int need = pattern.width * pattern.height;
 
     struct Attempt {
         cv::Mat image;
@@ -5080,8 +5078,6 @@ static int FindChessboardCornersGrayMat(const cv::Mat& gray, int boardCols, int 
         pushSb(MakeClaheGray(gray, claheClipLimit, claheTileSize));
     }
 
-    cv::Mat refineGray;
-    bool found = false;
     for (const auto& att : attempts) {
         if (att.image.empty())
             continue;
@@ -5089,18 +5085,58 @@ static int FindChessboardCornersGrayMat(const cv::Mat& gray, int boardCols, int 
             ? FindChessboardCornersClassic(att.image, pattern, corners, att.fast ? 1 : 0)
             : FindChessboardCornersSb(att.image, pattern, corners);
         if (ok && (int)corners.size() == need) {
-            refineGray = att.image;
-            found = true;
-            break;
+            outRefineGray = att.image;
+            return true;
         }
     }
+    return false;
+}
 
+static int FindChessboardCornersGrayMat(const cv::Mat& gray, int boardCols, int boardRows,
+    std::vector<cv::Point2f>& corners, int refineSubPix, int fastCheck,
+    int cornerPreprocessMode = kChessboardPreprocessAuto,
+    double claheClipLimit = 2.5, int claheTileSize = 8) {
+    if (gray.empty() || gray.type() != CV_8UC1 || boardCols < 2 || boardRows < 2) return -1;
+    const cv::Size pattern(boardCols, boardRows);
+    const int cornerCount = boardCols * boardRows;
+    const double estSqPx = std::min((double)gray.cols / boardCols, (double)gray.rows / boardRows);
+    // 小方格（如 0.5 mm 仅占 4~5 px）须放大后再检；超大点数棋盘限制放大倍数以免耗时过长
+    const int maxScale = (cornerCount > 2000) ? 4 : 8;
+    int startScale = 1;
+    while (estSqPx * startScale < 12.0 && startScale < maxScale)
+        startScale *= 2;
+
+    bool found = false;
+    int usedScale = 1;
+    cv::Mat refineGray;
+    for (int tryScale = startScale; tryScale <= maxScale && !found; tryScale *= 2) {
+        cv::Mat work;
+        if (tryScale > 1)
+            cv::resize(gray, work, cv::Size(), tryScale, tryScale, cv::INTER_CUBIC);
+        else
+            work = gray;
+        found = TryFindChessboardOnImage(work, pattern, corners, fastCheck,
+            cornerPreprocessMode, claheClipLimit, claheTileSize, refineGray);
+        if (found)
+            usedScale = tryScale;
+    }
     if (!found)
         return 1;
 
+    if (usedScale > 1) {
+        const float inv = 1.0f / (float)usedScale;
+        for (auto& p : corners) {
+            p.x *= inv;
+            p.y *= inv;
+        }
+        refineGray = gray;
+    }
+
     if (refineSubPix) {
+        int win = (int)std::max(3.0, std::min(11.0, estSqPx * 0.75));
+        if (win % 2 == 0) --win;
         cv::TermCriteria criteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 30, 0.001);
-        cv::cornerSubPix(refineGray, corners, cv::Size(11, 11), cv::Size(-1, -1), criteria);
+        cv::cornerSubPix(refineGray, corners, cv::Size(win, win), cv::Size(-1, -1), criteria);
     }
     return 0;
 }

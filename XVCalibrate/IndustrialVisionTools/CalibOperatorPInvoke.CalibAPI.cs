@@ -515,7 +515,7 @@ namespace CalibOperatorPInvoke
 
         /// <summary>透视展开到棋盘平面（鸟瞰）。viewIndex=-1 或 axis：光轴对称外参（多视图平均 rvec，棋盘中心对齐主点）。</summary>
         public static CalibImage WarpToChessboardPlane(CalibImage src, string calibrationJson, int viewIndex,
-            int boardCols, int boardRows, double squareSizeMm, double pxPerMm = 1.0, int perspectiveOutputMode = 0,
+            int boardCols, int boardRows, double squareSizeMm, double pxPerMm = 32.0, int perspectiveOutputMode = 0,
             bool assumeUndistortedInput = false, int outputSizeMode = 0)
         {
             if (src == null) throw new ArgumentNullException(nameof(src));

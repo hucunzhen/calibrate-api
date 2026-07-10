@@ -201,8 +201,9 @@ namespace CalibOperatorCLI_Example
                 s.CalibBoardCols = cols;
             if (int.TryParse(TxtCalibBoardRows?.Text?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int rows))
                 s.CalibBoardRows = rows;
-            s.CalibSquareSizeMm = TxtCalibSquareSizeMm?.Text?.Trim() ?? "25";
-            s.CalibPxPerMm = TxtCalibPxPerMm?.Text?.Trim() ?? "1";
+            s.CalibSquareSizeMm = TxtCalibSquareSizeMm?.Text?.Trim()
+                ?? ChessboardCalibrationDefaults.SquareSizeMm.ToString(CultureInfo.InvariantCulture);
+            s.CalibPxPerMm = TxtCalibPxPerMm?.Text?.Trim() ?? ChessboardCalibrationDefaults.PxPerMm.ToString(CultureInfo.InvariantCulture);
             s.PerspectiveOutputFrame = GetPerspectiveOutputFrameTag();
             s.PostCorrectRotateDeg = _postCorrectRotateDeg;
             s.RotateExpandCanvas = ChkRotateExpandCanvas?.IsChecked == true;
@@ -226,8 +227,8 @@ namespace CalibOperatorCLI_Example
             if (ChkEnablePerspective != null)
                 ChkEnablePerspective.IsChecked = s.EnablePerspective;
             TxtCalibViewIndex.Text = s.CalibViewIndex.ToString(CultureInfo.InvariantCulture);
-            TxtCalibBoardCols.Text = (s.CalibBoardCols > 0 ? s.CalibBoardCols : 9).ToString(CultureInfo.InvariantCulture);
-            TxtCalibBoardRows.Text = (s.CalibBoardRows > 0 ? s.CalibBoardRows : 6).ToString(CultureInfo.InvariantCulture);
+            TxtCalibBoardCols.Text = (s.CalibBoardCols > 0 ? s.CalibBoardCols : ChessboardCalibrationDefaults.InnerCornerCols).ToString(CultureInfo.InvariantCulture);
+            TxtCalibBoardRows.Text = (s.CalibBoardRows > 0 ? s.CalibBoardRows : ChessboardCalibrationDefaults.InnerCornerRows).ToString(CultureInfo.InvariantCulture);
             if (!string.IsNullOrWhiteSpace(s.CalibSquareSizeMm))
                 TxtCalibSquareSizeMm.Text = s.CalibSquareSizeMm;
             if (!string.IsNullOrWhiteSpace(s.CalibPxPerMm))

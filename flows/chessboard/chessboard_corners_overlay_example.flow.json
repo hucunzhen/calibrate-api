@@ -15,8 +15,8 @@
       "X": 300,
       "Y": 140,
       "Params": {
-        "cols": "9",
-        "rows": "6",
+        "cols": "11",
+        "rows": "8",
         "refine": "true",
         "fastCheck": "true"
       }

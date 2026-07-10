@@ -9,9 +9,9 @@
         "imageDirectory": "D:/work/data/chessboard",
         "extensions": ".bmp",
         "namePrefix": "Image_",
-        "cols": "9",
-        "rows": "6",
-        "squareSizeMm": "25"
+        "cols": "11",
+        "rows": "8",
+        "squareSizeMm": "5"
       }
     },
     {
@@ -39,10 +39,13 @@
       "Y": 240,
       "Params": {
         "viewIndex": "8",
-        "cols": "9",
-        "rows": "6",
-        "squareSizeMm": "25",
-        "pxPerMm": "1"
+        "cols": "11",
+        "rows": "8",
+        "squareSizeMm": "5",
+        "pxPerMm": "32",
+        "perspectiveOutputFrame": "plane",
+        "perspectiveOutputScale": "board_pixels",
+        "assumeUndistorted": "true"
       }
     },
     {

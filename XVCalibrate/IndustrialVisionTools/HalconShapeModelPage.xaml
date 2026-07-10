@@ -313,16 +313,16 @@
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0" Text="列" VerticalAlignment="Center"/>
-                                        <TextBox x:Name="TxtCalibBoardCols" Grid.Column="1" Text="9" Height="24" Margin="0,0,4,0" VerticalContentAlignment="Center"/>
+                                        <TextBox x:Name="TxtCalibBoardCols" Grid.Column="1" Text="11" Height="24" Margin="0,0,4,0" VerticalContentAlignment="Center"/>
                                         <TextBlock Grid.Column="2" Text="行" VerticalAlignment="Center"/>
-                                        <TextBox x:Name="TxtCalibBoardRows" Grid.Column="3" Text="6" Height="24" VerticalContentAlignment="Center"/>
+                                        <TextBox x:Name="TxtCalibBoardRows" Grid.Column="3" Text="8" Height="24" VerticalContentAlignment="Center"/>
                                     </Grid>
-                                    <TextBox x:Name="TxtCalibSquareSizeMm" Text="25" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center" ToolTip="方格 mm"/>
-                                    <TextBox x:Name="TxtCalibPxPerMm" Text="1" Height="24" Margin="16,0,0,4" VerticalContentAlignment="Center" ToolTip="mm/像素"/>
+                                    <TextBox x:Name="TxtCalibSquareSizeMm" Text="5" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center" ToolTip="方格 mm"/>
+                                    <TextBox x:Name="TxtCalibPxPerMm" Text="32" Height="24" Margin="16,0,0,4" VerticalContentAlignment="Center" ToolTip="像素/毫米（透视输出缩放）"/>
                                     <ComboBox x:Name="CmbPerspectiveOutputFrame" Height="26" Margin="16,0,0,6">
-                                        <ComboBoxItem Content="仅标定板 (board)" Tag="board" IsSelected="True"/>
+                                        <ComboBoxItem Content="仅标定板 (board)" Tag="board"/>
                                         <ComboBoxItem Content="原图+板内 (local)" Tag="local"/>
-                                        <ComboBoxItem Content="整图共面 (plane)" Tag="plane"/>
+                                        <ComboBoxItem Content="整图共面 (plane)" Tag="plane" IsSelected="True"/>
                                     </ComboBox>
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                                         <Button x:Name="BtnRotateCorrectedCcw90" Content="逆时针90°" Height="28" Margin="0,0,6,0" Click="BtnRotateCorrectedCcw90_Click"/>

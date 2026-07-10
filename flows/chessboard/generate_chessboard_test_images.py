@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-生成三张棋盘格测试图（内侧角点 9x6，与 Flow 示例 chessboard_find_corners / calibrate 一致）。
+生成三张棋盘格测试图（内侧角点 11x8，与 Flow 示例 chessboard_find_corners / calibrate 一致）。
 依赖: pip install opencv-python numpy
 
 输出（与本目录相对）:
@@ -21,8 +21,8 @@ except ImportError as e:
     ) from e
 
 # OpenCV findChessboardCorners 的 patternSize = 内侧角点列数 x 行数
-INNER_COLS = 9
-INNER_ROWS = 6
+INNER_COLS = 11
+INNER_ROWS = 8
 # 方格像素边长（仅合成图，与 squareSizeMm 无关）
 SQUARE_PX = 48
 MARGIN_PX = 80

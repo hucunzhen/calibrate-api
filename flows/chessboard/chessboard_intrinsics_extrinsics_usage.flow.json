@@ -7,9 +7,9 @@
       "Y": 140,
       "Params": {
         "imagePaths": "../../../../../test_images/chessboard_view1.png;../../../../../test_images/chessboard_view2.png;../../../../../test_images/chessboard_view3.png",
-        "cols": "9",
-        "rows": "6",
-        "squareSizeMm": "25"
+        "cols": "11",
+        "rows": "8",
+        "squareSizeMm": "5"
       }
     },
     {

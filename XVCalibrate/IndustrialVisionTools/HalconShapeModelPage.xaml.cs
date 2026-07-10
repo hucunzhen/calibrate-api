@@ -467,7 +467,7 @@ namespace CalibOperatorCLI_Example
         {
             if (CmbPerspectiveOutputFrame.SelectedItem is System.Windows.Controls.ComboBoxItem item)
                 return GetPerspectiveOutputModeFromTag(item.Tag as string);
-            return 0;
+            return 2;
         }
 
         private string LoadCalibrationJsonText(bool requireExtrinsics)
@@ -610,10 +610,10 @@ namespace CalibOperatorCLI_Example
                 if (perspective)
                 {
                     int viewIdx = CalibAPI.ParseChessboardViewIndex(TxtCalibViewIndex.Text);
-                    int cols = int.TryParse(TxtCalibBoardCols.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int c) ? c : 9;
-                    int rows = int.TryParse(TxtCalibBoardRows.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int r) ? r : 6;
-                    double sq = double.TryParse(TxtCalibSquareSizeMm.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double s) ? s : 25.0;
-                    double pxPerMm = double.TryParse(TxtCalibPxPerMm.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double ppm) ? ppm : 1.0;
+                    int cols = int.TryParse(TxtCalibBoardCols.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int c) ? c : ChessboardCalibrationDefaults.InnerCornerCols;
+                    int rows = int.TryParse(TxtCalibBoardRows.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int r) ? r : ChessboardCalibrationDefaults.InnerCornerRows;
+                    double sq = double.TryParse(TxtCalibSquareSizeMm.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double s) ? s : ChessboardCalibrationDefaults.SquareSizeMm;
+                    double pxPerMm = double.TryParse(TxtCalibPxPerMm.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double ppm) ? ppm : ChessboardCalibrationDefaults.PxPerMm;
                     int perspMode = GetPerspectiveOutputMode();
                     bool assumeUnd = ChkEnableUndistort.IsChecked == true;
                     var next = CalibAPI.WarpToChessboardPlane(work, calJsonPersp!, viewIdx, cols, rows, sq, pxPerMm, perspMode,

@@ -80,16 +80,16 @@ namespace CalibOperatorCLI_Example
 
         public int CalibViewIndex { get; set; }
 
-        public int CalibBoardCols { get; set; } = 9;
+        public int CalibBoardCols { get; set; } = ChessboardCalibrationDefaults.InnerCornerCols;
 
-        public int CalibBoardRows { get; set; } = 6;
+        public int CalibBoardRows { get; set; } = ChessboardCalibrationDefaults.InnerCornerRows;
 
-        public string CalibSquareSizeMm { get; set; } = "25";
+        public string CalibSquareSizeMm { get; set; } = ChessboardCalibrationDefaults.SquareSizeMm.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-        public string CalibPxPerMm { get; set; } = "1";
+        public string CalibPxPerMm { get; set; } = "32";
 
         /// <summary>board | local | plane，对应透视输出范围 ComboBox Tag。</summary>
-        public string PerspectiveOutputFrame { get; set; } = "board";
+        public string PerspectiveOutputFrame { get; set; } = ChessboardCalibrationDefaults.PerspectiveOutputFrame;
 
         /// <summary>矫正后图像顺时针旋转角度(°)，0/90/180/270 或任意角度。</summary>
         public double PostCorrectRotateDeg { get; set; }

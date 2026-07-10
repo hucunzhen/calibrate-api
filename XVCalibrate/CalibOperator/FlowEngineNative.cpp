@@ -2198,7 +2198,7 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         int cols = ToInt(NodeParam(n, "cols", "9"), 9);
         int rows = ToInt(NodeParam(n, "rows", "6"), 6);
         double sq = ToDouble(NodeParam(n, "squareSizeMm", "25"), 25.0);
-        double pxPerMm = ToDouble(NodeParam(n, "pxPerMm", "1"), 1.0);
+        double pxPerMm = ToDouble(NodeParam(n, "pxPerMm", "32"), 32.0);
         if (cols < 2 || rows < 2 || sq <= 0.0 || pxPerMm <= 0.0) {
             err = "chessboard_perspective_warp_image: invalid cols/rows/squareSizeMm/pxPerMm";
             return false;
@@ -2212,35 +2212,41 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
             err = "chessboard_perspective_warp_image: image convert failed";
             return false;
         }
-        int perspMode = 0;
+        int perspMode = 2;
         {
             auto it = n.params.find("perspectiveOutputFrame");
             if (it != n.params.end()) {
                 std::string v = it->second;
                 for (auto& c : v) c = (char)tolower((unsigned char)c);
-                if (v == "full" || v == "local" || v == "board_local")
+                if (v == "board" || v == "crop")
+                    perspMode = 0;
+                else if (v == "full" || v == "local" || v == "board_local")
                     perspMode = 1;
                 else if (v == "plane" || v == "full_plane" || v == "all" || v == "homography")
                     perspMode = 2;
             }
         }
-        int assumeUnd = 0;
+        int assumeUnd = 1;
         {
             auto it = n.params.find("assumeUndistorted");
             if (it != n.params.end()) {
                 std::string v = it->second;
                 for (auto& c : v) c = (char)tolower((unsigned char)c);
-                if (v == "1" || v == "true" || v == "yes")
+                if (v == "0" || v == "false" || v == "no")
+                    assumeUnd = 0;
+                else if (v == "1" || v == "true" || v == "yes")
                     assumeUnd = 1;
             }
         }
-        int outScale = 0;
+        int outScale = 1;
         {
             auto it = n.params.find("perspectiveOutputScale");
             if (it != n.params.end()) {
                 std::string v = it->second;
                 for (auto& c : v) c = (char)tolower((unsigned char)c);
-                if (v == "board_pixels" || v == "pixels" || v == "image")
+                if (v == "metric")
+                    outScale = 0;
+                else if (v == "board_pixels" || v == "pixels" || v == "image")
                     outScale = 1;
             }
         }

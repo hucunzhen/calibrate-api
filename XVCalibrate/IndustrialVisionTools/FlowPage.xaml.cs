@@ -8848,7 +8848,7 @@ namespace CalibOperatorCLI_Example
         private static int ParsePerspectiveOutputMode(IReadOnlyDictionary<string, string?> paramBag)
         {
             if (!paramBag.TryGetValue("perspectiveOutputFrame", out var raw) || string.IsNullOrWhiteSpace(raw))
-                return 0;
+                return 2;
             var t = raw.Trim();
             if (string.Equals(t, "plane", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(t, "full_plane", StringComparison.OrdinalIgnoreCase)
@@ -8867,7 +8867,7 @@ namespace CalibOperatorCLI_Example
         private static int ParsePerspectiveOutputScale(IReadOnlyDictionary<string, string?> paramBag)
         {
             if (!paramBag.TryGetValue("perspectiveOutputScale", out var raw) || string.IsNullOrWhiteSpace(raw))
-                return 0;
+                return 1;
             var t = raw.Trim();
             return string.Equals(t, "board_pixels", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(t, "pixels", StringComparison.OrdinalIgnoreCase)
@@ -8882,7 +8882,7 @@ namespace CalibOperatorCLI_Example
         private static bool ParseAssumeUndistortedForWarp(IReadOnlyDictionary<string, string?> paramBag, bool undistortEnabledInSameNode)
         {
             if (!paramBag.TryGetValue("assumeUndistorted", out var raw) || string.IsNullOrWhiteSpace(raw))
-                return undistortEnabledInSameNode;
+                return true;
             var t = raw.Trim();
             if (string.Equals(t, "auto", StringComparison.OrdinalIgnoreCase))
                 return undistortEnabledInSameNode;
@@ -8926,10 +8926,10 @@ namespace CalibOperatorCLI_Example
             {
                 string calJsonP = ResolveChessboardCalibrationJson(node, inputs, compositeInnerFlowBaseDir, requireExtrinsics: true);
                 int viewIdx = ParseChessboardViewIndex(node.Params);
-                int cols = int.TryParse(node.Params.GetValueOrDefault("cols"), out int cc) ? cc : 9;
-                int rows = int.TryParse(node.Params.GetValueOrDefault("rows"), out int rr) ? rr : 6;
-                double sqMm = double.TryParse(node.Params.GetValueOrDefault("squareSizeMm"), out double sqv) ? sqv : 25.0;
-                double pxPerMm = double.TryParse(node.Params.GetValueOrDefault("pxPerMm"), out double ppm) ? ppm : 1.0;
+                int cols = int.TryParse(node.Params.GetValueOrDefault("cols"), out int cc) ? cc : ChessboardCalibrationDefaults.InnerCornerCols;
+                int rows = int.TryParse(node.Params.GetValueOrDefault("rows"), out int rr) ? rr : ChessboardCalibrationDefaults.InnerCornerRows;
+                double sqMm = double.TryParse(node.Params.GetValueOrDefault("squareSizeMm"), out double sqv) ? sqv : ChessboardCalibrationDefaults.SquareSizeMm;
+                double pxPerMm = double.TryParse(node.Params.GetValueOrDefault("pxPerMm"), out double ppm) ? ppm : ChessboardCalibrationDefaults.PxPerMm;
                 int perspMode = ParsePerspectiveOutputMode(node.Params);
                 int outScale = ParsePerspectiveOutputScale(node.Params);
                 bool assumeUnd = ParseAssumeUndistortedForWarp(node.Params, undistort);
@@ -11143,6 +11143,17 @@ namespace CalibOperatorCLI_Example
                             promptPts = arr;
                         double fx = double.TryParse(node.Params.GetValueOrDefault("clickX"), out var cxx) ? cxx : 512;
                         double fy = double.TryParse(node.Params.GetValueOrDefault("clickY"), out var cyy) ? cyy : 512;
+                        string textPrompt = (node.Params.GetValueOrDefault("textPrompt", "") ?? "").Trim();
+                        if (promptPts == null && textPrompt.Length == 0
+                            && inputs.TryGetValue("CoarseRow", out var crIn) && crIn != null
+                            && inputs.TryGetValue("CoarseColumn", out var ccIn) && ccIn != null)
+                        {
+                            double coarseRow = TryGetDoubleInput(inputs, "CoarseRow");
+                            double coarseCol = TryGetDoubleInput(inputs, "CoarseColumn");
+                            promptPts = new[] { new Point2D(coarseCol, coarseRow) };
+                            fx = coarseCol;
+                            fy = coarseRow;
+                        }
                         float th = float.TryParse(node.Params.GetValueOrDefault("maskThreshold"), out var thv) ? thv : 0f;
                         int maskMergeMax = int.TryParse(
                             node.Params.GetValueOrDefault("maskMergeMax"),
@@ -11160,7 +11171,6 @@ namespace CalibOperatorCLI_Example
                         SamOnnxSegmentation.OrigBoxPrompt? boxOrig = null;
                         IReadOnlyList<Owlv2OnnxTextToBox.Owlv2Detection>? textDetections = null;
                         string groundingJson;
-                        string textPrompt = (node.Params.GetValueOrDefault("textPrompt", "") ?? "").Trim();
                         if (textPrompt.Length > 0)
                         {
                             double tthr = double.TryParse(
@@ -11247,7 +11257,13 @@ namespace CalibOperatorCLI_Example
                         }
                         else if (promptPts != null && promptPts.Length > 0)
                         {
-                            groundingJson = JsonSerializer.Serialize(new { mode = "points", count = promptPts.Length });
+                            groundingJson = JsonSerializer.Serialize(new
+                            {
+                                mode = inputs.ContainsKey("CoarseRow") ? "coarse_center" : "points",
+                                count = promptPts.Length,
+                                x = promptPts[0].X,
+                                y = promptPts[0].Y,
+                            });
                         }
                         else
                         {
@@ -11293,8 +11309,8 @@ namespace CalibOperatorCLI_Example
                     {
                         var chessImg = inputs["Image"] as CalibImage;
                         if (chessImg == null) throw new InvalidOperationException("棋盘格角点: 缺少输入图像");
-                        int cols = int.TryParse(node.Params.GetValueOrDefault("cols"), out int cc) ? cc : 9;
-                        int rows = int.TryParse(node.Params.GetValueOrDefault("rows"), out int rr) ? rr : 6;
+                        int cols = int.TryParse(node.Params.GetValueOrDefault("cols"), out int cc) ? cc : ChessboardCalibrationDefaults.InnerCornerCols;
+                        int rows = int.TryParse(node.Params.GetValueOrDefault("rows"), out int rr) ? rr : ChessboardCalibrationDefaults.InnerCornerRows;
                         bool refine = bool.TryParse(node.Params.GetValueOrDefault("refine"), out bool rv) ? rv : true;
                         bool fast = bool.TryParse(node.Params.GetValueOrDefault("fastCheck"), out bool fv) ? fv : true;
                         string cornerPre = node.Params.GetValueOrDefault("cornerPreprocess", "auto") ?? "auto";
@@ -11314,9 +11330,9 @@ namespace CalibOperatorCLI_Example
 
                     case "chessboard_calibrate_intrinsics":
                     {
-                        int colsI = int.TryParse(node.Params.GetValueOrDefault("cols"), out int ci) ? ci : 9;
-                        int rowsI = int.TryParse(node.Params.GetValueOrDefault("rows"), out int ri) ? ri : 6;
-                        double sqMm = double.TryParse(node.Params.GetValueOrDefault("squareSizeMm"), out double sqv) ? sqv : 25.0;
+                        int colsI = int.TryParse(node.Params.GetValueOrDefault("cols"), out int ci) ? ci : ChessboardCalibrationDefaults.InnerCornerCols;
+                        int rowsI = int.TryParse(node.Params.GetValueOrDefault("rows"), out int ri) ? ri : ChessboardCalibrationDefaults.InnerCornerRows;
+                        double sqMm = double.TryParse(node.Params.GetValueOrDefault("squareSizeMm"), out double sqv) ? sqv : ChessboardCalibrationDefaults.SquareSizeMm;
                         string cornerPre = node.Params.GetValueOrDefault("cornerPreprocess", "auto") ?? "auto";
                         double claheClip = double.TryParse(node.Params.GetValueOrDefault("claheClipLimit", "2.5")?.Trim(),
                             System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var clv) ? clv : 2.5;
@@ -11407,10 +11423,10 @@ namespace CalibOperatorCLI_Example
                         string calJson = ResolveChessboardCalibrationJson(node, inputs, compositeInnerFlowBaseDir, requireExtrinsics: true);
 
                         int viewIdx = ParseChessboardViewIndex(node.Params);
-                        int cols = int.TryParse(node.Params.GetValueOrDefault("cols"), out int cc) ? cc : 9;
-                        int rows = int.TryParse(node.Params.GetValueOrDefault("rows"), out int rr) ? rr : 6;
-                        double sqMm = double.TryParse(node.Params.GetValueOrDefault("squareSizeMm"), out double sqv) ? sqv : 25.0;
-                        double pxPerMm = double.TryParse(node.Params.GetValueOrDefault("pxPerMm"), out double ppm) ? ppm : 1.0;
+                        int cols = int.TryParse(node.Params.GetValueOrDefault("cols"), out int cc) ? cc : ChessboardCalibrationDefaults.InnerCornerCols;
+                        int rows = int.TryParse(node.Params.GetValueOrDefault("rows"), out int rr) ? rr : ChessboardCalibrationDefaults.InnerCornerRows;
+                        double sqMm = double.TryParse(node.Params.GetValueOrDefault("squareSizeMm"), out double sqv) ? sqv : ChessboardCalibrationDefaults.SquareSizeMm;
+                        double pxPerMm = double.TryParse(node.Params.GetValueOrDefault("pxPerMm"), out double ppm) ? ppm : ChessboardCalibrationDefaults.PxPerMm;
                         int perspMode = ParsePerspectiveOutputMode(node.Params);
                         int outScale = ParsePerspectiveOutputScale(node.Params);
                         bool assumeUnd = ParseAssumeUndistortedForWarp(node.Params, undistortEnabledInSameNode: false);
