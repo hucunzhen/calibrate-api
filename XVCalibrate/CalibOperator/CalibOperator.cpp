@@ -5007,18 +5007,100 @@ static void SplitSemicolonPaths(const char* delimStr, std::vector<std::string>& 
     }
 }
 
-static int FindChessboardCornersGrayMat(const cv::Mat& gray, int boardCols, int boardRows,
-    std::vector<cv::Point2f>& corners, int refineSubPix, int fastCheck) {
-    if (gray.empty() || gray.type() != CV_8UC1 || boardCols < 2 || boardRows < 2) return -1;
-    cv::Size pattern(boardCols, boardRows);
+// cornerPreprocessMode: 0=auto（原图→CLAHE→轻模糊+CLAHE→SB 回退）, 1=none, 2=clahe
+static constexpr int kChessboardPreprocessAuto = 0;
+static constexpr int kChessboardPreprocessNone = 1;
+static constexpr int kChessboardPreprocessClahe = 2;
+
+static cv::Mat MakeClaheGray(const cv::Mat& gray, double clipLimit, int tileSize) {
+    double clip = clipLimit > 0.0 ? clipLimit : 2.5;
+    int tgs = tileSize > 0 ? tileSize : 8;
+    cv::Mat out;
+    cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(clip, cv::Size(tgs, tgs));
+    clahe->apply(gray, out);
+    return out;
+}
+
+static bool FindChessboardCornersClassic(const cv::Mat& gray, const cv::Size& pattern,
+    std::vector<cv::Point2f>& corners, int fastCheck) {
     int flags = cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE;
     if (fastCheck) flags |= cv::CALIB_CB_FAST_CHECK;
     corners.clear();
-    bool ok = cv::findChessboardCorners(gray, pattern, corners, flags);
-    if (!ok) return 1;
+    return cv::findChessboardCorners(gray, pattern, corners, flags);
+}
+
+static bool FindChessboardCornersSb(const cv::Mat& gray, const cv::Size& pattern,
+    std::vector<cv::Point2f>& corners) {
+#if CV_VERSION_MAJOR >= 4
+    corners.clear();
+    const int flags = cv::CALIB_CB_NORMALIZE_IMAGE | cv::CALIB_CB_EXHAUSTIVE;
+    return cv::findChessboardCornersSB(gray, pattern, corners, flags);
+#else
+    (void)gray;
+    (void)pattern;
+    corners.clear();
+    return false;
+#endif
+}
+
+static int FindChessboardCornersGrayMat(const cv::Mat& gray, int boardCols, int boardRows,
+    std::vector<cv::Point2f>& corners, int refineSubPix, int fastCheck,
+    int cornerPreprocessMode = kChessboardPreprocessAuto,
+    double claheClipLimit = 2.5, int claheTileSize = 8) {
+    if (gray.empty() || gray.type() != CV_8UC1 || boardCols < 2 || boardRows < 2) return -1;
+    const cv::Size pattern(boardCols, boardRows);
+    const int need = boardCols * boardRows;
+
+    struct Attempt {
+        cv::Mat image;
+        bool classic;
+        bool fast;
+    };
+    std::vector<Attempt> attempts;
+    attempts.reserve(6);
+
+    auto pushClassic = [&](const cv::Mat& img, bool fast) {
+        attempts.push_back({ img, true, fast });
+    };
+    auto pushSb = [&](const cv::Mat& img) {
+        attempts.push_back({ img, false, false });
+    };
+
+    if (cornerPreprocessMode == kChessboardPreprocessNone) {
+        pushClassic(gray, fastCheck != 0);
+    } else if (cornerPreprocessMode == kChessboardPreprocessClahe) {
+        pushClassic(MakeClaheGray(gray, claheClipLimit, claheTileSize), false);
+    } else {
+        pushClassic(gray, false);
+        pushClassic(MakeClaheGray(gray, claheClipLimit, claheTileSize), false);
+        cv::Mat blurred;
+        cv::GaussianBlur(gray, blurred, cv::Size(3, 3), 0.0);
+        pushClassic(MakeClaheGray(blurred, claheClipLimit, claheTileSize), false);
+        pushSb(gray);
+        pushSb(MakeClaheGray(gray, claheClipLimit, claheTileSize));
+    }
+
+    cv::Mat refineGray;
+    bool found = false;
+    for (const auto& att : attempts) {
+        if (att.image.empty())
+            continue;
+        bool ok = att.classic
+            ? FindChessboardCornersClassic(att.image, pattern, corners, att.fast ? 1 : 0)
+            : FindChessboardCornersSb(att.image, pattern, corners);
+        if (ok && (int)corners.size() == need) {
+            refineGray = att.image;
+            found = true;
+            break;
+        }
+    }
+
+    if (!found)
+        return 1;
+
     if (refineSubPix) {
         cv::TermCriteria criteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 30, 0.001);
-        cv::cornerSubPix(gray, corners, cv::Size(11, 11), cv::Size(-1, -1), criteria);
+        cv::cornerSubPix(refineGray, corners, cv::Size(11, 11), cv::Size(-1, -1), criteria);
     }
     return 0;
 }
@@ -5026,12 +5108,14 @@ static int FindChessboardCornersGrayMat(const cv::Mat& gray, int boardCols, int 
 } // namespace
 
 int FindChessboardCornersGrayBuffer(const unsigned char* grayRowMajor, int width, int height, int boardCols, int boardRows,
-    Point2D* outPts, int* outCount, int maxPts, int refineSubPix, int fastCheck) {
+    Point2D* outPts, int* outCount, int maxPts, int refineSubPix, int fastCheck,
+    int cornerPreprocessMode, double claheClipLimit, int claheTileSize) {
     if (!grayRowMajor || width <= 0 || height <= 0 || !outCount || maxPts < boardCols * boardRows) return -1;
     cv::Mat gray(height, width, CV_8UC1, const_cast<unsigned char*>(grayRowMajor));
     cv::Mat grayClone = gray.clone();
     std::vector<cv::Point2f> corners;
-    int rc = FindChessboardCornersGrayMat(grayClone, boardCols, boardRows, corners, refineSubPix, fastCheck);
+    int rc = FindChessboardCornersGrayMat(grayClone, boardCols, boardRows, corners, refineSubPix, fastCheck,
+        cornerPreprocessMode, claheClipLimit, claheTileSize);
     if (rc != 0) {
         *outCount = 0;
         return rc;
@@ -5048,12 +5132,14 @@ int FindChessboardCornersGrayBuffer(const unsigned char* grayRowMajor, int width
 }
 
 int FindChessboardCorners(Image* img, int boardCols, int boardRows,
-    Point2D* outPts, int* outCount, int maxPts, int refineSubPix, int fastCheck) {
+    Point2D* outPts, int* outCount, int maxPts, int refineSubPix, int fastCheck,
+    int cornerPreprocessMode, double claheClipLimit, int claheTileSize) {
     if (!img || !img->data || !outCount || boardCols < 2 || boardRows < 2 || maxPts < boardCols * boardRows) return -1;
     cv::Mat gray;
     Step_ConvertToGrayscale(img, &gray);
     std::vector<cv::Point2f> corners;
-    int rc = FindChessboardCornersGrayMat(gray, boardCols, boardRows, corners, refineSubPix, fastCheck);
+    int rc = FindChessboardCornersGrayMat(gray, boardCols, boardRows, corners, refineSubPix, fastCheck,
+        cornerPreprocessMode, claheClipLimit, claheTileSize);
     if (rc != 0) {
         *outCount = 0;
         return rc;
@@ -5144,7 +5230,8 @@ int CalibrateCameraChessboardMultiview(const char* pathsDelimited, int boardCols
     double* outFx, double* outFy, double* outCx, double* outCy,
     double* outK1, double* outK2, double* outP1, double* outP2, double* outK3,
     double* outRms,
-    char* fullCalibrationJsonOut, int fullCalibrationJsonOutSize) {
+    char* fullCalibrationJsonOut, int fullCalibrationJsonOutSize,
+    int cornerPreprocessMode, double claheClipLimit, int claheTileSize) {
     if (!pathsDelimited || boardCols < 2 || boardRows < 2 || squareSize <= 0.0) return -1;
 
     std::vector<std::string> paths;
@@ -5172,7 +5259,8 @@ int CalibrateCameraChessboardMultiview(const char* pathsDelimited, int boardCols
         cv::Mat gray;
         cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
         std::vector<cv::Point2f> corners;
-        if (FindChessboardCornersGrayMat(gray, boardCols, boardRows, corners, 1, 0) != 0) {
+        if (FindChessboardCornersGrayMat(gray, boardCols, boardRows, corners, 1, 0,
+                cornerPreprocessMode, claheClipLimit, claheTileSize) != 0) {
             failedPaths.push_back(path);
             continue;
         }

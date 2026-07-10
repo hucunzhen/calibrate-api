@@ -327,7 +327,8 @@ namespace CalibOperatorPInvoke
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int CALIB_FindChessboardCorners(IntPtr img, int boardCols, int boardRows,
-            IntPtr outPts, ref int count, int maxPts, int refineSubPix, int fastCheck);
+            IntPtr outPts, ref int count, int maxPts, int refineSubPix, int fastCheck,
+            int cornerPreprocessMode, double claheClipLimit, int claheTileSize);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern void CALIB_DrawChessboardCorners(IntPtr img, IntPtr pts, int count, int boardCols, int boardRows);
@@ -335,7 +336,8 @@ namespace CalibOperatorPInvoke
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
         public static extern int CALIB_CalibrateCameraChessboard(string pathsDelimited, int boardCols, int boardRows,
             double squareSizeMm, ref NativeCameraIntrinsics outIntrinsics,
-            IntPtr fullCalibrationJsonOut, int fullCalibrationJsonOutSize);
+            IntPtr fullCalibrationJsonOut, int fullCalibrationJsonOutSize,
+            int cornerPreprocessMode, double claheClipLimit, int claheTileSize);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int CALIB_PixelsToChessboardPlaneFromCalibrationJson(

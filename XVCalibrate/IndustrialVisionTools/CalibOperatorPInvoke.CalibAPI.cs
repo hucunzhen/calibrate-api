@@ -236,10 +236,23 @@ namespace CalibOperatorPInvoke
             }
         }
 
+        /// <summary>cornerPreprocessMode: 0=auto, 1=none, 2=clahe</summary>
+        public static int ParseChessboardCornerPreprocessMode(string? mode)
+        {
+            string m = (mode ?? "auto").Trim().ToLowerInvariant();
+            return m switch
+            {
+                "none" or "off" or "false" or "0" => 1,
+                "clahe" or "2" => 2,
+                _ => 0,
+            };
+        }
+
         /// <summary>
         /// 棋盘格内侧角点检测（完整棋盘时返回 cols×rows 个点）
         /// </summary>
-        public static Point2D[] FindChessboardCorners(CalibImage img, int boardCols, int boardRows, bool refineSubPix = true, bool fastCheck = true)
+        public static Point2D[] FindChessboardCorners(CalibImage img, int boardCols, int boardRows, bool refineSubPix = true, bool fastCheck = true,
+            string cornerPreprocess = "auto", double claheClipLimit = 2.5, int claheTileSize = 8)
         {
             if (img == null) throw new ArgumentNullException(nameof(img));
             int maxPts = boardCols * boardRows;
@@ -247,11 +260,12 @@ namespace CalibOperatorPInvoke
                 return Array.Empty<Point2D>();
 
             int count = 0;
+            int preprocessMode = ParseChessboardCornerPreprocessMode(cornerPreprocess);
             IntPtr ptsPtr = Marshal.AllocHGlobal(Marshal.SizeOf<NativePoint2D>() * maxPts);
             try
             {
                 NativeAPI.CALIB_FindChessboardCorners(img.NativePtr, boardCols, boardRows, ptsPtr, ref count, maxPts,
-                    refineSubPix ? 1 : 0, fastCheck ? 1 : 0);
+                    refineSubPix ? 1 : 0, fastCheck ? 1 : 0, preprocessMode, claheClipLimit, claheTileSize);
                 if (count <= 0)
                     return Array.Empty<Point2D>();
 
@@ -396,15 +410,18 @@ namespace CalibOperatorPInvoke
         /// 多视图棋盘格标定：OpenCV calibrateCamera 优化求解内参、畸变，以及每张成功视图的外参 rvec/tvec（board→camera）。
         /// 返回的 calibrationJson 含 intrinsics、extrinsicsPerView、convention 字段。
         /// </summary>
-        public static (CameraIntrinsics intrinsics, string calibrationJson) CalibrateCameraChessboard(string pathsDelimited, int boardCols, int boardRows, double squareSizeMm)
+        public static (CameraIntrinsics intrinsics, string calibrationJson) CalibrateCameraChessboard(
+            string pathsDelimited, int boardCols, int boardRows, double squareSizeMm,
+            string cornerPreprocess = "auto", double claheClipLimit = 2.5, int claheTileSize = 8)
         {
             NativeCameraIntrinsics n = new NativeCameraIntrinsics();
             byte[] buf = new byte[524288];
             GCHandle handle = GCHandle.Alloc(buf, GCHandleType.Pinned);
             try
             {
+                int preprocessMode = ParseChessboardCornerPreprocessMode(cornerPreprocess);
                 int rc = NativeAPI.CALIB_CalibrateCameraChessboard(pathsDelimited ?? string.Empty, boardCols, boardRows, squareSizeMm, ref n,
-                    handle.AddrOfPinnedObject(), buf.Length);
+                    handle.AddrOfPinnedObject(), buf.Length, preprocessMode, claheClipLimit, claheTileSize);
                 if (rc != 0 || n.success == 0)
                     throw new InvalidOperationException($"棋盘格标定求解失败 (code {rc})：需至少 3 张成功检出棋盘格的图像以计算内参与外参。");
                 string calJson = Utf8NullTerminated(buf);

@@ -337,6 +337,15 @@ static int ParseChessboardViewIndex(const std::string& s, int defVal) {
     return ToInt(s, defVal);
 }
 
+/** 0=auto, 1=none, 2=clahe */
+static int ParseChessboardCornerPreprocessMode(const std::string& s) {
+    std::string t = s;
+    for (auto& c : t) c = (char)tolower((unsigned char)c);
+    if (t == "none" || t == "off" || t == "false" || t == "0") return 1;
+    if (t == "clahe" || t == "2") return 2;
+    return 0;
+}
+
 // Polyline helpers aligned with FlowPage.xaml.cs (SimplifyOpenPolyline / closed / resample / smooth / splits).
 
 static double FlowPtLineDist(Point2D p, Point2D a, Point2D b) {
@@ -2073,6 +2082,9 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         int rows = ToInt(NodeParam(n, "rows", "6"), 6);
         int refine = ToInt(NodeParam(n, "refine", "1"), 1);
         int fast = ToInt(NodeParam(n, "fastCheck", "1"), 1);
+        int preprocess = ParseChessboardCornerPreprocessMode(NodeParam(n, "cornerPreprocess", "auto"));
+        double claheClip = ToDouble(NodeParam(n, "claheClipLimit", "2.5"), 2.5);
+        int claheTile = ToInt(NodeParam(n, "claheTileSize", "8"), 8);
         if (cols < 2 || rows < 2) { err = "chessboard_find_corners: cols/rows must be >=2"; return false; }
         cv::Mat gray = EnsureGray(vin.img);
         std::vector<unsigned char> buf((size_t)gray.cols * gray.rows);
@@ -2085,7 +2097,8 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         int maxPts = cols * rows;
         std::vector<Point2D> pts((size_t)maxPts);
         int count = 0;
-        FindChessboardCornersGrayBuffer(buf.data(), gray.cols, gray.rows, cols, rows, pts.data(), &count, maxPts, refine, fast);
+        FindChessboardCornersGrayBuffer(buf.data(), gray.cols, gray.rows, cols, rows, pts.data(), &count, maxPts, refine, fast,
+            preprocess, claheClip, claheTile);
         Value vpts; vpts.kind = Value::Kind::Points;
         if (count > 0) vpts.points.assign(pts.begin(), pts.begin() + count);
         out["Points"] = vpts;
@@ -2111,10 +2124,13 @@ static bool ExecuteNode(NativeFlowEngineImpl* e, const NodeDef& n, std::string& 
         int cols = ToInt(NodeParam(n, "cols", "9"), 9);
         int rows = ToInt(NodeParam(n, "rows", "6"), 6);
         double sq = ToDouble(NodeParam(n, "squareSizeMm", "25"), 25.0);
+        int preprocess = ParseChessboardCornerPreprocessMode(NodeParam(n, "cornerPreprocess", "auto"));
+        double claheClip = ToDouble(NodeParam(n, "claheClipLimit", "2.5"), 2.5);
+        int claheTile = ToInt(NodeParam(n, "claheTileSize", "8"), 8);
         double fx, fy, cx, cy, k1, k2, p1, p2, k3, rms;
         std::vector<char> jbuf(393216);
         int crc = CalibrateCameraChessboardMultiview(paths.c_str(), cols, rows, sq, &fx, &fy, &cx, &cy, &k1, &k2, &p1, &p2, &k3, &rms,
-            jbuf.data(), (int)jbuf.size());
+            jbuf.data(), (int)jbuf.size(), preprocess, claheClip, claheTile);
         if (crc != 0) { err = "chessboard_calibrate_intrinsics failed (need >=3 views with detected board)"; return false; }
         std::ostringstream j;
         j << std::fixed << std::setprecision(6);

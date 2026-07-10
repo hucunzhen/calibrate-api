@@ -178,11 +178,13 @@ bool ParseHoughCirclesJsonUtf8(const char* jsonUtf8, std::vector<cv::Vec3f>& cir
 // boardCols/boardRows：棋盘内侧角点列数、行数（与 cv::findChessboardCorners 的 patternSize 一致）
 // FindChessboardCorners：返回 0 表示检测到完整角点集；1 表示未找到；负值表示参数错误
 int FindChessboardCorners(Image* img, int boardCols, int boardRows,
-    Point2D* outPts, int* outCount, int maxPts, int refineSubPix, int fastCheck);
+    Point2D* outPts, int* outCount, int maxPts, int refineSubPix, int fastCheck,
+    int cornerPreprocessMode, double claheClipLimit, int claheTileSize);
 
 // 连续存储的灰度行优先缓冲区（width×height），用于已由 cv::Mat 等得到的灰度图
 int FindChessboardCornersGrayBuffer(const unsigned char* grayRowMajor, int width, int height, int boardCols, int boardRows,
-    Point2D* outPts, int* outCount, int maxPts, int refineSubPix, int fastCheck);
+    Point2D* outPts, int* outCount, int maxPts, int refineSubPix, int fastCheck,
+    int cornerPreprocessMode, double claheClipLimit, int claheTileSize);
 
 void DrawChessboardCorners(Image* img, Point2D* pts, int count, int boardCols, int boardRows);
 
@@ -195,7 +197,8 @@ int CalibrateCameraChessboardMultiview(const char* pathsDelimited, int boardCols
     double* outFx, double* outFy, double* outCx, double* outCy,
     double* outK1, double* outK2, double* outP1, double* outP2, double* outK3,
     double* outRms,
-    char* fullCalibrationJsonOut, int fullCalibrationJsonOutSize);
+    char* fullCalibrationJsonOut, int fullCalibrationJsonOutSize,
+    int cornerPreprocessMode, double claheClipLimit, int claheTileSize);
 
 // 像素 → 棋盘平面 XY（Z=0），长度单位与标定时 squareSize 一致（如 mm）；畸变先 undistort，再与 extrinsics 求射线与棋盘平面交点
 int PixelsToChessboardPlaneXY(double fx, double fy, double cx, double cy,

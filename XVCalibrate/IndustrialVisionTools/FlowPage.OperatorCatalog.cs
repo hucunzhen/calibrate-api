@@ -2641,7 +2641,17 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "9", Description = "棋盘格内侧角点列数（宽方向）" },
                     new OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "6", Description = "棋盘格内侧角点行数（高方向）" },
                     new OperatorParam { Name = "refine", DisplayName = "亚像素细化", DefaultValue = "true", Description = "cornerSubPix 细化" },
-                    new OperatorParam { Name = "fastCheck", DisplayName = "快速检测", DefaultValue = "true", Description = "CALIB_CB_FAST_CHECK，失败时可改为 false" }
+                    new OperatorParam { Name = "fastCheck", DisplayName = "快速检测", DefaultValue = "true", Description = "CALIB_CB_FAST_CHECK，失败时可改为 false" },
+                    new OperatorParam
+                    {
+                        Name = "cornerPreprocess",
+                        DisplayName = "角点预处理",
+                        DefaultValue = "auto",
+                        Description = "auto=原图→CLAHE→轻模糊+CLAHE→SB 多策略回退（光照不均推荐）；none=仅原图；clahe=仅 CLAHE",
+                        Options = new List<string> { "auto", "clahe", "none" }
+                    },
+                    new OperatorParam { Name = "claheClipLimit", DisplayName = "CLAHE 对比度限制", DefaultValue = "2.5", Description = "预处理为 auto/clahe 时有效，典型 2.0~4.0" },
+                    new OperatorParam { Name = "claheTileSize", DisplayName = "CLAHE 分块", DefaultValue = "8", Description = "分块边长(px)，大视场可试 16" }
                 },
                 Ports =
                 {
@@ -2665,7 +2675,17 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "imagePaths", DisplayName = "图像路径列表", DefaultValue = "", Description = "可选：分号分隔单张路径；相对路径相对流程文件目录" },
                     new OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "9", Description = "与检测算子一致，用于构造已知三维棋盘角点" },
                     new OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "6", Description = "与检测算子一致，用于构造已知三维棋盘角点" },
-                    new OperatorParam { Name = "squareSizeMm", DisplayName = "方格边长(mm)", DefaultValue = "25", Description = "棋盘方格物理边长(mm)，与世界坐标尺度一致，参与内参求解" }
+                    new OperatorParam { Name = "squareSizeMm", DisplayName = "方格边长(mm)", DefaultValue = "25", Description = "棋盘方格物理边长(mm)，与世界坐标尺度一致，参与内参求解" },
+                    new OperatorParam
+                    {
+                        Name = "cornerPreprocess",
+                        DisplayName = "角点预处理",
+                        DefaultValue = "auto",
+                        Description = "auto=原图→CLAHE→轻模糊+CLAHE→findChessboardCornersSB 多策略回退，提高光照不均时检出率；none=仅原图；clahe=仅 CLAHE",
+                        Options = new List<string> { "auto", "clahe", "none" }
+                    },
+                    new OperatorParam { Name = "claheClipLimit", DisplayName = "CLAHE 对比度限制", DefaultValue = "2.5", Description = "预处理为 auto/clahe 时有效，典型 2.0~4.0" },
+                    new OperatorParam { Name = "claheTileSize", DisplayName = "CLAHE 分块", DefaultValue = "8", Description = "分块边长(px)，大视场可试 16" }
                 },
                 Ports =
                 {

@@ -128,8 +128,10 @@ CALIB_API int CALIB_HoughRunwayDetect(Image* src, Image* dstOverlay,
 }
 
 CALIB_API int CALIB_FindChessboardCorners(Image* img, int boardCols, int boardRows,
-    Point2D* outPts, int* outCount, int maxPts, int refineSubPix, int fastCheck) {
-    return ::FindChessboardCorners(img, boardCols, boardRows, outPts, outCount, maxPts, refineSubPix, fastCheck);
+    Point2D* outPts, int* outCount, int maxPts, int refineSubPix, int fastCheck,
+    int cornerPreprocessMode, double claheClipLimit, int claheTileSize) {
+    return ::FindChessboardCorners(img, boardCols, boardRows, outPts, outCount, maxPts, refineSubPix, fastCheck,
+        cornerPreprocessMode, claheClipLimit, claheTileSize);
 }
 
 CALIB_API void CALIB_DrawChessboardCorners(Image* img, Point2D* pts, int count, int boardCols, int boardRows) {
@@ -138,7 +140,8 @@ CALIB_API void CALIB_DrawChessboardCorners(Image* img, Point2D* pts, int count, 
 
 CALIB_API int CALIB_CalibrateCameraChessboard(const char* pathsDelimited, int boardCols, int boardRows,
     double squareSizeMm, CALIB_CameraIntrinsics* outIntrinsics,
-    char* fullCalibrationJsonOut, int fullCalibrationJsonOutSize) {
+    char* fullCalibrationJsonOut, int fullCalibrationJsonOutSize,
+    int cornerPreprocessMode, double claheClipLimit, int claheTileSize) {
     if (!outIntrinsics) return -1;
     outIntrinsics->fx = outIntrinsics->fy = outIntrinsics->cx = outIntrinsics->cy = 0.0;
     outIntrinsics->k1 = outIntrinsics->k2 = outIntrinsics->p1 = outIntrinsics->p2 = outIntrinsics->k3 = 0.0;
@@ -147,7 +150,8 @@ CALIB_API int CALIB_CalibrateCameraChessboard(const char* pathsDelimited, int bo
     double fx, fy, cx, cy, k1, k2, p1, p2, k3, rms;
     int rc = ::CalibrateCameraChessboardMultiview(pathsDelimited, boardCols, boardRows, squareSizeMm,
         &fx, &fy, &cx, &cy, &k1, &k2, &p1, &p2, &k3, &rms,
-        fullCalibrationJsonOut, fullCalibrationJsonOutSize);
+        fullCalibrationJsonOut, fullCalibrationJsonOutSize,
+        cornerPreprocessMode, claheClipLimit, claheTileSize);
     if (rc != 0) return rc;
     outIntrinsics->fx = fx;
     outIntrinsics->fy = fy;

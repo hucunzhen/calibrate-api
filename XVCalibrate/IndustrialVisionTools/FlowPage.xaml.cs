@@ -11297,7 +11297,12 @@ namespace CalibOperatorCLI_Example
                         int rows = int.TryParse(node.Params.GetValueOrDefault("rows"), out int rr) ? rr : 6;
                         bool refine = bool.TryParse(node.Params.GetValueOrDefault("refine"), out bool rv) ? rv : true;
                         bool fast = bool.TryParse(node.Params.GetValueOrDefault("fastCheck"), out bool fv) ? fv : true;
-                        var cbPts = CalibAPI.FindChessboardCorners(chessImg, cols, rows, refine, fast);
+                        string cornerPre = node.Params.GetValueOrDefault("cornerPreprocess", "auto") ?? "auto";
+                        double claheClip = double.TryParse(node.Params.GetValueOrDefault("claheClipLimit", "2.5")?.Trim(),
+                            System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var clv) ? clv : 2.5;
+                        int claheTile = int.TryParse(node.Params.GetValueOrDefault("claheTileSize", "8")?.Trim(),
+                            System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var ctv) ? ctv : 8;
+                        var cbPts = CalibAPI.FindChessboardCorners(chessImg, cols, rows, refine, fast, cornerPre, claheClip, claheTile);
                         node.Outputs["Points"] = cbPts;
                         node.Outputs["Found"] = cbPts.Length > 0;
                         var vis = CalibAPI.DuplicateImage(chessImg);
@@ -11312,11 +11317,16 @@ namespace CalibOperatorCLI_Example
                         int colsI = int.TryParse(node.Params.GetValueOrDefault("cols"), out int ci) ? ci : 9;
                         int rowsI = int.TryParse(node.Params.GetValueOrDefault("rows"), out int ri) ? ri : 6;
                         double sqMm = double.TryParse(node.Params.GetValueOrDefault("squareSizeMm"), out double sqv) ? sqv : 25.0;
+                        string cornerPre = node.Params.GetValueOrDefault("cornerPreprocess", "auto") ?? "auto";
+                        double claheClip = double.TryParse(node.Params.GetValueOrDefault("claheClipLimit", "2.5")?.Trim(),
+                            System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var clv) ? clv : 2.5;
+                        int claheTile = int.TryParse(node.Params.GetValueOrDefault("claheTileSize", "8")?.Trim(),
+                            System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var ctv) ? ctv : 8;
                         var resolved = ResolveChessboardCalibrationImagePaths(node, inputs, compositeInnerFlowBaseDir);
                         if (resolved.Count == 0)
                             throw new InvalidOperationException("棋盘格内参: 请连接 ImagePaths（摄像头采集）、设置 imageDirectory 或 imagePaths");
                         string pathsJoined = string.Join(";", resolved);
-                        var (intr, calJson) = CalibAPI.CalibrateCameraChessboard(pathsJoined, colsI, rowsI, sqMm);
+                        var (intr, calJson) = CalibAPI.CalibrateCameraChessboard(pathsJoined, colsI, rowsI, sqMm, cornerPre, claheClip, claheTile);
                         node.Outputs["Intrinsics"] = intr;
                         node.Outputs["IntrinsicsJson"] = JsonSerializer.Serialize(intr, new JsonSerializerOptions { IncludeFields = true });
                         node.Outputs["CalibrationJson"] = calJson;
