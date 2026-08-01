@@ -7,7 +7,7 @@ using System.Text.Json;
 
 namespace CalibOperatorCLI_Example
 {
-    /// <summary>棋盘格标定结果质检：总体好坏、补拍位置、需替换坏图。</summary>
+    /// <summary>棋盘格标定结果质检：总体评定、补拍位置、需替换不合格图像。</summary>
     internal static class ChessboardCalibrationQuality
     {
         private const double RmsExcellent = 0.10;
@@ -98,14 +98,14 @@ namespace CalibOperatorCLI_Example
 
             sb.AppendLine();
             sb.AppendLine("──────────────────────────────────────");
-            sb.AppendLine("[1 · 标定结果好坏]");
+            sb.AppendLine("[1 · 标定结果评定]");
             sb.AppendLine(report.VerdictLine);
             sb.AppendLine($"等级：{report.Grade} | 全局 RMS={rms:G4}px（<0.10 优秀 / <0.30 良好 / <0.50 可用）");
             sb.AppendLine($"统计：共 {attempted} 张，成功 {success} 张，角点失败 {failed} 张。");
             if (report.Passed)
                 sb.AppendLine("结论：当前标定结果可用于保存并进入九点标定。");
             else
-                sb.AppendLine("结论：请按下方 [2][3] 补拍并替换坏图后，重新运行本流程。");
+                sb.AppendLine("结论：请按下方 [2][3] 补拍并替换不合格图像后，重新运行本流程。");
 
             AppendRetakePositions(sb, root, success);
             AppendReplaceImages(sb, root);
@@ -129,18 +129,18 @@ namespace CalibOperatorCLI_Example
 
             string verdict = passed
                 ? "✓ 标定结果：合格（指标与覆盖度满足要求）"
-                : "✗ 标定结果：不合格（需补拍 / 替换坏图 / 或整体重标）";
+                : "✗ 标定结果：不合格（需补拍 / 替换不合格图像 / 或整体重标）";
 
             if (!minViewsOk)
                 verdict = "✗ 标定结果：不合格（成功张数不足 3，无法标定）";
             else if (replaceCount > 0)
                 verdict = $"✗ 标定结果：不合格（有 {replaceCount} 张图必须替换，见下方清单）";
             else if (!rmsOk)
-                verdict = $"✗ 标定结果：不合格（RMS={rms:G4}px 偏大，需补拍并剔除差图）";
+                verdict = $"✗ 标定结果：不合格（RMS={rms:G4}px 偏大，需补拍并剔除不合格图像）";
             else if (!coverageOk)
                 verdict = "✗ 标定结果：不合格（画面覆盖或姿态不足，见补拍位置）";
             else if (!countOk)
-                verdict = $"✗ 标定结果：勉强可用（建议补拍至 {RecommendedMinViews} 张以上再保存）";
+                verdict = $"✗ 标定结果：临界可用（建议补拍至 {RecommendedMinViews} 张后再保存）";
 
             return new QualityReport
             {
@@ -237,7 +237,7 @@ namespace CalibOperatorCLI_Example
         private static void AppendReplaceImages(StringBuilder sb, JsonElement root)
         {
             sb.AppendLine();
-            sb.AppendLine("[3 · 必须替换的坏图清单]");
+            sb.AppendLine("[3 · 须替换的不合格图像清单]");
 
             var entries = CollectReplaceEntries(root);
             if (entries.Count == 0)
@@ -265,7 +265,7 @@ namespace CalibOperatorCLI_Example
 
             sb.AppendLine();
             sb.AppendLine("[操作步骤]");
-            sb.AppendLine("  1. 按 [3] 删除/替换坏图");
+            sb.AppendLine("  1. 按 [3] 删除/替换不合格图像");
             sb.AppendLine("  2. 按 [2] 补拍缺失区域");
             sb.AppendLine("  3. 重新运行本流程，直至 [1] 显示合格");
             if (failed > 0 && attempted > 0 && (double)failed / attempted > 0.2)

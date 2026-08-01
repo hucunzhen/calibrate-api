@@ -2,7 +2,7 @@
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       Title="HALCON 形状模板"
-      Background="{StaticResource Ui.PageBackground}">
+      Background="{StaticResource Ui.WorkspaceBackground}">
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="400"/>
@@ -36,8 +36,8 @@
                         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6">
                             <TextBlock Text="图像" Width="40" VerticalAlignment="Center" Foreground="#90A4AE" FontSize="11" Margin="0,0,8,0"/>
                             <Button x:Name="BtnLoadImage" Content="加载图像" MinWidth="80" Height="32" Padding="10,4" Margin="0,0,6,0" Click="BtnLoadImage_Click"/>
-                            <Button x:Name="BtnCameraGrab" Content="摄像头取一帧" MinWidth="96" Height="32" Padding="10,4" Margin="0,0,6,0"
-                                    Click="BtnCameraGrab_Click" ToolTip="海康相机抓一帧（设备索引见右侧「相机矫正」）"/>
+                            <Button x:Name="BtnCameraGrab" Content="相机单帧采集" MinWidth="96" Height="32" Padding="10,4" Margin="0,0,6,0"
+                                    Click="BtnCameraGrab_Click" ToolTip="海康相机单帧采集（设备索引见左侧「标定与矫正」）"/>
                             <Button x:Name="BtnClearRoi" Content="清除 ROI" MinWidth="72" Height="32" Padding="10,4" Margin="0,0,6,0" Click="BtnClearRoi_Click"/>
                             <Button x:Name="BtnResetView" Content="重置视图" MinWidth="72" Height="32" Padding="10,4" Click="BtnResetView_Click"/>
                         </StackPanel>
@@ -141,11 +141,11 @@
                 </Border>
                 </Grid>
 
-                <!-- 图像右侧：匹配测试 / 相机矫正 / 日志 -->
+                <!-- 图像右侧：匹配测试 / 日志 -->
                 <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" Margin="0,8,8,8">
                     <StackPanel>
-                        <TextBlock Text="④ 匹配测试" FontWeight="Bold" FontSize="13" Foreground="#B0BEC5" Margin="0,0,0,6"/>
-                            <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}"
+                        <TextBlock Text="⑤ 匹配测试" Style="{StaticResource Ui.SectionHeader}" Margin="0,0,0,6"/>
+                            <Border Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}"
                                     BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
                                 <StackPanel>
                                     <Grid Margin="0,0,0,4">
@@ -237,7 +237,7 @@
                                     </Grid>
                                     <CheckBox x:Name="ChkFindAutoRetry" Content="零结果时自动降低最低分数重试"
                                               Margin="0,0,0,6" IsChecked="False"
-                                              ToolTip="仅当 HALCON 返回 0 个匹配时再试；有匹配时不会增加数量"/>
+                                              ToolTip="仅当 HALCON 返回 0 个匹配时重试；有匹配时不会增加数量"/>
 
                                     <Button x:Name="BtnImportModel" Content="导入模型(.shm)" Height="28"
                                             Margin="0,0,0,8" Click="BtnImportModel_Click"
@@ -260,7 +260,7 @@
                                 </StackPanel>
                             </Border>
 
-                            <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}"
+                            <Border Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}"
                                     BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
                                 <StackPanel>
                                     <TextBlock FontWeight="Bold" Text="模型信息" Margin="0,0,0,6"/>
@@ -268,7 +268,7 @@
                                 </StackPanel>
                             </Border>
 
-                            <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}"
+                            <Border Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}"
                                     BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
                                 <StackPanel>
                                     <TextBlock FontWeight="Bold" Text="查找结果" Margin="0,0,0,6"/>
@@ -276,77 +276,8 @@
                                 </StackPanel>
                             </Border>
 
-                        <TextBlock Text="⑤ 相机矫正" FontWeight="Bold" FontSize="13" Foreground="#B0BEC5" Margin="0,8,0,6"/>
-                            <Border x:Name="PnlCameraCorrection" Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}"
-                                    BorderThickness="1" Padding="10" Margin="0,0,0,0" CornerRadius="3">
-                                <StackPanel>
-                                    <TextBlock Text="去畸变 / 透视 / 矫正后旋转；设备索引与顶部「摄像头取一帧」共用。"
-                                               FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,8"/>
-                                    <Grid Margin="0,0,0,6">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="72"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Text="设备索引" VerticalAlignment="Center"/>
-                                        <TextBox x:Name="TxtCameraDeviceIndex" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
-                                    </Grid>
-                                    <Grid Margin="0,0,0,4">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="72"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="28"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Text="标定 JSON" VerticalAlignment="Center"/>
-                                        <TextBox x:Name="TxtCalibrationJsonPath" Grid.Column="1" Height="24" VerticalContentAlignment="Center"/>
-                                        <Button Grid.Column="2" Content="..." Height="24" Margin="4,0,0,0" Click="BtnBrowseCalibrationJson_Click"/>
-                                    </Grid>
-                                    <CheckBox x:Name="ChkEnableUndistort" Content="内参畸变矫正" Foreground="#CCC" Margin="0,4,0,2"/>
-                                    <TextBox x:Name="TxtUndistortAlpha" Text="-1" Height="24" Margin="16,0,0,4" VerticalContentAlignment="Center"
-                                             ToolTip="裁剪 α：-1=原尺寸"/>
-                                    <CheckBox x:Name="ChkEnablePerspective" Content="透视矫正 (棋盘鸟瞰)" Foreground="#CCC" Margin="0,4,0,4"/>
-                                    <TextBox x:Name="TxtCalibViewIndex" Text="0" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center"/>
-                                    <Grid Margin="16,0,0,2">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="36"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="36"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Text="列" VerticalAlignment="Center"/>
-                                        <TextBox x:Name="TxtCalibBoardCols" Grid.Column="1" Text="11" Height="24" Margin="0,0,4,0" VerticalContentAlignment="Center"/>
-                                        <TextBlock Grid.Column="2" Text="行" VerticalAlignment="Center"/>
-                                        <TextBox x:Name="TxtCalibBoardRows" Grid.Column="3" Text="8" Height="24" VerticalContentAlignment="Center"/>
-                                    </Grid>
-                                    <TextBox x:Name="TxtCalibSquareSizeMm" Text="5" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center" ToolTip="方格 mm"/>
-                                    <TextBox x:Name="TxtCalibPxPerMm" Text="32" Height="24" Margin="16,0,0,4" VerticalContentAlignment="Center" ToolTip="像素/毫米（透视输出缩放）"/>
-                                    <ComboBox x:Name="CmbPerspectiveOutputFrame" Height="26" Margin="16,0,0,6">
-                                        <ComboBoxItem Content="仅标定板 (board)" Tag="board"/>
-                                        <ComboBoxItem Content="原图+板内 (local)" Tag="local"/>
-                                        <ComboBoxItem Content="整图共面 (plane)" Tag="plane" IsSelected="True"/>
-                                    </ComboBox>
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                                        <Button x:Name="BtnRotateCorrectedCcw90" Content="逆时针90°" Height="28" Margin="0,0,6,0" Click="BtnRotateCorrectedCcw90_Click"/>
-                                        <Button x:Name="BtnRotateCorrectedCw90" Content="顺时针90°" Height="28" Margin="0,0,6,0" Click="BtnRotateCorrectedCw90_Click"/>
-                                        <Button x:Name="BtnResetCorrectedRotate" Content="重置旋转" Height="28" Click="BtnResetCorrectedRotate_Click"/>
-                                    </StackPanel>
-                                    <Grid Margin="0,0,0,4">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="72"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="44"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Text="角度(°)" VerticalAlignment="Center"/>
-                                        <TextBox x:Name="TxtPostCorrectRotateDeg" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
-                                        <Button Grid.Column="2" x:Name="BtnApplyPostCorrectRotate" Content="应用" Height="24" Margin="4,0,0,0"
-                                                Click="BtnApplyPostCorrectRotate_Click"/>
-                                    </Grid>
-                                    <CheckBox x:Name="ChkRotateExpandCanvas" Content="扩大画布容纳整图" Foreground="#CCC" Margin="0,0,0,8" IsChecked="False"/>
-                                    <Button x:Name="BtnApplyCameraCorrection" Content="应用相机矫正" Height="28" Click="BtnApplyCameraCorrection_Click"/>
-                                </StackPanel>
-                            </Border>
-
-                        <TextBlock Text="日志" FontWeight="Bold" FontSize="13" Foreground="#B0BEC5" Margin="0,8,0,6"/>
-                        <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}"
+                        <TextBlock Text="日志" Style="{StaticResource Ui.SectionHeader}" Margin="0,8,0,6"/>
+                        <Border Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}"
                                 BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
                             <TextBox x:Name="TxtLog" AcceptsReturn="True" MinHeight="120" MaxHeight="240" VerticalScrollBarVisibility="Auto"
                                      TextWrapping="Wrap" FontFamily="Consolas" FontSize="11" Background="#1E1E1E" Foreground="#E0E0E0"
@@ -357,15 +288,86 @@
             </Grid>
         </Border>
 
-        <!-- 左侧：ROI / 模板 / 创建 -->
+        <!-- 左侧：标定 / ROI / 模板 / 创建 -->
         <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="8,8,0,8">
             <StackPanel>
-                <TextBlock Text="① ROI 与绘制" FontWeight="Bold" FontSize="13" Foreground="#B0BEC5" Margin="0,0,0,8"/>
-                <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}"
+                <TextBlock Text="① 标定与矫正" Style="{StaticResource Ui.SectionHeader}" Margin="0,0,0,8"/>
+                <Border Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}"
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
                     <StackPanel>
+                        <TextBlock FontWeight="Bold" Text="相机矫正" Margin="0,0,0,6"/>
+                        <Border x:Name="PnlCameraCorrection" Background="Transparent" BorderThickness="0" Padding="0">
+                            <StackPanel>
+                                <TextBlock Text="棋盘格内参去畸变 / 透视鸟瞰 / 矫正后旋转；设备索引与顶部「相机单帧采集」共用。"
+                                           FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="72"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="设备索引" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtCameraDeviceIndex" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
+                                </Grid>
+                                <Grid Margin="0,0,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="72"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="28"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="标定文件" VerticalAlignment="Center"
+                                               ToolTip="棋盘格标定文件（CalibrationJson）"/>
+                                    <TextBox x:Name="TxtCalibrationJsonPath" Grid.Column="1" Height="24" VerticalContentAlignment="Center"/>
+                                    <Button Grid.Column="2" Content="..." Height="24" Margin="4,0,0,0" Click="BtnBrowseCalibrationJson_Click"/>
+                                </Grid>
+                                <CheckBox x:Name="ChkEnableUndistort" Content="内参畸变矫正" Foreground="#CCC" Margin="0,4,0,2"/>
+                                <TextBox x:Name="TxtUndistortAlpha" Text="-1" Height="24" Margin="16,0,0,4" VerticalContentAlignment="Center"
+                                         ToolTip="裁剪 α：-1=原尺寸"/>
+                                <CheckBox x:Name="ChkEnablePerspective" Content="透视矫正 (棋盘鸟瞰)" Foreground="#CCC" Margin="0,4,0,4"/>
+                                <TextBox x:Name="TxtCalibViewIndex" Text="0" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center"/>
+                                <Grid Margin="16,0,0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="36"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="36"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="列" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtCalibBoardCols" Grid.Column="1" Text="11" Height="24" Margin="0,0,4,0" VerticalContentAlignment="Center"/>
+                                    <TextBlock Grid.Column="2" Text="行" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtCalibBoardRows" Grid.Column="3" Text="8" Height="24" VerticalContentAlignment="Center"/>
+                                </Grid>
+                                <TextBox x:Name="TxtCalibSquareSizeMm" Text="5" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center" ToolTip="方格 mm"/>
+                                <TextBox x:Name="TxtCalibPxPerMm" Text="32" Height="24" Margin="16,0,0,4" VerticalContentAlignment="Center" ToolTip="像素/毫米（透视输出缩放）"/>
+                                <ComboBox x:Name="CmbPerspectiveOutputFrame" Height="26" Margin="16,0,0,6">
+                                    <ComboBoxItem Content="仅标定板 (board)" Tag="board"/>
+                                    <ComboBoxItem Content="原图+板内 (local)" Tag="local"/>
+                                    <ComboBoxItem Content="整图共面 (plane)" Tag="plane" IsSelected="True"/>
+                                </ComboBox>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <Button x:Name="BtnRotateCorrectedCcw90" Content="逆时针90°" Height="28" Margin="0,0,6,0" Click="BtnRotateCorrectedCcw90_Click"/>
+                                    <Button x:Name="BtnRotateCorrectedCw90" Content="顺时针90°" Height="28" Margin="0,0,6,0" Click="BtnRotateCorrectedCw90_Click"/>
+                                    <Button x:Name="BtnResetCorrectedRotate" Content="重置旋转" Height="28" Click="BtnResetCorrectedRotate_Click"/>
+                                </StackPanel>
+                                <Grid Margin="0,0,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="72"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="44"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="角度(°)" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtPostCorrectRotateDeg" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
+                                    <Button Grid.Column="2" x:Name="BtnApplyPostCorrectRotate" Content="应用" Height="24" Margin="4,0,0,0"
+                                            Click="BtnApplyPostCorrectRotate_Click"/>
+                                </Grid>
+                                <CheckBox x:Name="ChkRotateExpandCanvas" Content="扩大画布容纳整图" Foreground="#CCC" Margin="0,0,0,8" IsChecked="False"/>
+                                <Button x:Name="BtnApplyCameraCorrection" Content="应用相机矫正" Height="28" Click="BtnApplyCameraCorrection_Click"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Separator Margin="0,10,0,10" Background="{StaticResource Ui.PanelBorder}"/>
+
                         <TextBlock FontWeight="Bold" Text="九点标定" Margin="0,0,0,6"/>
-                        <TextBlock Text="ROI 存盘为 mm、加载反算像素；测量几何亦用此 affine。"
+                        <TextBlock Text="像素→世界 affine；ROI 存盘为 mm、测量几何亦用此 JSON。"
                                    FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,6"/>
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -373,7 +375,7 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="28"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="九点 JSON" VerticalAlignment="Center"
+                            <TextBlock Grid.Column="0" Text="九点标定文件" VerticalAlignment="Center"
                                        ToolTip="calibration_result.json（含 affine）"/>
                             <TextBox x:Name="TxtNinePointCalibPath" Grid.Column="1" Height="24" VerticalContentAlignment="Center"
                                      TextChanged="NinePointCalibPath_Changed" LostFocus="NinePointCalibPath_Changed"/>
@@ -382,12 +384,14 @@
                     </StackPanel>
                 </Border>
 
-                <Border x:Name="PnlRoiManage" Background="{StaticResource Ui.CardBackground}"
-                        BorderBrush="{StaticResource Ui.CardBorder}" BorderThickness="1" Padding="10"
+                <TextBlock Text="② ROI 与绘制" Style="{StaticResource Ui.SectionHeader}" Margin="0,0,0,8"/>
+
+                <Border x:Name="PnlRoiManage" Background="{StaticResource Ui.CardDark}"
+                        BorderBrush="{StaticResource Ui.PanelBorder}" BorderThickness="1" Padding="10"
                         Margin="0,0,0,8" CornerRadius="3">
                     <StackPanel>
                         <TextBlock FontWeight="Bold" Text="ROI 保存 / 加载" Margin="0,0,0,6"/>
-                        <TextBlock Text="保存为 .xvroi.json（mm 坐标）；加载时用九点标定反算像素。"
+                        <TextBlock Text="保存为 .xvroi.json（mm 坐标）；加载时用上方九点标定反算像素。"
                                    FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,8"/>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                             <Button x:Name="BtnSaveRoi" Content="保存 ROI" Width="88" Height="26"
@@ -420,7 +424,7 @@
                     </StackPanel>
                 </Border>
 
-                <Border x:Name="PnlThreshold" Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" 
+                <Border x:Name="PnlThreshold" Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}" 
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
                     <StackPanel>
                         <TextBlock x:Name="TxtThresholdPanelTitle" FontWeight="Bold" Text="阈值与闭合" Margin="0,0,0,8"/>
@@ -480,7 +484,7 @@
                     </StackPanel>
                 </Border>
 
-                <Border x:Name="PnlRoiBoundaryDir" Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" 
+                <Border x:Name="PnlRoiBoundaryDir" Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}" 
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3" Visibility="Collapsed">
                     <StackPanel>
                         <TextBlock FontWeight="Bold" Text="手绘边线梯度" Margin="0,0,0,6"/>
@@ -510,8 +514,8 @@
                     </StackPanel>
                 </Border>
 
-                <TextBlock Text="② 模板与轮廓" FontWeight="Bold" FontSize="13" Foreground="#B0BEC5" Margin="0,8,0,8"/>
-                <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" 
+                <TextBlock Text="③ 模板与轮廓" Style="{StaticResource Ui.SectionHeader}" Margin="0,8,0,8"/>
+                <Border Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}" 
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
                     <StackPanel>
                         <TextBlock FontWeight="Bold" Text="模板来源与模型类型" Margin="0,0,0,6"/>
@@ -535,7 +539,7 @@
                     </StackPanel>
                 </Border>
 
-                <Border x:Name="PnlGeometryMeasure" Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}"
+                <Border x:Name="PnlGeometryMeasure" Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}"
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3" Visibility="Collapsed">
                     <StackPanel>
                         <TextBlock FontWeight="Bold" Text="测量与几何轮廓" Margin="0,0,0,6"/>
@@ -708,7 +712,7 @@
                     </StackPanel>
                 </Border>
 
-                <Border x:Name="PnlContourExtract" Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" 
+                <Border x:Name="PnlContourExtract" Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}" 
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3" Visibility="Collapsed">
                     <StackPanel>
                         <TextBlock FontWeight="Bold" Text="轮廓提取" Margin="0,0,0,8"/>
@@ -732,7 +736,7 @@
                     </StackPanel>
                 </Border>
 
-                <Border x:Name="PnlContourTrim" Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" 
+                <Border x:Name="PnlContourTrim" Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}" 
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3" Visibility="Collapsed">
                     <StackPanel>
                         <TextBlock FontWeight="Bold" Text="轮廓修剪" Margin="0,0,0,6"/>
@@ -779,7 +783,7 @@
                     </StackPanel>
                 </Border>
 
-                <Border x:Name="PnlEdgeExtract" Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" 
+                <Border x:Name="PnlEdgeExtract" Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}" 
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3" Visibility="Collapsed">
                     <StackPanel>
                         <TextBlock FontWeight="Bold" Text="Canny 边缘提取" Margin="0,0,0,8"/>
@@ -813,7 +817,7 @@
                 </Border>
 
                 <!-- 缩放模型 -->
-                <Border x:Name="PnlScale" Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" 
+                <Border x:Name="PnlScale" Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}" 
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3" Visibility="Collapsed">
                     <StackPanel>
                         <TextBlock FontWeight="Bold" Text="缩放范围" Margin="0,0,0,8"/>
@@ -845,8 +849,8 @@
                     </StackPanel>
                 </Border>
 
-                <TextBlock Text="③ 创建模型" FontWeight="Bold" FontSize="13" Foreground="#B0BEC5" Margin="0,8,0,8"/>
-                <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" 
+                <TextBlock Text="④ 创建模型" Style="{StaticResource Ui.SectionHeader}" Margin="0,8,0,8"/>
+                <Border Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}" 
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
                     <StackPanel>
                         <Button x:Name="BtnPreviewContour" Content="预览轮廓 / 模板域" Height="28"
@@ -857,7 +861,7 @@
                 </Border>
 
                 <!-- CreateShapeModel 参数 -->
-                <Border Background="{StaticResource Ui.CardBackground}" BorderBrush="{StaticResource Ui.CardBorder}" 
+                <Border Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}" 
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
                     <StackPanel>
                         <TextBlock FontWeight="Bold" Text="匹配模型参数" Margin="0,0,0,8"/>

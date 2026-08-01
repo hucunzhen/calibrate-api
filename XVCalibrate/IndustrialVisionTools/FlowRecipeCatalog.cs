@@ -78,6 +78,7 @@ namespace CalibOperatorCLI_Example
             {
                 settings.FlowsRootDirectory = "";
                 settings.Save();
+                FormalFlowOperatorCatalog.InvalidateCache();
                 return true;
             }
 
@@ -90,6 +91,7 @@ namespace CalibOperatorCLI_Example
 
             settings.FlowsRootDirectory = full;
             settings.Save();
+            FormalFlowOperatorCatalog.InvalidateCache();
             return true;
         }
 

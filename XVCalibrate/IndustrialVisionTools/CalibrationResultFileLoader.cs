@@ -70,7 +70,7 @@ namespace CalibOperatorCLI_Example
                 if (raw.Contains("\"extrinsicsPerView\"", StringComparison.Ordinal)
                     && !raw.Contains("\"schemaVersion\"", StringComparison.Ordinal))
                 {
-                    error = "该文件为棋盘内参 JSON，请使用九点标定保存的 calibration_result.json";
+                    error = "该文件为棋盘内参标定文件，请使用九点标定保存的 calibration_result.json";
                     return false;
                 }
 
@@ -83,7 +83,7 @@ namespace CalibOperatorCLI_Example
 
                 if (dto.Affine == null)
                 {
-                    error = "JSON 不含 affine（请先运行九点标定并保存结果）";
+                    error = "文件不含 affine（请先运行九点标定并保存结果）";
                     return false;
                 }
 

@@ -14,7 +14,7 @@ using static CalibOperatorCLI_Example.CameraService;
 namespace CalibOperatorCLI_Example
 {
     /// <summary>
-    /// 摄像头交互采集标定图：实时预览 →「确定」保存当前帧 → 数量足够后「完成」。
+    /// 相机交互采集标定图：实时预览 →「确定」保存当前帧 → 达到最少张数后「完成」。
     /// 预览走 WriteableBitmap 直写像素（无 CalibImage / PNG 转换）。
     /// </summary>
     public sealed class CameraCalibCaptureDialog : Window
@@ -63,7 +63,7 @@ namespace CalibOperatorCLI_Example
             _namePrefix = string.IsNullOrWhiteSpace(namePrefix) ? "Image_" : namePrefix;
             _fileExtension = NormalizeExtension(fileExtension);
 
-            Title = "棋盘标定 — 摄像头采集";
+            Title = "棋盘标定 — 相机采集";
             Width = 1080;
             Height = 720;
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
@@ -99,7 +99,7 @@ namespace CalibOperatorCLI_Example
 
             var hint = new TextBlock
             {
-                Text = "调整标定板位姿与对焦，点击「确定」保存当前预览帧。建议覆盖画面四角与中心，至少采集足够张数后再点「完成」。",
+                Text = "调整标定板位姿与对焦，单击「确定」保存当前预览帧。建议覆盖画面四角与中心，达到最少采集张数后单击「完成」。",
                 Foreground = Brushes.Silver,
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(10, 0, 10, 8),

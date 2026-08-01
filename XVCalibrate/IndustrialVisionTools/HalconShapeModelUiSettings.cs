@@ -97,7 +97,7 @@ namespace CalibOperatorCLI_Example
         /// <summary>非 90° 整数倍旋转时扩大画布以容纳整图。</summary>
         public bool RotateExpandCanvas { get; set; }
 
-        /// <summary>海康相机枚举索引（摄像头取一帧）。</summary>
+        /// <summary>海康相机枚举索引（相机单帧采集）。</summary>
         public string CameraDeviceIndex { get; set; } = "0";
 
         /// <summary>模板创建/匹配等侧栏控件（按 x:Name 序列化）。</summary>

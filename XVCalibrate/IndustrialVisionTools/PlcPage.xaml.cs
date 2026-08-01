@@ -117,7 +117,7 @@ namespace CalibOperatorCLI_Example
             ApplyRegToolTip(BtnManual, "ManualMode", "写 ON → 手动");
             BtnAuto.Content = "关闭手动模式";
             ApplyRegToolTip(BtnAuto, "ManualMode", "写 OFF → 关闭手动");
-            ApplyRegToolTip(BtnCalibrationMode, "CalibrationMode", "点一下开，再点一下关");
+            ApplyRegToolTip(BtnCalibrationMode, "CalibrationMode", "单击置位，再次单击复位");
             BtnStart.Content = "启动";
             ApplyRegToolTip(BtnStart, "RunStartStop", "写 ON");
             BtnStop.Content = "停止";

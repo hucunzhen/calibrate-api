@@ -44,7 +44,7 @@ FindShapeModel → halcon_pick_shape_match_lattice（阵列格点筛选，输出
 | gridRows / gridCols | 已知行数、列数 |
 | pitchRow / pitchCol | 行/列间距（像素）；**0 = 自动估计** |
 | gridAngleDeg | **auto**：用 FindShapeModel 匹配角 + PCA，并自动尝试 ±90° 与行列轴对调（适配整板旋转） |
-| maxAngleDeviationDeg | 相对匹配角的偏差上限；**整板同向旋转**可设 10~15°；对称模板或角度乱跳时请 **0** |
+| maxAngleDeviationDeg | 相对匹配角的偏差上限；**整板同向旋转**可设 10~15°；对称模板或角度不稳定时请 **0** |
 | snapTolerancePx | 点到格心最大偏差；0 ≈ 0.35×min间距 |
 | minNeighborVotes | ≥1 时要求与邻格间距一致，抑制孤立误检 |
 

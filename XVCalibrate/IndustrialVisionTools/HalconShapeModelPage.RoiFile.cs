@@ -76,7 +76,7 @@ namespace CalibOperatorCLI_Example
 
             if (!TryGetNinePointAffine(out AffineTransform affine, out string affineError))
 
-                throw new InvalidOperationException($"ROI 文件为 mm 坐标，需要有效的九点标定 JSON。\n{affineError}");
+                throw new InvalidOperationException($"ROI 文件为 mm 坐标，需要有效的九点标定文件。\n{affineError}");
 
 
 
@@ -298,7 +298,7 @@ namespace CalibOperatorCLI_Example
 
                 MessageBox.Show(
 
-                    $"保存 ROI 需要有效的九点标定 JSON，以便将坐标写入 mm。\n{affineError}",
+                    $"保存 ROI 需要有效的九点标定文件，以便将坐标写入 mm。\n{affineError}",
 
                     "保存 ROI",
 

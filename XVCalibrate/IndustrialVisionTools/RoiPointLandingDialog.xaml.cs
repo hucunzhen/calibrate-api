@@ -100,7 +100,7 @@ namespace CalibOperatorCLI_Example
 
             else
 
-                TxtWorldHint.Text = "未加载九点标定 JSON，仅编辑像素坐标。";
+                TxtWorldHint.Text = "未加载九点标定文件，仅编辑像素坐标。";
 
         }
 

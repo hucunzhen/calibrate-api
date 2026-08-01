@@ -1221,7 +1221,7 @@ namespace CalibOperatorPInvoke
         }
 
         /// <summary>
-        /// 一键检测（执行所有步骤）
+        /// 完整检测流程（执行所有步骤）
         /// </summary>
         /// <param name="doFit">是否执行形状拟合</param>
         /// <param name="doVerify">是否执行Mask验证</param>

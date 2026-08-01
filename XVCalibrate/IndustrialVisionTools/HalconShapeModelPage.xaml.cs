@@ -248,12 +248,12 @@ namespace CalibOperatorCLI_Example
 
                 CalibImage? frame = cam.GrabOneFrame(0, 0);
                 if (frame == null)
-                    throw new InvalidOperationException($"相机取图失败: {cam.LastError ?? "未知错误"}");
+                    throw new InvalidOperationException($"相机图像采集失败: {cam.LastError ?? "未知错误"}");
 
                 try
                 {
                     LoadImageFromCalibImage(frame, clearRoi: true);
-                    AppendLog($"摄像头取一帧 OK: dev={deviceIndex} ({_imgWidth}x{_imgHeight})");
+                    AppendLog($"相机单帧采集成功: dev={deviceIndex} ({_imgWidth}x{_imgHeight})");
                 }
                 finally
                 {
@@ -262,7 +262,7 @@ namespace CalibOperatorCLI_Example
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"摄像头取图失败:\n{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"相机图像采集失败:\n{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                 AppendLog($"[相机] {ex.Message}");
             }
         }
@@ -408,7 +408,7 @@ namespace CalibOperatorCLI_Example
             var dlg = new OpenFileDialog
             {
                 Filter = "JSON|*.json|所有文件|*.*",
-                Title = "选择棋盘标定 JSON",
+                Title = "选择棋盘标定文件",
                 FileName = string.IsNullOrWhiteSpace(TxtCalibrationJsonPath.Text)
                     ? "chessboard_calibration_from_dir.json"
                     : IoPath.GetFileName(TxtCalibrationJsonPath.Text)
@@ -474,7 +474,7 @@ namespace CalibOperatorCLI_Example
         {
             string path = TxtCalibrationJsonPath.Text?.Trim() ?? "";
             if (string.IsNullOrWhiteSpace(path))
-                throw new InvalidOperationException("请指定标定 JSON 文件路径");
+                throw new InvalidOperationException("请指定标定文件路径");
             return requireExtrinsics
                 ? CalibAPI.NormalizeChessboardCalibrationJson(path)
                 : CalibAPI.NormalizeIntrinsicsCalibrationJson(path);
@@ -831,7 +831,7 @@ namespace CalibOperatorCLI_Example
             if (!TryGetNinePointAffine(out AffineTransform affine, out string affineErr))
             {
                 MessageBox.Show(
-                    $"矩形/旋转矩形/圆形 ROI 参数使用 mm，须先加载有效的九点标定 JSON。\n{affineErr}",
+                    $"矩形/旋转矩形/圆形 ROI 参数使用 mm，须先加载有效的九点标定文件。\n{affineErr}",
                     "九点标定",
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
@@ -4619,7 +4619,7 @@ namespace CalibOperatorCLI_Example
             string path = TxtNinePointCalibPath?.Text?.Trim() ?? "";
             if (string.IsNullOrWhiteSpace(path))
             {
-                error = "未指定九点标定 JSON";
+                error = "未指定九点标定文件";
                 _ninePointAffineCached = null;
                 return false;
             }

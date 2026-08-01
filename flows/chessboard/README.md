@@ -16,7 +16,7 @@
 
 | 算子 | 作用 |
 |------|------|
-| `camera_calib_capture` | 摄像头预览采集标定图（确定/完成）→ `ImagePaths` / `ImageDirectory` |
+| `camera_calib_capture` | 相机预览采集标定图（确定/完成）→ `ImagePaths` / `ImageDirectory` |
 | `chessboard_find_corners` | 单张图检测棋盘角点 |
 | `chessboard_calibrate_intrinsics` | 多视图 OpenCV 标定 → `Intrinsics` / `CalibrationJson` |
 | `intrinsics_undistort_image` | 内参去畸变（`cv::undistort`） |
@@ -24,7 +24,7 @@
 | `calibration_correct_image` | **组合**：去畸变 + 透视（原 `load_image` 内置选项已拆出） |
 | `chessboard_pixels_to_world` | 像素轨迹 → 棋盘平面 mm 坐标 |
 
-取图算子 `load_image` / `load_image_dir` / `camera_snap` **不再**内置矫正，须串联上述矫正算子。
+图像采集算子 `load_image` / `load_image_dir` / `camera_snap` **不再**内置矫正，须串联上述矫正算子。
 
 ---
 
@@ -110,7 +110,7 @@ load_image / camera_snap ── Image ── calibration_correct_image ── Ou
 |------|------|
 | `chessboard_example.flow.json` | 角点检测 + 显示 |
 | `chessboard_intrinsics_example.flow.json` | 目录批量内参标定 |
-| `chessboard_intrinsics_from_dir.flow.json` | **摄像头交互采集** → 内参标定、质检报告、角点逐张检查、去畸变对比并保存 JSON |
+| `chessboard_intrinsics_from_dir.flow.json` | **相机交互采集** → 内参标定、质检报告、角点逐张检查、去畸变对比并保存 JSON |
 | `chessboard_intrinsics_with_qc.flow.json` | 与上一文件相同（带完整质检支路） |
 | `chessboard_undistort_example.flow.json` | 去畸变对比显示 |
 | `chessboard_perspective_warp_example.flow.json` | 去畸变 → 透视展开 → 存图 |
@@ -124,7 +124,7 @@ load_image / camera_snap ── Image ── calibration_correct_image ── Ou
 
 `chessboard_intrinsics_from_dir.flow.json` / `chessboard_intrinsics_with_qc.flow.json` 含三条支路：
 
-1. **显示标定结果**：运行后**弹出质检报告窗口**（非日志），含 **[1] 标定好坏**、**[2] 补拍位置**、**[3] 坏图清单**；日志仅一行摘要。
+1. **显示标定结果**：运行后**弹出质检报告窗口**（非日志），含 **[1] 标定评定**、**[2] 补拍位置**、**[3] 不合格图像清单**；日志仅一行摘要。
 2. **角点逐张检查**：`加载图像目录(each)` → `棋盘格角点` → `显示图像`（运行流程时逐张刷新，无角点即需重拍）。
 3. **去畸变对比**：`加载图像目录(single)` → `内参畸变矫正` → `显示图像`（Img=原图，Image=矫正后）。
 
@@ -173,7 +173,7 @@ A: `cols` / `rows` 是 **内侧角点个数**（您说的 67×50 点数填法是
 4. 程序已对过小方格 **自动 2×/4× 放大再检测**，并缩小亚像素窗口（须 **重新编译 CalibOperator** 后生效）；放大只能缓解检出，**不能替代光学放大**，0.1 mm 验收仍须提高像素尺度。
 
 **Q: 换 viewIndex 后透视图大小变了？**  
-A: 检查 `perspectiveOutputScale` 是否为 `metric`；`board_pixels` 会随图中棋盘大小变化。未检测到角点时，程序会回退 `metric`，避免外参投影导致尺寸乱跳。
+A: 检查 `perspectiveOutputScale` 是否为 `metric`；`board_pixels` 会随图中棋盘大小变化。未检测到角点时，程序会回退 `metric`，避免外参投影导致尺寸不稳定。
 
 **Q: 透视图拉伸 / 黑边多？**  
 A: 先去畸变再透视；`undistortAlpha` 可试 0~1 裁黑边。透视用 `viewIndex` 与当前图位姿不匹配时会偏。

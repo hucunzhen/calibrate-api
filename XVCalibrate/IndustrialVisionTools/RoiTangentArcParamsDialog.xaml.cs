@@ -41,7 +41,7 @@ namespace CalibOperatorCLI_Example
             TxtRadiusMm.IsReadOnly = !hasAffine;
             TxtMmStatus.Text = hasAffine
                 ? "半径/弧长已按九点标定换算 mm。"
-                : "未加载九点标定 JSON，仅可编辑像素；mm 显示为 —。";
+                : "未加载九点标定文件，仅可编辑像素；mm 显示为 —。";
             UpdateArcLengthHint();
         }
 

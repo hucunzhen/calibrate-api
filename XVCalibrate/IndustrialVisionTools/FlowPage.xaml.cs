@@ -317,6 +317,12 @@ namespace CalibOperatorCLI_Example
 
         private const int MaxFlowUndoSteps = 80;
         private static readonly JsonSerializerOptions FlowSnapshotJsonOptions = new JsonSerializerOptions { WriteIndented = false };
+        private static readonly JsonSerializerOptions FlowDocumentJsonOptions = new()
+        {
+            PropertyNameCaseInsensitive = true,
+            ReadCommentHandling = JsonCommentHandling.Skip,
+            AllowTrailingCommas = true,
+        };
 
         /// <summary>剪贴板自定义格式（另同步写入文本 JSON，便于外部编辑器粘贴）。</summary>
         private const string FlowClipboardDataFormat = "application/x-calibrate-flow-nodes+json";
@@ -336,6 +342,39 @@ namespace CalibOperatorCLI_Example
             FlowCanvas.RenderTransform = _canvasTransform;
             if (StopRunButton != null) StopRunButton.IsEnabled = false;
             RefreshFlowUndoRedoButtons();
+            Loaded += (_, _) => ScheduleConnectionGeometryRefresh();
+            IsVisibleChanged += (_, e) =>
+            {
+                if (e.NewValue is true)
+                    ScheduleConnectionGeometryRefresh();
+            };
+        }
+
+        /// <summary>在布局完成后重算端口坐标并刷新连线（启动默认加载、切回流程页时必需）。</summary>
+        public void RefreshConnectionGeometry()
+        {
+            if (_connections.Count == 0)
+                return;
+
+            FlowCanvas.UpdateLayout();
+            foreach (var n in _nodes)
+                UpdatePortPositions(n);
+            UpdateAllConnections();
+        }
+
+        /// <summary>延迟到 Loaded/Render 后再刷新连线，避免页面未入视觉树时端口 ActualSize 为 0。</summary>
+        public void ScheduleConnectionGeometryRefresh()
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(ScheduleConnectionGeometryRefresh);
+                return;
+            }
+
+            RefreshConnectionGeometry();
+            Dispatcher.BeginInvoke(RefreshConnectionGeometry, System.Windows.Threading.DispatcherPriority.Loaded);
+            Dispatcher.BeginInvoke(RefreshConnectionGeometry, System.Windows.Threading.DispatcherPriority.Render);
+            Dispatcher.BeginInvoke(RefreshConnectionGeometry, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         }
 
         private void ThrowIfExecutionCancelled()
@@ -419,7 +458,7 @@ namespace CalibOperatorCLI_Example
         {
             string mode = node.Params.GetValueOrDefault("pixelPickMode", "manual")?.Trim() ?? "manual";
             if (string.Equals(mode, "manual", StringComparison.OrdinalIgnoreCase)
-                || mode == "手选" || mode == "手选像素")
+                || mode == "手选" || mode == "手选像素" || mode == "手动选点")
                 return true;
             if (string.Equals(mode, "detected", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(mode, "detect", StringComparison.OrdinalIgnoreCase)
@@ -1043,18 +1082,32 @@ namespace CalibOperatorCLI_Example
                 "光源",
                 "输出",
                 "可视化",
-                "HALCON"
+                "HALCON",
+                FormalFlowOperatorCatalog.ExtendedToolboxCategory,
             };
 
             _toolboxCatalog.Clear();
+            var formalUsed = FormalFlowOperatorCatalog.GetUsedTypeIds();
+            bool splitExtended = formalUsed.Count > 0;
+
+            string CategoryFor(OperatorDef op)
+            {
+                if (!splitExtended)
+                    return op.Category ?? "";
+                return formalUsed.Contains(op.TypeId)
+                    ? (op.Category ?? "")
+                    : FormalFlowOperatorCatalog.ExtendedToolboxCategory;
+            }
+
             var grouped = OperatorRegistry
-                .GroupBy(o => o.Category ?? "")
+                .GroupBy(CategoryFor)
                 .ToDictionary(g => g.Key, g => g.OrderBy(x => x.DisplayName).ToList());
 
             foreach (var category in categoryOrder)
             {
                 if (!grouped.TryGetValue(category, out var ops) || ops.Count == 0) continue;
-                var group = new ToolboxGroup { Name = category, IsExpanded = true };
+                bool collapsed = category == FormalFlowOperatorCatalog.ExtendedToolboxCategory;
+                var group = new ToolboxGroup { Name = category, IsExpanded = !collapsed };
                 foreach (var op in ops) group.Operators.Add(op);
                 _toolboxCatalog.Add(group);
                 grouped.Remove(category);
@@ -2564,16 +2617,7 @@ namespace CalibOperatorCLI_Example
             FlowCanvas.UpdateLayout();
             foreach (var n in mapOldIdToNode.Values)
                 UpdatePortPositions(n);
-            UpdateAllConnections();
-            Dispatcher.BeginInvoke(
-                new Action(() =>
-                {
-                    FlowCanvas.UpdateLayout();
-                    foreach (var n in mapOldIdToNode.Values)
-                        UpdatePortPositions(n);
-                    UpdateAllConnections();
-                }),
-                System.Windows.Threading.DispatcherPriority.Loaded);
+            ScheduleConnectionGeometryRefresh();
 
             StatusText.Text = $"已粘贴 {data.Nodes.Count} 个算子";
         }
@@ -2654,7 +2698,7 @@ namespace CalibOperatorCLI_Example
                 nodeLookup[nd.Id] = node;
             }
 
-            foreach (var cd in data.Connections)
+            foreach (var cd in data.Connections ?? new List<FlowConnData>())
             {
                 if (!nodeLookup.TryGetValue(cd.FromNodeId, out var fromNode))
                     continue;
@@ -2671,20 +2715,12 @@ namespace CalibOperatorCLI_Example
                     CreateConnection(fromPort, toPort);
             }
 
-            FlowCanvas.UpdateLayout();
-            foreach (var n in _nodes) UpdatePortPositions(n);
-            UpdateAllConnections();
-            Dispatcher.BeginInvoke(new Action(() =>
-            {
-                FlowCanvas.UpdateLayout();
-                foreach (var n in _nodes) UpdatePortPositions(n);
-                UpdateAllConnections();
-            }), System.Windows.Threading.DispatcherPriority.Loaded);
+            ScheduleConnectionGeometryRefresh();
         }
 
         private void RestoreFlowFromSnapshotJson(string json)
         {
-            var data = JsonSerializer.Deserialize<FlowData>(json);
+            var data = JsonSerializer.Deserialize<FlowData>(json, FlowDocumentJsonOptions);
             if (data == null) return;
             _suppressFlowUndoRecording = true;
             try
@@ -2777,7 +2813,7 @@ namespace CalibOperatorCLI_Example
             try
             {
                 var json = System.IO.File.ReadAllText(filePath);
-                var data = JsonSerializer.Deserialize<FlowData>(json);
+                var data = JsonSerializer.Deserialize<FlowData>(json, FlowDocumentJsonOptions);
                 if (data == null) throw new Exception("文件内容为空");
 
                 PushFlowUndoSnapshotBeforeChange();
@@ -2803,7 +2839,8 @@ namespace CalibOperatorCLI_Example
                 if (IsStandaloneDebugActive)
                     StatusText.Text = $"已加载(子流程调试): {System.IO.Path.GetFileName(filePath)} ({data.Nodes.Count} 节点)";
                 else
-                    StatusText.Text = $"已加载: {System.IO.Path.GetFileName(filePath)} ({data.Nodes.Count} 节点, {data.Connections.Count} 连线)";
+                    StatusText.Text = $"已加载: {System.IO.Path.GetFileName(filePath)} ({data.Nodes.Count} 节点, {(data.Connections?.Count ?? 0)} 连线)";
+                ScheduleConnectionGeometryRefresh();
                 return true;
             }
             catch (Exception ex)
@@ -7276,7 +7313,7 @@ namespace CalibOperatorCLI_Example
             {
                 if (calibImage == null)
                     throw new InvalidOperationException(
-                        $"{contextLabel}: 手选像素或图像确认对应需要连接 Image 端口（与取图/加载图像同源）");
+                        $"{contextLabel}: 手动选点或图像确认对应需要连接 Image 端口（与图像采集/加载图像同源）");
 
                 bool dialogManual = manualPick || imagePts == null || imagePts.Length == 0;
                 var owner = Window.GetWindow(this);
@@ -7373,7 +7410,7 @@ namespace CalibOperatorCLI_Example
                 throw new InvalidOperationException($"相机连接失败，deviceIndex={deviceIndex}");
             var img = cam.GrabOneFrame(targetWidth, targetHeight);
             if (img == null)
-                throw new InvalidOperationException($"相机取图失败: {cam.LastError ?? "未知错误"}");
+                throw new InvalidOperationException($"相机图像采集失败: {cam.LastError ?? "未知错误"}");
             return img;
         }
 
@@ -7400,7 +7437,7 @@ namespace CalibOperatorCLI_Example
                     System.Threading.Thread.Sleep(intervalMs);
             }
             if (last == null)
-                throw new InvalidOperationException($"相机循环取图失败: {cam.LastError ?? "未抓到有效帧"}");
+                throw new InvalidOperationException($"相机循环采集失败: {cam.LastError ?? "未采集到有效帧"}");
             return (last, okCount);
         }
 
@@ -7426,7 +7463,7 @@ namespace CalibOperatorCLI_Example
                     System.Threading.Thread.Sleep(intervalMs);
             }
             if (frames.Count == 0)
-                throw new InvalidOperationException($"相机循环取图失败: {cam.LastError ?? "未抓到有效帧"}");
+                throw new InvalidOperationException($"相机循环采集失败: {cam.LastError ?? "未采集到有效帧"}");
             return (frames, okCount);
         }
 
@@ -8830,7 +8867,7 @@ namespace CalibOperatorCLI_Example
                 {
                     var resolved = ResolveCompositeFlowPath(path, compositeInnerFlowBaseDir);
                     if (!System.IO.File.Exists(resolved))
-                        throw new System.IO.FileNotFoundException($"标定 JSON 文件不存在: {resolved}");
+                        throw new System.IO.FileNotFoundException($"标定文件不存在: {resolved}");
                     raw = System.IO.File.ReadAllText(resolved, Encoding.UTF8);
                 }
             }
@@ -9186,11 +9223,11 @@ namespace CalibOperatorCLI_Example
                         });
 
                         if (accepted != true || dlg == null)
-                            throw new OperationCanceledException("摄像头标定采集已取消");
+                            throw new OperationCanceledException("相机标定采集已取消");
 
                         var paths = dlg.SavedImagePaths.ToList();
                         if (paths.Count == 0)
-                            throw new InvalidOperationException("摄像头标定采集: 未保存任何图像");
+                            throw new InvalidOperationException("相机标定采集: 未保存任何图像");
 
                         string pathsJoined = string.Join(";", paths);
                         node.Outputs["ImagePaths"] = pathsJoined;
@@ -9438,13 +9475,30 @@ namespace CalibOperatorCLI_Example
                         double jitterRatio = double.TryParse(node.Params.GetValueOrDefault("jitterRatio"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var jr) ? jr : 0.15;
                         int randomSeed = int.TryParse(node.Params.GetValueOrDefault("randomSeed"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var rs) ? rs : 42;
                         int scatterCount = int.TryParse(node.Params.GetValueOrDefault("scatterCount"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var sc) ? sc : 16;
+                        double rotateDeg = double.TryParse(node.Params.GetValueOrDefault("rotateDeg"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var rd) ? rd : 0.0;
+                        string? rotateCenterXRaw = node.Params.GetValueOrDefault("rotateCenterX");
+                        string? rotateCenterYRaw = node.Params.GetValueOrDefault("rotateCenterY");
+                        bool hasRotateCenterX = !string.IsNullOrWhiteSpace(rotateCenterXRaw)
+                            && double.TryParse(rotateCenterXRaw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _);
+                        bool hasRotateCenterY = !string.IsNullOrWhiteSpace(rotateCenterYRaw)
+                            && double.TryParse(rotateCenterYRaw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _);
+                        double rotateCenterX = hasRotateCenterX
+                            && double.TryParse(rotateCenterXRaw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var rcx)
+                            ? rcx : cx;
+                        double rotateCenterY = hasRotateCenterY
+                            && double.TryParse(rotateCenterYRaw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var rcy)
+                            ? rcy : cy;
 
-                        var coords = GenerateWeldTrajectoryWorld(pattern, cx, cy, step, stepX, stepY, arm, legX, legY, ang, gcols, grows, samp, jitterRatio, randomSeed, scatterCount);
-                        var coords3 = GenerateWeldTrajectoryWorld3D(pattern, cx, cy, cz, step, stepX, stepY, arm, legX, legY, ang, gcols, grows, samp, jitterRatio, randomSeed, scatterCount);
+                        var coords = GenerateWeldTrajectoryWorld(pattern, cx, cy, step, stepX, stepY, arm, legX, legY, ang, gcols, grows, samp, jitterRatio, randomSeed, scatterCount, rotateDeg, rotateCenterX, rotateCenterY, hasRotateCenterX, hasRotateCenterY);
+                        var coords3 = GenerateWeldTrajectoryWorld3D(pattern, cx, cy, cz, step, stepX, stepY, arm, legX, legY, ang, gcols, grows, samp, jitterRatio, randomSeed, scatterCount, rotateDeg, rotateCenterX, rotateCenterY, hasRotateCenterX, hasRotateCenterY);
                         node.Outputs["Points"] = coords;
                         node.Outputs["Points3D"] = coords3;
                         var (effSx, effSy) = ResolveWeldTrajectorySteps(step, stepX, stepY);
-                        node.ResultSummary = $"{pattern.Trim()}: {coords.Length} pts (center {cx:G},{cy:G},{cz:G} mm, ΔX={effSx:G} ΔY={effSy:G})";
+                        var (effRcx, effRcy) = ResolveWeldRotateCenter(cx, cy, rotateCenterX, rotateCenterY, hasRotateCenterX, hasRotateCenterY);
+                        string rotNote = Math.Abs(rotateDeg) < 1e-9
+                            ? ""
+                            : $", rot {rotateDeg:G}°@( {effRcx:G},{effRcy:G} )";
+                        node.ResultSummary = $"{pattern.Trim()}: {coords.Length} pts (center {cx:G},{cy:G},{cz:G} mm, ΔX={effSx:G} ΔY={effSy:G}{rotNote})";
                         break;
                     }
 
@@ -11340,7 +11394,7 @@ namespace CalibOperatorCLI_Example
                             System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var ctv) ? ctv : 8;
                         var resolved = ResolveChessboardCalibrationImagePaths(node, inputs, compositeInnerFlowBaseDir);
                         if (resolved.Count == 0)
-                            throw new InvalidOperationException("棋盘格内参: 请连接 ImagePaths（摄像头采集）、设置 imageDirectory 或 imagePaths");
+                            throw new InvalidOperationException("棋盘格内参: 请连接 ImagePaths（相机标定采集）、设置 imageDirectory 或 imagePaths");
                         string pathsJoined = string.Join(";", resolved);
                         var (intr, calJson) = CalibAPI.CalibrateCameraChessboard(pathsJoined, colsI, rowsI, sqMm, cornerPre, claheClip, claheTile);
                         node.Outputs["Intrinsics"] = intr;
@@ -11524,7 +11578,7 @@ namespace CalibOperatorCLI_Example
                             brief += $" · 反算探针 {probeImagePts.Length} 点";
                         node.ResultSummary = needDialog
                             ? (manualPick
-                                ? $"标定 OK（{gridRows}×{gridCols}={alignedImagePts.Length} 对，手选像素 · {brief}）"
+                                ? $"标定 OK（{gridRows}×{gridCols}={alignedImagePts.Length} 对，手动选点 · {brief}）"
                                 : $"标定 OK（{gridRows}×{gridCols}={alignedImagePts.Length} 对，图像确认 · {brief}）")
                             : $"标定 OK（{gridRows}×{gridCols}={alignedImagePts.Length} 对 · {brief}）";
 
@@ -11564,7 +11618,7 @@ namespace CalibOperatorCLI_Example
                             else
                                 Dispatcher.Invoke(() => StatusText.Text = brief);
                         }
-                        AppendLog($"[{calibName}质检] {brief}（详见弹窗报告）");
+                        AppendLog($"[{calibName}质检] {brief}（详见对话框报告）");
                         break;
                     }
 
@@ -11657,7 +11711,7 @@ namespace CalibOperatorCLI_Example
                             if (accepted != true || dialogResult == null)
                                 throw new OperationCanceledException("微调九点标定已取消");
                             adjusted = dialogResult.Value;
-                            node.ResultSummary = "弹窗微调 · " + AffineTransformAdjust.BuildSummary(
+                            node.ResultSummary = "对话框微调 · " + AffineTransformAdjust.BuildSummary(
                                 dialogState.OffsetX, dialogState.OffsetY, dialogState.ScaleX, dialogState.ScaleY,
                                 dialogState.PivotX, dialogState.PivotY, null)
                                 + (usedGridCenter ? " · pivot=网格中心" : "");
@@ -11726,7 +11780,7 @@ namespace CalibOperatorCLI_Example
 
                         node.ResultSummary = needDialogH
                             ? (manualPickH
-                                ? $"透视标定 OK [{spaceNoteH}]（{alignedImagePtsH.Length} 对，手选{errNoteH}）"
+                                ? $"透视标定 OK [{spaceNoteH}]（{alignedImagePtsH.Length} 对，手动选点{errNoteH}）"
                                 : $"透视标定 OK [{spaceNoteH}]（{alignedImagePtsH.Length} 对，确认{errNoteH}）")
                             : $"透视标定 OK [{spaceNoteH}]（{alignedImagePtsH.Length} 对{errNoteH}）";
                         break;
@@ -11905,7 +11959,7 @@ namespace CalibOperatorCLI_Example
                                 ChessboardCalibrationReportDialog.ShowDialog(Window.GetWindow(this), calJsonForDlg);
                                 StatusText.Text = brief;
                             });
-                            AppendLog($"[标定质检] {brief}（详见弹窗报告）");
+                            AppendLog($"[标定质检] {brief}（详见对话框报告）");
                         }
                         else
                         {
@@ -12012,7 +12066,7 @@ namespace CalibOperatorCLI_Example
                                 node.Outputs["CalibrationJson"] = CalibAPI.NormalizeChessboardCalibrationJson(raw);
                             if (inputs.TryGetValue("After", out var afterChess))
                                 node.Outputs["Out"] = afterChess;
-                            node.ResultSummary = $"棋盘标定 JSON: {System.IO.Path.GetFileName(resolvedPath)}";
+                            node.ResultSummary = $"棋盘标定文件: {System.IO.Path.GetFileName(resolvedPath)}";
                             break;
                         }
 
@@ -12643,7 +12697,7 @@ namespace CalibOperatorCLI_Example
                                 closePolyline: closePolyline))
                         {
                             throw new InvalidOperationException(
-                                $"{(sendAsPoint ? "发送PLC(每点一点)" : "发送PLC")}: {resolveDiag}");
+                                $"{(sendAsPoint ? "发送PLC(逐点)" : "发送PLC")}: {resolveDiag}");
                         }
 
                         if (string.Equals(splitByBar, "separate_batch", StringComparison.OrdinalIgnoreCase)
@@ -15126,7 +15180,7 @@ namespace CalibOperatorCLI_Example
                     {
                         var ofd = new OpenFileDialog
                         {
-                            Title = "选择标定 JSON",
+                            Title = "选择标定文件",
                             Filter = "JSON|*.json|所有文件|*.*"
                         };
                         if (ofd.ShowDialog() == true && input is TextBox jsonBox)
@@ -16818,7 +16872,7 @@ namespace CalibOperatorCLI_Example
                         var frame = cam.GrabOneFrame(targetWidth, targetHeight);
                         if (frame == null)
                         {
-                            AppendLog($"[FRAME {fi + 1}/{frameCount}] 抓帧失败: {cam.LastError ?? "未知错误"}", true);
+                            AppendLog($"[FRAME {fi + 1}/{frameCount}] 帧采集失败: {cam.LastError ?? "未知错误"}", true);
                             if (intervalMs > 0 && fi < frameCount - 1)
                                 await System.Threading.Tasks.Task.Delay(intervalMs, _runCts?.Token ?? System.Threading.CancellationToken.None);
                             continue;
@@ -16870,7 +16924,7 @@ namespace CalibOperatorCLI_Example
                     }
 
                     if (okFrames <= 0)
-                        throw new InvalidOperationException("per_frame 未抓到任何有效帧");
+                        throw new InvalidOperationException("per_frame 未采集到任何有效帧");
 
                     StatusText.Text = $"per_frame 执行完成: 前置 {successCountPre}/{preNodes.Count}" +
                                       (errorCountPre > 0 ? $"(错误{errorCountPre})" : "") +

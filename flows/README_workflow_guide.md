@@ -48,7 +48,7 @@ flowchart LR
 
 **推荐顺序**：
 
-1. 用激光焊打九点（或已知九点的物理位置）→ 运行 [`halcon/caliSendContour.flow.json`](halcon/caliSendContour.flow.json) 得到 PLC 侧世界坐标与轨迹；
+1. 执行九点焊接轨迹（或已知九点的物理位置）→ 运行 [`halcon/caliSendContour.flow.json`](halcon/caliSendContour.flow.json) 得到 PLC 侧世界坐标与轨迹；
 2. 拍一张九点可见的标定图，用 [`halcon/caliNinePoint.flow.json`](halcon/caliNinePoint.flow.json) 求变换并保存 `calibration_nine_point.json`。
 
 **注意**：
@@ -127,8 +127,8 @@ flowchart LR
 
 | 项 | 说明 |
 |----|------|
-| **用途** | 激光焊**打九点**，经 PLC 下发焊接轨迹，得到九点**世界坐标**（供下一步九点标定） |
-| **使用前** | 修改组合子流程内的 **焊接轨迹** 算子（`weld_trajectory_world`）：**中心点**（`centerX` / `centerY` / `centerZ`）、**步距**（`stepXmm` / `stepYmm`）与现场九点布局一致 |
+| **用途** | 激光焊**九点轨迹下发**，经 PLC 下发焊接轨迹，得到九点**世界坐标**（供下一步九点标定） |
+| **使用前** | 修改组合子流程内的 **焊接轨迹** 算子（`weld_trajectory_world`）：**中心点**（`centerX` / `centerY` / `centerZ`）、**步距**（`stepXmm` / `stepYmm`）、**绕中心旋转**（`rotateDeg`，可选 `rotateCenterX/Y`）与现场九点布局一致 |
 | **子流程** | 参数 `innerFlowPath` 指向实际轨迹生成 flow；部署时改为本机相对路径 |
 | **输出** | `send_plc` 写入 GVAR；PLC 执行后世界坐标用于填写 `caliNinePoint` 的 `worldPoints` |
 
@@ -148,8 +148,8 @@ flowchart LR
 
 | 项 | 说明 |
 |----|------|
-| **用途** | **主流程**：取图 → 预处理 → 粗/精匹配 → 轮廓采样 → 像素转世界 → PLC 下发 |
-| **标定加载** | `load_calibration_result` 加载九点标定 JSON；棋盘 `CalibrationJson` 在矫正链中单独加载 |
+| **用途** | **主流程**：图像采集 → 预处理 → 粗/精匹配 → 轮廓采样 → 像素转世界 → PLC 下发 |
+| **标定加载** | `load_calibration_result` 加载九点标定文件；棋盘 `CalibrationJson` 在矫正链中单独加载 |
 | **子流程** | `grayPreprocess`、`binPreprocess`、`contourPreprocess`、`genMask` 等组合算子，按产线调整 |
 | **PLC** | `plc_connect` → `send_plc`（`splitByBar=separate_batch`）→ 使能 / 等待焊完 |
 
@@ -160,7 +160,7 @@ flowchart LR
 ## 5. 推荐串联关系（简图）
 
 ```
-chessboard_intrinsics_from_dir  →  CalibrationJson  →  取图 → calibration_correct_image（viewIndex=正视角）
+chessboard_intrinsics_from_dir  →  CalibrationJson  →  图像采集 → calibration_correct_image（viewIndex=正视角）
 load_calibration_result         →  Transform         →  img_to_world → send_plc
 
 形状模板页导出 .shm / .dfm  →  main.flow.json 内 halcon_load_* → 粗找 → 精找 → 轨迹
@@ -177,7 +177,7 @@ A: 使用 `perspectiveOutputScale=metric`；并确保 `viewIndex` 对应「较�
 A: 检查 `worldPoints` 是否与 `caliSendContour` 一致；像素 9 点顺序是否与 `findCircle` 网格排序一致。
 
 **Q: 如何查看棋盘格 + 九点的系统整体误差？**  
-A: 九点标定算子填写 `calibrationJsonFile`（或连接棋盘 `CalibrationJson`），运行后弹窗末尾有 **[系统整体误差]** 段；`SystemErrorJson` 接 `save_calibration_result` 会写入 `systemError` 字段（合成 avg/max，单位 mm）。
+A: 九点标定算子填写 `calibrationJsonFile`（或连接棋盘 `CalibrationJson`），运行后对话框末尾有 **[系统整体误差]** 段；`SystemErrorJson` 接 `save_calibration_result` 会写入 `systemError` 字段（合成 avg/max，单位 mm）。
 
 **Q: 精匹配偏差大？**  
 A: 确认粗匹配已缩小位置/角度；精模板边缘是否贴合物体；Mask / `CoarseAngle` 是否接入。

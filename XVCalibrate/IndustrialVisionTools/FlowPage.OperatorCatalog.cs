@@ -92,7 +92,7 @@ namespace CalibOperatorCLI_Example
                         Name = "filePath",
                         DisplayName = "图像路径",
                         DefaultValue = "",
-                        Description = "可选；填写后自动加载（相对路径相对当前 .flow.json 目录）；留空则弹窗选择"
+                        Description = "可选；填写后自动加载（相对路径相对当前 .flow.json 目录）；留空则打开文件对话框"
                     }
                 },
                 Ports =
@@ -187,14 +187,14 @@ namespace CalibOperatorCLI_Example
             new OperatorDef
             {
                 TypeId = "camera_snap",
-                DisplayName = "相机取一帧",
-                Description = "从相机抓取单帧图像。上游算子 Out → After 可排在任意算子之后取图；Out 透传 After 供下游继续。",
+                DisplayName = "相机单帧采集",
+                Description = "从相机采集单帧图像。上游算子 Out → After 可排在任意算子之后采集；Out 透传 After 供下游继续。",
                 Category = "输入",
                 Params =
                 {
                     new OperatorParam { Name = "deviceIndex", DisplayName = "设备索引", DefaultValue = "0", Description = "相机枚举索引，从0开始" },
-                    new OperatorParam { Name = "targetWidth", DisplayName = "目标宽度", DefaultValue = "0", Description = "预留参数，当前未缩放（填0即可）" },
-                    new OperatorParam { Name = "targetHeight", DisplayName = "目标高度", DefaultValue = "0", Description = "预留参数，当前未缩放（填0即可）" }
+                    new OperatorParam { Name = "targetWidth", DisplayName = "目标宽度", DefaultValue = "0", Description = "预留参数，当前未缩放（填 0 表示不缩放）" },
+                    new OperatorParam { Name = "targetHeight", DisplayName = "目标高度", DefaultValue = "0", Description = "预留参数，当前未缩放（填 0 表示不缩放）" }
                 },
                 Ports =
                 {
@@ -206,13 +206,13 @@ namespace CalibOperatorCLI_Example
             new OperatorDef
             {
                 TypeId = "camera_calib_capture",
-                DisplayName = "摄像头标定采集",
-                Description = "打开摄像头预览，点「确定」保存当前帧，采集足够张数后点「完成」。输出 ImagePaths / ImageDirectory 供棋盘格内参标定与质检使用。",
+                DisplayName = "相机标定采集",
+                Description = "打开相机预览；单击「确定」保存当前帧，达到最少张数后单击「完成」。输出 ImagePaths / ImageDirectory 供棋盘格内参标定与质检使用。",
                 Category = "输入",
                 Params =
                 {
                     new OperatorParam { Name = "deviceIndex", DisplayName = "设备索引", DefaultValue = "0", Description = "相机枚举索引，从0开始" },
-                    new OperatorParam { Name = "minFrames", DisplayName = "最少张数", DefaultValue = "10", Description = "点「完成」前至少采集的张数（标定至少需3张成功检出棋盘的视图）" },
+                    new OperatorParam { Name = "minFrames", DisplayName = "最少张数", DefaultValue = "10", Description = "单击「完成」前至少采集的张数（标定至少需3张成功检出棋盘的视图）" },
                     new OperatorParam { Name = "saveDirectory", DisplayName = "保存目录", DefaultValue = "captured_chessboard", Description = "相对当前 .flow.json 目录；采集图像保存为 Image_001.bmp 等" },
                     new OperatorParam { Name = "namePrefix", DisplayName = "文件名前缀", DefaultValue = "Image_", Description = "保存文件名前缀，如 Image_001.bmp" },
                     new OperatorParam { Name = "fileExtension", DisplayName = "扩展名", DefaultValue = ".bmp", Description = "保存格式扩展名，如 .bmp 或 .png" }
@@ -227,8 +227,8 @@ namespace CalibOperatorCLI_Example
             new OperatorDef
             {
                 TypeId = "camera_loop",
-                DisplayName = "相机循环取图",
-                Description = "循环抓取多帧并输出最后一帧",
+                DisplayName = "相机循环采集",
+                Description = "循环采集多帧并输出最后一帧",
                 Category = "输入",
                 Params =
                 {
@@ -241,10 +241,10 @@ namespace CalibOperatorCLI_Example
                         Description = "last_only=仅输出最后一帧；per_frame=每帧驱动下游执行一次",
                         Options = new List<string> { "last_only", "per_frame" }
                     },
-                    new OperatorParam { Name = "frameCount", DisplayName = "抓取帧数", DefaultValue = "10", Description = "循环抓取总帧数，>=1" },
+                    new OperatorParam { Name = "frameCount", DisplayName = "采集帧数", DefaultValue = "10", Description = "循环采集总帧数，>=1" },
                     new OperatorParam { Name = "intervalMs", DisplayName = "帧间隔(ms)", DefaultValue = "100", Description = "每帧之间等待时间" },
-                    new OperatorParam { Name = "targetWidth", DisplayName = "目标宽度", DefaultValue = "0", Description = "预留参数，当前未缩放（填0即可）" },
-                    new OperatorParam { Name = "targetHeight", DisplayName = "目标高度", DefaultValue = "0", Description = "预留参数，当前未缩放（填0即可）" }
+                    new OperatorParam { Name = "targetWidth", DisplayName = "目标宽度", DefaultValue = "0", Description = "预留参数，当前未缩放（填 0 表示不缩放）" },
+                    new OperatorParam { Name = "targetHeight", DisplayName = "目标高度", DefaultValue = "0", Description = "预留参数，当前未缩放（填 0 表示不缩放）" }
                 },
                 Ports =
                 {
@@ -1451,6 +1451,9 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "centerX", DisplayName = "中心X(mm)", DefaultValue = "0", Description = "世界坐标中心 X" },
                     new OperatorParam { Name = "centerY", DisplayName = "中心Y(mm)", DefaultValue = "0", Description = "世界坐标中心 Y" },
                     new OperatorParam { Name = "centerZ", DisplayName = "中心Z(mm)", DefaultValue = "0", Description = "所有轨迹点的 Z 高度（基座/world mm）" },
+                    new OperatorParam { Name = "rotateDeg", DisplayName = "绕中心旋转(°)", DefaultValue = "0", Description = "整体轨迹绕旋转中心逆时针旋转（与 +X 夹角约定同「直线角度」）；0=不旋转" },
+                    new OperatorParam { Name = "rotateCenterX", DisplayName = "旋转中心X(mm)", DefaultValue = "", Description = "留空=使用 centerX；可单独指定旋转枢轴 X" },
+                    new OperatorParam { Name = "rotateCenterY", DisplayName = "旋转中心Y(mm)", DefaultValue = "", Description = "留空=使用 centerY；可单独指定旋转枢轴 Y" },
                     new OperatorParam { Name = "stepXmm", DisplayName = "X步距(mm)", DefaultValue = "10", Description = "九宫格/网格蛇形：列方向(世界X)点间距；L形水平段、矩形水平边插补步长" },
                     new OperatorParam { Name = "stepYmm", DisplayName = "Y步距(mm)", DefaultValue = "10", Description = "九宫格/网格蛇形：行方向(世界Y)点间距；L形垂直段、矩形垂直边插补步长" },
                     new OperatorParam { Name = "stepMm", DisplayName = "步距(mm,兼容)", DefaultValue = "10", Description = "旧参数：未填 stepXmm/stepYmm 或填 0 时，X、Y 均用本值" },
@@ -1537,15 +1540,15 @@ namespace CalibOperatorCLI_Example
                         Name = "pixelPickMode",
                         DisplayName = "像素取点方式",
                         DefaultValue = "manual",
-                        Description = "manual/手选=在图像任意位置手选像素；detected/匹配检测点=点击 ImagePts 附近；auto=数量一致时按顺序标定否则弹窗",
-                        Options = new List<string> { "manual", "detected", "auto", "手选", "匹配检测点" }
+                        Description = "manual/手动选点=在图像上手动指定像素坐标；detected/匹配检测点=单击 ImagePts 附近；auto=数量一致时按顺序标定否则打开对话框",
+                        Options = new List<string> { "manual", "detected", "auto", "手动选点", "匹配检测点" }
                     },
                     new OperatorParam
                     {
                         Name = "confirmCorrespondence",
                         DisplayName = "图像确认对应",
                         DefaultValue = "true",
-                        Description = "true=弹窗确认；false=仅 auto 且 ImagePts 数量一致时按顺序标定（手选模式仍会弹窗）",
+                        Description = "true=打开对话框确认；false=仅 auto 且 ImagePts 数量一致时按顺序标定（手动选点模式仍会打开对话框）",
                         Options = new List<string> { "true", "false" }
                     },
                     new OperatorParam
@@ -1565,9 +1568,9 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam
                     {
                         Name = "calibrationJsonFile",
-                        DisplayName = "棋盘标定 JSON",
+                        DisplayName = "棋盘标定文件",
                         DefaultValue = "",
-                        Description = "可选；填写后九点质检弹窗与 SystemErrorJson 输出将包含「棋盘格+九点」系统整体误差。相对路径相对当前 .flow.json"
+                        Description = "可选；填写后九点质检对话框与 SystemErrorJson 输出将包含「棋盘格+九点」系统整体误差。相对路径相对当前 .flow.json"
                     }
                 },
                 Ports =
@@ -1602,16 +1605,16 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "adjust_affine_calibration",
                 DisplayName = "微调九点标定",
-                Description = "在世界坐标系(mm)下平移/缩放仿射标定结果。interactiveAdjust=true 时弹窗按钮微调；false 时仅按参数一次性修正。接「九点标定」Transform，并建议连 ImagePts（或 WorldPts）以便缩放绕网格中心。",
+                Description = "在世界坐标系(mm)下平移/缩放仿射标定结果。interactiveAdjust=true 时在对话框中逐步微调；false 时仅按参数一次性修正。接「九点标定」Transform，并建议连 ImagePts（或 WorldPts）以便缩放绕网格中心。",
                 Category = "标定",
                 Params =
                 {
                     new OperatorParam
                     {
                         Name = "interactiveAdjust",
-                        DisplayName = "弹窗微调",
+                        DisplayName = "对话框微调",
                         DefaultValue = "true",
-                        Description = "true=运行时报弹窗，方向键/按钮逐步修正；false=仅用下方参数一次性应用",
+                        Description = "true=运行时在对话框中逐步修正；false=仅用下方参数一次性应用",
                         Options = new List<string> { "true", "false" }
                     },
                     new OperatorParam
@@ -1644,16 +1647,16 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam
                     {
                         Name = "nudgeStepMm",
-                        DisplayName = "预设/弹窗平移步长(mm)",
+                        DisplayName = "预设/对话框平移步长(mm)",
                         DefaultValue = "0.5",
-                        Description = "nudgePreset 非 none/无 时的平移步长；弹窗内默认平移步长"
+                        Description = "nudgePreset 非 none/无 时的平移步长；对话框内默认平移步长"
                     },
                     new OperatorParam
                     {
                         Name = "scaleStepPercent",
-                        DisplayName = "弹窗缩放步长(%)",
+                        DisplayName = "对话框缩放步长(%)",
                         DefaultValue = "0.1",
-                        Description = "弹窗内每次点 X±/Y±/等比± 的缩放百分比"
+                        Description = "对话框内每次单击 X±/Y±/等比± 的缩放百分比"
                     },
                     new OperatorParam
                     {
@@ -1735,15 +1738,15 @@ namespace CalibOperatorCLI_Example
                         Name = "pixelPickMode",
                         DisplayName = "像素取点方式",
                         DefaultValue = "manual",
-                        Description = "manual/手选=在图像上按世界点列表手选像素；detected/匹配检测点=在 ImagePts 附近点选；auto=数量一致时按顺序标定否则弹窗",
-                        Options = new List<string> { "manual", "detected", "auto", "手选", "匹配检测点" }
+                        Description = "manual/手动选点=在图像上按世界点列表手动指定像素；detected/匹配检测点=在 ImagePts 附近点选；auto=数量一致时按顺序标定否则打开对话框",
+                        Options = new List<string> { "manual", "detected", "auto", "手动选点", "匹配检测点" }
                     },
                     new OperatorParam
                     {
                         Name = "confirmCorrespondence",
                         DisplayName = "图像确认对应",
                         DefaultValue = "true",
-                        Description = "true=弹窗确认；false=仅 auto 且 ImagePts 数量一致时按顺序标定（手选模式仍会弹窗）",
+                        Description = "true=打开对话框确认；false=仅 auto 且 ImagePts 数量一致时按顺序标定（手动选点模式仍会打开对话框）",
                         Options = new List<string> { "true", "false" }
                     },
                     new OperatorParam
@@ -1948,7 +1951,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "display_calibration",
                 DisplayName = "显示标定结果",
-                Description = "棋盘格标定接 CalibrationJson 时弹出质检报告窗口（合格/不合格、补拍位置、坏图清单）；其它标定类型仍输出到日志。",
+                Description = "棋盘格标定接 CalibrationJson 时弹出质检报告窗口（合格/不合格、补拍位置、不合格图像清单）；其它标定类型仍输出到日志。",
                 Category = "标定",
                 Ports =
                 {
@@ -1988,7 +1991,7 @@ namespace CalibOperatorCLI_Example
                 Category = "标定",
                 Params =
                 {
-                    new OperatorParam { Name = "filePath", DisplayName = "文件路径", DefaultValue = "", Description = "可选；填写后自动读取（相对路径相对当前 .flow.json 目录）；留空则弹窗选择" }
+                    new OperatorParam { Name = "filePath", DisplayName = "文件路径", DefaultValue = "", Description = "可选；填写后自动读取（相对路径相对当前 .flow.json 目录）；留空则打开文件对话框" }
                 },
                 Ports =
                 {
@@ -2357,8 +2360,8 @@ namespace CalibOperatorCLI_Example
             new OperatorDef
             {
                 TypeId = "send_plc_point",
-                DisplayName = "发送PLC(每点一点)",
-                Description = "与「发送PLC」相同下发逻辑（须先 PLC连接）。默认每点一条退化 GVAR(p0=p1)。asPolylineSegments=true 时改为相邻点连成线段并可闭合。下发完成通知请使用「PLC通知轨迹已下发」。",
+                DisplayName = "发送PLC(逐点)",
+                Description = "与「发送PLC」相同下发逻辑（须先 PLC连接）。默认逐点生成退化 GVAR 段（p0=p1，n 点→n 条）。asPolylineSegments=true 时改为相邻点连成线段并可闭合。下发完成通知请使用「PLC 通知轨迹已下发」。",
                 Category = "输出",
                 Params =
                 {
@@ -2396,7 +2399,7 @@ namespace CalibOperatorCLI_Example
                         Name = "asPolylineSegments",
                         DisplayName = "连成线段",
                         DefaultValue = "false",
-                        Description = "false=每点一条退化 GVAR(p0=p1，与算子名一致)；true=按折线生成 p0→p1 线段（闭合轮廓可开 closePolyline）",
+                        Description = "false=逐点模式，每点一条退化 GVAR（p0=p1）；true=按折线生成 p0→p1 线段（闭合轮廓可开 closePolyline）",
                         Options = new List<string> { "true", "false" }
                     },
                     new OperatorParam
@@ -2737,7 +2740,7 @@ namespace CalibOperatorCLI_Example
                 Params =
                 {
                     new OperatorParam { Name = "alpha", DisplayName = "裁剪系数", DefaultValue = "-1", Description = "-1=保持原分辨率与 K；0..1= getOptimalNewCameraMatrix 裁剪黑边（0 裁最多，1 保留全部像素）" },
-                    new OperatorParam { Name = "calibrationJsonFile", DisplayName = "标定 JSON 文件", DefaultValue = "", Description = "可选；未接 CalibrationJson 端口时从文件读取（完整包，含 extrinsicsPerView）" }
+                    new OperatorParam { Name = "calibrationJsonFile", DisplayName = "标定文件", DefaultValue = "", Description = "可选；未接 CalibrationJson 端口时从文件读取（完整包，含 extrinsicsPerView）" }
                 },
                 Ports =
                 {
@@ -2755,8 +2758,8 @@ namespace CalibOperatorCLI_Example
                 Category = "标定",
                 Params =
                 {
-                    new OperatorParam { Name = "calibrationJsonFile", DisplayName = "标定 JSON 文件", DefaultValue = "", Description = "可选；未接端口时读取完整标定 JSON（须含 extrinsicsPerView，如 chessboard_calibration_from_dir.json）" },
-                    new OperatorParam { Name = "viewIndex", DisplayName = "外参视图序号", DefaultValue = "0", Description = "0..n-1=extrinsicsPerView 下标；axis/-1=光轴对称（多视图平均旋转，棋盘中心对齐主点 cx,cy，无需手选视图）" },
+                    new OperatorParam { Name = "calibrationJsonFile", DisplayName = "标定文件", DefaultValue = "", Description = "可选；未接端口时读取完整标定文件（须含 extrinsicsPerView，如 chessboard_calibration_from_dir.json）" },
+                    new OperatorParam { Name = "viewIndex", DisplayName = "外参视图序号", DefaultValue = "0", Description = "0..n-1=extrinsicsPerView 下标；axis/-1=光轴对称（多视图平均旋转，棋盘中心对齐主点 cx,cy，无需手动指定视图）" },
                     new OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "11", Description = "与棋盘格标定一致" },
                     new OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "8", Description = "与棋盘格标定一致" },
                     new OperatorParam { Name = "squareSizeMm", DisplayName = "方格边长(mm)", DefaultValue = "5", Description = "与标定 squareSizeMm 一致" },
@@ -3702,7 +3705,7 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "coarseGreediness", DisplayName = "粗 Greediness", DefaultValue = "0.85", Description = "粗定位贪心系数，略高可加速" },
                     new OperatorParam { Name = "coarseSubPixel", DisplayName = "粗 SubPixel", DefaultValue = "none", Description = "粗定位亚像素：none 最快，interpolation 更准" },
                     new OperatorParam { Name = "coarseNumLevels", DisplayName = "粗 NumLevels", DefaultValue = "0", Description = "粗金字塔层数，0=用模型默认" },
-                    new OperatorParam { Name = "coarseAllowRetry", DisplayName = "粗失败重试", DefaultValue = "false", Description = "无结果时是否降分再搜一次（会拖慢）" },
+                    new OperatorParam { Name = "coarseAllowRetry", DisplayName = "粗失败重试", DefaultValue = "false", Description = "无结果时是否降分再搜一次（将增加耗时）" },
                     new OperatorParam { Name = "coarseScaleMin", DisplayName = "粗 ScaleMin", DefaultValue = "1.0", Description = "粗匹配缩放下限；=1 时不缩放搜索（需 ScaledShape 模型）" },
                     new OperatorParam { Name = "coarseScaleMax", DisplayName = "粗 ScaleMax", DefaultValue = "1.0", Description = "粗匹配缩放上限；=1 时不缩放搜索（需 ScaledShape 模型）" },
                     new OperatorParam { Name = "endScoreWeight", DisplayName = "粗端部得分权重", DefaultValue = "0.8", Description = "粗定位 CoarseScore 端部修正权重，0=不修正" },
@@ -4129,7 +4132,7 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "pitchToleranceRatio", DisplayName = "间距容差比", DefaultValue = "0.2", Description = "邻格一致性检查时的间距相对容差" },
                     new OperatorParam { Name = "minNeighborVotes", DisplayName = "最少邻格票", DefaultValue = "0", Description = "0=关闭；≥1 抑制孤立误检(可能增加漏检)" },
                     new OperatorParam { Name = "minScoreKeep", DisplayName = "最低得分", DefaultValue = "0", Description = "过滤后保留的最低 Score；误检多时可设 0.45~0.55" },
-                    new OperatorParam { Name = "maxAngleDeviationDeg", DisplayName = "最大角度偏差°", DefaultValue = "0", Description = "0=关闭；相对模板匹配角的偏差上限。整板旋转时各点角相近可设 10~15°；对称模板或角度乱跳时请设 0" },
+                    new OperatorParam { Name = "maxAngleDeviationDeg", DisplayName = "最大角度偏差°", DefaultValue = "0", Description = "0=关闭；相对模板匹配角的偏差上限。整板旋转时各点角相近可设 10~15°；对称模板或角度不稳定时请设 0" },
                     new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto", Description = "auto=后台跑flow或设环境变量XV_GRID_FILTER_LOG时写日志；true=强制；false=关闭。日志见 flow同目录/*.grid-filter.log" }
                 },
                 Ports =
@@ -4388,13 +4391,13 @@ namespace CalibOperatorCLI_Example
                 Name = "enablePerspective",
                 DisplayName = "透视展开",
                 DefaultValue = "false",
-                Description = "取图后再做棋盘平面鸟瞰 warp；须完整标定 JSON（含 extrinsicsPerView）",
+                Description = "图像采集后执行棋盘平面透视展开（鸟瞰）；须完整标定文件（含 extrinsicsPerView）",
                 Options = new List<string> { "false", "true" }
             },
             new FlowPage.OperatorParam
             {
                 Name = "calibrationJsonFile",
-                DisplayName = "标定 JSON 文件",
+                DisplayName = "标定文件",
                 DefaultValue = "",
                 Description = "可选；未接 CalibrationJson 端口时使用；须为完整 CalibrationJson"
             },

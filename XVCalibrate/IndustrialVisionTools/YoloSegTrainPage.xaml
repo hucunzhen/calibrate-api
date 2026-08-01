@@ -260,7 +260,7 @@
                         <Button Grid.Column="4" Content="1:1" Width="44" Height="26" Margin="0,0,8,0" Click="BtnAnnotZoomReset_Click" ToolTip="重置为 100%"/>
                         <TextBlock x:Name="TxtAnnotZoomPct" Grid.Column="5" Text="100%" VerticalAlignment="Center" MinWidth="44" Foreground="#444"/>
                     </Grid>
-                    <TextBlock Text="在画布上按住 Ctrl 并滚轮缩放；放大后可拖动滚动条平移，便于抠细边。" FontSize="10" Foreground="#888" Margin="0,0,0,4"/>
+                    <TextBlock Text="在画布上按住 Ctrl 并滚轮缩放；放大后可拖动滚动条平移，便于精细标注边缘。" FontSize="10" Foreground="#888" Margin="0,0,0,4"/>
                     <WrapPanel Margin="0,8,0,4">
                         <Button Content="打开图像…" Width="96" Height="26" Margin="0,0,8,4" Click="BtnAnnotLoadImage_Click"/>
                         <Button Content="闭合当前多边形" Width="120" Height="26" Margin="0,0,8,4" Click="BtnAnnotClosePolygon_Click"/>

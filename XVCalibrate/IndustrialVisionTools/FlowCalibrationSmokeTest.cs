@@ -291,9 +291,9 @@ namespace CalibOperatorCLI_Example
             for (int i = 0; i < 9; i++)
                 grid9[i] = new CalibPoint3D(100 + i, 200 + i, 0);
             var pointGvars = PlcGvarBuilder.BuildPointGvarsFromPolyline(grid9, 1);
-            fails += Check("每点一点: 9 点 → 9 条 GVAR",
+            fails += Check("逐点模式: 9 点 → 9 条 GVAR",
                 () => pointGvars.Length == 9);
-            fails += Check("每点一点: 每条 p0 与 p1 相同",
+            fails += Check("逐点模式: 每条 p0 与 p1 相同",
                 () => pointGvars.All(g =>
                     g.spVec3_p0.x == g.spVec3_p1.x
                     && g.spVec3_p0.y == g.spVec3_p1.y

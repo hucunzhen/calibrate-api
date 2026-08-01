@@ -5,55 +5,66 @@
         WindowState="Maximized"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResize"
-        WindowStyle="SingleBorderWindow">
+        WindowStyle="SingleBorderWindow"
+        Background="{StaticResource NavBarBrush}">
     <DockPanel>
-        <Border DockPanel.Dock="Top" Background="{StaticResource NavBarBrush}" Padding="0">
-            <StackPanel Orientation="Horizontal">
-                <Button x:Name="NavPlc" Content="PLC" Style="{StaticResource NavTabButtonStyle}"
-                        Click="NavPlc_Click"
-                        AutomationProperties.Name="PLC"/>
-                <Button x:Name="NavController" Content="光源控制器" Style="{StaticResource NavTabButtonStyle}"
-                        Click="NavController_Click"
-                        AutomationProperties.Name="光源控制器"/>
-                <Button x:Name="NavFlow" Content="流程编排" Style="{StaticResource NavTabButtonStyle}"
-                        Click="NavFlow_Click"
-                        AutomationProperties.Name="流程编排"/>
-                <Button x:Name="NavHalconShapeModel" Content="形状模板" Style="{StaticResource NavTabButtonStyle}"
-                        Click="NavHalconShapeModel_Click"
-                        AutomationProperties.Name="形状模板"/>
-                <Button x:Name="NavAdvanced" Content="高级功能 ▾" Style="{StaticResource NavTabButtonStyle}"
-                        MinWidth="108"
-                        Click="NavAdvanced_Click"
-                        AutomationProperties.Name="高级功能">
-                    <Button.ContextMenu>
-                        <ContextMenu Background="#2D2D2D" BorderBrush="#555" BorderThickness="1">
-                            <ContextMenu.Resources>
-                                <Style TargetType="MenuItem">
-                                    <Setter Property="Foreground" Value="White"/>
-                                    <Setter Property="Background" Value="#2D2D2D"/>
-                                    <Style.Triggers>
-                                        <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter Property="Background" Value="#404040"/>
-                                        </Trigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </ContextMenu.Resources>
-                            <MenuItem Header="直方图" Click="NavHistogram_Click"
-                                      AutomationProperties.Name="直方图"/>
-                            <MenuItem Header="YOLO分割" Click="NavYoloSeg_Click"
-                                      AutomationProperties.Name="YOLO分割训练"/>
-                            <MenuItem Header="HALCON DL分割" Click="NavHalconDlSeg_Click"
-                                      AutomationProperties.Name="HALCON深度学习分割"/>
-                            <MenuItem Header="SAM ONNX" Click="NavSamOnnx_Click"
-                                      AutomationProperties.Name="SAM ONNX 导出"/>
-                        </ContextMenu>
-                    </Button.ContextMenu>
-                </Button>
-            </StackPanel>
+        <Border DockPanel.Dock="Top" Background="{StaticResource NavBarBrush}" Padding="12,0,16,0">
+            <Grid Height="52">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,24,0">
+                    <Border Width="4" Height="28" CornerRadius="2" Background="{StaticResource NavAccentBrush}" Margin="0,0,12,0"/>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="工业视觉工具" Foreground="{StaticResource NavTextBrush}"
+                                   FontSize="15" FontWeight="SemiBold"/>
+                        <TextBlock Text="标定 · 流程 · 模板 · PLC" Foreground="{StaticResource NavTextMutedBrush}"
+                                   FontSize="11" Margin="0,1,0,0"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="NavFlow" Content="流程编排" Style="{StaticResource NavTabButtonStyle}"
+                            Click="NavFlow_Click" AutomationProperties.Name="流程编排"/>
+                    <Button x:Name="NavHalconShapeModel" Content="形状模板" Style="{StaticResource NavTabButtonStyle}"
+                            Click="NavHalconShapeModel_Click" AutomationProperties.Name="形状模板"/>
+                    <Button x:Name="NavPlc" Content="PLC" Style="{StaticResource NavTabButtonStyle}"
+                            Click="NavPlc_Click" AutomationProperties.Name="PLC"/>
+                    <Button x:Name="NavController" Content="光源" Style="{StaticResource NavTabButtonStyle}"
+                            Click="NavController_Click" AutomationProperties.Name="光源控制器"/>
+                    <Button x:Name="NavAdvanced" Content="高级 ▾" Style="{StaticResource NavTabButtonStyle}"
+                            MinWidth="72" Click="NavAdvanced_Click" AutomationProperties.Name="高级功能">
+                        <Button.ContextMenu>
+                            <ContextMenu Background="{StaticResource Ui.PanelBackground}"
+                                         BorderBrush="{StaticResource Ui.PanelBorder}" BorderThickness="1">
+                                <ContextMenu.Resources>
+                                    <Style TargetType="MenuItem">
+                                        <Setter Property="Foreground" Value="{StaticResource Ui.TextPrimary}"/>
+                                        <Setter Property="Background" Value="{StaticResource Ui.PanelBackground}"/>
+                                        <Setter Property="Padding" Value="12,8"/>
+                                        <Style.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter Property="Background" Value="{StaticResource NavHoverBrush}"/>
+                                            </Trigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ContextMenu.Resources>
+                                <MenuItem Header="直方图" Click="NavHistogram_Click" AutomationProperties.Name="直方图"/>
+                                <MenuItem Header="YOLO 分割" Click="NavYoloSeg_Click" AutomationProperties.Name="YOLO分割训练"/>
+                                <MenuItem Header="HALCON DL 分割" Click="NavHalconDlSeg_Click" AutomationProperties.Name="HALCON深度学习分割"/>
+                                <MenuItem Header="SAM ONNX" Click="NavSamOnnx_Click" AutomationProperties.Name="SAM ONNX 导出"/>
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                    </Button>
+                </StackPanel>
+            </Grid>
         </Border>
 
         <Border DockPanel.Dock="Top" Height="2" Background="{StaticResource NavAccentBrush}"/>
 
-        <Frame x:Name="MainFrame" NavigationUIVisibility="Hidden"/>
+        <Frame x:Name="MainFrame" NavigationUIVisibility="Hidden" Background="{StaticResource Ui.WorkspaceBackground}"/>
     </DockPanel>
 </Window>

@@ -6,7 +6,7 @@ using CalibOperatorPInvoke;
 
 namespace CalibOperatorCLI_Example
 {
-    /// <summary>九点标定（仿射）质检：重投影误差、坏点与配对建议。</summary>
+    /// <summary>九点标定（仿射）质检：重投影误差、异常点与配对建议。</summary>
     internal static class NinePointCalibrationQuality
     {
         private const double AvgExcellentMm = 0.30;
@@ -64,7 +64,7 @@ namespace CalibOperatorCLI_Example
 
             string verdict = passed
                 ? "✓ 九点标定：合格（像素→世界映射误差在允许范围内）"
-                : "✗ 九点标定：不合格（请核对坏点并重标）";
+                : "✗ 九点标定：不合格（请核对异常点并重新标定）";
 
             if (imagePts.Length < 4)
                 verdict = "✗ 九点标定：不合格（点数不足 4，无法可靠标定）";
@@ -75,7 +75,7 @@ namespace CalibOperatorCLI_Example
             else if (!maxOk)
                 verdict = $"✗ 九点标定：不合格（最大单点误差 {max:F3} mm 过大）";
             else if (!ratioOk)
-                verdict = "✗ 九点标定：不合格（个别点误差显著偏大，疑似配对错误或检测偏了）";
+                verdict = "✗ 九点标定：不合格（个别点误差显著偏大，疑似配对错误或检测偏差过大）";
             else if (!countOk)
                 verdict = imagePts.Length >= 16
                     ? $"△ 网格标定：可用（{imagePts.Length} 点超定，覆盖较密）"
@@ -115,7 +115,7 @@ namespace CalibOperatorCLI_Example
             sb.AppendLine($"标定点数：{report.Points.Count}（支持 3×3/4×4/5×5/6×6 方阵；点数越多重投影越稳）");
             sb.AppendLine();
             sb.AppendLine("──────────────────────────────────────");
-            sb.AppendLine("[1 · 标定结果好坏]");
+            sb.AppendLine("[1 · 标定结果评定]");
             sb.AppendLine(report.VerdictLine);
             sb.AppendLine("误差参考（世界坐标 mm）：平均 <0.3 优秀 / <1.0 良好 / <2.0 可用；单点建议 <1.5 mm。");
             if (report.Passed)
@@ -203,7 +203,7 @@ namespace CalibOperatorCLI_Example
                 if (worst.ErrorMm >= MaxPointWarnMm)
                 {
                     sb.AppendLine($"  · 优先重选像素点 #{worst.Index}（误差最大 {worst.ErrorMm:F3} mm）。");
-                    sb.AppendLine("    手选时在弹窗中重新点击该点；匹配检测模式则检查圆心/模板匹配是否偏了。");
+                    sb.AppendLine("    手动选点时在对话框中重新指定该点；匹配检测模式则检查圆心/模板匹配是否存在偏差。");
                 }
             }
 

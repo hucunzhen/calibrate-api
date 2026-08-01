@@ -20,7 +20,7 @@ using CalibOperatorPInvoke;
 namespace CalibOperatorCLI_Example
 {
     /// <summary>
-    /// 在图像上建立世界坐标与像素坐标的对应：手选像素，或点击附近匹配检测点。
+    /// 在图像上建立世界坐标与像素坐标的对应：手动选点，或点击附近匹配检测点。
     /// </summary>
     public sealed class NinePointCorrespondenceDialog : Window
     {
@@ -99,7 +99,7 @@ namespace CalibOperatorCLI_Example
             _pixelForWorld = new Point2D?[_n];
 
             string gridTitle = CalibrationGridLayout.FormatDialogTitle(_gridRows, _gridCols);
-            Title = manualPixelPick ? $"{gridTitle} — 手选像素点" : $"{gridTitle} — 匹配检测点";
+            Title = manualPixelPick ? $"{gridTitle} — 手动选点" : $"{gridTitle} — 匹配检测点";
             Width = 1100;
             Height = 760;
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
@@ -352,7 +352,7 @@ namespace CalibOperatorCLI_Example
                   "浅蓝圆=检测参考；绿=已选；黄=当前。"
                 : "左侧选中世界点，在图像上点击检测圆心附近。\n" +
                   "已配对点可拖拽或方向键微调；至少 4 对后实时显示标定网格与误差。\n" +
-                  "默认按世界点分行分列匹配检测点（允许小幅偏差）。绿=已选，黄=当前，灰蓝=未配对；粉=P 探针反算点。确认无误后点「确认完成」。";
+                  "默认按世界点分行分列匹配检测点（允许小幅偏差）。绿=已选，黄=当前，灰蓝=未配对；粉=P 探针反算点。确认无误后单击「确认完成」。";
 
         private void UpdateHint()
         {
@@ -578,7 +578,7 @@ namespace CalibOperatorCLI_Example
             string brief = NinePointCalibrationQuality.BuildBriefSummary(report);
             string probeHint = _probeWorldPts.Length > 0 ? $" · 探针 {_probeWorldPts.Length} 点已反算" : "";
             _txtLiveCal.Text = allAssigned
-                ? $"实时标定 · {brief}{probeHint}\n确认无误后点「确认完成」。"
+                ? $"实时标定 · {brief}{probeHint}\n确认无误后单击「确认完成」。"
                 : $"实时预览（{assigned}/{_n} 对）· {brief}{probeHint}";
             _txtLiveCal.Foreground = report.Passed ? Brushes.LightGreen : Brushes.Salmon;
 
@@ -750,7 +750,7 @@ namespace CalibOperatorCLI_Example
             if (_referenceImagePts.Length != _n)
             {
                 MessageBox.Show(this,
-                    $"分行分列需要 {_n} 个检测参考点，当前为 {_referenceImagePts.Length} 个。请手选或调整检测输出。",
+                    $"分行分列需要 {_n} 个检测参考点，当前为 {_referenceImagePts.Length} 个。请手动选点或调整检测输出。",
                     "分行分列", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
@@ -1018,8 +1018,8 @@ namespace CalibOperatorCLI_Example
 
             var answer = MessageBox.Show(this,
                 $"检测到 {mismatches}/{_n} 个点的对应顺序与「按序自动」(分行分列) 不一致。\n" +
-                "若顺序选错，标定误差会很大且后续弹窗可能阻塞界面。\n\n" +
-                "建议点「否」后使用「分行分列」或逐点重新配对。\n\n仍要确定标定吗？",
+                "若顺序选错，标定误差会很大且后续对话框可能阻塞界面。\n\n" +
+                "建议选择「否」后使用「分行分列」或逐点重新配对。\n\n仍要确定标定吗？",
                 "顺序可能错误",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning,

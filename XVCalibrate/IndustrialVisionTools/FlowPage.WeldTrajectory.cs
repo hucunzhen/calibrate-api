@@ -78,9 +78,6 @@ namespace CalibOperatorCLI_Example
                 $"焊接轨迹: 未知 pattern「{p}」。请从下拉选择，或使用: nine_3x3, grid_4x4, grid_jitter_4x4, scattered, cross_lines 等");
         }
 
-        /// <summary>
-        /// 根据 pattern 与参数生成世界 XY 点列（单位与 center/step 一致，通常为 mm）。
-        /// </summary>
         private static (double StepX, double StepY) ResolveWeldTrajectorySteps(double stepMm, double stepXmm, double stepYmm)
         {
             double fb = Math.Max(1e-6, stepMm);
@@ -89,6 +86,39 @@ namespace CalibOperatorCLI_Example
             return (sx, sy);
         }
 
+        private static Point2D RotatePointAroundCenter(double px, double py, double rcx, double rcy, double angleDeg)
+        {
+            if (Math.Abs(angleDeg) < 1e-12)
+                return new Point2D(px, py);
+            double rad = angleDeg * (Math.PI / 180.0);
+            double cos = Math.Cos(rad);
+            double sin = Math.Sin(rad);
+            double dx = px - rcx;
+            double dy = py - rcy;
+            return new Point2D(rcx + dx * cos - dy * sin, rcy + dx * sin + dy * cos);
+        }
+
+        private static Point2D[] RotateTrajectoryPoints(Point2D[] pts, double rcx, double rcy, double rotateDeg)
+        {
+            if (pts.Length == 0 || Math.Abs(rotateDeg) < 1e-12)
+                return pts;
+            var rotated = new Point2D[pts.Length];
+            for (int i = 0; i < pts.Length; i++)
+                rotated[i] = RotatePointAroundCenter(pts[i].X, pts[i].Y, rcx, rcy, rotateDeg);
+            return rotated;
+        }
+
+        private static (double Rcx, double Rcy) ResolveWeldRotateCenter(
+            double centerX, double centerY, double rotateCenterX, double rotateCenterY, bool hasRotateCenterX, bool hasRotateCenterY)
+        {
+            double rcx = hasRotateCenterX ? rotateCenterX : centerX;
+            double rcy = hasRotateCenterY ? rotateCenterY : centerY;
+            return (rcx, rcy);
+        }
+
+        /// <summary>
+        /// 根据 pattern 与参数生成世界 XY 点列；生成后可绕旋转中心整体旋转 rotateDeg（逆时针为正）。
+        /// </summary>
         private static Point2D[] GenerateWeldTrajectoryWorld(
             string patternRaw,
             double centerX,
@@ -105,7 +135,12 @@ namespace CalibOperatorCLI_Example
             int samplesPerSegment,
             double jitterRatio = 0.15,
             int randomSeed = 42,
-            int scatterCount = 16)
+            int scatterCount = 16,
+            double rotateDeg = 0,
+            double rotateCenterX = 0,
+            double rotateCenterY = 0,
+            bool hasRotateCenterX = false,
+            bool hasRotateCenterY = false)
         {
             string key = NormalizeWeldPatternToKey(patternRaw);
 
@@ -115,7 +150,7 @@ namespace CalibOperatorCLI_Example
             armMm = Math.Max(1e-6, armMm);
             var (stepX, stepY) = ResolveWeldTrajectorySteps(stepMm, stepXmm, stepYmm);
 
-            return key switch
+            Point2D[] pts = key switch
             {
                 "nine_3x3" => BuildNineGrid(centerX, centerY, stepX, stepY, 3, 3),
                 "grid_4x4" => BuildNineGrid(centerX, centerY, stepX, stepY, 4, 4),
@@ -139,6 +174,9 @@ namespace CalibOperatorCLI_Example
                 "grid_snake" => BuildGridSnake(centerX, centerY, stepX, stepY, gridCols, gridRows),
                 _ => throw new InvalidOperationException($"焊接轨迹: 未识别的 pattern 键「{key}」")
             };
+
+            var (rcx, rcy) = ResolveWeldRotateCenter(centerX, centerY, rotateCenterX, rotateCenterY, hasRotateCenterX, hasRotateCenterY);
+            return RotateTrajectoryPoints(pts, rcx, rcy, rotateDeg);
         }
 
         /// <summary>世界 XY 轨迹 + 统一 Z，输出基座 3D 点列。</summary>
@@ -159,11 +197,17 @@ namespace CalibOperatorCLI_Example
             int samplesPerSegment,
             double jitterRatio = 0.15,
             int randomSeed = 42,
-            int scatterCount = 16)
+            int scatterCount = 16,
+            double rotateDeg = 0,
+            double rotateCenterX = 0,
+            double rotateCenterY = 0,
+            bool hasRotateCenterX = false,
+            bool hasRotateCenterY = false)
         {
             Point2D[] xy = GenerateWeldTrajectoryWorld(
                 patternRaw, centerX, centerY, stepMm, stepXmm, stepYmm, armMm, legXmm, legYmm, angleDeg,
-                gridCols, gridRows, samplesPerSegment, jitterRatio, randomSeed, scatterCount);
+                gridCols, gridRows, samplesPerSegment, jitterRatio, randomSeed, scatterCount,
+                rotateDeg, rotateCenterX, rotateCenterY, hasRotateCenterX, hasRotateCenterY);
             return xy.Select(p => new CalibPoint3D(p.X, p.Y, centerZ)).ToArray();
         }
 

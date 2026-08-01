@@ -315,7 +315,7 @@ namespace CalibOperatorPInvoke
         public static string NormalizeChessboardCalibrationJson(string jsonOrFilePath)
         {
             if (string.IsNullOrWhiteSpace(jsonOrFilePath))
-                throw new ArgumentException("标定 JSON 不能为空", nameof(jsonOrFilePath));
+                throw new ArgumentException("标定文件不能为空", nameof(jsonOrFilePath));
 
             string json = jsonOrFilePath.Trim();
             if (File.Exists(json))
@@ -358,7 +358,7 @@ namespace CalibOperatorPInvoke
             }
 
             throw new InvalidOperationException(
-                "无法识别的标定 JSON：透视展开需要含 intrinsics 与 extrinsicsPerView 的完整标定结果。");
+                "无法识别的标定文件：透视展开需要含 intrinsics 与 extrinsicsPerView 的完整标定结果。");
         }
 
         /// <summary>内参去畸变用 JSON：完整包或仅内参短 JSON 均可。</summary>

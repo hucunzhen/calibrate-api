@@ -2,57 +2,66 @@
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       Title="流程编排"
-      Background="#252526">
+      Background="{StaticResource Ui.WorkspaceBackground}">
     <DockPanel>
-        <Border DockPanel.Dock="Top" Background="#2D2D30" BorderBrush="#3C3C3C" BorderThickness="0,0,0,1" Padding="8,6">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="160"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="配方" Foreground="#9CDCFE" FontWeight="SemiBold"
-                           VerticalAlignment="Center" Margin="0,0,8,0"/>
-                <ComboBox x:Name="CmbRecipe" Grid.Column="1" Height="28" VerticalContentAlignment="Center"
-                          ToolTip="每个配方对应配方根目录下的一个子文件夹（如 v1、v2）"
-                          SelectionChanged="CmbRecipe_SelectionChanged"/>
-                <Button x:Name="BtnSelectFlowsRoot" Grid.Column="2" Content="目录…" Height="28" MinWidth="56"
-                        Margin="6,0,0,0" Padding="8,2" Click="BtnSelectFlowsRoot_Click"
-                        ToolTip="选择配方根目录（其下每个子文件夹为一个配方）"/>
-                <Button x:Name="BtnOpenRecipeMain" Grid.Column="3" Content="打开主流程" Height="28" MinWidth="88"
-                        Margin="8,0,0,0" Padding="10,2" Click="BtnOpenRecipeMain_Click"
-                        ToolTip="在当前标签加载所选配方的 main.flow.json"/>
-                <Button x:Name="BtnOpenNinePointCalib" Grid.Column="4" Content="九点标定" Height="28" MinWidth="72"
-                        Margin="6,0,0,0" Padding="10,2" Click="BtnOpenNinePointCalib_Click"
-                        ToolTip="在当前标签加载所选配方的 calibSendContour.flow.json"/>
-                <Button x:Name="BtnOpenChessboardCalib" Grid.Column="5" Content="棋盘格标定" Height="28" MinWidth="80"
-                        Margin="6,0,0,0" Padding="10,2" Click="BtnOpenChessboardCalib_Click"
-                        ToolTip="在当前标签加载所选配方的 chessboard_intrinsics_from_dir.flow.json"/>
-                <Button x:Name="BtnRefreshRecipes" Grid.Column="6" Content="刷新" Height="28" MinWidth="56"
-                        Margin="6,0,0,0" Padding="8,2" Click="BtnRefreshRecipes_Click"
-                        ToolTip="重新扫描配方根目录下的子文件夹"/>
-                <Button x:Name="BtnCopyRecipe" Grid.Column="7" Content="复制" Height="28" MinWidth="56"
-                        Margin="6,0,0,0" Padding="8,2" Click="BtnCopyRecipe_Click"
-                        ToolTip="复制当前配方目录为新配方"/>
-                <Button x:Name="BtnRenameRecipe" Grid.Column="8" Content="重命名" Height="28" MinWidth="64"
-                        Margin="6,0,0,0" Padding="8,2" Click="BtnRenameRecipe_Click"
-                        ToolTip="重命名当前配方目录"/>
-                <Button x:Name="BtnDeleteRecipe" Grid.Column="9" Content="删除" Height="28" MinWidth="56"
-                        Margin="6,0,0,0" Padding="8,2" Click="BtnDeleteRecipe_Click"
-                        ToolTip="删除当前配方目录（不可撤销）"/>
-                <TextBlock x:Name="TxtRecipeHint" Grid.Column="10" Text="" Foreground="#888" FontSize="11"
-                           VerticalAlignment="Center" Margin="12,0,0,0" TextTrimming="CharacterEllipsis"/>
-            </Grid>
+        <Border DockPanel.Dock="Top" Background="{StaticResource Ui.PanelBackground}"
+                BorderBrush="{StaticResource Ui.PanelBorder}" BorderThickness="0,0,0,1" Padding="12,10">
+            <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <!-- 配方选择 -->
+                <Border Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}"
+                        BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,0,10,6">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="配方" Foreground="{StaticResource Ui.SectionTitle}" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" Margin="0,0,10,0"/>
+                        <ComboBox x:Name="CmbRecipe" Width="140" Height="28" Style="{StaticResource Ui.DarkComboBox}"
+                                  ToolTip="每个配方对应配方根目录下的一个子文件夹（如 v1、v4）"
+                                  SelectionChanged="CmbRecipe_SelectionChanged"/>
+                        <Button x:Name="BtnSelectFlowsRoot" Content="根目录…" Style="{StaticResource IndustrialToolbarButton}"
+                                Margin="8,0,0,0" Click="BtnSelectFlowsRoot_Click"
+                                ToolTip="选择配方根目录（其下每个子文件夹为一个配方）"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- 快捷打开 -->
+                <Border Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}"
+                        BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,0,10,6">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="打开" Foreground="{StaticResource Ui.TextMuted}" FontSize="11"
+                                   VerticalAlignment="Center" Margin="0,0,10,0"/>
+                        <Button x:Name="BtnOpenRecipeMain" Content="主流程" Style="{StaticResource IndustrialToolbarPrimaryButton}"
+                                Click="BtnOpenRecipeMain_Click"
+                                ToolTip="在当前标签加载所选配方的 main.flow.json"/>
+                        <Button x:Name="BtnOpenNinePointCalib" Content="九点标定" Style="{StaticResource IndustrialToolbarButton}"
+                                Margin="6,0,0,0" Click="BtnOpenNinePointCalib_Click"
+                                ToolTip="在当前标签加载 calibSendContour.flow.json"/>
+                        <Button x:Name="BtnOpenChessboardCalib" Content="棋盘格标定" Style="{StaticResource IndustrialToolbarButton}"
+                                Margin="6,0,0,0" Click="BtnOpenChessboardCalib_Click"
+                                ToolTip="在当前标签加载 chessboard_intrinsics_from_dir.flow.json"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- 配方管理 -->
+                <Border Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}"
+                        BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,0,10,6">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="管理" Foreground="{StaticResource Ui.TextMuted}" FontSize="11"
+                                   VerticalAlignment="Center" Margin="0,0,10,0"/>
+                        <Button x:Name="BtnRefreshRecipes" Content="刷新" Style="{StaticResource IndustrialToolbarButton}"
+                                Click="BtnRefreshRecipes_Click" ToolTip="重新扫描配方根目录"/>
+                        <Button x:Name="BtnCopyRecipe" Content="复制" Style="{StaticResource IndustrialToolbarButton}"
+                                Margin="6,0,0,0" Click="BtnCopyRecipe_Click" ToolTip="复制当前配方为新配方"/>
+                        <Button x:Name="BtnRenameRecipe" Content="重命名" Style="{StaticResource IndustrialToolbarButton}"
+                                Margin="6,0,0,0" Click="BtnRenameRecipe_Click" ToolTip="重命名当前配方目录"/>
+                        <Button x:Name="BtnDeleteRecipe" Content="删除" Style="{StaticResource IndustrialToolbarButton}"
+                                Margin="6,0,0,0" Click="BtnDeleteRecipe_Click" ToolTip="删除当前配方目录（不可撤销）"/>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock x:Name="TxtRecipeHint" Text="" Foreground="{StaticResource Ui.TextMuted}" FontSize="11"
+                           VerticalAlignment="Center" Margin="4,0,0,6" TextTrimming="CharacterEllipsis" MaxWidth="480"/>
+            </WrapPanel>
         </Border>
-        <!-- 单页内多标签仍保留（关闭 ×、工具栏「在新标签打开流程」）；不再单独提供空白「新建标签」顶栏 -->
+
         <TabControl x:Name="FlowTabs"
                     Style="{StaticResource FlowHostTabControlStyle}"
                     ItemContainerStyle="{StaticResource FlowHostTabItemStyle}"/>

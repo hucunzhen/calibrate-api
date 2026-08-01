@@ -26,11 +26,17 @@ namespace CalibOperatorCLI_Example
                     OpenTabsChanged?.Invoke();
                     SyncRecipeFromActiveTab();
                 }
+                ActiveFlowPage?.ScheduleConnectionGeometryRefresh();
             };
+            Loaded += (_, _) => ActiveFlowPage?.ScheduleConnectionGeometryRefresh();
         }
 
         /// <summary>当前选中的流程编排页。</summary>
         public FlowPage? ActiveFlowPage => (FlowTabs.SelectedItem as TabItem)?.Content as FlowPage;
+
+        /// <summary>流程页入视觉树后刷新连线几何（默认加载时画布可能尚未量尺寸）。</summary>
+        public void RefreshActiveFlowConnections() =>
+            ActiveFlowOrFirst()?.ScheduleConnectionGeometryRefresh();
 
         /// <summary>任一标签加载或保存路径变更时通知（路径为 null 表示清空为未命名）。</summary>
         public event Action<string?>? FlowLoaded;
@@ -92,6 +98,7 @@ namespace CalibOperatorCLI_Example
                 int idx = Math.Clamp(activeIndex, 0, FlowTabs.Items.Count - 1);
                 FlowTabs.SelectedIndex = idx;
                 SyncRecipeFromActiveTab();
+                ActiveFlowPage?.ScheduleConnectionGeometryRefresh();
             }
             finally
             {

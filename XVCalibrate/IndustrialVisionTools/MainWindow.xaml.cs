@@ -39,6 +39,12 @@ namespace CalibOperatorCLI_Example
         {
             InitializeComponent();
 
+            MainFrame.Navigated += (_, e) =>
+            {
+                if (e.Content is FlowHostPage host)
+                    host.RefreshActiveFlowConnections();
+            };
+
             // 海康 SDK：进程级初始化一次（流程编排 camera_loop 等会创建独立 CameraService）
             try
             {
@@ -62,6 +68,7 @@ namespace CalibOperatorCLI_Example
 
             RestoreLastNavigationTab();
             TryRestoreFlowSessionOnStartup();
+            _flowHostPage.RefreshActiveFlowConnections();
         }
 
         protected override void OnClosed(EventArgs e)
@@ -181,35 +188,28 @@ namespace CalibOperatorCLI_Example
 
         private void HighlightTab(string tab)
         {
-            var dim = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
-            var accent = new SolidColorBrush(Color.FromRgb(0x00, 0x7A, 0xCC));
-            NavPlc.Background = dim;
-            NavController.Background = dim;
-            NavFlow.Background = dim;
-            NavHalconShapeModel.Background = dim;
-            NavAdvanced.Background = dim;
+            var activeBg = new SolidColorBrush(Color.FromRgb(0x2C, 0x35, 0x44));
+            var activeFg = new SolidColorBrush(Color.FromRgb(0x7E, 0xC8, 0xE3));
+            var normalFg = new SolidColorBrush(Color.FromRgb(0xEC, 0xEF, 0xF1));
 
-            switch (tab)
+            foreach (var btn in new[] { NavPlc, NavController, NavFlow, NavHalconShapeModel, NavAdvanced })
             {
-                case "Plc":
-                    NavPlc.Background = accent;
-                    break;
-                case "Controller":
-                    NavController.Background = accent;
-                    break;
-                case "Flow":
-                    NavFlow.Background = accent;
-                    break;
-                case "HalconShapeModel":
-                    NavHalconShapeModel.Background = accent;
-                    break;
-                case "Histogram":
-                case "YoloSeg":
-                case "HalconDlSeg":
-                case "SamOnnx":
-                    NavAdvanced.Background = accent;
-                    break;
+                btn.Background = Brushes.Transparent;
+                btn.Foreground = normalFg;
             }
+
+            Button? activeBtn = tab switch
+            {
+                "Plc" => NavPlc,
+                "Controller" => NavController,
+                "Flow" => NavFlow,
+                "HalconShapeModel" => NavHalconShapeModel,
+                "Histogram" or "YoloSeg" or "HalconDlSeg" or "SamOnnx" => NavAdvanced,
+                _ => NavFlow
+            };
+
+            activeBtn.Background = activeBg;
+            activeBtn.Foreground = activeFg;
         }
 
         private void NavAdvanced_Click(object sender, RoutedEventArgs e)
@@ -245,7 +245,7 @@ namespace CalibOperatorCLI_Example
         {
             NavigateTo(_flowHostPage);
             HighlightTab("Flow");
-            // 不在此处自动加载 last_flow：流程页实例常驻内存，切回时应保留当前编辑内容。
+            _flowHostPage.RefreshActiveFlowConnections();
         }
 
         private void NavYoloSeg_Click(object sender, RoutedEventArgs e)
