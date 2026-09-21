@@ -261,6 +261,36 @@ namespace CalibOperatorPInvoke
         public static extern int CALIB_DetectCircles(IntPtr img, IntPtr pts, ref int count, int maxCount);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int CALIB_DetectCalibrationDots(
+            IntPtr src,
+            IntPtr dstOverlay,
+            IntPtr outPts,
+            ref int outCount,
+            int maxPts,
+            ref int outGridRows,
+            ref int outGridCols,
+            int morphKernelSize,
+            int templateHalfSize,
+            double matchThreshold,
+            double nmsRadiusPx,
+            double seedScoreThreshold,
+            double rowClusterDist,
+            double colClusterDist,
+            double cellMatchRadius,
+            int centroidWinHalf,
+            double centroidMinResp,
+            double roiXMin,
+            double roiXMax,
+            double roiYMin,
+            double roiYMax,
+            int templateCenterX,
+            int templateCenterY,
+            int gridRowsHint,
+            int gridColsHint,
+            double gridPitchPx,
+            double dotContrastMin);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int CALIB_HoughCirclesDetect(
             IntPtr src,
             IntPtr dstOverlay,

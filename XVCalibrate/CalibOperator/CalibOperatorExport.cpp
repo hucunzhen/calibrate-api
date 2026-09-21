@@ -85,6 +85,32 @@ CALIB_API void CALIB_DrawDetectedCircles(Image* img, Point2D* pts, int count, in
     ::DrawDetectedCircles(img, pts, count, gray);
 }
 
+CALIB_API int CALIB_DetectCalibrationDots(
+    Image* src, Image* dstOverlay,
+    Point2D* outPts, int* outCount, int maxPts,
+    int* outGridRows, int* outGridCols,
+    int morphKernelSize,
+    int templateHalfSize,
+    double matchThreshold,
+    double nmsRadiusPx,
+    double seedScoreThreshold,
+    double rowClusterDist,
+    double colClusterDist,
+    double cellMatchRadius,
+    int centroidWinHalf,
+    double centroidMinResp,
+    double roiXMin, double roiXMax, double roiYMin, double roiYMax,
+    int templateCenterX, int templateCenterY,
+    int gridRowsHint, int gridColsHint, double gridPitchPx, double dotContrastMin) {
+    return ::DetectCalibrationDotsDetect(src, dstOverlay, outPts, outCount, maxPts,
+        outGridRows, outGridCols,
+        morphKernelSize, templateHalfSize, matchThreshold, nmsRadiusPx,
+        seedScoreThreshold, rowClusterDist, colClusterDist, cellMatchRadius,
+        centroidWinHalf, centroidMinResp,
+        roiXMin, roiXMax, roiYMin, roiYMax, templateCenterX, templateCenterY,
+        gridRowsHint, gridColsHint, gridPitchPx, dotContrastMin);
+}
+
 CALIB_API int CALIB_HoughCirclesDetect(Image* src, Image* dstOverlay,
     Point2D* circlePts, int* circleCount, int maxCircles,
     char* circlesJsonOut, int circlesJsonBufSize,

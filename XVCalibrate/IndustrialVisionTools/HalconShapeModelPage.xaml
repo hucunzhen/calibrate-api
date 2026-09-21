@@ -3,6 +3,15 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       Title="HALCON 形状模板"
       Background="{StaticResource Ui.WorkspaceBackground}">
+    <Page.Resources>
+        <!-- 深色卡片内默认黑字 → 统一浅色字与输入框样式 -->
+        <Style TargetType="TextBlock" BasedOn="{StaticResource Ui.DarkLabel}"/>
+        <Style TargetType="TextBox" BasedOn="{StaticResource Ui.DarkTextBox}"/>
+        <Style TargetType="ComboBox" BasedOn="{StaticResource Ui.DarkComboBox}"/>
+        <Style TargetType="CheckBox" BasedOn="{StaticResource Ui.DarkCheckBox}"/>
+        <Style TargetType="ListBox" BasedOn="{StaticResource Ui.DarkListBox}"/>
+        <Style TargetType="Button" BasedOn="{StaticResource IndustrialToolbarButton}"/>
+    </Page.Resources>
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="400"/>

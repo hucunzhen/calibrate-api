@@ -88,6 +88,71 @@ namespace CalibOperatorPInvoke
 
         public const int HoughDetectMaxCircles = 512;
         public const int HoughJsonCap = 262144;
+        public const int DetectCalibrationDotsMaxPoints = 256;
+
+        /// <summary>
+        /// 标定板圆点检测：亮框 ROI + top-hat 局部对比 + 规则网格逐格检测。
+        /// roiXMin&lt;0 时自动板内 ROI；gridPitchPx≤0 自动估计点间距。
+        /// </summary>
+        public static CalibImage DetectCalibrationDotsOverlay(
+            CalibImage src,
+            out Point2D[] points,
+            out int gridRows,
+            out int gridCols,
+            int morphKernelSize,
+            int templateHalfSize,
+            double matchThreshold,
+            double nmsRadiusPx,
+            double seedScoreThreshold,
+            double rowClusterDist,
+            double colClusterDist,
+            double cellMatchRadius,
+            int centroidWinHalf,
+            double centroidMinResp,
+            double roiXMin,
+            double roiXMax,
+            double roiYMin,
+            double roiYMax,
+            int templateCenterX,
+            int templateCenterY,
+            int gridRowsHint,
+            int gridColsHint,
+            double gridPitchPx,
+            double dotContrastMin)
+        {
+            if (src == null) throw new ArgumentNullException(nameof(src));
+            var dst = new CalibImage(src.Width, src.Height, 3);
+            int count = 0;
+            gridRows = 0;
+            gridCols = 0;
+            IntPtr ptsPin = Marshal.AllocHGlobal(Marshal.SizeOf<NativePoint2D>() * DetectCalibrationDotsMaxPoints);
+            try
+            {
+                int rc = NativeAPI.CALIB_DetectCalibrationDots(
+                    src.NativePtr, dst.NativePtr, ptsPin, ref count, DetectCalibrationDotsMaxPoints,
+                    ref gridRows, ref gridCols,
+                    morphKernelSize, templateHalfSize, matchThreshold, nmsRadiusPx,
+                    seedScoreThreshold, rowClusterDist, colClusterDist, cellMatchRadius,
+                    centroidWinHalf, centroidMinResp,
+                    roiXMin, roiXMax, roiYMin, roiYMax, templateCenterX, templateCenterY,
+                    gridRowsHint, gridColsHint, gridPitchPx, dotContrastMin);
+                if (rc != 0)
+                    throw new InvalidOperationException($"CALIB_DetectCalibrationDots failed ({rc}), count={count}");
+
+                points = new Point2D[count];
+                for (int i = 0; i < count; i++)
+                {
+                    IntPtr ep = IntPtr.Add(ptsPin, i * Marshal.SizeOf<NativePoint2D>());
+                    NativePoint2D np = Marshal.PtrToStructure<NativePoint2D>(ep);
+                    points[i] = Point2D.FromNative(np);
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(ptsPin);
+            }
+            return dst;
+        }
 
         /// <summary>霍夫圆（绿圈/青圆心）；circlesJson 为 [[cx,cy,r],...]，可与霍夫跑道形 CirclesJson 对接。</summary>
         public static CalibImage HoughCirclesOverlay(CalibImage src, out Point2D[] circleCenters, out string circlesJson,

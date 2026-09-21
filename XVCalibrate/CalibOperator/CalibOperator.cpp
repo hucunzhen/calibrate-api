@@ -934,6 +934,755 @@ static Mat ImageToMatClone(const Image* img) {
     return out;
 }
 
+namespace {
+
+struct DotCand {
+    double x = 0, y = 0, score = 0;
+};
+
+static double MedianOfDoubles(std::vector<double> v) {
+    if (v.empty()) return 0;
+    size_t mid = v.size() / 2;
+    std::nth_element(v.begin(), v.begin() + mid, v.end());
+    return v[mid];
+}
+
+static void Cluster1D(const std::vector<double>& sortedVals, double gapTol,
+    std::vector<std::vector<double>>& clustersOut) {
+    clustersOut.clear();
+    for (double v : sortedVals) {
+        if (!clustersOut.empty() && v - clustersOut.back().back() < gapTol)
+            clustersOut.back().push_back(v);
+        else
+            clustersOut.push_back({ v });
+    }
+}
+
+static bool ExtractDotTemplate(const Mat& respF, int cx, int cy, int halfSize, Mat& tmplOut) {
+    int th = halfSize;
+    int x0 = cx - th, y0 = cy - th;
+    int x1 = cx + th + 1, y1 = cy + th + 1;
+    if (x0 < 0 || y0 < 0 || x1 > respF.cols || y1 > respF.rows)
+        return false;
+    tmplOut = respF(Rect(x0, y0, x1 - x0, y1 - y0)).clone();
+    return !tmplOut.empty();
+}
+
+static bool FindRespPeak(const Mat& respF, int margin, int& peakCx, int& peakCy) {
+    double maxVal = -1;
+    int bestX = -1, bestY = -1;
+    int xStart = std::max(0, margin);
+    int yStart = std::max(0, margin);
+    int xEnd = std::min(respF.cols - margin, respF.cols);
+    int yEnd = std::min(respF.rows - margin, respF.rows);
+    for (int y = yStart; y < yEnd; ++y) {
+        const float* row = respF.ptr<float>(y);
+        for (int x = xStart; x < xEnd; ++x) {
+            if (row[x] > maxVal) {
+                maxVal = row[x];
+                bestX = x;
+                bestY = y;
+            }
+        }
+    }
+    if (bestX < 0) return false;
+    peakCx = bestX;
+    peakCy = bestY;
+    return true;
+}
+
+static std::vector<DotCand> MatchTemplateWithNms(
+    const Mat& respF, const Mat& tmpl, double matchThreshold, double nmsRadiusPx, double centerOffset)
+{
+    std::vector<DotCand> cand;
+    if (tmpl.empty() || respF.empty()) return cand;
+
+    Mat res;
+    matchTemplate(respF, tmpl, res, TM_CCOEFF_NORMED);
+
+    std::vector<std::pair<float, Point>> hits;
+    for (int y = 0; y < res.rows; ++y) {
+        const float* row = res.ptr<float>(y);
+        for (int x = 0; x < res.cols; ++x) {
+            float s = row[x];
+            if (s >= (float)matchThreshold)
+                hits.push_back({ s, Point(x, y) });
+        }
+    }
+    std::sort(hits.begin(), hits.end(),
+        [](const std::pair<float, Point>& a, const std::pair<float, Point>& b) {
+            return a.first > b.first;
+        });
+
+    double nmsR2 = nmsRadiusPx * nmsRadiusPx;
+    for (const auto& h : hits) {
+        double cx = h.second.x + centerOffset;
+        double cy = h.second.y + centerOffset;
+        bool dup = false;
+        for (const auto& f : cand) {
+            double dx = cx - f.x, dy = cy - f.y;
+            if (dx * dx + dy * dy <= nmsR2) { dup = true; break; }
+        }
+        if (!dup)
+            cand.push_back({ cx, cy, (double)h.first });
+    }
+    return cand;
+}
+
+static Point2D RefineDotCentroid(const Mat& resp, double cx, double cy,
+    int winHalf, double minResp)
+{
+    int x0 = (int)std::round(cx);
+    int y0 = (int)std::round(cy);
+    int yA = std::max(0, y0 - winHalf);
+    int yB = std::min(resp.rows, y0 + winHalf + 1);
+    int xA = std::max(0, x0 - winHalf);
+    int xB = std::min(resp.cols, x0 + winHalf + 1);
+    if (yB <= yA || xB <= xA)
+        return { cx, cy };
+
+    Mat win = resp(Rect(xA, yA, xB - xA, yB - yA)).clone();
+    Mat winF;
+    if (win.type() == CV_32F)
+        winF = win;
+    else
+        win.convertTo(winF, CV_32F);
+
+    Mat mask = winF >= (float)minResp;
+    double sumW = 0, sumX = 0, sumY = 0;
+    int cnt = 0;
+    for (int y = 0; y < winF.rows; ++y) {
+        const float* prow = winF.ptr<float>(y);
+        const uchar* mrow = mask.ptr<uchar>(y);
+        for (int x = 0; x < winF.cols; ++x) {
+            if (!mrow[x]) continue;
+            float w = prow[x];
+            sumW += w;
+            sumX += (xA + x) * w;
+            sumY += (yA + y) * w;
+            ++cnt;
+        }
+    }
+    if (cnt >= 5 && sumW > 1e-6)
+        return { sumX / sumW, sumY / sumW };
+    return { cx, cy };
+}
+
+static float LocalGrayStd(const Mat& gray, int cx, int cy, int r = 7) {
+    int xA = std::max(0, cx - r), xB = std::min(gray.cols, cx + r + 1);
+    int yA = std::max(0, cy - r), yB = std::min(gray.rows, cy + r + 1);
+    if (xB <= xA || yB <= yA) return 999.f;
+    Mat patch = gray(Rect(xA, yA, xB - xA, yB - yA));
+    Scalar mean, stddev;
+    meanStdDev(patch, mean, stddev);
+    return (float)stddev[0];
+}
+
+static bool BuildPlateInteriorMask(const Mat& gray, Mat& plateMask, Rect& innerRect) {
+    Mat bright;
+    threshold(gray, bright, 165, 255, THRESH_BINARY);
+    Mat kClose = getStructuringElement(MORPH_ELLIPSE, Size(11, 11));
+    morphologyEx(bright, bright, MORPH_CLOSE, kClose);
+
+    std::vector<std::vector<Point>> contours;
+    findContours(bright, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+    if (contours.empty()) return false;
+
+    int bestIdx = -1;
+    double bestArea = 0;
+    for (int i = 0; i < (int)contours.size(); ++i) {
+        double a = contourArea(contours[i]);
+        if (a > bestArea) { bestArea = a; bestIdx = i; }
+    }
+    if (bestIdx < 0 || bestArea < 5000) return false;
+
+    Rect frameRect = boundingRect(contours[bestIdx]);
+    int inset = std::max(32, std::min(frameRect.width, frameRect.height) / 10);
+    innerRect.x = frameRect.x + inset;
+    innerRect.y = frameRect.y + inset;
+    innerRect.width = std::max(0, frameRect.width - 2 * inset);
+    innerRect.height = std::max(0, frameRect.height - 2 * inset);
+    if (innerRect.width < 40 || innerRect.height < 40) return false;
+
+    plateMask = Mat::zeros(gray.size(), CV_8UC1);
+    rectangle(plateMask, innerRect, Scalar(255), FILLED);
+
+    LOG_INFO("DetectCalibrationDots: plate inner (%d,%d,%d,%d)",
+        innerRect.x, innerRect.y, innerRect.width, innerRect.height);
+    return true;
+}
+
+struct LocalCellHit {
+    double x = 0, y = 0;
+    double contrast = 0;
+    bool valid = false;
+};
+
+static LocalCellHit DetectDotInCell(
+    const Mat& gray, const Mat& dotResp, const Mat& plateMask, const Rect& inner,
+    double gx, double gy, int winHalf, double contrastMin)
+{
+    LocalCellHit hit;
+    int x0 = (int)std::round(gx);
+    int y0 = (int)std::round(gy);
+    if (x0 >= 0 && x0 < gray.cols && y0 >= 0 && y0 < gray.rows) {
+        if (gray.at<uchar>(y0, x0) > 175) return hit;
+    }
+    int ya = std::max(inner.y + 2, y0 - winHalf);
+    int yb = std::min(inner.y + inner.height - 2, y0 + winHalf + 1);
+    int xa = std::max(inner.x + 2, x0 - winHalf);
+    int xb = std::min(inner.x + inner.width - 2, x0 + winHalf + 1);
+    if (xb <= xa || yb <= ya) return hit;
+
+    std::vector<uchar> vals;
+    vals.reserve((size_t)(xb - xa) * (size_t)(yb - ya));
+    for (int y = ya; y < yb; ++y) {
+        const uchar* rrow = dotResp.ptr<uchar>(y);
+        const uchar* mrow = plateMask.ptr<uchar>(y);
+        for (int x = xa; x < xb; ++x) {
+            if (mrow[x]) vals.push_back(rrow[x]);
+        }
+    }
+    if (vals.size() < 8) return hit;
+
+    std::vector<uchar> sorted = vals;
+    size_t mid = sorted.size() / 2;
+    std::nth_element(sorted.begin(), sorted.begin() + mid, sorted.end());
+    double med = sorted[mid];
+    uchar peak = *std::max_element(vals.begin(), vals.end());
+    double contrast = (double)peak - med;
+    if (contrast < contrastMin) return hit;
+
+    double sumW = 0, sumX = 0, sumY = 0;
+    int cnt = 0;
+    for (int y = ya; y < yb; ++y) {
+        const uchar* rrow = dotResp.ptr<uchar>(y);
+        const uchar* mrow = plateMask.ptr<uchar>(y);
+        for (int x = xa; x < xb; ++x) {
+            if (!mrow[x]) continue;
+            double w = (double)rrow[x] - med;
+            if (w < contrastMin - 1.0) continue;
+            sumW += w;
+            sumX += x * w;
+            sumY += y * w;
+            ++cnt;
+        }
+    }
+    if (cnt < 3 || sumW < 1e-6) return hit;
+
+    hit.x = sumX / sumW;
+    hit.y = sumY / sumW;
+    hit.contrast = contrast;
+    hit.valid = true;
+    return hit;
+}
+
+static double EstimateGridPitchFromTopHat(
+    const Mat& gray, const Mat& plateMask, const Rect& inner, int morphK)
+{
+    morphK = std::max(9, morphK | 1);
+    Mat kernel = getStructuringElement(MORPH_ELLIPSE, Size(morphK, morphK));
+    Mat dotResp;
+    morphologyEx(gray, dotResp, MORPH_TOPHAT, kernel);
+    dotResp.setTo(0, plateMask == 0);
+
+    std::vector<double> axisDist;
+    std::vector<Point2f> peaks;
+    for (int y = inner.y + 4; y < inner.y + inner.height - 4; ++y) {
+        const uchar* row = dotResp.ptr<uchar>(y);
+        for (int x = inner.x + 4; x < inner.x + inner.width - 4; ++x) {
+            if (!plateMask.at<uchar>(y, x) || row[x] < 22) continue;
+            bool isMax = true;
+            for (int dy = -3; dy <= 3 && isMax; ++dy) {
+                for (int dx = -3; dx <= 3; ++dx) {
+                    if (dx == 0 && dy == 0) continue;
+                    int yy = y + dy, xx = x + dx;
+                    if (dotResp.at<uchar>(yy, xx) > row[x]) { isMax = false; break; }
+                }
+            }
+            if (isMax) peaks.push_back(Point2f((float)x, (float)y));
+        }
+    }
+
+    for (size_t i = 0; i < peaks.size(); ++i) {
+        for (size_t j = i + 1; j < peaks.size(); ++j) {
+            double dx = std::abs(peaks[j].x - peaks[i].x);
+            double dy = std::abs(peaks[j].y - peaks[i].y);
+            if (dy < 22.0 && dx >= 38.0 && dx <= 95.0) axisDist.push_back(dx);
+            if (dx < 22.0 && dy >= 38.0 && dy <= 95.0) axisDist.push_back(dy);
+        }
+    }
+    if (!axisDist.empty())
+        return MedianOfDoubles(std::move(axisDist));
+    return std::max(58.0, std::min((double)inner.width, (double)inner.height) / 6.0);
+}
+
+static int DetectCalibrationDotsGrid(
+    const Mat& gray, const Mat& dotResp, const Mat& plateMask, const Rect& inner,
+    int gridRowsHint, int gridColsHint, double gridPitchPx, double dotContrastMin,
+    int cellWinHalf, int morphKernelSize,
+    Point2D* outPts, int maxPts, int& outRows, int& outCols)
+{
+    double pitch = gridPitchPx;
+    if (pitch <= 0)
+        pitch = EstimateGridPitchFromTopHat(gray, plateMask, inner, morphKernelSize);
+
+    int nRows = gridRowsHint;
+    int nCols = gridColsHint;
+    if (nRows <= 0)
+        nRows = std::max(3, (int)std::lround((double)inner.height / pitch));
+    if (nCols <= 0)
+        nCols = std::max(3, (int)std::lround((double)inner.width / pitch));
+    nRows = std::min(std::max(nRows, 3), 12);
+    nCols = std::min(std::max(nCols, 3), 12);
+
+    int bestFill = -1;
+    double bestOx = 0, bestOy = 0, bestPitch = pitch;
+    double search = pitch * 0.55;
+    for (double pitchTry : { pitch, pitch * 0.97, pitch * 1.03 }) {
+        for (double oy = -search; oy <= search; oy += 1.0) {
+            for (double ox = -search; ox <= search; ox += 1.0) {
+                int fill = 0;
+                for (int r = 0; r < nRows; ++r) {
+                    for (int c = 0; c < nCols; ++c) {
+                        double gx = inner.x + ox + c * pitchTry;
+                        double gy = inner.y + oy + r * pitchTry;
+                        LocalCellHit h = DetectDotInCell(gray, dotResp, plateMask, inner, gx, gy, cellWinHalf, dotContrastMin);
+                        if (h.valid) ++fill;
+                    }
+                }
+                if (fill > bestFill) {
+                    bestFill = fill;
+                    bestOx = ox;
+                    bestOy = oy;
+                    bestPitch = pitchTry;
+                }
+            }
+        }
+    }
+
+    struct DotFinal { double x, y; int row, col; };
+    std::vector<DotFinal> finalDots;
+    for (int r = 0; r < nRows; ++r) {
+        for (int c = 0; c < nCols; ++c) {
+            double gx = inner.x + bestOx + c * bestPitch;
+            double gy = inner.y + bestOy + r * bestPitch;
+            LocalCellHit h = DetectDotInCell(gray, dotResp, plateMask, inner, gx, gy, cellWinHalf, dotContrastMin);
+            if (h.valid)
+                finalDots.push_back({ h.x, h.y, r, c });
+        }
+    }
+
+    outRows = nRows;
+    outCols = nCols;
+    int nOut = (int)std::min(finalDots.size(), (size_t)maxPts);
+    for (int i = 0; i < nOut; ++i) {
+        outPts[i].x = finalDots[i].x;
+        outPts[i].y = finalDots[i].y;
+    }
+    LOG_INFO("DetectCalibrationDots grid: %dx%d pitch=%.1f fill=%d/%d offset=(%.1f,%.1f)",
+        nRows, nCols, bestPitch, (int)finalDots.size(), nRows * nCols, bestOx, bestOy);
+    return nOut;
+}
+
+static Mat BuildBipolarResponse(const Mat& gray, int morphKernelSize) {
+    Mat kernel = getStructuringElement(MORPH_ELLIPSE, Size(morphKernelSize, morphKernelSize));
+    Mat topHat, blackHat;
+    morphologyEx(gray, topHat, MORPH_TOPHAT, kernel);
+    morphologyEx(gray, blackHat, MORPH_BLACKHAT, kernel);
+
+    Mat resp(gray.size(), CV_8UC1);
+    for (int y = 0; y < gray.rows; ++y) {
+        const uchar* g = gray.ptr<uchar>(y);
+        const uchar* th = topHat.ptr<uchar>(y);
+        const uchar* bh = blackHat.ptr<uchar>(y);
+        uchar* r = resp.ptr<uchar>(y);
+        for (int x = 0; x < gray.cols; ++x) {
+            uchar tb = std::max(th[x], bh[x]);
+            // 反光带内圆点常为暗环：优先 black-hat；其余区域仍用双极 max
+            r[x] = (g[x] > 115) ? bh[x] : tb;
+        }
+    }
+    return resp;
+}
+
+static bool IsValidDotLocation(const Mat& gray, const Mat& boardMask,
+    double cx, double cy, double maxGray, double maxLocalStd)
+{
+    int ix = (int)std::round(cx), iy = (int)std::round(cy);
+    if (ix < 0 || iy < 0 || ix >= gray.cols || iy >= gray.rows) return false;
+    if (!boardMask.empty() && boardMask.at<uchar>(iy, ix) == 0) return false;
+    if (gray.at<uchar>(iy, ix) > (uchar)maxGray) return false;
+    if (LocalGrayStd(gray, ix, iy, 7) > (float)maxLocalStd) return false;
+    return true;
+}
+
+static std::vector<DotCand> FilterDotsByBoardAndGlare(
+    const std::vector<DotCand>& cand, const Mat& gray, const Mat& boardMask,
+    double maxGray, double maxLocalStd)
+{
+    std::vector<DotCand> out;
+    out.reserve(cand.size());
+    for (const auto& c : cand) {
+        if (IsValidDotLocation(gray, boardMask, c.x, c.y, maxGray, maxLocalStd))
+            out.push_back(c);
+    }
+    return out;
+}
+
+static double EstimatePitchFromSeeds(const std::vector<DotCand>& seeds, int /*kNeighbor*/ = 3) {
+    int n = (int)seeds.size();
+    if (n < 2) return 65.0;
+
+    std::vector<double> axisDist;
+    axisDist.reserve((size_t)n * (size_t)n);
+    for (int i = 0; i < n; ++i) {
+        for (int j = i + 1; j < n; ++j) {
+            double dx = std::abs(seeds[j].x - seeds[i].x);
+            double dy = std::abs(seeds[j].y - seeds[i].y);
+            if (dy < 30.0 && dx >= 35.0 && dx <= 120.0)
+                axisDist.push_back(dx);
+            if (dx < 30.0 && dy >= 35.0 && dy <= 120.0)
+                axisDist.push_back(dy);
+        }
+    }
+    if (axisDist.empty()) {
+        std::vector<double> allDist;
+        for (int i = 0; i < n; ++i) {
+            for (int j = i + 1; j < n; ++j) {
+                double dx = seeds[j].x - seeds[i].x;
+                double dy = seeds[j].y - seeds[i].y;
+                double d = std::sqrt(dx * dx + dy * dy);
+                if (d >= 35.0 && d <= 120.0)
+                    allDist.push_back(d);
+            }
+        }
+        if (allDist.empty()) return 65.0;
+        return MedianOfDoubles(std::move(allDist));
+    }
+    return MedianOfDoubles(std::move(axisDist));
+}
+
+struct GridFillResult {
+    int finalCount = 0;
+    int rowCount = 0;
+    int colCount = 0;
+    std::vector<double> rowY;
+    std::vector<double> colX;
+};
+
+static GridFillResult FillGridFromDots(
+    const std::vector<DotCand>& dots,
+    const std::vector<DotCand>& seedsIn,
+    double rowClusterDist,
+    double colClusterDist,
+    double cellMatchRadius)
+{
+    GridFillResult out;
+    std::vector<DotCand> seeds = seedsIn;
+    if (seeds.size() < 2) {
+        seeds = dots;
+        std::sort(seeds.begin(), seeds.end(),
+            [](const DotCand& a, const DotCand& b) { return a.score > b.score; });
+        if (seeds.size() > 15) seeds.resize(15);
+    }
+
+    if (rowClusterDist <= 0 || colClusterDist <= 0 || cellMatchRadius <= 0) {
+        double pitch = EstimatePitchFromSeeds(seeds, 3);
+        if (rowClusterDist <= 0) rowClusterDist = std::max(35.0, pitch * 0.42);
+        if (colClusterDist <= 0) colClusterDist = rowClusterDist;
+        if (cellMatchRadius <= 0) cellMatchRadius = pitch * 0.52;
+    }
+
+    std::sort(seeds.begin(), seeds.end(),
+        [](const DotCand& a, const DotCand& b) { return a.y < b.y; });
+
+    std::vector<std::vector<DotCand>> seedRows;
+    for (const auto& s : seeds) {
+        if (!seedRows.empty() && s.y - seedRows.back().back().y < rowClusterDist)
+            seedRows.back().push_back(s);
+        else
+            seedRows.push_back({ s });
+    }
+
+    std::vector<double> seedXs;
+    seedXs.reserve(seeds.size());
+    for (const auto& s : seeds) seedXs.push_back(s.x);
+    std::sort(seedXs.begin(), seedXs.end());
+
+    std::vector<std::vector<double>> colClusters;
+    Cluster1D(seedXs, colClusterDist, colClusters);
+
+    for (const auto& row : seedRows) {
+        std::vector<double> ys;
+        ys.reserve(row.size());
+        for (const auto& s : row) ys.push_back(s.y);
+        out.rowY.push_back(MedianOfDoubles(std::move(ys)));
+    }
+    for (const auto& col : colClusters)
+        out.colX.push_back(MedianOfDoubles(col));
+
+    out.rowCount = (int)out.rowY.size();
+    out.colCount = (int)out.colX.size();
+    double cellR2 = cellMatchRadius * cellMatchRadius;
+
+    for (int r = 0; r < out.rowCount; ++r) {
+        for (int c = 0; c < out.colCount; ++c) {
+            const DotCand* best = nullptr;
+            double bestScore = -1;
+            for (const auto& d : dots) {
+                double dx = d.x - out.colX[c];
+                double dy = d.y - out.rowY[r];
+                if (dx * dx + dy * dy > cellR2) continue;
+                if (d.score > bestScore) { bestScore = d.score; best = &d; }
+            }
+            if (best) ++out.finalCount;
+        }
+    }
+    return out;
+}
+
+static std::vector<std::pair<int, int>> CollectRespPeaksInBoard(
+    const Mat& respF, const Mat& gray, const Mat& boardMask, const Rect& roi,
+    int templateHalfSize, double minResp, double maxGray, double maxLocalStd)
+{
+    std::vector<std::pair<int, int>> peaks;
+    int x0 = std::max(roi.x + 5, templateHalfSize + 2);
+    int y0 = std::max(roi.y + 5, templateHalfSize + 2);
+    int x1 = std::min(roi.x + roi.width - 5, respF.cols - templateHalfSize - 2);
+    int y1 = std::min(roi.y + roi.height - 5, respF.rows - templateHalfSize - 2);
+    if (x1 <= x0 || y1 <= y0) return peaks;
+
+    for (int y = y0; y < y1; ++y) {
+        const float* row = respF.ptr<float>(y);
+        for (int x = x0; x < x1; ++x) {
+            if (!IsValidDotLocation(gray, boardMask, (double)x, (double)y, maxGray, maxLocalStd))
+                continue;
+            float v = row[x];
+            if (v < (float)minResp) continue;
+            int r = 6;
+            int ya = std::max(0, y - r), yb = std::min(respF.rows, y + r + 1);
+            int xa = std::max(0, x - r), xb = std::min(respF.cols, x + r + 1);
+            double localMax = -1;
+            for (int yy = ya; yy < yb; ++yy) {
+                const float* prow = respF.ptr<float>(yy);
+                for (int xx = xa; xx < xb; ++xx)
+                    localMax = std::max(localMax, (double)prow[xx]);
+            }
+            if ((double)v + 0.01 < localMax) continue;
+            peaks.push_back({ x, y });
+        }
+    }
+
+    std::sort(peaks.begin(), peaks.end(), [&](const std::pair<int, int>& a, const std::pair<int, int>& b) {
+        return respF.at<float>(a.second, a.first) > respF.at<float>(b.second, b.first);
+    });
+
+    std::vector<std::pair<int, int>> sel;
+    double nmsR2 = (double)(templateHalfSize + 11) * (templateHalfSize + 11);
+    for (const auto& p : peaks) {
+        bool dup = false;
+        for (const auto& s : sel) {
+            double dx = p.first - s.first, dy = p.second - s.second;
+            if (dx * dx + dy * dy <= nmsR2) { dup = true; break; }
+        }
+        if (!dup) sel.push_back(p);
+        if ((int)sel.size() >= 16) break;
+    }
+    return sel;
+}
+
+static bool SnapGridCellFromResp(
+    const Mat& respF, const Mat& gray, const Mat& boardMask,
+    double gridCx, double gridRy, double searchRadius,
+    double maxGray, double maxLocalStd, DotCand& out)
+{
+    int cx0 = (int)std::round(gridCx);
+    int cy0 = (int)std::round(gridRy);
+    int r = (int)std::ceil(searchRadius);
+    int xA = std::max(0, cx0 - r), xB = std::min(respF.cols, cx0 + r + 1);
+    int yA = std::max(0, cy0 - r), yB = std::min(respF.rows, cy0 + r + 1);
+    if (xB <= xA || yB <= yA) return false;
+
+    double bestV = -1;
+    int bestX = -1, bestY = -1;
+    for (int y = yA; y < yB; ++y) {
+        const float* row = respF.ptr<float>(y);
+        for (int x = xA; x < xB; ++x) {
+            double dx = x - gridCx, dy = y - gridRy;
+            if (dx * dx + dy * dy > searchRadius * searchRadius) continue;
+            if (!IsValidDotLocation(gray, boardMask, (double)x, (double)y, maxGray, maxLocalStd))
+                continue;
+            if ((double)row[x] > bestV) {
+                bestV = row[x];
+                bestX = x;
+                bestY = y;
+            }
+        }
+    }
+    if (bestX < 0 || bestV < 35.0) return false;
+    out.x = (double)bestX + 0.5;
+    out.y = (double)bestY + 0.5;
+    out.score = bestV / 255.0;
+    return true;
+}
+
+static bool SelectBestTemplateCenter(
+    const Mat& resp, const Mat& respF, const Mat& gray, const Mat& boardMask, const Rect& roi,
+    int templateHalfSize, double matchThreshold, double nmsRadiusPx,
+    double seedScoreThreshold, double rowClusterDist, double colClusterDist, double cellMatchRadius,
+    double maxGray, double maxLocalStd, int& outCx, int& outCy)
+{
+    auto peakCandidates = CollectRespPeaksInBoard(
+        respF, gray, boardMask, roi, templateHalfSize, 38.0, maxGray, maxLocalStd);
+
+    int bestFill = -1;
+    bool found = false;
+
+    auto tryCenter = [&](int cx, int cy) {
+        Mat tmpl;
+        if (!ExtractDotTemplate(respF, cx, cy, templateHalfSize, tmpl)) return;
+        double centerOffset = (double)templateHalfSize + 0.5;
+        std::vector<DotCand> cand = MatchTemplateWithNms(respF, tmpl, matchThreshold, nmsRadiusPx, centerOffset);
+        cand = FilterDotsByBoardAndGlare(cand, gray, boardMask, maxGray, maxLocalStd);
+        if (cand.size() < 4) return;
+
+        std::vector<DotCand> seeds;
+        for (const auto& d : cand) {
+            if (d.score >= seedScoreThreshold) seeds.push_back(d);
+        }
+        GridFillResult grid = FillGridFromDots(cand, seeds, rowClusterDist, colClusterDist, cellMatchRadius);
+        if (grid.finalCount > bestFill) {
+            bestFill = grid.finalCount;
+            outCx = cx;
+            outCy = cy;
+            found = true;
+        }
+    };
+
+    for (const auto& p : peakCandidates)
+        tryCenter(p.first, p.second);
+
+    if (!found) {
+        for (int y = roi.y + 5; y < roi.y + roi.height - 5; y += 11) {
+            for (int x = roi.x + 5; x < roi.x + roi.width - 5; x += 11) {
+                if (!IsValidDotLocation(gray, boardMask, (double)x, (double)y, maxGray, maxLocalStd))
+                    continue;
+                tryCenter(x, y);
+            }
+        }
+    }
+    return found;
+}
+
+} // namespace
+
+int DetectCalibrationDotsDetect(Image* src, Image* dstOverlay,
+    Point2D* outPts, int* outCount, int maxPts,
+    int* outGridRows, int* outGridCols,
+    int morphKernelSize,
+    int templateHalfSize,
+    double matchThreshold,
+    double nmsRadiusPx,
+    double seedScoreThreshold,
+    double rowClusterDist,
+    double colClusterDist,
+    double cellMatchRadius,
+    int centroidWinHalf,
+    double centroidMinResp,
+    double roiXMin, double roiXMax, double roiYMin, double roiYMax,
+    int templateCenterX, int templateCenterY,
+    int gridRowsHint, int gridColsHint, double gridPitchPx, double dotContrastMin)
+{
+    (void)templateHalfSize;
+    (void)matchThreshold;
+    (void)nmsRadiusPx;
+    (void)seedScoreThreshold;
+    (void)rowClusterDist;
+    (void)colClusterDist;
+    (void)cellMatchRadius;
+    (void)centroidMinResp;
+    (void)templateCenterX;
+    (void)templateCenterY;
+
+    if (!src || !src->data || !outPts || maxPts <= 0)
+        return -1;
+    if (outCount) *outCount = 0;
+    if (outGridRows) *outGridRows = 0;
+    if (outGridCols) *outGridCols = 0;
+
+    morphKernelSize = std::max(9, morphKernelSize | 1);
+    if (centroidWinHalf <= 0) centroidWinHalf = 14;
+    if (dotContrastMin <= 0) dotContrastMin = 5.0;
+    if (gridRowsHint <= 0) gridRowsHint = 3;
+    if (gridColsHint <= 0) gridColsHint = 3;
+
+    Mat m = ImageToMatClone(src);
+    if (m.empty()) return -1;
+
+    Mat gray;
+    if (m.channels() == 1)
+        gray = m;
+    else
+        cvtColor(m, gray, COLOR_BGR2GRAY);
+
+    Mat plateMask;
+    Rect innerRect;
+    if (!BuildPlateInteriorMask(gray, plateMask, innerRect)) {
+        LOG_ERROR("DetectCalibrationDots: plate interior mask failed");
+        return -2;
+    }
+
+    bool manualRoi = roiXMin >= 0 && roiXMax >= 0 && roiYMin >= 0 && roiYMax >= 0;
+    if (manualRoi) {
+        Rect userRoi((int)roiXMin, (int)roiYMin,
+            (int)std::max(1.0, roiXMax - roiXMin), (int)std::max(1.0, roiYMax - roiYMin));
+        innerRect = innerRect & userRoi;
+        plateMask.setTo(0);
+        rectangle(plateMask, innerRect, Scalar(255), FILLED);
+        if (innerRect.width < 40 || innerRect.height < 40) {
+            LOG_ERROR("DetectCalibrationDots: manual ROI too small");
+            return -3;
+        }
+    }
+
+    Mat kernel = getStructuringElement(MORPH_ELLIPSE, Size(morphKernelSize, morphKernelSize));
+    Mat dotResp;
+    morphologyEx(gray, dotResp, MORPH_TOPHAT, kernel);
+    dotResp.setTo(0, plateMask == 0);
+
+    int gridRows = 0, gridCols = 0;
+    int nOut = DetectCalibrationDotsGrid(
+        gray, dotResp, plateMask, innerRect,
+        gridRowsHint, gridColsHint, gridPitchPx, dotContrastMin,
+        centroidWinHalf, morphKernelSize,
+        outPts, maxPts, gridRows, gridCols);
+
+    if (outGridRows) *outGridRows = gridRows;
+    if (outGridCols) *outGridCols = gridCols;
+    if (outCount) *outCount = nOut;
+
+    LOG_INFO("DetectCalibrationDots: final %d points (%dx%d grid)", nOut, gridRows, gridCols);
+
+    if (dstOverlay) {
+        Mat color;
+        if (m.channels() == 1)
+            cvtColor(m, color, COLOR_GRAY2BGR);
+        else
+            color = m.clone();
+
+        rectangle(color, innerRect, Scalar(0, 255, 0), 1, LINE_AA);
+        for (int i = 0; i < nOut; ++i) {
+            Point center((int)std::round(outPts[i].x), (int)std::round(outPts[i].y));
+            circle(color, center, 13, Scalar(255, 0, 0), 2, LINE_AA);
+            circle(color, center, 2, Scalar(0, 255, 0), -1, LINE_AA);
+        }
+        MatToImageBGR(color, dstOverlay);
+    }
+
+    return nOut > 0 ? 0 : -4;
+}
+
 // 线段方向角 [0, π)
 static double SegmentDirectionRad(const Vec4i& s) {
     double dx = (double)(s[2] - s[0]), dy = (double)(s[3] - s[1]);

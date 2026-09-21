@@ -2599,6 +2599,45 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "detect_calibration_dots",
+                DisplayName = "标定板圆点检测",
+                Description = "亮框自动 ROI + top-hat 局部对比 + 规则网格逐格检测 + 亚像素质心。适用暗色金属板圆点阵列、光照不均/镜面反光。输出按行优先排序，可接九点标定。",
+                Category = "标定",
+                Params =
+                {
+                    new OperatorParam { Name = "gridRows", DisplayName = "网格行数", DefaultValue = "3", Description = "标定板圆点行数（九点标定默认 3）" },
+                    new OperatorParam { Name = "gridCols", DisplayName = "网格列数", DefaultValue = "3", Description = "标定板圆点列数（九点标定默认 3）" },
+                    new OperatorParam { Name = "gridPitchPx", DisplayName = "点间距(px)", DefaultValue = "0", Description = "0=自动估计；否则指定相邻圆点中心距" },
+                    new OperatorParam { Name = "dotContrastMin", DisplayName = "最小对比度", DefaultValue = "5", Description = "格内 top-hat 峰值减中位数下限" },
+                    new OperatorParam { Name = "morphKernelSize", DisplayName = "形态学核", DefaultValue = "13", Description = "top-hat 椭圆结构元直径(奇数)" },
+                    new OperatorParam { Name = "centroidWinHalf", DisplayName = "格内搜索半宽", DefaultValue = "14", Description = "每格局部搜索窗口半宽(px)" },
+                    new OperatorParam { Name = "roiXMin", DisplayName = "ROI Xmin", DefaultValue = "-1", Description = "-1=自动板内；否则手动矩形左界" },
+                    new OperatorParam { Name = "roiXMax", DisplayName = "ROI Xmax", DefaultValue = "-1", Description = "-1=自动；否则右界" },
+                    new OperatorParam { Name = "roiYMin", DisplayName = "ROI Ymin", DefaultValue = "-1", Description = "-1=自动；否则上界" },
+                    new OperatorParam { Name = "roiYMax", DisplayName = "ROI Ymax", DefaultValue = "-1", Description = "-1=自动；否则下界" },
+                    new OperatorParam { Name = "templateHalfSize", DisplayName = "模板半宽(保留)", DefaultValue = "17", Description = "旧版参数，当前算法未使用" },
+                    new OperatorParam { Name = "matchThreshold", DisplayName = "匹配阈值(保留)", DefaultValue = "0.52", Description = "旧版参数，当前算法未使用" },
+                    new OperatorParam { Name = "nmsRadiusPx", DisplayName = "NMS半径(保留)", DefaultValue = "28", Description = "旧版参数，当前算法未使用" },
+                    new OperatorParam { Name = "seedScoreThreshold", DisplayName = "种子分(保留)", DefaultValue = "0.62", Description = "旧版参数，当前算法未使用" },
+                    new OperatorParam { Name = "rowClusterDist", DisplayName = "行聚类(保留)", DefaultValue = "0", Description = "旧版参数，当前算法未使用" },
+                    new OperatorParam { Name = "colClusterDist", DisplayName = "列聚类(保留)", DefaultValue = "0", Description = "旧版参数，当前算法未使用" },
+                    new OperatorParam { Name = "cellMatchRadius", DisplayName = "格位半径(保留)", DefaultValue = "0", Description = "旧版参数，当前算法未使用" },
+                    new OperatorParam { Name = "centroidMinResp", DisplayName = "质心响应(保留)", DefaultValue = "40", Description = "旧版参数，当前算法未使用" },
+                    new OperatorParam { Name = "templateCenterX", DisplayName = "模板中心X(保留)", DefaultValue = "0", Description = "旧版参数，当前算法未使用" },
+                    new OperatorParam { Name = "templateCenterY", DisplayName = "模板中心Y(保留)", DefaultValue = "0", Description = "旧版参数，当前算法未使用" }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Points", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "Vis", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "GridRows", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FF9800" },
+                    new PortDef { Name = "GridCols", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#FF9800" },
+                    new PortDef { Name = "PointCount", Direction = PortDirection.Output, DataType = typeof(int), ColorHex = "#607D8B" }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "sam_onnx_segment",
                 DisplayName = "SAM 图像分割",
                 Description = "Segment Anything ONNX：点提示、粗匹配中心（CoarseRow/Column）或文本提示（OWLv2 ONNX→多框→SAM，需额外模型）。无 textPrompt 时优先 Points，其次 CoarseColumn/CoarseRow（HALCON 行/列，即 Y/X），最后 clickX/Y。",

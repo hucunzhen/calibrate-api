@@ -1,5 +1,7 @@
 # 产线标定、模板与主流程部署指南
 
+现场步骤以 **[产线视觉标定与主流程.md](产线视觉标定与主流程.md)** 为准；本文偏技术说明与 flow 索引。
+
 本文说明从相机标定、PLC 坐标映射、HALCON 模板制作到主流程运行的推荐顺序。相关算子细节见 [chessboard/README.md](chessboard/README.md)、[halcon/README_coarse_fine_shape_match.md](halcon/README_coarse_fine_shape_match.md)。
 
 ---
@@ -28,7 +30,7 @@ flowchart LR
 
 **关键操作**：
 
-1. 运行 [`chessboard/chessboard_intrinsics_from_dir.flow.json`](chessboard/chessboard_intrinsics_from_dir.flow.json)（见第 4 节），得到 `CalibrationJson`。
+1. 运行 [`v4/chessboard_intrinsics_from_dir.flow.json`](v4/chessboard_intrinsics_from_dir.flow.json)（见第 4 节），得到 `chessboard/calibration_result.json`。
 2. 在标定成功的多张图中，**选一张棋盘放得较正、完整的图**，记下其在 `extrinsicsPerView` 中的 **`viewIndex`**（从 0 起，与标定成功图像顺序一致）。
 3. 后续透视展开、组合矫正算子中 **`viewIndex` 固定使用该视角**；去畸变仅依赖内参，与 `viewIndex` 无关。
 
@@ -48,8 +50,9 @@ flowchart LR
 
 **推荐顺序**：
 
-1. 执行九点焊接轨迹（或已知九点的物理位置）→ 运行 [`halcon/caliSendContour.flow.json`](halcon/caliSendContour.flow.json) 得到 PLC 侧世界坐标与轨迹；
-2. 拍一张九点可见的标定图，用 [`halcon/caliNinePoint.flow.json`](halcon/caliNinePoint.flow.json) 求变换并保存 `calibration_nine_point.json`。
+1. 机台确定 **中心点** 与 **stepXmm / stepYmm**，填入 [`v4/calibSendContour.flow.json`](v4/calibSendContour.flow.json) 的 **weld_trajectory_world**，生成 `v4/models/world_pos.txt`（详见 [产线视觉标定与主流程.md](产线视觉标定与主流程.md) 阶段 2）。  
+2. 拍一张九点可见的标定图，用 [`v4/caliNinePoint.flow.json`](v4/caliNinePoint.flow.json)（圆点网格检测）求变换并保存 `models/calibration_nine_point.json`。  
+   圆点检测专章 [v4/九点标定_圆点检测.md](v4/九点标定_圆点检测.md)。
 
 **注意**：
 
@@ -113,7 +116,9 @@ flowchart LR
 
 ## 4. 流程文件说明
 
-### 4.1 `chessboard/chessboard_intrinsics_from_dir.flow.json`
+### 4.1 `v4/chessboard_intrinsics_from_dir.flow.json`（产线）
+
+> 历史副本：`chessboard/chessboard_intrinsics_from_dir.flow.json`；**现场以 v4 为准**。
 
 | 项 | 说明 |
 |----|------|
@@ -123,7 +128,9 @@ flowchart LR
 | **采图** | 棋盘完整、共面、姿态多样；**其中一张要较正**，记下其 `viewIndex` 供透视展开 |
 | **算子参数** | `cols` / `rows` / `squareSizeMm` 须与物理棋盘一致 |
 
-### 4.2 `halcon/caliSendContour.flow.json`
+### 4.2 `v4/calibSendContour.flow.json`（产线）
+
+> 历史副本：`halcon/caliSendContour.flow.json`。
 
 | 项 | 说明 |
 |----|------|
@@ -134,7 +141,9 @@ flowchart LR
 
 > 文件名：`caliSendContour.flow.json`（非 calibSendContour）。
 
-### 4.3 `halcon/caliNinePoint.flow.json`
+### 4.3 `v4/caliNinePoint.flow.json`（产线）
+
+> 历史 HALCON 圆点链：`halcon/caliNinePoint.flow.json` + `findCircle.flow.json`；产线改用 **detect_calibration_dots**。
 
 | 项 | 说明 |
 |----|------|
@@ -144,7 +153,9 @@ flowchart LR
 | **输出** | `save_calibration_result` → 如 `calibration_nine_point.json`（含 `systemError` 系统整体误差，需填写 `calibrationJsonFile` 或连接 `CalibrationJson`） |
 | **核对** | `confirmCorrespondence=true` 时可交互确认像素↔世界配对 |
 
-### 4.4 `halcon/main.flow.json`
+### 4.4 `v4/main.flow.json`（产线）
+
+> 历史副本：`halcon/main.flow.json`。
 
 | 项 | 说明 |
 |----|------|

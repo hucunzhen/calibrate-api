@@ -3034,7 +3034,9 @@ namespace CalibOperatorCLI_Example
             angles = sliced.Angles;
             int n = sliced.UsedCount;
             if (n == 0)
-                throw new InvalidOperationException("形状匹配 Mask: Row/Column 为空，请先连接 Find 结果");
+                throw new InvalidOperationException(
+                    "形状匹配 Mask: Row/Column 为空（上游 FindShapeModel 未匹配到目标或连线未接 Row/Column）。" +
+                    "请检查模板 .shm、minScore/角度范围，或禁用/移除 Mask 节点；圆点检测可改用「标定板圆点检测」算子。");
 
             image.RefreshProperties();
             int w = image.Width;

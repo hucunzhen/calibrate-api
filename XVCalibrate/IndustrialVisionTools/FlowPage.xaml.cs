@@ -11071,6 +11071,49 @@ namespace CalibOperatorCLI_Example
                         break;
                     }
 
+                    case "detect_calibration_dots":
+                    {
+                        var dotImg = inputs["Image"] as CalibImage;
+                        if (dotImg == null) throw new InvalidOperationException("标定板圆点检测: 缺少输入图像 Image");
+                        static double ParseDotD(Dictionary<string, string> p, string key, double def) =>
+                            double.TryParse(p.GetValueOrDefault(key), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : def;
+                        static int ParseDotI(Dictionary<string, string> p, string key, int def) =>
+                            int.TryParse(p.GetValueOrDefault(key), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : def;
+                        int morphK = ParseDotI(node.Params, "morphKernelSize", 13);
+                        if (morphK >= 3 && (morphK & 1) == 0) morphK |= 1;
+                        int tmplHalf = ParseDotI(node.Params, "templateHalfSize", 17);
+                        double matchTh = ParseDotD(node.Params, "matchThreshold", 0.52);
+                        double nmsR = ParseDotD(node.Params, "nmsRadiusPx", 28);
+                        double seedTh = ParseDotD(node.Params, "seedScoreThreshold", 0.62);
+                        double rowDist = ParseDotD(node.Params, "rowClusterDist", 0);
+                        double colDist = ParseDotD(node.Params, "colClusterDist", 0);
+                        double cellR = ParseDotD(node.Params, "cellMatchRadius", 0);
+                        int cenHalf = ParseDotI(node.Params, "centroidWinHalf", 14);
+                        double cenMin = ParseDotD(node.Params, "centroidMinResp", 40);
+                        double roiXMin = ParseDotD(node.Params, "roiXMin", -1);
+                        double roiXMax = ParseDotD(node.Params, "roiXMax", -1);
+                        double roiYMin = ParseDotD(node.Params, "roiYMin", -1);
+                        double roiYMax = ParseDotD(node.Params, "roiYMax", -1);
+                        int tmplCx = ParseDotI(node.Params, "templateCenterX", 0);
+                        int tmplCy = ParseDotI(node.Params, "templateCenterY", 0);
+                        int gridRowsHint = ParseDotI(node.Params, "gridRows", 3);
+                        int gridColsHint = ParseDotI(node.Params, "gridCols", 3);
+                        double gridPitch = ParseDotD(node.Params, "gridPitchPx", 0);
+                        double dotContrast = ParseDotD(node.Params, "dotContrastMin", 5);
+                        var vis = CalibAPI.DetectCalibrationDotsOverlay(
+                            dotImg, out var dotPts, out var gridRows, out var gridCols,
+                            morphK, tmplHalf, matchTh, nmsR, seedTh, rowDist, colDist, cellR,
+                            cenHalf, cenMin, roiXMin, roiXMax, roiYMin, roiYMax, tmplCx, tmplCy,
+                            gridRowsHint, gridColsHint, gridPitch, dotContrast);
+                        node.Outputs["Points"] = dotPts;
+                        node.Outputs["Vis"] = vis;
+                        node.Outputs["GridRows"] = gridRows;
+                        node.Outputs["GridCols"] = gridCols;
+                        node.Outputs["PointCount"] = dotPts.Length;
+                        node.ResultSummary = $"标定板圆点: {dotPts.Length} ({gridRows}×{gridCols})";
+                        break;
+                    }
+
                     case "hough_circles":
                     {
                         var hImg = inputs["Image"] as CalibImage;

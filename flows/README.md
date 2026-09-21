@@ -4,7 +4,9 @@
 
 ## 产线部署（必读）
 
-**[README_workflow_guide.md](README_workflow_guide.md)** — 棋盘格标定 → 九点标定 → 形状模板制作 → 主流程文件（`chessboard_intrinsics_from_dir`、`caliSendContour`、`caliNinePoint`、`main.flow.json`）。
+- **[产线视觉标定与主流程.md](产线视觉标定与主流程.md)** — **§1 量产日常运行** + 换产品时标定部署（阶段 0–6）  
+  PDF：[产线视觉标定与主流程.pdf](产线视觉标定与主流程.pdf)（更新 Markdown 后运行 `python flows/_md_to_pdf.py` 重新生成；依赖 `markdown` 与系统自带 Edge 浏览器）
+- **[README_workflow_guide.md](README_workflow_guide.md)** — 技术部署指南（棋盘格标定 → 九点标定 → 形状模板 → 主流程）
 
 ---
 
@@ -33,14 +35,15 @@
 
 ## 示例入口
 
-**标定与主流程**
+**标定与主流程（v4 产线包）**
 
 ```
-README_workflow_guide.md                          # 部署顺序说明
-chessboard/chessboard_intrinsics_from_dir.flow.json
-halcon/caliSendContour.flow.json
-halcon/caliNinePoint.flow.json
-halcon/main.flow.json
+产线视觉标定与主流程.md                           # 产线全流程
+v4/README.md                                      # v4 流程索引
+v4/chessboard_intrinsics_from_dir.flow.json
+v4/calibSendContour.flow.json
+v4/caliNinePoint.flow.json
+v4/main.flow.json
 ```
 
 **棋盘 / HALCON 专题**

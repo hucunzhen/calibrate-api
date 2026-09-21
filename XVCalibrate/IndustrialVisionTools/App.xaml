@@ -133,6 +133,120 @@
             <Setter Property="FontSize" Value="12"/>
         </Style>
 
+        <Style x:Key="Ui.DarkComboBoxItem" TargetType="ComboBoxItem">
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource Ui.TextPrimary}"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                              RecognizesAccessKey="True"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#354052"/>
+                                <Setter Property="Foreground" Value="{StaticResource Ui.TextPrimary}"/>
+                            </Trigger>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#117A92"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{StaticResource Ui.TextMuted}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 须在 Ui.DarkComboBoxTemplate 之前：StaticResource 不能后向引用 -->
+        <DataTemplate x:Key="Ui.DarkComboBoxSelectionBoxItem">
+            <TextBlock TextTrimming="CharacterEllipsis" Foreground="{StaticResource Ui.TextPrimary}">
+                <TextBlock.Text>
+                    <PriorityBinding FallbackValue="">
+                        <Binding Path="Content"/>
+                        <Binding/>
+                    </PriorityBinding>
+                </TextBlock.Text>
+            </TextBlock>
+        </DataTemplate>
+
+        <ControlTemplate x:Key="Ui.DarkComboBoxToggleButton" TargetType="ToggleButton">
+            <Border x:Name="ToggleBorder" Background="Transparent" SnapsToDevicePixels="True"/>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="ToggleBorder" Property="Background" Value="#2A3140"/>
+                </Trigger>
+                <Trigger Property="IsChecked" Value="True">
+                    <Setter TargetName="ToggleBorder" Property="Background" Value="#354052"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <ControlTemplate x:Key="Ui.DarkComboBoxTemplate" TargetType="ComboBox">
+            <Grid SnapsToDevicePixels="True">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="22"/>
+                </Grid.ColumnDefinitions>
+                <Border x:Name="Chrome"
+                        Grid.ColumnSpan="2"
+                        Background="{TemplateBinding Background}"
+                        BorderBrush="{TemplateBinding BorderBrush}"
+                        BorderThickness="{TemplateBinding BorderThickness}"/>
+                <ToggleButton x:Name="ToggleButton"
+                              Grid.ColumnSpan="2"
+                              Focusable="False"
+                              ClickMode="Press"
+                              Template="{StaticResource Ui.DarkComboBoxToggleButton}"
+                              IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"/>
+                <ContentPresenter x:Name="ContentSite"
+                                  Grid.Column="0"
+                                  Margin="8,4,28,4"
+                                  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                  Content="{TemplateBinding SelectionBoxItem}"
+                                  ContentTemplate="{StaticResource Ui.DarkComboBoxSelectionBoxItem}"
+                                  TextElement.Foreground="{StaticResource Ui.TextPrimary}"
+                                  IsHitTestVisible="False"/>
+                <Path Grid.Column="1" Width="8" Height="5" Margin="0,0,6,0"
+                      HorizontalAlignment="Right" VerticalAlignment="Center"
+                      Data="M 0,0 L 4,4 L 8,0 Z" Fill="{StaticResource Ui.TextSecondary}"
+                      IsHitTestVisible="False"/>
+                <Popup x:Name="PART_Popup"
+                       AllowsTransparency="True"
+                       Placement="Bottom"
+                       IsOpen="{TemplateBinding IsDropDownOpen}"
+                       PopupAnimation="{DynamicResource {x:Static SystemParameters.ComboBoxPopupAnimationKey}}"
+                       Focusable="False">
+                    <Border x:Name="DropDownBorder"
+                            Background="{StaticResource Ui.InputBackground}"
+                            BorderBrush="{StaticResource Ui.InputBorder}"
+                            BorderThickness="1"
+                            MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                            MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                        <ScrollViewer SnapsToDevicePixels="True" Padding="2">
+                            <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/>
+                        </ScrollViewer>
+                    </Border>
+                </Popup>
+            </Grid>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter TargetName="ContentSite" Property="TextElement.Foreground" Value="{StaticResource Ui.TextMuted}"/>
+                    <Setter TargetName="Chrome" Property="Opacity" Value="0.55"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
         <Style x:Key="Ui.DarkComboBox" TargetType="ComboBox">
             <Setter Property="Background" Value="{StaticResource Ui.InputBackground}"/>
             <Setter Property="Foreground" Value="{StaticResource Ui.TextPrimary}"/>
@@ -140,6 +254,59 @@
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding" Value="8,4"/>
             <Setter Property="FontSize" Value="12"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="ItemContainerStyle" Value="{StaticResource Ui.DarkComboBoxItem}"/>
+            <Setter Property="Template" Value="{StaticResource Ui.DarkComboBoxTemplate}"/>
+            <Style.Resources>
+                <SolidColorBrush x:Key="{x:Static SystemColors.WindowBrushKey}" Color="#1E2430"/>
+                <SolidColorBrush x:Key="{x:Static SystemColors.WindowTextBrushKey}" Color="#E8ECF1"/>
+                <SolidColorBrush x:Key="{x:Static SystemColors.ControlBrushKey}" Color="#1E2430"/>
+                <SolidColorBrush x:Key="{x:Static SystemColors.ControlTextBrushKey}" Color="#E8ECF1"/>
+                <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#117A92"/>
+                <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#FFFFFF"/>
+            </Style.Resources>
+        </Style>
+
+        <Style x:Key="Ui.DarkCheckBox" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource Ui.TextPrimary}"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+
+        <Style x:Key="Ui.DarkListBoxItem" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="6,4"/>
+            <Setter Property="Foreground" Value="{StaticResource Ui.TextPrimary}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#354052"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#117A92"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="Ui.DarkListBox" TargetType="ListBox">
+            <Setter Property="Background" Value="{StaticResource Ui.InputBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource Ui.TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Ui.InputBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="ItemContainerStyle" Value="{StaticResource Ui.DarkListBoxItem}"/>
+        </Style>
+
+        <Style x:Key="Ui.DarkLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource Ui.TextPrimary}"/>
         </Style>
 
         <Style x:Key="IndustrialToolbarButton" TargetType="Button">

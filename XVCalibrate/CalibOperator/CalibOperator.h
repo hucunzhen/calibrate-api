@@ -106,6 +106,25 @@ void DetectCircles(Image* img, Point2D* pts, int* count);
 // 在图像上绘制检测到的圆标记
 void DrawDetectedCircles(Image* img, Point2D* pts, int count, int gray);
 
+// 标定板圆点：亮框 ROI + top-hat 局部对比 + 规则网格逐格检测 + 亚像素质心
+// roiXMin<0 表示 ROI 自动（板内）；gridRows/Cols 默认 3×3；gridPitchPx<=0 自动估计
+int DetectCalibrationDotsDetect(Image* src, Image* dstOverlay,
+    Point2D* outPts, int* outCount, int maxPts,
+    int* outGridRows, int* outGridCols,
+    int morphKernelSize,
+    int templateHalfSize,
+    double matchThreshold,
+    double nmsRadiusPx,
+    double seedScoreThreshold,
+    double rowClusterDist,
+    double colClusterDist,
+    double cellMatchRadius,
+    int centroidWinHalf,
+    double centroidMinResp,
+    double roiXMin, double roiXMax, double roiYMin, double roiYMax,
+    int templateCenterX, int templateCenterY,
+    int gridRowsHint, int gridColsHint, double gridPitchPx, double dotContrastMin);
+
 // 霍夫变换拆分为三个独立入口（叠加均为在输入图副本上绘制）。
 int HoughCirclesDetect(Image* src, Image* dstOverlay,
     Point2D* circlePts, int* circleCount, int maxCircles,
