@@ -116,7 +116,7 @@
                         </StackPanel>
                     </Button>
                     <Button x:Name="StopRunButton" Style="{StaticResource FlowToolbarPrimaryBtnStyle}"
-                            ToolTip="停止执行" Margin="6,0,0,4" Click="StopRun_Click" IsEnabled="False"
+                            ToolTip="停止当前流程执行（软件取消，非 PLC 停线）" Margin="6,0,0,4" Click="StopRun_Click" IsEnabled="False"
                             Foreground="#FFB3B3"
                             AutomationProperties.Name="停止执行">
                         <StackPanel Orientation="Horizontal">

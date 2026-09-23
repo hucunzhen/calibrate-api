@@ -1436,6 +1436,101 @@ namespace CalibOperatorCLI_Example
             };
         }
 
+        /// <summary>闭合/折线点列用法向等距偏移。默认走 <see cref="PolylineUniformOffset"/>（图像系 +d=外扩/-d=内缩，四边均匀）；仅当 <paramref name="preferHalcon"/> 时尝试 HALCON。</summary>
+        public static Point2D[] OffsetPointPolylineHalcon(Point2D[] pts, double offset, string mode, bool closed, bool preferHalcon = false)
+        {
+            if (pts == null || pts.Length < 2)
+                return pts ?? Array.Empty<Point2D>();
+
+            // 点列路径优先 2D：与 gen_parallel 的「右侧」约定相反且 SmoothContoursXld 易让视觉上某一侧像没动
+            if (!preferHalcon || !closed || pts.Length < 3)
+                return PolylineUniformOffset.Offset(pts, offset, closed);
+
+            try
+            {
+                // HALCON regression_normal：正距离=沿走向右侧；对本模板外形约等于内缩，与 2D「+外扩」相反 → 取反对齐
+                Point2D[]? halconPts = TryOffsetPointPolylineViaHalconParallel(pts, -offset, mode);
+                if (halconPts != null && halconPts.Length >= 2)
+                    return halconPts;
+            }
+            catch (HOperatorException)
+            {
+            }
+
+            return PolylineUniformOffset.Offset(pts, offset, closed);
+        }
+
+        /// <summary>由 Point2D 生成的多边形 XLD；不做 Smooth（避免长直边被拽偏）。</summary>
+        static Point2D[]? TryOffsetPointPolylineViaHalconParallel(Point2D[] pts, double offset, string? requestedMode)
+        {
+            Point2D[] ring = StripDuplicateClosingPoint(pts);
+            if (ring.Length < 3)
+                return null;
+
+            HObject ho = XldBundleToHObject(new List<Point2D[]> { ring });
+            try
+            {
+                string parallelMode = ResolveGenParallelContourModeForXld(ho, requestedMode);
+                // 点列无 edge_direction：强制 regression_normal
+                if (!parallelMode.Equals("regression_normal", StringComparison.OrdinalIgnoreCase))
+                    parallelMode = "regression_normal";
+                HOperatorSet.GenParallelContourXld(ho, out HObject hoOut, parallelMode, offset);
+                try
+                {
+                    Point2D[] result = ContourXldToPointArray(hoOut);
+                    return result.Length >= 2 ? result : null;
+                }
+                finally
+                {
+                    hoOut.Dispose();
+                }
+            }
+            finally
+            {
+                ho.Dispose();
+            }
+        }
+
+        static Point2D[] StripDuplicateClosingPoint(Point2D[] pts)
+        {
+            if (pts == null || pts.Length < 2)
+                return pts ?? Array.Empty<Point2D>();
+
+            double dx = pts[0].X - pts[^1].X;
+            double dy = pts[0].Y - pts[^1].Y;
+            if (dx * dx + dy * dy > 1e-12 || pts.Length <= 3)
+                return pts;
+
+            var ring = new Point2D[pts.Length - 1];
+            Array.Copy(pts, ring, pts.Length - 1);
+            return ring;
+        }
+
+        static bool ContourXldHasPointAttrib(HObject contourXld, string attribName)
+        {
+            try
+            {
+                HOperatorSet.GetContourAttribXld(contourXld, attribName, out HTuple attrib);
+                return attrib != null && attrib.Length > 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        static string ResolveGenParallelContourModeForXld(HObject contourXld, string? requestedMode)
+        {
+            string m = ResolveGenParallelContourMode(requestedMode);
+            if (m.Equals("gradient", StringComparison.OrdinalIgnoreCase) &&
+                !ContourXldHasPointAttrib(contourXld, "edge_direction"))
+                return "regression_normal";
+            if (m.Equals("contour_normal", StringComparison.OrdinalIgnoreCase) &&
+                !ContourXldHasPointAttrib(contourXld, "angle"))
+                return "regression_normal";
+            return m;
+        }
+
         /// <summary>HALCON 法向等距偏移 XLD（<c>gen_parallel_contour_xld</c>）。</summary>
         public static HalconXldContourBundle OffsetXldBundle(HalconXldContourBundle src, double offset, string mode)
         {
@@ -1447,7 +1542,6 @@ namespace CalibOperatorCLI_Example
             if (polys.Count == 0)
                 return new HalconXldContourBundle { Width = src.Width, Height = src.Height, Contours = new List<Point2D[]>() };
 
-            string parallelMode = ResolveGenParallelContourMode(mode);
             var outList = new List<Point2D[]>();
 
             foreach (var poly in polys)
@@ -1455,7 +1549,8 @@ namespace CalibOperatorCLI_Example
                 HObject ho = XldBundleToHObject(new List<Point2D[]> { poly });
                 try
                 {
-                    HOperatorSet.GenParallelContourXld(ho, out HObject hoOut, parallelMode, offset);
+                    string modeUse = ResolveGenParallelContourModeForXld(ho, mode);
+                    HOperatorSet.GenParallelContourXld(ho, out HObject hoOut, modeUse, offset);
                     try
                     {
                         outList.AddRange(ContourXldToPointArrays(hoOut));

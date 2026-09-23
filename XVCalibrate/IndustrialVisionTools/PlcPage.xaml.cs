@@ -173,7 +173,7 @@ namespace CalibOperatorCLI_Example
             ApplyDisableButton(BtnYDisable, "YEnableH", "YEnableL");
             ApplyEnableButton(BtnZEnable, "ZEnableL");
             ApplyDisableButton(BtnZDisable, "ZEnableH", "ZEnableL");
-            ApplyRegToolTip(BtnLaserToggle, "LaserEnable", "点击切换激光使能（读当前位后取反）");
+            ApplyRegToolTip(BtnLaserToggle, "LaserEnable", "按住打开激光使能，松开关闭");
             ApplyEnableButton(BtnRedLightEnable, "RedLightEnable");
             ApplyRegToolTip(BtnRedLightDisable, "RedLightEnable", "红光使能 OFF");
             ApplyRegToolTip(BtnBlowToggle, "BlowEnable", "点击切换吹气使能（读当前位后取反）");
@@ -972,15 +972,47 @@ namespace CalibOperatorCLI_Example
             Log($"[PLC] {logLabel} {addr} = {(next ? "ON" : "OFF")}");
         }
 
-        private void BtnLaserToggle_Click(object sender, RoutedEventArgs e)
+        bool _laserHoldActive;
+
+        private void BtnLaserToggle_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             if (!CheckPlcConnected()) return;
+            BtnLaserToggle.CaptureMouse();
+            SetLaserHold(true);
+            e.Handled = true;
+        }
+
+        private void BtnLaserToggle_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            ReleaseLaserHold();
+            e.Handled = true;
+        }
+
+        private void BtnLaserToggle_LostMouseCapture(object sender, MouseEventArgs e)
+            => ReleaseLaserHold();
+
+        void ReleaseLaserHold()
+        {
+            if (BtnLaserToggle.IsMouseCaptured)
+                BtnLaserToggle.ReleaseMouseCapture();
+            if (!_laserHoldActive) return;
+            SetLaserHold(false);
+        }
+
+        void SetLaserHold(bool on)
+        {
+            if (!CheckPlcConnected())
+            {
+                _laserHoldActive = false;
+                return;
+            }
+
+            _laserHoldActive = on;
             string laserAddr = Reg("LaserEnable");
-            bool next = !ReadBit(laserAddr, 0);
-            WriteBit(laserAddr, 0, next);
-            SetEnableStatusDisplay(TxtLaserEnableStatus, next);
-            Log($"[PLC] 激光使能 {laserAddr} = {(next ? "ON" : "OFF")}");
-            if (next)
+            WriteBit(laserAddr, 0, on);
+            SetEnableStatusDisplay(TxtLaserEnableStatus, on);
+            Log($"[PLC] 激光使能 {laserAddr} = {(on ? "ON" : "OFF")}");
+            if (on)
             {
                 string blowAddr = Reg("BlowEnable");
                 WriteBit(blowAddr, 0, true);

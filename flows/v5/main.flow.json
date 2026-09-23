@@ -1,0 +1,271 @@
+{
+  "Nodes": [
+    {
+      "Id": "925e8678-f199-43cc-ab65-a59b8999ae65",
+      "TypeId": "composite",
+      "X": 295,
+      "Y": 65,
+      "Params": {
+        "inputPorts": "In",
+        "outputPorts": "Out,Out2,Out3,Out4,Out5",
+        "innerFlowPath": "halcon_coarse_shape_match.flow.json",
+        "innerFlowJson": "",
+        "bindingsJson": "{}",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "6e9ddbe1-6fe9-4610-934e-35daed362ed6",
+      "TypeId": "composite",
+      "X": 806,
+      "Y": 111,
+      "Params": {
+        "inputPorts": "In,In2,In3,In4,In5",
+        "outputPorts": "Out,Out2",
+        "innerFlowPath": "halcon_fine_shape_match.flow.json",
+        "innerFlowJson": "",
+        "bindingsJson": "{}",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "TypeId": "flow_loop",
+      "X": 550,
+      "Y": 84,
+      "Params": {
+        "count": "3",
+        "stepValues": "",
+        "itemPorts": "In,In2,In3,In4,In5",
+        "intervalMs": "0",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "6775f59b-913e-4dee-b635-9344aef3d779",
+      "TypeId": "load_calibration_result",
+      "X": 801,
+      "Y": 345,
+      "Params": {
+        "filePath": "models\\calibration_nine_point.json",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "cdccc632-49e3-4150-afee-a5901375acc9",
+      "TypeId": "img_to_world",
+      "X": 1072,
+      "Y": 138,
+      "Params": {
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "633918c2-f4e3-4a65-b2a7-73455d5459ac",
+      "TypeId": "flow_sink",
+      "X": 547,
+      "Y": 422,
+      "Params": {
+        "acceptNull": "false",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "f191dd3a-24ba-4eae-bce1-5885244ae197",
+      "TypeId": "intrinsics_undistort_image",
+      "X": 241,
+      "Y": 269,
+      "Params": {
+        "alpha": "-1",
+        "calibrationJsonFile": "models\\calibration_result.json",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "e3a0a693-a75c-479f-9f75-3e4f90c5d8bb",
+      "TypeId": "chessboard_perspective_warp_image",
+      "X": 281,
+      "Y": 437,
+      "Params": {
+        "calibrationJsonFile": "models\\calibration_result.json",
+        "viewIndex": "1",
+        "cols": "11",
+        "rows": "8",
+        "squareSizeMm": "5",
+        "pxPerMm": "32",
+        "perspectiveOutputFrame": "plane",
+        "perspectiveOutputScale": "board_pixels",
+        "assumeUndistorted": "true",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "2933e235-0d1d-4fa6-8a3e-59daadb1e292",
+      "TypeId": "display",
+      "X": 1367,
+      "Y": 247,
+      "Params": {
+        "dotRadius": "1",
+        "pointLineJoin": "auto",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "79612222-52a4-4d90-8242-4fe2e1076f2b",
+      "TypeId": "flow_sink",
+      "X": 1305,
+      "Y": 89,
+      "Params": {
+        "acceptNull": "false",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "28ceecc3-d2d8-489c-b333-437e5f54f3d8",
+      "TypeId": "load_image",
+      "X": 33,
+      "Y": 153,
+      "Params": {
+        "filePath": "preview.png",
+        "enable": "true",
+        "disable": "false"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "6775f59b-913e-4dee-b635-9344aef3d779",
+      "FromPort": "Transform",
+      "ToNodeId": "cdccc632-49e3-4150-afee-a5901375acc9",
+      "ToPort": "Transform"
+    },
+    {
+      "FromNodeId": "f191dd3a-24ba-4eae-bce1-5885244ae197",
+      "FromPort": "Out",
+      "ToNodeId": "e3a0a693-a75c-479f-9f75-3e4f90c5d8bb",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "6e9ddbe1-6fe9-4610-934e-35daed362ed6",
+      "FromPort": "Out",
+      "ToNodeId": "cdccc632-49e3-4150-afee-a5901375acc9",
+      "ToPort": "Pixel"
+    },
+    {
+      "FromNodeId": "e3a0a693-a75c-479f-9f75-3e4f90c5d8bb",
+      "FromPort": "Out",
+      "ToNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "FromPort": "Out",
+      "ToNodeId": "633918c2-f4e3-4a65-b2a7-73455d5459ac",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "FromPort": "Out",
+      "ToNodeId": "6775f59b-913e-4dee-b635-9344aef3d779",
+      "ToPort": "After"
+    },
+    {
+      "FromNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "FromPort": "In",
+      "ToNodeId": "6e9ddbe1-6fe9-4610-934e-35daed362ed6",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "FromPort": "In2",
+      "ToNodeId": "6e9ddbe1-6fe9-4610-934e-35daed362ed6",
+      "ToPort": "In2"
+    },
+    {
+      "FromNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "FromPort": "In4",
+      "ToNodeId": "6e9ddbe1-6fe9-4610-934e-35daed362ed6",
+      "ToPort": "In4"
+    },
+    {
+      "FromNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "FromPort": "In3",
+      "ToNodeId": "6e9ddbe1-6fe9-4610-934e-35daed362ed6",
+      "ToPort": "In3"
+    },
+    {
+      "FromNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
+      "FromPort": "Out",
+      "ToNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "ToPort": "InList"
+    },
+    {
+      "FromNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
+      "FromPort": "Out2",
+      "ToNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "ToPort": "In2List"
+    },
+    {
+      "FromNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
+      "FromPort": "Out3",
+      "ToNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "ToPort": "In3List"
+    },
+    {
+      "FromNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
+      "FromPort": "Out4",
+      "ToNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "ToPort": "In4List"
+    },
+    {
+      "FromNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
+      "FromPort": "Out5",
+      "ToNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "ToPort": "In5List"
+    },
+    {
+      "FromNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "FromPort": "In5",
+      "ToNodeId": "6e9ddbe1-6fe9-4610-934e-35daed362ed6",
+      "ToPort": "In5"
+    },
+    {
+      "FromNodeId": "6e9ddbe1-6fe9-4610-934e-35daed362ed6",
+      "FromPort": "Out",
+      "ToNodeId": "79612222-52a4-4d90-8242-4fe2e1076f2b",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "e3a0a693-a75c-479f-9f75-3e4f90c5d8bb",
+      "FromPort": "Out",
+      "ToNodeId": "2933e235-0d1d-4fa6-8a3e-59daadb1e292",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "79612222-52a4-4d90-8242-4fe2e1076f2b",
+      "FromPort": "PointsList",
+      "ToNodeId": "2933e235-0d1d-4fa6-8a3e-59daadb1e292",
+      "ToPort": "PointsList"
+    },
+    {
+      "FromNodeId": "28ceecc3-d2d8-489c-b333-437e5f54f3d8",
+      "FromPort": "Image",
+      "ToNodeId": "f191dd3a-24ba-4eae-bce1-5885244ae197",
+      "ToPort": "Image"
+    }
+  ],
+  "Meta": {
+    "latticeGridRows": "10",
+    "latticeGridCols": "2"
+  }
+}

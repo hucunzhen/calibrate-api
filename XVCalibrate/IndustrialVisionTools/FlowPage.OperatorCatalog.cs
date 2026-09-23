@@ -1379,7 +1379,7 @@ namespace CalibOperatorCLI_Example
                 {
                     new OperatorParam { Name = "offsetDistance", DisplayName = "偏移距离", DefaultValue = "5", Description = "与坐标同单位（像素或 mm）；正=外扩，负=内缩" },
                     new OperatorParam { Name = "closed", DisplayName = "闭合轮廓", DefaultValue = "true", Description = "true=首尾闭合；false=开折线" },
-                    new OperatorParam { Name = "halconMode", DisplayName = "HALCON法向模式", DefaultValue = "regression_normal", Description = "仅 Xld：gen_parallel_contour_xld 的 Mode；折线轮廓推荐 regression_normal", Options = new List<string> { "regression_normal", "contour_normal", "gradient" } }
+                    new OperatorParam { Name = "halconMode", DisplayName = "HALCON法向模式", DefaultValue = "regression_normal", Description = "gen_parallel_contour_xld 的 Mode。Point2D 点列无 edge_direction/angle 时 gradient/contour_normal 会自动改用 regression_normal", Options = new List<string> { "regression_normal", "contour_normal", "gradient" } }
                 },
                 Ports =
                 {

@@ -34,6 +34,9 @@ namespace CalibOperatorCLI_Example
         private HalconDlSegPage _halconDlSegPage;
         private SamTrainPage _samTrainPage;
         private HalconShapeModelPage _halconShapeModelPage;
+        private OperatorProductionPage _operatorProductionPage;
+
+        public FlowHostPage FlowHost => _flowHostPage;
 
         public MainWindow()
         {
@@ -65,10 +68,17 @@ namespace CalibOperatorCLI_Example
             _halconDlSegPage = new HalconDlSegPage();
             _samTrainPage = new SamTrainPage();
             _halconShapeModelPage = new HalconShapeModelPage();
+            _operatorProductionPage = new OperatorProductionPage(this);
+
+            AppSession.Current.RoleChanged += ApplyRoleToNavigation;
+            ApplyRoleToNavigation();
+            UpdateRoleCaption();
 
             RestoreLastNavigationTab();
             TryRestoreFlowSessionOnStartup();
             _flowHostPage.RefreshActiveFlowConnections();
+            _flowHostPage.ApplyRolePolicy(AppSession.Current.Role);
+            _plcPage.ApplyRolePolicy(AppSession.Current.Role);
         }
 
         protected override void OnClosed(EventArgs e)
@@ -115,11 +125,14 @@ namespace CalibOperatorCLI_Example
                 case HalconShapeModelPage:
                     _halconShapeModelPage.SaveSession();
                     break;
+                case OperatorProductionPage:
+                    break;
             }
         }
 
         private static string TabKeyFromPage(Page page) => page switch
         {
+            OperatorProductionPage => "Operator",
             PlcPage => "Plc",
             ControllerLightPage => "Controller",
             FlowHostPage => "Flow",
@@ -148,8 +161,16 @@ namespace CalibOperatorCLI_Example
         private void RestoreLastNavigationTab()
         {
             string tab = AppNavigationUiSettings.Load().LastTab;
+            if (tab == "Flow" && !AppRolePermissions.CanOpenFlowEditor(AppSession.Current.Role))
+                tab = "Operator";
+
             switch (tab)
             {
+                case "Operator":
+                    NavigateTo(_operatorProductionPage);
+                    HighlightTab("Operator");
+                    _operatorProductionPage.RefreshCardUi();
+                    break;
                 case "Plc":
                     NavigateTo(_plcPage);
                     HighlightTab("Plc");
@@ -192,7 +213,7 @@ namespace CalibOperatorCLI_Example
             var activeFg = new SolidColorBrush(Color.FromRgb(0x7E, 0xC8, 0xE3));
             var normalFg = new SolidColorBrush(Color.FromRgb(0xEC, 0xEF, 0xF1));
 
-            foreach (var btn in new[] { NavPlc, NavController, NavFlow, NavHalconShapeModel, NavAdvanced })
+            foreach (var btn in new[] { NavOperator, NavPlc, NavController, NavFlow, NavHalconShapeModel, NavAdvanced })
             {
                 btn.Background = Brushes.Transparent;
                 btn.Foreground = normalFg;
@@ -200,12 +221,13 @@ namespace CalibOperatorCLI_Example
 
             Button? activeBtn = tab switch
             {
+                "Operator" => NavOperator,
                 "Plc" => NavPlc,
                 "Controller" => NavController,
                 "Flow" => NavFlow,
                 "HalconShapeModel" => NavHalconShapeModel,
                 "Histogram" or "YoloSeg" or "HalconDlSeg" or "SamOnnx" => NavAdvanced,
-                _ => NavFlow
+                _ => NavOperator
             };
 
             activeBtn.Background = activeBg;
@@ -223,6 +245,13 @@ namespace CalibOperatorCLI_Example
             }
         }
 
+        private void NavOperator_Click(object sender, RoutedEventArgs e)
+        {
+            NavigateTo(_operatorProductionPage);
+            HighlightTab("Operator");
+            _operatorProductionPage.RefreshCardUi();
+        }
+
         private void NavPlc_Click(object sender, RoutedEventArgs e)
         {
             NavigateTo(_plcPage);
@@ -231,18 +260,30 @@ namespace CalibOperatorCLI_Example
 
         private void NavController_Click(object sender, RoutedEventArgs e)
         {
+            if (!AppRolePermissions.CanOpenLightController(AppSession.Current.Role))
+            {
+                MessageBox.Show("光源调试需要视觉或管理员权限。", "权限不足", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
             NavigateTo(_controllerLightPage);
             HighlightTab("Controller");
         }
 
         private void NavHistogram_Click(object sender, RoutedEventArgs e)
         {
+            if (!EnsureAdvancedAccess())
+                return;
+
             NavigateTo(_histogramPage);
             HighlightTab("Histogram");
         }
 
         private void NavFlow_Click(object sender, RoutedEventArgs e)
         {
+            if (!EnsureEngineeringAccess("流程编排"))
+                return;
+
             NavigateTo(_flowHostPage);
             HighlightTab("Flow");
             _flowHostPage.RefreshActiveFlowConnections();
@@ -250,27 +291,119 @@ namespace CalibOperatorCLI_Example
 
         private void NavYoloSeg_Click(object sender, RoutedEventArgs e)
         {
+            if (!EnsureAdvancedAccess())
+                return;
+
             NavigateTo(_yoloSegTrainPage);
             HighlightTab("YoloSeg");
         }
 
         private void NavHalconDlSeg_Click(object sender, RoutedEventArgs e)
         {
+            if (!EnsureAdvancedAccess())
+                return;
+
             NavigateTo(_halconDlSegPage);
             HighlightTab("HalconDlSeg");
         }
 
         private void NavSamOnnx_Click(object sender, RoutedEventArgs e)
         {
+            if (!EnsureAdvancedAccess())
+                return;
+
             NavigateTo(_samTrainPage);
             HighlightTab("SamOnnx");
         }
 
+        private bool EnsureAdvancedAccess()
+        {
+            if (AppRolePermissions.CanOpenAdvancedTools(AppSession.Current.Role))
+                return true;
+
+            MessageBox.Show(
+                "高级功能需要视觉或管理员权限。\n请点击右上角「切换用户」登录。",
+                "权限不足",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return false;
+        }
+
         private void NavHalconShapeModel_Click(object sender, RoutedEventArgs e)
         {
+            if (!EnsureEngineeringAccess("形状模板"))
+                return;
+
             NavigateTo(_halconShapeModelPage);
             HighlightTab("HalconShapeModel");
             _halconShapeModelPage.RestoreSessionOnShow();
+        }
+
+        private void BtnSwitchUser_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new RoleLoginDialog { Owner = this };
+            if (dlg.ShowDialog() != true)
+                return;
+
+            ApplyRoleToNavigation();
+            UpdateRoleCaption();
+            _flowHostPage.ApplyRolePolicy(AppSession.Current.Role);
+            _plcPage.ApplyRolePolicy(AppSession.Current.Role);
+            _operatorProductionPage.RefreshCardUi();
+
+            if (!AppRolePermissions.CanOpenFlowEditor(AppSession.Current.Role)
+                && MainFrame.Content is FlowHostPage)
+            {
+                NavigateTo(_operatorProductionPage);
+                HighlightTab("Operator");
+            }
+        }
+
+        private void ApplyRoleToNavigation()
+        {
+            var role = AppSession.Current.Role;
+            NavFlow.Visibility = AppRolePermissions.CanOpenFlowEditor(role) ? Visibility.Visible : Visibility.Collapsed;
+            NavHalconShapeModel.Visibility = AppRolePermissions.CanOpenShapeTemplate(role) ? Visibility.Visible : Visibility.Collapsed;
+            NavAdvanced.Visibility = AppRolePermissions.CanOpenAdvancedTools(role) ? Visibility.Visible : Visibility.Collapsed;
+            NavController.Visibility = AppRolePermissions.CanOpenLightController(role) ? Visibility.Visible : Visibility.Collapsed;
+            NavPlc.Visibility = Visibility.Visible;
+            NavOperator.Visibility = Visibility.Visible;
+        }
+
+        private void UpdateRoleCaption()
+        {
+            TxtCurrentRole.Text = AppSession.Current.RoleDisplayName;
+        }
+
+        private bool EnsureEngineeringAccess(string featureName)
+        {
+            if (AppRolePermissions.CanOpenFlowEditor(AppSession.Current.Role)
+                || (featureName == "形状模板" && AppRolePermissions.CanOpenShapeTemplate(AppSession.Current.Role)))
+                return true;
+
+            MessageBox.Show(
+                $"「{featureName}」需要视觉或管理员权限。\n请点击右上角「切换用户」登录。",
+                "权限不足",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return false;
+        }
+
+        public string? GetSelectedRecipeName() => _flowHostPage.GetSelectedRecipeName();
+
+        public async Task<bool> RunSelectedRecipeMainFlowAsync(bool preferNativeEngine = true)
+        {
+            if (!_flowHostPage.TryLoadSelectedRecipeMainFlow(showErrors: true))
+                return false;
+
+            NavigateTo(_flowHostPage);
+            return await _flowHostPage.RunActiveFlowAsync(preferNativeEngine);
+        }
+
+        public void NavigateToPlcReadOnlySummary()
+        {
+            NavigateTo(_plcPage);
+            HighlightTab("Plc");
         }
 
         public async Task<bool> RunFlowConfigInBackgroundAsync(string flowFilePath, bool preferNativeEngine = false)

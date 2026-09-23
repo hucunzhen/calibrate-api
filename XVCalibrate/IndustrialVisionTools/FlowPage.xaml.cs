@@ -3616,12 +3616,13 @@ namespace CalibOperatorCLI_Example
             int[]? barIds,
             double distance,
             bool closed,
+            string halconMode,
             out Point2D[] outPts,
             out int[] outBarIds)
         {
             if (barIds == null || barIds.Length != pts.Length)
             {
-                outPts = PolylineUniformOffset.Offset(pts, distance, closed);
+                outPts = HalconFlowBridge.OffsetPointPolylineHalcon(pts, distance, halconMode, closed);
                 outBarIds = new int[outPts.Length];
                 return;
             }
@@ -3637,7 +3638,7 @@ namespace CalibOperatorCLI_Example
 
                 int barId = gi < segBarIds.Count ? segBarIds[gi] : gi;
                 bool segClosed = closed && seg.Length >= 3;
-                var off = PolylineUniformOffset.Offset(seg, distance, segClosed);
+                var off = HalconFlowBridge.OffsetPointPolylineHalcon(seg, distance, halconMode, segClosed);
                 foreach (var p in off)
                 {
                     outList.Add(p);
@@ -3647,6 +3648,151 @@ namespace CalibOperatorCLI_Example
 
             outPts = outList.ToArray();
             outBarIds = idList.ToArray();
+        }
+
+        /// <summary>诊断：量输出点到原折线最短距离，找出「几乎没动」的点（相对 |d|）。</summary>
+        private void TryDumpPolylineOffsetDiag(
+            string nodeId,
+            double offsetDist,
+            bool closed,
+            string halconMode,
+            Point2D[] src,
+            int[]? srcBars,
+            Point2D[] dst,
+            int[]? dstBars,
+            string? compositeInnerFlowBaseDir)
+        {
+            try
+            {
+                string? dir = !string.IsNullOrWhiteSpace(compositeInnerFlowBaseDir) && System.IO.Directory.Exists(compositeInnerFlowBaseDir)
+                    ? compositeInnerFlowBaseDir
+                    : (!string.IsNullOrWhiteSpace(CurrentFlowFilePath)
+                        ? System.IO.Path.GetDirectoryName(CurrentFlowFilePath)
+                        : null);
+                if (string.IsNullOrWhiteSpace(dir))
+                    dir = System.IO.Path.GetTempPath();
+
+                double absD = Math.Abs(offsetDist);
+                double nearTol = Math.Max(0.35, absD * 0.25);
+                var bad = new List<(int i, double dist, double x, double y, int bar)>();
+                double minD = double.PositiveInfinity, maxD = 0, sumD = 0;
+                int n = dst.Length;
+                for (int i = 0; i < n; i++)
+                {
+                    double dist = PointToPolylineDistance(dst[i], src, closed);
+                    if (dist < minD) minD = dist;
+                    if (dist > maxD) maxD = dist;
+                    sumD += dist;
+                    int bar = dstBars != null && i < dstBars.Length ? dstBars[i] : -1;
+                    if (dist < nearTol)
+                        bad.Add((i, dist, dst[i].X, dst[i].Y, bar));
+                }
+
+                // 同源等长时再看顶点位移（HALCON 重采样后通常不等长）
+                int sameLenNear = 0;
+                if (src.Length == dst.Length)
+                {
+                    for (int i = 0; i < src.Length; i++)
+                    {
+                        double dx = dst[i].X - src[i].X;
+                        double dy = dst[i].Y - src[i].Y;
+                        if (Math.Sqrt(dx * dx + dy * dy) < nearTol)
+                            sameLenNear++;
+                    }
+                }
+
+                int uniqBars = 0;
+                if (srcBars != null && srcBars.Length == src.Length)
+                    uniqBars = srcBars.Distinct().Count();
+
+                string path = System.IO.Path.Combine(dir!, $"_offset_diag_{nodeId[..Math.Min(8, nodeId.Length)]}.txt");
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine($"node={nodeId}");
+                sb.AppendLine($"d={offsetDist:G9} closed={closed} mode={halconMode}");
+                sb.AppendLine($"src={src.Length} dst={dst.Length} srcBars={uniqBars}");
+                sb.AppendLine($"dist_to_src_poly: min={minD:G6} max={maxD:G6} mean={(n > 0 ? sumD / n : 0):G6} expect~{absD:G6}");
+                sb.AppendLine($"near_unmoved_tol={nearTol:G6} count={bad.Count}/{n} sameLenVertexNear={sameLenNear}");
+                int show = Math.Min(bad.Count, 40);
+                for (int k = 0; k < show; k++)
+                {
+                    var b = bad[k];
+                    sb.AppendLine($"  bad[{k}] i={b.i} bar={b.bar} dist={b.dist:G6} xy=({b.x:G9},{b.y:G9})");
+                }
+
+                // 按条：每条边中点法向距离抽样（用源折线边中点到目标折线）
+                if (srcBars != null && srcBars.Length == src.Length && uniqBars > 0)
+                {
+                    SplitSampledPointsToContourPolylinesWithBarIds(src, srcBars, out var srcGroups, out var srcSegBars);
+                    SplitSampledPointsToContourPolylinesWithBarIds(dst, dstBars, out var dstGroups, out var dstSegBars);
+                    sb.AppendLine("per_bar mid_edge_dist (src mid → dst poly):");
+                    for (int gi = 0; gi < srcGroups.Count; gi++)
+                    {
+                        var s = srcGroups[gi];
+                        if (s == null || s.Length < 2) continue;
+                        int bar = gi < srcSegBars.Count ? srcSegBars[gi] : gi;
+                        Point2D[]? dSeg = null;
+                        for (int dj = 0; dj < dstGroups.Count; dj++)
+                        {
+                            if (dj < dstSegBars.Count && dstSegBars[dj] == bar)
+                            {
+                                dSeg = dstGroups[dj];
+                                break;
+                            }
+                        }
+                        if (dSeg == null || dSeg.Length < 2) continue;
+
+                        double edgeMin = double.PositiveInfinity, edgeMax = 0, edgeSum = 0;
+                        int edgeN = 0;
+                        int nEdge = closed && s.Length >= 3 ? s.Length : s.Length - 1;
+                        for (int e = 0; e < nEdge; e++)
+                        {
+                            var a = s[e];
+                            var b = s[(e + 1) % s.Length];
+                            var mid = new Point2D((a.X + b.X) * 0.5, (a.Y + b.Y) * 0.5);
+                            double dd = PointToPolylineDistance(mid, dSeg, closed);
+                            if (dd < edgeMin) edgeMin = dd;
+                            if (dd > edgeMax) edgeMax = dd;
+                            edgeSum += dd;
+                            edgeN++;
+                        }
+                        sb.AppendLine(
+                            $"  bar={bar} srcPts={s.Length} dstPts={dSeg.Length} mid→dst min={edgeMin:G5} max={edgeMax:G5} mean={(edgeN > 0 ? edgeSum / edgeN : 0):G5}");
+                    }
+                }
+
+                System.IO.File.WriteAllText(path, sb.ToString());
+                AppendLog($"[offset-diag] {path} · near={bad.Count}/{n} · dist[{minD:G4},{maxD:G4}] mean={(n > 0 ? sumD / n : 0):G4} expect={absD:G4}", MirrorErrorsToStderr);
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"[offset-diag] dump failed: {ex.Message}", MirrorErrorsToStderr);
+            }
+        }
+
+        private static double PointToPolylineDistance(Point2D p, Point2D[] poly, bool closed)
+        {
+            if (poly == null || poly.Length == 0)
+                return double.PositiveInfinity;
+            if (poly.Length == 1)
+                return Dist2D(p, poly[0]);
+
+            double best = double.PositiveInfinity;
+            int nSeg = closed && poly.Length >= 3 ? poly.Length : poly.Length - 1;
+            for (int i = 0; i < nSeg; i++)
+            {
+                var a = poly[i];
+                var b = poly[(i + 1) % poly.Length];
+                double d = PointLineDistance(p, a, b);
+                if (d < best) best = d;
+            }
+            return best;
+        }
+
+        private static double Dist2D(Point2D a, Point2D b)
+        {
+            double dx = a.X - b.X;
+            double dy = a.Y - b.Y;
+            return Math.Sqrt(dx * dx + dy * dy);
         }
 
         private static void SplitSampledPointsToContourPolylinesWithBarIds(
@@ -12454,7 +12600,7 @@ namespace CalibOperatorCLI_Example
                             else if (inputs.TryGetValue("BarIds", out var b3) && b3 is int[] bArr && bArr.Length == p3.Length)
                                 barIn = bArr;
 
-                            OffsetPolylinesWithBarIds(xy, barIn, offsetDist, closed, out var off2d, out var offIds);
+                            OffsetPolylinesWithBarIds(xy, barIn, offsetDist, closed, halconMode, out var off2d, out var offIds);
                             var off3d = new CalibPoint3D[off2d.Length];
                             for (int i = 0; i < off2d.Length; i++)
                             {
@@ -12486,10 +12632,20 @@ namespace CalibOperatorCLI_Example
                         else if (inputs.TryGetValue("BarIds", out var barObj) && barObj is int[] bi && bi.Length == pts.Length)
                             barIn = bi;
 
-                        OffsetPolylinesWithBarIds(pts, barIn, offsetDist, closed, out var outPts, out var outBarIds);
+                        OffsetPolylinesWithBarIds(pts, barIn, offsetDist, closed, halconMode, out var outPts, out var outBarIds);
                         node.Outputs["Out"] = outPts;
                         node.Outputs["OutBarIds"] = outBarIds;
                         node.ResultSummary = $"外扩 d={offsetDist:G} · {pts.Length}→{outPts.Length} 点";
+                        TryDumpPolylineOffsetDiag(
+                            node.Id.ToString(),
+                            offsetDist,
+                            closed,
+                            halconMode,
+                            pts,
+                            barIn,
+                            outPts,
+                            outBarIds,
+                            compositeInnerFlowBaseDir);
                         break;
                     }
 
@@ -17419,7 +17575,11 @@ namespace CalibOperatorCLI_Example
             await RunDryRunAsync(clearLog: true);
         }
 
-        private void StopRun_Click(object sender, RoutedEventArgs e)
+        private void StopRun_Click(object sender, RoutedEventArgs e) => RequestStopRun();
+
+        public bool IsRunInProgress => _isRunInProgress;
+
+        public void RequestStopRun()
         {
             if (_isRunInProgress && _runCts != null && !_runCts.IsCancellationRequested)
             {

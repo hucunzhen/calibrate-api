@@ -109,6 +109,69 @@ namespace CalibOperatorCLI_Example
         /// <summary>扫描 flows/ 子目录并填充配方下拉框。</summary>
         public void InitializeRecipes() => RefreshRecipeCombo(selectFromSettings: true);
 
+        public string? GetSelectedRecipeName() => CmbRecipe.SelectedItem as string;
+
+        public bool TryLoadSelectedRecipeMainFlow(bool showErrors) =>
+            TryLoadSelectedRecipeMainFlow(showErrors, out _);
+
+        public bool TryLoadSelectedRecipeMainFlow(bool showErrors, out string? loadedPath)
+        {
+            loadedPath = null;
+            string? name = GetSelectedRecipeName();
+            if (string.IsNullOrWhiteSpace(name))
+                return false;
+
+            var card = ProductRecipeCard.LoadForRecipe(name);
+            string? dir = FlowRecipeCatalog.TryGetRecipeDirectory(name);
+            if (dir == null)
+                return false;
+
+            string flowPath = card.ResolveMainFlowPath(dir);
+            if (string.IsNullOrWhiteSpace(flowPath) || !File.Exists(flowPath))
+            {
+                if (showErrors)
+                {
+                    MessageBox.Show(
+                        $"未找到配方「{name}」的主流程（{card.MainFlowFile}）。",
+                        "工艺卡",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
+                return false;
+            }
+
+            LoadFlowPathInActiveTab(flowPath, showErrors);
+            loadedPath = flowPath;
+            return true;
+        }
+
+        public async System.Threading.Tasks.Task<bool> RunActiveFlowAsync(bool preferNativeEngine = true)
+        {
+            var fp = ActiveFlowOrFirst();
+            if (fp == null)
+                return false;
+            return await fp.RunAllAsync(clearLog: true, preferNativeEngine: preferNativeEngine);
+        }
+
+        public void StopActiveFlow() => ActiveFlowOrFirst()?.RequestStopRun();
+
+        public void ApplyRolePolicy(AppUserRole role)
+        {
+            bool manage = AppRolePermissions.CanManageRecipes(role);
+            bool engineer = AppRolePermissions.CanOpenFlowEditor(role);
+
+            CmbRecipe.IsEnabled = manage || engineer;
+            BtnSelectFlowsRoot.IsEnabled = manage || engineer;
+            BtnCopyRecipe.IsEnabled = manage;
+            BtnRenameRecipe.IsEnabled = manage;
+            BtnDeleteRecipe.IsEnabled = manage;
+            BtnRefreshRecipes.IsEnabled = manage || engineer;
+
+            BtnOpenNinePointCalib.IsEnabled = engineer;
+            BtnOpenChessboardCalib.IsEnabled = engineer;
+            BtnOpenRecipeMain.IsEnabled = engineer || manage;
+        }
+
         public void SyncRecipeFromActiveTab()
         {
             string? path = ActiveFlowPage?.CurrentFlowFilePath;
@@ -240,10 +303,7 @@ namespace CalibOperatorCLI_Example
         }
 
         private void LoadSelectedRecipeMainFlow(bool showErrors) =>
-            LoadSelectedRecipeFlow(
-                FlowRecipeCatalog.TryGetMainFlowPath,
-                FlowRecipeCatalog.DefaultMainFlowFileName,
-                showErrors);
+            TryLoadSelectedRecipeMainFlow(showErrors);
 
         private void LoadSelectedRecipeNinePointCalibFlow(bool showErrors) =>
             LoadSelectedRecipeFlow(

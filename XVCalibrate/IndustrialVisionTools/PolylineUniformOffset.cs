@@ -5,11 +5,13 @@ using CalibOperatorPInvoke;
 namespace CalibOperatorCLI_Example
 {
     /// <summary>
-    /// 折线/轮廓法向等距偏移（平行曲线）。正距离对 CCW 闭合多边形为外扩。
+    /// 折线/轮廓法向等距偏移（平行曲线）。闭合轮廓在图像坐标（Y 向下）下：正距离=外扩、负距离=内缩。
     /// </summary>
     public static class PolylineUniformOffset
     {
         const double MiterLimit = 5.0;
+        /// <summary>闭合环顶点过少时先沿周长加密，避免折线偏移在弧边/长边上「切角」导致相对原轮廓宽窄不一。</summary>
+        const int ClosedDensifyMinPoints = 48;
 
         public static Point2D[] Offset(Point2D[] pts, double distance, bool closed)
         {
@@ -52,19 +54,47 @@ namespace CalibOperatorCLI_Example
 
         static Point2D[] OffsetClosed(Point2D[] pts, double d)
         {
-            int n = pts.Length;
-            if (SignedArea(pts) < 0)
-                d = -d;
+            var ring = PrepareClosedRing(pts);
+            if (ring.Length < 3)
+                return pts;
 
+            if (ring.Length < ClosedDensifyMinPoints)
+            {
+                var dense = HalconFlowBridge.DensifyClosedPolyline(ring, ClosedDensifyMinPoints);
+                ring = PrepareClosedRing(dense);
+                if (ring.Length < 3)
+                    return pts;
+            }
+
+            int n = ring.Length;
             var result = new Point2D[n];
             for (int i = 0; i < n; i++)
             {
                 int im = (i - 1 + n) % n;
                 int ip = (i + 1) % n;
-                result[i] = OffsetVertex(pts[im], pts[i], pts[ip], d);
+                result[i] = OffsetVertex(ring[im], ring[i], ring[ip], d);
             }
 
             return result;
+        }
+
+        /// <summary>去掉末尾与起点重合的闭合点，避免退化边导致某一侧偏移异常。</summary>
+        static Point2D[] PrepareClosedRing(Point2D[] pts)
+        {
+            if (pts == null || pts.Length < 2)
+                return pts ?? Array.Empty<Point2D>();
+
+            double dx = pts[0].X - pts[^1].X;
+            double dy = pts[0].Y - pts[^1].Y;
+            if (dx * dx + dy * dy > 1e-12)
+                return pts;
+
+            if (pts.Length <= 3)
+                return pts;
+
+            var ring = new Point2D[pts.Length - 1];
+            Array.Copy(pts, ring, pts.Length - 1);
+            return ring;
         }
 
         static Point2D[] OffsetOpen(Point2D[] pts, double d)
@@ -84,17 +114,39 @@ namespace CalibOperatorCLI_Example
             result[0] = Shift(pts[0], nFirst, d);
 
             for (int i = 1; i < n - 1; i++)
-                result[i] = OffsetVertex(pts[i - 1], pts[i], pts[i + 1], d);
+                result[i] = OffsetVertexOpen(pts[i - 1], pts[i], pts[i + 1], d);
 
             var nLast = LeftNormal(pts[n - 2], pts[n - 1]);
             result[n - 1] = Shift(pts[n - 1], nLast, d);
             return result;
         }
 
+        /// <summary>
+        /// 图像坐标（Y 向下、列/行即 X/Y）：外法向统一为边方向的 -LeftNormal，
+        /// 与 HALCON 外形顺逆混用时按边一致，避免上/下或左/右一侧动、一侧几乎不动。
+        /// </summary>
+        static Point2D OutwardNormal(Point2D a, Point2D b)
+        {
+            var left = LeftNormal(a, b);
+            return new Point2D(-left.X, -left.Y);
+        }
+
         static Point2D OffsetVertex(Point2D prev, Point2D cur, Point2D next, double d)
+        {
+            var n1 = OutwardNormal(prev, cur);
+            var n2 = OutwardNormal(cur, next);
+            return OffsetVertexMiter(prev, cur, next, d, n1, n2);
+        }
+
+        static Point2D OffsetVertexOpen(Point2D prev, Point2D cur, Point2D next, double d)
         {
             var n1 = LeftNormal(prev, cur);
             var n2 = LeftNormal(cur, next);
+            return OffsetVertexMiter(prev, cur, next, d, n1, n2);
+        }
+
+        static Point2D OffsetVertexMiter(Point2D prev, Point2D cur, Point2D next, double d, Point2D n1, Point2D n2)
+        {
             var a1 = Shift(prev, n1, d);
             var b1 = Shift(cur, n1, d);
             var b2 = Shift(cur, n2, d);
@@ -107,10 +159,7 @@ namespace CalibOperatorCLI_Example
                     return hit;
             }
 
-            var fallback = new Point2D(
-                (b1.X + b2.X) * 0.5,
-                (b1.Y + b2.Y) * 0.5);
-            return fallback;
+            return new Point2D((b1.X + b2.X) * 0.5, (b1.Y + b2.Y) * 0.5);
         }
 
         static Point2D Shift(Point2D p, Point2D nUnit, double d)

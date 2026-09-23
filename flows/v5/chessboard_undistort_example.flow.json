@@ -1,0 +1,79 @@
+{
+  "Nodes": [
+    {
+      "Id": "cba52003-1000-4000-8000-000000000002",
+      "TypeId": "load_image",
+      "X": 80,
+      "Y": 240,
+      "Params": {
+        "filePath": "D:/work/data/chessboard/Image_20260529133906040.bmp"
+      }
+    },
+    {
+      "Id": "cba52003-1000-4000-8000-000000000003",
+      "TypeId": "intrinsics_undistort_image",
+      "X": 420,
+      "Y": 160,
+      "Params": {
+        "alpha": "-1"
+      }
+    },
+    {
+      "Id": "55c92441-4ae2-46f7-a18e-da449ece4523",
+      "TypeId": "display",
+      "X": 807,
+      "Y": 253,
+      "Params": {
+        "dotRadius": "3",
+        "pointLineJoin": "auto"
+      }
+    },
+    {
+      "Id": "dfbcdbb5-42fe-4754-8c14-6b72dc44f677",
+      "TypeId": "chessboard_calibrate_intrinsics",
+      "X": 93,
+      "Y": 53,
+      "Params": {
+        "imageDirectory": "D:\\work\\data\\chessboard",
+        "extensions": ".bmp",
+        "namePrefix": "Image_",
+        "imagePaths": "",
+        "cols": "11",
+        "rows": "8",
+        "squareSizeMm": "5"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "cba52003-1000-4000-8000-000000000002",
+      "FromPort": "Image",
+      "ToNodeId": "cba52003-1000-4000-8000-000000000003",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "cba52003-1000-4000-8000-000000000003",
+      "FromPort": "Out",
+      "ToNodeId": "55c92441-4ae2-46f7-a18e-da449ece4523",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "cba52003-1000-4000-8000-000000000002",
+      "FromPort": "Image",
+      "ToNodeId": "55c92441-4ae2-46f7-a18e-da449ece4523",
+      "ToPort": "Img"
+    },
+    {
+      "FromNodeId": "dfbcdbb5-42fe-4754-8c14-6b72dc44f677",
+      "FromPort": "CalibrationJson",
+      "ToNodeId": "cba52003-1000-4000-8000-000000000003",
+      "ToPort": "CalibrationJson"
+    },
+    {
+      "FromNodeId": "dfbcdbb5-42fe-4754-8c14-6b72dc44f677",
+      "FromPort": "Intrinsics",
+      "ToNodeId": "cba52003-1000-4000-8000-000000000003",
+      "ToPort": "Intrinsics"
+    }
+  ]
+}

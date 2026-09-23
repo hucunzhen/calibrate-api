@@ -1,0 +1,98 @@
+{
+  "Version": 2,
+  "CoordinateUnit": "mm",
+  "NinePointCalibrationPath": "D:\\work\\calibrate-api\\flows\\v1\\models\\calibration_nine_point.json",
+  "ImagePath": "D:\\work\\data\\Image_20260602183730305.bmp",
+  "ImageWidth": 2592,
+  "ImageHeight": 1944,
+  "RoiMode": "opentrajectories",
+  "RoiRectX": 410.02636951791897,
+  "RoiRectY": 36.63130864206073,
+  "RoiRectW": 3.4017211327705668,
+  "RoiRectH": 3.3934643679213505,
+  "RotRectCenterX": 356.8110389369409,
+  "RotRectCenterY": 167.62001422802982,
+  "RotRectWidth": 0,
+  "RotRectHeight": 0,
+  "RotRectAngleDeg": 0,
+  "CircleCenterX": 356.8110389369409,
+  "CircleCenterY": 167.62001422802982,
+  "CircleRadius": 0,
+  "OpenTrajectoryPaths": [
+    {
+      "VertexXs": [
+        437.477313356066,
+        476.4767070996053,
+        476.51544126754914,
+        437.5160475240099,
+        437.477313356066
+      ],
+      "VertexYs": [
+        104.59414567286436,
+        104.78834677684446,
+        98.80373036400741,
+        98.6095292600273,
+        104.59414567286436
+      ],
+      "EdgeKinds": [
+        "Line",
+        "Arc",
+        "Line",
+        "Arc"
+      ],
+      "ArcViaXs": [
+        null,
+        479.4956887238246,
+        null,
+        434.4970658997906
+      ],
+      "ArcViaYs": [
+        null,
+        101.81097542967719,
+        null,
+        101.58690060719458
+      ],
+      "IsClosed": false
+    },
+    {
+      "VertexXs": [
+        437.48119814853385,
+        476.4805918920731,
+        476.5115792264281,
+        437.51218548288887,
+        437.48119814853385
+      ],
+      "VertexYs": [
+        103.99392643498365,
+        104.18812753896376,
+        99.4004344086941,
+        99.20623330471399,
+        103.99392643498365
+      ],
+      "EdgeKinds": [
+        "Line",
+        "Arc",
+        "Line",
+        "Arc"
+      ],
+      "ArcViaXs": [
+        null,
+        478.89577719144853,
+        null,
+        435.09700018351344
+      ],
+      "ArcViaYs": [
+        null,
+        101.80623046122992,
+        null,
+        101.58813038244783
+      ],
+      "IsClosed": false
+    }
+  ],
+  "OpenTrajectoryNames": [
+    "\u8F68\u8FF9 1",
+    "\u8F68\u8FF9 2"
+  ],
+  "OpenTrajectoryConnectors": []
+}

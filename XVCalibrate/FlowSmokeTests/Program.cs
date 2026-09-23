@@ -45,6 +45,18 @@ namespace FlowSmokeTests
                     Console.WriteLine("=== NinePointGridCorrespondenceMatcherSmokeTest ===");
                     return NinePointGridCorrespondenceMatcherSmokeTest.Run();
                 }
+
+                if (args[i] == "--offset-diag")
+                {
+                    Console.WriteLine("=== PolylineOffsetDiagSmokeTest ===");
+                    return PolylineOffsetDiagSmokeTest.Run(root);
+                }
+
+                if (args[i] == "--offset-bar18")
+                {
+                    Console.WriteLine("=== OffsetBar18DiagSmokeTest ===");
+                    return OffsetBar18DiagSmokeTest.Run(root);
+                }
             }
 
             Console.WriteLine("=== FlowCalibrationSmokeTest ===");

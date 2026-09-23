@@ -1,0 +1,64 @@
+{
+  "Nodes": [
+    {
+      "Id": "a3f04eb6-3ffc-4a02-a29d-17fd48620176",
+      "TypeId": "load_calibration_result",
+      "X": 362,
+      "Y": 152,
+      "Params": {
+        "filePath": "models\\calibration_nine_point.json",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "a9b9bb2f-b007-429c-bab7-998ae1f224c4",
+      "TypeId": "adjust_affine_calibration",
+      "X": 727,
+      "Y": 174,
+      "Params": {
+        "interactiveAdjust": "true",
+        "offsetWorldX": "0",
+        "offsetWorldY": "0",
+        "nudgePreset": "none",
+        "nudgeStepMm": "0.5",
+        "scaleStepPercent": "0.1",
+        "scaleX": "1",
+        "scaleY": "1",
+        "pivotWorldX": "0",
+        "pivotWorldY": "0",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "18927501-9a18-4a9f-b61c-5fe844e19e41",
+      "TypeId": "save_calibration_result",
+      "X": 1062,
+      "Y": 181,
+      "Params": {
+        "filePath": "models\\calibration_nine_point.json",
+        "enable": "true",
+        "disable": "false"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "a3f04eb6-3ffc-4a02-a29d-17fd48620176",
+      "FromPort": "Transform",
+      "ToNodeId": "a9b9bb2f-b007-429c-bab7-998ae1f224c4",
+      "ToPort": "Transform"
+    },
+    {
+      "FromNodeId": "a9b9bb2f-b007-429c-bab7-998ae1f224c4",
+      "FromPort": "Transform",
+      "ToNodeId": "18927501-9a18-4a9f-b61c-5fe844e19e41",
+      "ToPort": "Transform"
+    }
+  ],
+  "Meta": {
+    "latticeGridRows": "10",
+    "latticeGridCols": "2"
+  }
+}

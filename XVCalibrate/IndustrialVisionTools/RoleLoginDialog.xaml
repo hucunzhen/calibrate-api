@@ -1,0 +1,30 @@
+<Window x:Class="CalibOperatorCLI_Example.RoleLoginDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="切换用户"
+        SizeToContent="WidthAndHeight"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="{StaticResource Ui.PanelBackground}"
+        Foreground="{StaticResource Ui.TextPrimary}"
+        ShowInTaskbar="False">
+    <Window.Resources>
+        <Style TargetType="TextBlock" BasedOn="{StaticResource Ui.DarkLabel}"/>
+        <Style TargetType="ComboBox" BasedOn="{StaticResource Ui.DarkComboBox}"/>
+    </Window.Resources>
+    <StackPanel Margin="20" MinWidth="340">
+        <TextBlock Text="选择角色并输入密码" Style="{StaticResource Ui.SectionHeader}"/>
+        <TextBlock Text="操作员无需密码；工艺/视觉/管理员需密码（出厂默认见帮助文档）。"
+                   Foreground="{StaticResource Ui.TextMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/>
+        <TextBlock Text="角色" Margin="0,0,0,4"/>
+        <ComboBox x:Name="CmbRole" Height="30" Style="{StaticResource Ui.DarkComboBox}" Margin="0,0,0,10"/>
+        <TextBlock Text="密码" Margin="0,0,0,4"/>
+        <PasswordBox x:Name="TxtPassword" Height="30" Padding="8,4" Margin="0,0,0,8"/>
+        <TextBlock x:Name="TxtError" Foreground="{StaticResource Ui.Danger}" TextWrapping="Wrap" Visibility="Collapsed"/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="确定" IsDefault="True" Style="{StaticResource IndustrialToolbarPrimaryButton}"
+                    MinWidth="80" Margin="0,0,8,0" Click="Ok_Click"/>
+            <Button Content="取消" IsCancel="True" Style="{StaticResource IndustrialToolbarButton}" MinWidth="80"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

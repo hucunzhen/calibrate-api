@@ -34,7 +34,20 @@
         <SolidColorBrush x:Key="NavTextBrush" Color="#ECEFF1"/>
         <SolidColorBrush x:Key="NavTextMutedBrush" Color="#8A97A8"/>
 
+        <!-- 悬停提示（全局深色，便于产线阅读） -->
+        <Style TargetType="ToolTip">
+            <Setter Property="Background" Value="{StaticResource Ui.CardDark}"/>
+            <Setter Property="Foreground" Value="{StaticResource Ui.TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Ui.PanelBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="MaxWidth" Value="380"/>
+        </Style>
+
         <Style x:Key="NavTabButtonStyle" TargetType="Button">
+            <Setter Property="ToolTipService.ShowDuration" Value="60000"/>
+            <Setter Property="ToolTipService.InitialShowDelay" Value="400"/>
             <Setter Property="MinWidth" Value="88"/>
             <Setter Property="Height" Value="40"/>
             <Setter Property="Background" Value="Transparent"/>
@@ -271,6 +284,43 @@
         <Style x:Key="Ui.DarkCheckBox" TargetType="CheckBox">
             <Setter Property="Foreground" Value="{StaticResource Ui.TextPrimary}"/>
             <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Grid Background="Transparent" SnapsToDevicePixels="True">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="BoxBorder" Width="16" Height="16" CornerRadius="2"
+                                    Background="{StaticResource Ui.InputBackground}"
+                                    BorderBrush="{StaticResource Ui.InputBorder}" BorderThickness="1"
+                                    VerticalAlignment="Center"/>
+                            <Path x:Name="CheckMark" Grid.Column="0" Width="10" Height="8"
+                                  Data="M 0,4 L 3,7 L 9,0" Stroke="{StaticResource Ui.SectionTitle}"
+                                  StrokeThickness="2" Visibility="Collapsed"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <ContentPresenter Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="CheckMark" Property="Visibility" Value="Visible"/>
+                                <Setter TargetName="BoxBorder" Property="BorderBrush" Value="{StaticResource NavAccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="BoxBorder" Property="BorderBrush" Value="{StaticResource NavAccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{StaticResource Ui.TextMuted}"/>
+                                <Setter TargetName="BoxBorder" Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style x:Key="Ui.DarkListBoxItem" TargetType="ListBoxItem">
@@ -310,6 +360,8 @@
         </Style>
 
         <Style x:Key="IndustrialToolbarButton" TargetType="Button">
+            <Setter Property="ToolTipService.ShowDuration" Value="60000"/>
+            <Setter Property="ToolTipService.InitialShowDelay" Value="400"/>
             <Setter Property="Height" Value="28"/>
             <Setter Property="MinWidth" Value="56"/>
             <Setter Property="Padding" Value="12,4"/>
@@ -328,6 +380,8 @@
         </Style>
 
         <Style x:Key="IndustrialToolbarPrimaryButton" TargetType="Button" BasedOn="{StaticResource IndustrialToolbarButton}">
+            <Setter Property="ToolTipService.ShowDuration" Value="60000"/>
+            <Setter Property="Height" Value="28"/>
             <Setter Property="Background" Value="#0D5C6F"/>
             <Setter Property="BorderBrush" Value="#0095B6"/>
             <Style.Triggers>

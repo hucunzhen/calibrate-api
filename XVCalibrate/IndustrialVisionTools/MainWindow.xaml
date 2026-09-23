@@ -27,16 +27,24 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="NavOperator" Content="量产" Style="{StaticResource NavTabButtonStyle}"
+                            Click="NavOperator_Click" AutomationProperties.Name="量产运行"
+                            ToolTip="操作员主界面：启动/停止视觉主流程、查看工艺卡与换型状态。"/>
                     <Button x:Name="NavFlow" Content="流程编排" Style="{StaticResource NavTabButtonStyle}"
-                            Click="NavFlow_Click" AutomationProperties.Name="流程编排"/>
+                            Click="NavFlow_Click" AutomationProperties.Name="流程编排"
+                            ToolTip="视觉工程师：编辑 flow、调试算子（需视觉/管理员登录）。"/>
                     <Button x:Name="NavHalconShapeModel" Content="形状模板" Style="{StaticResource NavTabButtonStyle}"
-                            Click="NavHalconShapeModel_Click" AutomationProperties.Name="形状模板"/>
+                            Click="NavHalconShapeModel_Click" AutomationProperties.Name="形状模板"
+                            ToolTip="制作与测试 HALCON 形状模板（需视觉/管理员）。"/>
                     <Button x:Name="NavPlc" Content="PLC" Style="{StaticResource NavTabButtonStyle}"
-                            Click="NavPlc_Click" AutomationProperties.Name="PLC"/>
+                            Click="NavPlc_Click" AutomationProperties.Name="PLC"
+                            ToolTip="PLC 连接、状态；手动/标定模式需工艺及以上权限。"/>
                     <Button x:Name="NavController" Content="光源" Style="{StaticResource NavTabButtonStyle}"
-                            Click="NavController_Click" AutomationProperties.Name="光源控制器"/>
+                            Click="NavController_Click" AutomationProperties.Name="光源控制器"
+                            ToolTip="光源控制器调试（需视觉/管理员）。"/>
                     <Button x:Name="NavAdvanced" Content="高级 ▾" Style="{StaticResource NavTabButtonStyle}"
-                            MinWidth="72" Click="NavAdvanced_Click" AutomationProperties.Name="高级功能">
+                            MinWidth="72" Click="NavAdvanced_Click" AutomationProperties.Name="高级功能"
+                            ToolTip="训练/分割等高级工具（需视觉/管理员）。">
                         <Button.ContextMenu>
                             <ContextMenu Background="{StaticResource Ui.PanelBackground}"
                                          BorderBrush="{StaticResource Ui.PanelBorder}" BorderThickness="1">
@@ -59,6 +67,14 @@
                             </ContextMenu>
                         </Button.ContextMenu>
                     </Button>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock x:Name="TxtCurrentRole" VerticalAlignment="Center" Foreground="{StaticResource NavTextMutedBrush}"
+                               FontSize="12" Margin="0,0,10,0"/>
+                    <Button x:Name="BtnSwitchUser" Content="切换用户" Style="{StaticResource NavTabButtonStyle}"
+                            MinWidth="88" Click="BtnSwitchUser_Click"
+                            ToolTip="切换操作员 / 工艺 / 视觉 / 管理员。&#10;操作员无密码；其余角色需密码（出厂默认见产线文档）。"/>
                 </StackPanel>
             </Grid>
         </Border>

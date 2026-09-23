@@ -4,8 +4,8 @@ namespace CalibOperatorCLI_Example
     {
         public const string FileName = "app_navigation_ui.json";
 
-        /// <summary>Plc | Flow | Controller | Histogram | YoloSeg | HalconDlSeg | SamOnnx | HalconShapeModel</summary>
-        public string LastTab { get; set; } = "Flow";
+        /// <summary>Operator | Plc | Flow | Controller | …</summary>
+        public string LastTab { get; set; } = "Operator";
 
         public static AppNavigationUiSettings Load() => AppUiSettingsStore.Load<AppNavigationUiSettings>(FileName);
 

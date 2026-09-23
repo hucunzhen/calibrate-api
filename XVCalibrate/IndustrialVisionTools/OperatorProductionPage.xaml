@@ -1,0 +1,73 @@
+<Page x:Class="CalibOperatorCLI_Example.OperatorProductionPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      Title="量产运行"
+      Background="{StaticResource Ui.WorkspaceBackground}"
+      ToolTipService.ShowDuration="60000"
+      ToolTipService.InitialShowDelay="400">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,20">
+            <TextBlock Text="量产运行" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource Ui.SectionTitle}"/>
+            <TextBlock x:Name="TxtRoleHint" Foreground="{StaticResource Ui.TextMuted}" FontSize="12" Margin="0,6,0,0"/>
+        </StackPanel>
+
+        <Border Grid.Row="1" Style="{StaticResource Ui.CardDarkStyle}" Margin="0,0,0,20">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="当前工艺卡" Foreground="{StaticResource Ui.TextMuted}" FontSize="11"/>
+                    <TextBlock x:Name="TxtProductName" Text="—" FontSize="18" FontWeight="SemiBold" Margin="0,4,0,0"/>
+                    <TextBlock x:Name="TxtRecipeLine" Foreground="{StaticResource Ui.TextSecondary}" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="TxtChangeoverStatus" Margin="0,10,0,0" FontSize="13" FontWeight="SemiBold"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <Button x:Name="BtnLoadMainFlow" Content="加载主流程" Style="{StaticResource IndustrialToolbarButton}"
+                            MinWidth="120" Margin="0,0,0,8" Click="BtnLoadMainFlow_Click"
+                            ToolTip="将当前配方工艺卡中的 main.flow.json 载入流程引擎（不自动运行）。&#10;换型后若工程师已更新流程，可先点此再启动。"/>
+                    <Button x:Name="BtnChangeoverWizard" Content="换型向导…" Style="{StaticResource IndustrialToolbarButton}"
+                            MinWidth="120" Click="BtnChangeoverWizard_Click"
+                            ToolTip="打开换型检查清单（阶段 0–6）。&#10;工艺/视觉勾选并「允许量产」后，操作员方可启动视觉流程。"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <UniformGrid Grid.Row="2" Columns="2" Rows="2" Margin="0,0,0,20">
+            <Button x:Name="BtnStartVision" Content="启动视觉流程" Margin="0,0,12,12"
+                    FontSize="20" FontWeight="SemiBold" Height="100"
+                    Style="{StaticResource IndustrialToolbarPrimaryButton}"
+                    Click="BtnStartVision_Click"
+                    ToolTip="运行当前配方主流程（采图、匹配、坐标、下发 PLC 等）。&#10;须换型验收通过；不替代 PLC 启动产线。"/>
+            <Button x:Name="BtnStopVision" Content="停止" Margin="12,0,0,12"
+                    FontSize="20" FontWeight="SemiBold" Height="100"
+                    Style="{StaticResource IndustrialToolbarButton}"
+                    Click="BtnStopVision_Click"
+                    ToolTip="请求停止本轮视觉流程（软件取消执行）。&#10;不会停 PLC/激光/轴；设备停止请在 PLC 页按 SOP 操作。"/>
+            <Button x:Name="BtnPlcStatus" Content="PLC 状态" Margin="0,12,12,0"
+                    FontSize="18" Height="80"
+                    Style="{StaticResource IndustrialToolbarButton}"
+                    Click="BtnPlcStatus_Click"
+                    ToolTip="跳转到 PLC 页查看连接、位置与运行状态。&#10;操作员无「手动与运行」权限；勿擅自点动。"/>
+            <Button x:Name="BtnResetHint" Content="复位提示" Margin="12,12,0,0"
+                    FontSize="18" Height="80"
+                    Style="{StaticResource IndustrialToolbarButton}"
+                    Click="BtnResetHint_Click"
+                    ToolTip="查看量产异常与复位说明（弹窗）。&#10;本按钮不执行 PLC 复位；异常请联系视觉工程师。"/>
+        </UniformGrid>
+
+        <Border Grid.Row="3" Background="{StaticResource Ui.StatusBarBg}" CornerRadius="6" Padding="12,10"
+                ToolTip="最近一次量产页操作或视觉流程执行的简要状态。">
+            <TextBlock x:Name="TxtRunStatus" Text="就绪" Foreground="{StaticResource Ui.LogConsoleFg}"
+                       FontFamily="Consolas" FontSize="13" TextWrapping="Wrap"/>
+        </Border>
+    </Grid>
+</Page>
