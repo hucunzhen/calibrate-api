@@ -103,9 +103,12 @@ namespace CalibOperatorCLI_Example
         /// <summary>模板创建/匹配等侧栏控件（按 x:Name 序列化）。</summary>
         public Dictionary<string, string> Controls { get; set; } = new();
 
+        /// <summary>上次选用的形状参数配方 Id（内置 builtin:… 或用户文件名）。</summary>
+        public string LastParamRecipeId { get; set; } = "";
+
         private static readonly string[] PersistControlNames =
         {
-            "CmbTemplateSource", "CmbModelKind", "CmbGenContourMode", "TxtMinContourPoints", "ChkLargestContourOnly",
+            "CmbTemplateSource", "CmbModelKind", "CmbGeometryKind", "CmbGenContourMode", "TxtMinContourPoints", "ChkLargestContourOnly",
             "CmbTrimMode", "TxtTrimEpsilon", "TxtTrimEndsPx", "TxtTrimMinLength", "ChkTrimClosed",
             "RbGradientOutward", "RbGradientInward", "CmbRingInnerGradientMode",
             "RbInnerGradientOutward", "RbInnerGradientInward", "RbNextSegmentLine", "RbNextSegmentArc", "ChkTangentJoin",

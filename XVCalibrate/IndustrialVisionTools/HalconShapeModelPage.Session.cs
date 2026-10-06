@@ -66,6 +66,9 @@ namespace CalibOperatorCLI_Example
                 AttachSessionPersistHandlers();
             }
 
+            RefreshParamRecipeCombo(
+                HalconShapeModelUiSettings.Load().LastParamRecipeId,
+                apply: false);
             _uiReady = true;
             _suppressSessionPersist = false;
             UpdateTangentFlipButtonVisibility();
@@ -170,12 +173,19 @@ namespace CalibOperatorCLI_Example
                 ? ""
                 : IoPath.GetFullPath(_loadedImagePath);
 
-            // 启动/初始化阶段或未加载图时，不要用空 ImagePath 覆盖磁盘上已有会话
+            // 启动/初始化阶段或未加载图时，不要用空 ImagePath 覆盖磁盘上已有会话；仍可写入当前参数。
             if (string.IsNullOrWhiteSpace(imagePath))
             {
                 HalconShapeModelUiSettings existing = HalconShapeModelUiSettings.Load();
                 if (!string.IsNullOrWhiteSpace(existing.ImagePath))
+                {
+                    existing.Controls = PageUiBinder.Capture(this, HalconShapeModelUiSettings.PersistControlNameList);
+                    existing.LastParamRecipeId = (CmbParamRecipe?.SelectedItem as ShapeParamRecipeListItem)?.Recipe.Id
+                        ?? _lastParamRecipeId
+                        ?? "";
+                    existing.Save();
                     return;
+                }
             }
 
             var s = new HalconShapeModelUiSettings
@@ -187,6 +197,9 @@ namespace CalibOperatorCLI_Example
             CaptureRoiIntoSettings(s);
             CaptureCameraCorrectionIntoSettings(s);
             s.Controls = PageUiBinder.Capture(this, HalconShapeModelUiSettings.PersistControlNameList);
+            s.LastParamRecipeId = (CmbParamRecipe?.SelectedItem as ShapeParamRecipeListItem)?.Recipe.Id
+                ?? _lastParamRecipeId
+                ?? "";
             s.Save();
         }
 

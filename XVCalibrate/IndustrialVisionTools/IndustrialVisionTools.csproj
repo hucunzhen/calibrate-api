@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="FlowSmokeTests" />
+    <None Include="shape_model_recipes\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- HALCON：未安装时跳过引用与算子。

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 
@@ -15,7 +16,7 @@ namespace CalibOperatorCLI_Example
             {
                 if (string.IsNullOrWhiteSpace(name))
                     continue;
-                if (root.FindName(name) is not FrameworkElement fe)
+                if (FindControl(root, name) is not FrameworkElement fe)
                     continue;
                 switch (fe)
                 {
@@ -26,10 +27,7 @@ namespace CalibOperatorCLI_Example
                         d[name] = cb.IsChecked == true ? "true" : "false";
                         break;
                     case ComboBox cmb:
-                        if (cmb.SelectedItem is ComboBoxItem cbi && cbi.Tag is string tag && !string.IsNullOrWhiteSpace(tag))
-                            d[name] = tag.Trim();
-                        else
-                            d[name] = cmb.SelectedIndex.ToString(CultureInfo.InvariantCulture);
+                        d[name] = ReadComboTag(cmb) ?? cmb.SelectedIndex.ToString(CultureInfo.InvariantCulture);
                         break;
                     case RadioButton rb:
                         d[name] = rb.IsChecked == true ? "true" : "false";
@@ -47,9 +45,9 @@ namespace CalibOperatorCLI_Example
 
             foreach (string name in names)
             {
-                if (string.IsNullOrWhiteSpace(name) || !values.TryGetValue(name, out string? raw))
+                if (string.IsNullOrWhiteSpace(name) || !TryGet(values, name, out string? raw))
                     continue;
-                if (root.FindName(name) is not FrameworkElement fe)
+                if (FindControl(root, name) is not FrameworkElement fe)
                     continue;
 
                 switch (fe)
@@ -72,25 +70,80 @@ namespace CalibOperatorCLI_Example
             }
         }
 
-        private static void ApplyCombo(ComboBox cmb, string? raw)
+        public static void ApplyCombo(ComboBox? cmb, string? raw)
         {
-            if (string.IsNullOrWhiteSpace(raw))
+            if (cmb == null || string.IsNullOrWhiteSpace(raw))
                 return;
-            foreach (var item in cmb.Items)
+            string want = raw.Trim();
+
+            if (string.Equals(cmb.SelectedValuePath, "Tag", StringComparison.Ordinal))
             {
-                if (item is ComboBoxItem cbi
-                    && cbi.Tag is string tag
-                    && string.Equals(tag, raw, StringComparison.OrdinalIgnoreCase))
-                {
-                    cmb.SelectedItem = cbi;
+                cmb.SelectedValue = want;
+                if (string.Equals(ReadComboTag(cmb), want, StringComparison.OrdinalIgnoreCase))
                     return;
-                }
             }
 
-            if (int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int idx)
+            for (int i = 0; i < cmb.Items.Count; i++)
+            {
+                if (!string.Equals(ReadItemTag(cmb.Items[i]), want, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                cmb.SelectedIndex = i;
+                cmb.SelectedItem = cmb.Items[i];
+                return;
+            }
+
+            if (int.TryParse(want, NumberStyles.Integer, CultureInfo.InvariantCulture, out int idx)
                 && idx >= 0
                 && idx < cmb.Items.Count)
                 cmb.SelectedIndex = idx;
+        }
+
+        static FrameworkElement? FindControl(FrameworkElement root, string name)
+        {
+            if (root.FindName(name) is FrameworkElement named)
+                return named;
+
+            FieldInfo? field = root.GetType().GetField(
+                name,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            return field?.GetValue(root) as FrameworkElement;
+        }
+
+        static bool TryGet(IReadOnlyDictionary<string, string> values, string name, out string? raw)
+        {
+            if (values.TryGetValue(name, out raw))
+                return true;
+            foreach (var kv in values)
+            {
+                if (string.Equals(kv.Key, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    raw = kv.Value;
+                    return true;
+                }
+            }
+
+            raw = null;
+            return false;
+        }
+
+        static string? ReadComboTag(ComboBox cmb)
+        {
+            string? fromValue = cmb.SelectedValue?.ToString();
+            if (!string.IsNullOrWhiteSpace(fromValue) && !int.TryParse(fromValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+                return fromValue.Trim();
+            return ReadItemTag(cmb.SelectedItem);
+        }
+
+        static string? ReadItemTag(object? item)
+        {
+            if (item is ComboBoxItem cbi)
+            {
+                string? tag = cbi.Tag?.ToString();
+                if (!string.IsNullOrWhiteSpace(tag))
+                    return tag.Trim();
+            }
+
+            return null;
         }
     }
 }

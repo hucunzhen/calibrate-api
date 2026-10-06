@@ -2,7 +2,10 @@
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       Title="HALCON 形状模板"
-      Background="{StaticResource Ui.WorkspaceBackground}">
+      Background="{StaticResource Ui.WorkspaceBackground}"
+      ToolTipService.InitialShowDelay="300"
+      ToolTipService.ShowDuration="60000"
+      ToolTipService.BetweenShowDelay="100">
     <Page.Resources>
         <!-- 深色卡片内默认黑字 → 统一浅色字与输入框样式 -->
         <Style TargetType="TextBlock" BasedOn="{StaticResource Ui.DarkLabel}"/>
@@ -55,29 +58,30 @@
                             <RadioButton x:Name="RbRectMode" Content="矩形" GroupName="DrawMode" IsChecked="True"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
-                                         ToolTip="选中后弹出参数对话框，或在画布上单击"/>
+                                         ToolTip="轴对齐矩形 ROI。适合摆正的工件外框、阈值/Canny/灰度图模板。选中后可弹参数框或在画布拖绘。"/>
                             <RadioButton x:Name="RbRotatedRectMode" Content="旋转矩形" GroupName="DrawMode"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
-                                         ToolTip="中心、宽高、角度均在对话框中输入"/>
+                                         ToolTip="带角度的矩形。斜放料片、标签用。中心、宽高、角度在对话框输入，比在图上估角更准。"/>
                             <RadioButton x:Name="RbCircleMode" Content="圆形" GroupName="DrawMode"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
-                                         ToolTip="圆心与半径在对话框中输入"/>
+                                         ToolTip="圆孔/外圆 ROI。圆心与半径在对话框输入。用于圆模板或「几何图形 → 轮廓」里的圆。"/>
                             <Button x:Name="BtnPrimitiveRoiParams" Content="参数…" MinWidth="56" Height="32" Padding="8,4"
                                     Margin="0,0,6,4" Visibility="Collapsed" Click="BtnPrimitiveRoiParams_Click"
-                                    ToolTip="编辑当前矩形/旋转矩形/圆的 ROI 参数"/>
+                                    ToolTip="编辑当前矩形/旋转矩形/圆的 ROI 参数（中心、宽高、半径、角度）"/>
                             <RadioButton x:Name="RbPolygonMode" Content="多边形" GroupName="DrawMode"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
-                                         MinHeight="32" Checked="DrawMode_Changed"/>
+                                         MinHeight="32" Checked="DrawMode_Changed"
+                                         ToolTip="单击加点，路径可选直线或圆弧。回到起点容差内自动闭合。用于不规则外形、手绘边线模板。开放轨迹请改用「开放轨迹」。"/>
                             <RadioButton x:Name="RbRingMode" Content="环形" GroupName="DrawMode"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
-                                         ToolTip="外圈/内圈各绘一圈并闭合"/>
+                                         ToolTip="先画外圈再画内圈并闭合，得到环带。垫圈、密封圈用。内外圈都要设梯度（通常相反）。"/>
                             <RadioButton x:Name="RbOpenTrajectoriesMode" Content="开放轨迹" GroupName="DrawMode"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
-                                         ToolTip="多条不闭合轨迹；「完成本条」/「新建本条」"/>
+                                         ToolTip="不闭合的胶路/刻线。可画多条，「完成本条」加入列表。连接线只辅助显示，不进入模板。"/>
                             <Button x:Name="BtnFinishOpenTrajectory" Content="完成本条" MinWidth="72" Height="32" Padding="8,4" Margin="0,0,6,4"
                                     Visibility="Collapsed" Click="BtnFinishOpenTrajectory_Click"
                                     ToolTip="当前轨迹≥2 点则加入列表"/>
@@ -90,19 +94,21 @@
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,0" Padding="8,4"
                                          MinHeight="32" IsChecked="True"
                                          Checked="NextSegment_Changed" Unchecked="NextSegment_Changed"
-                                         ToolTip="移鼠标定方向，单击输入段长/角度/终点"/>
+                                         ToolTip="下一段画直线。移动鼠标定方向，单击后输入段长/角度/终点。规则边、胶路直线段用这个。"/>
                             <RadioButton x:Name="RbNextSegmentArc" Content="圆弧" GroupName="NextSeg"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,0" Padding="8,4"
                                          MinHeight="32"
-                                         Checked="NextSegment_Changed" Unchecked="NextSegment_Changed"/>
+                                         Checked="NextSegment_Changed" Unchecked="NextSegment_Changed"
+                                         ToolTip="下一段画圆弧。可勾选「相切」让弧与上一段直线相切；方向不对点「换向」。圆角、R 角用这个。"/>
                             <RadioButton x:Name="RbNextSegmentConnector" Content="连接线" GroupName="NextSeg"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,0" Padding="8,4"
                                          MinHeight="32" Visibility="Collapsed"
                                          Checked="NextSegment_Changed" Unchecked="NextSegment_Changed"
-                                         ToolTip="仅开放轨迹；不参与模板"/>
+                                         ToolTip="仅开放轨迹：两条轨迹之间的辅助连线，不进入形状模板。"/>
                             <CheckBox x:Name="ChkTangentJoin" Content="相切" Foreground="#CCC" VerticalAlignment="Center"
                                       Margin="0,0,6,0" Padding="8,4" MinHeight="32"
-                                      Checked="TangentJoin_Changed" Unchecked="TangentJoin_Changed"/>
+                                      Checked="TangentJoin_Changed" Unchecked="TangentJoin_Changed"
+                                      ToolTip="圆弧与上一段直线/弧相切。保证圆角光滑。相切有左右两解，不对就点「换向」或按 F。"/>
                             <Button x:Name="BtnTangentFlipSide" Content="换向" MinWidth="48" Height="32" Padding="8,4" Margin="0,0,6,0"
                                     Visibility="Collapsed" Click="BtnTangentFlipSide_Click" ToolTip="相切弧左右解 (F)"/>
                             <Button x:Name="BtnUndoPoint" Content="撤销点" MinWidth="60" Height="32" Padding="8,4" Margin="0,0,6,0"
@@ -157,15 +163,17 @@
                             <Border Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}"
                                     BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
                                 <StackPanel>
+                                    <TextBlock Text="在当前图上试刚创建或导入的模型。漏检：降低最低分数、降低贪婪度、检查角度范围是否覆盖。误检：提高分数、收窄角度、勾阵列过滤。"
+                                               Style="{StaticResource Ui.ParamHelp}"/>
                                     <Grid Margin="0,0,0,4">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="90"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0" Text="匹配个数" VerticalAlignment="Center"
-                                                   ToolTip="0=按下方阵列行×列（默认 3×3）；填正整数则固定上限；流程中 0 才表示全部"/>
+                                                   ToolTip="本页测试：0=按下方阵列行×列（默认 3×3）封顶，避免一次搜出成百上千个占满内存。要固定搜 N 个就填正整数。注意：量产流程里 0 才表示「全部匹配」。"/>
                                         <TextBox x:Name="TxtFindNumMatches" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"
-                                                 ToolTip="测试页 0 不会搜全部匹配，而是按阵列行列或默认 100 封顶"/>
+                                                 ToolTip="测试页 0≠搜全部，而是按阵列行列或默认 100 封顶。流程节点里 0=全部。"/>
                                     </Grid>
                                     <Grid Margin="0,0,0,4">
                                         <Grid.ColumnDefinitions>
@@ -173,7 +181,7 @@
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0" Text="最低分数" VerticalAlignment="Center"
-                                                   ToolTip="漏检时降到 0.35~0.45；误检多时提高到 0.55~0.65"/>
+                                                   ToolTip="0~1，候选得分低于此值丢弃。漏检（明明有件找不到）降到 0.35~0.45；误检多（背景当工件）升到 0.55~0.65。先看查找结果里真实件的分数再卡阈值，不要一次调太狠。"/>
                                         <TextBox x:Name="TxtFindMinScore" Grid.Column="1" Text="0.4" Height="24" VerticalContentAlignment="Center"/>
                                     </Grid>
                                     <Grid Margin="0,0,0,4">
@@ -182,7 +190,7 @@
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0" Text="贪婪度" VerticalAlignment="Center"
-                                                   ToolTip="0~1；漏检时降低(如0.7)，速度慢但更全"/>
+                                                   ToolTip="0~1。越大越快、越容易漏；越小越全、越慢。默认 0.75。漏检降到 0.6~0.7；要节拍、外形很清楚可升到 0.85~0.9。"/>
                                         <TextBox x:Name="TxtFindGreediness" Grid.Column="1" Text="0.75" Height="24" VerticalContentAlignment="Center"/>
                                     </Grid>
                                     <Grid Margin="0,0,0,4">
@@ -191,7 +199,7 @@
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0" Text="搜索层数" VerticalAlignment="Center"
-                                                   ToolTip="0=与创建模型一致；建议与创建金字塔层数相同"/>
+                                                   ToolTip="0=与创建模型的金字塔层数相同（推荐）。一般不要改。乱填比创建层数更少会丢小目标。"/>
                                         <TextBox x:Name="TxtFindNumLevels" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
                                     </Grid>
                                     <Grid Margin="0,0,0,8">
@@ -199,13 +207,15 @@
                                             <ColumnDefinition Width="90"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Text="最大重叠" VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="0" Text="最大重叠" VerticalAlignment="Center"
+                                                   ToolTip="两个匹配允许重叠的比例 0~1。密集阵列、轮廓相交填 0.4~0.6；严禁两个结果叠在同一件上填 0.1~0.3。重叠太小会把相邻真目标杀掉。"/>
                                         <TextBox x:Name="TxtFindMaxOverlap" Grid.Column="1" Text="0.5" Height="24" VerticalContentAlignment="Center"/>
                                     </Grid>
-                                    <TextBlock Text="HALCON 会返回全部候选；流程后接「阵列过滤」后数量更少。下方可勾选以复现流程结果。"
-                                               FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                                    <TextBlock Text="HALCON 会返回全部候选；流程后接「阵列过滤」后数量更少。下方勾选可在本页复现流程过滤结果。"
+                                               Style="{StaticResource Ui.ParamHelp}"/>
                                     <CheckBox x:Name="ChkFindApplyGridFilter" Content="阵列过滤（同 halcon_filter_shape_match_grid）"
-                                              Margin="0,0,0,4" IsChecked="False"/>
+                                              Margin="0,0,0,4" IsChecked="False"
+                                              ToolTip="目标按固定行×列等距排列时勾选：每格只留最高分，去掉孤立误检。散乱放置、数量不固定时不要勾。"/>
                                     <Grid Margin="0,0,0,4">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="90"/>
@@ -213,9 +223,12 @@
                                             <ColumnDefinition Width="90"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Text="行×列" VerticalAlignment="Center"/>
-                                        <TextBox x:Name="TxtFindGridRows" Grid.Column="1" Text="3" Height="24" VerticalContentAlignment="Center" Margin="0,0,4,0"/>
-                                        <TextBox x:Name="TxtFindGridCols" Grid.Column="2" Grid.ColumnSpan="2" Text="3" Height="24" VerticalContentAlignment="Center"/>
+                                        <TextBlock Grid.Column="0" Text="行×列" VerticalAlignment="Center"
+                                                   ToolTip="阵列实际行数、列数，必须与工装一致。3×3 表示 9 个工位。填错会错格、漏件或把噪声当成一格。"/>
+                                        <TextBox x:Name="TxtFindGridRows" Grid.Column="1" Text="3" Height="24" VerticalContentAlignment="Center" Margin="0,0,4,0"
+                                                 ToolTip="阵列行数（沿料片纵向的个数）"/>
+                                        <TextBox x:Name="TxtFindGridCols" Grid.Column="2" Grid.ColumnSpan="2" Text="3" Height="24" VerticalContentAlignment="Center"
+                                                 ToolTip="阵列列数"/>
                                     </Grid>
                                     <Grid Margin="0,0,0,4">
                                         <Grid.ColumnDefinitions>
@@ -223,7 +236,7 @@
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0" Text="保留最低分" VerticalAlignment="Center"
-                                                   ToolTip="过滤后保留的最低分数，0=不按分数剔除"/>
+                                                   ToolTip="过滤之后再卡一刀分数。0=不过滤分数。可略高于「最低分数」，把落格后仍然偏低的候选去掉。"/>
                                         <TextBox x:Name="TxtFindMinScoreKeep" Grid.Column="1" Text="0.45" Height="24" VerticalContentAlignment="Center" ToolTip="0=不按分数剔除"/>
                                     </Grid>
                                     <Grid Margin="0,0,0,4">
@@ -232,7 +245,7 @@
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0" Text="阵列角度°" VerticalAlignment="Center"
-                                                   ToolTip="auto=自动(匹配角+PCA)；或填固定角度"/>
+                                                   ToolTip="阵列行列在图上的方向。auto=用匹配角+PCA 自动估，并可能对调行列。整板固定摆放也可填死角度（相对图像 +X）。估错方向时先看日志里的 θ，再改成固定值。"/>
                                         <TextBox x:Name="TxtFindGridAngleDeg" Grid.Column="1" Text="auto" Height="24" VerticalContentAlignment="Center"/>
                                     </Grid>
                                     <Grid Margin="0,0,0,4">
@@ -241,7 +254,7 @@
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0" Text="角度偏差°" VerticalAlignment="Center"
-                                                   ToolTip="相对匹配角的中位偏差；整板同向可设10~15；对称模板请设0"/>
+                                                   ToolTip="匹配角相对阵列方向允许的偏差。整板工件朝向一致可设 10~15，去掉转歪的误检。模板近似旋转对称（圆、正方）或角度不稳请填 0，否则真目标会被角度杀掉。"/>
                                         <TextBox x:Name="TxtFindMaxAngleDev" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
                                     </Grid>
                                     <CheckBox x:Name="ChkFindAutoRetry" Content="零结果时自动降低最低分数重试"
@@ -300,6 +313,33 @@
         <!-- 左侧：标定 / ROI / 模板 / 创建 -->
         <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="8,8,0,8">
             <StackPanel>
+                <TextBlock Text="参数配方" Style="{StaticResource Ui.SectionHeader}" Margin="0,0,0,8"/>
+                <Border Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}"
+                        BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
+                    <StackPanel>
+                        <TextBlock Text="内置外框 / 粗匹配 / 精匹配保存在工程 shape_model_recipes（可 git 提交）。覆盖保存会改这些 JSON。自定义配方仍在本机 AppData。"
+                                   FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                        <ComboBox x:Name="CmbParamRecipe" Height="26" Margin="0,0,0,4"
+                                  SelectionChanged="CmbParamRecipe_SelectionChanged"
+                                  ToolTip="内置：IndustrialVisionTools/shape_model_recipes。自定义：%AppData%\IndustrialVisionTools\shape_model_recipes。"/>
+                        <TextBlock x:Name="TxtParamRecipeHint" Text="" Style="{StaticResource Ui.ParamHelp}"/>
+                        <WrapPanel Margin="0,2,0,0">
+                            <Button x:Name="BtnApplyParamRecipe" Content="应用" Width="56" Height="26"
+                                    Margin="0,0,6,4" Click="BtnApplyParamRecipe_Click"
+                                    ToolTip="把所选配方的参数写到下面各栏。不改图像和 ROI。"/>
+                            <Button x:Name="BtnSaveAsParamRecipe" Content="另存为" Width="64" Height="26"
+                                    Margin="0,0,6,4" Click="BtnSaveAsParamRecipe_Click"
+                                    ToolTip="把当前参数存成新的自定义配方。"/>
+                            <Button x:Name="BtnOverwriteParamRecipe" Content="覆盖保存" Width="72" Height="26"
+                                    Margin="0,0,6,4" Click="BtnOverwriteParamRecipe_Click"
+                                    ToolTip="内置：写入工程 shape_model_recipes JSON，可 git 提交。自定义：覆盖本机 AppData 文件。"/>
+                            <Button x:Name="BtnDeleteParamRecipe" Content="删除" Width="56" Height="26"
+                                    Margin="0,0,0,4" Click="BtnDeleteParamRecipe_Click"
+                                    ToolTip="删除所选自定义配方。内置不能删。"/>
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+
                 <TextBlock Text="① 标定与矫正" Style="{StaticResource Ui.SectionHeader}" Margin="0,0,0,8"/>
                 <Border Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}"
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
@@ -314,7 +354,8 @@
                                         <ColumnDefinition Width="72"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="设备索引" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="0" Text="设备索引" VerticalAlignment="Center"
+                                               ToolTip="海康相机列表中的序号，从 0 开始。多相机时与现场工位对应。与顶部「相机单帧采集」共用。"/>
                                     <TextBox x:Name="TxtCameraDeviceIndex" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
                                 </Grid>
                                 <Grid Margin="0,0,0,4">
@@ -328,11 +369,14 @@
                                     <TextBox x:Name="TxtCalibrationJsonPath" Grid.Column="1" Height="24" VerticalContentAlignment="Center"/>
                                     <Button Grid.Column="2" Content="..." Height="24" Margin="4,0,0,0" Click="BtnBrowseCalibrationJson_Click"/>
                                 </Grid>
-                                <CheckBox x:Name="ChkEnableUndistort" Content="内参畸变矫正" Foreground="#CCC" Margin="0,4,0,2"/>
+                                <CheckBox x:Name="ChkEnableUndistort" Content="内参畸变矫正" Foreground="#CCC" Margin="0,4,0,2"
+                                          ToolTip="用棋盘格标定消除镜头桶形/枕形畸变。广角、边缘发弯时勾选。已经是远心/几乎无畸变可关掉，少一次插值。"/>
                                 <TextBox x:Name="TxtUndistortAlpha" Text="-1" Height="24" Margin="16,0,0,4" VerticalContentAlignment="Center"
-                                         ToolTip="裁剪 α：-1=原尺寸"/>
-                                <CheckBox x:Name="ChkEnablePerspective" Content="透视矫正 (棋盘鸟瞰)" Foreground="#CCC" Margin="0,4,0,4"/>
-                                <TextBox x:Name="TxtCalibViewIndex" Text="0" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center"/>
+                                         ToolTip="去畸变裁剪 α。-1=尽量保持原图尺寸（可能留黑边）。0=裁掉无效边只留有效像素。一般保持 -1，与量产流程一致。"/>
+                                <CheckBox x:Name="ChkEnablePerspective" Content="透视矫正 (棋盘鸟瞰)" Foreground="#CCC" Margin="0,4,0,4"
+                                          ToolTip="把倾斜拍摄的平面拉成正视鸟瞰。相机不正对工作面时勾选，形状模板必须做在矫正后的图上，与量产同一套。"/>
+                                <TextBox x:Name="TxtCalibViewIndex" Text="0" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center"
+                                         ToolTip="标定文件里第几张视图（从 0 起）。多姿态标定时选与当前工位最接近的一张。只有一张就填 0。"/>
                                 <Grid Margin="16,0,0,2">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="36"/>
@@ -340,17 +384,25 @@
                                         <ColumnDefinition Width="36"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="列" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="0" Text="列" VerticalAlignment="Center"
+                                               ToolTip="棋盘格内角点列数（宽边个数），不是格子数。11×8 表示横向 11 个角点、纵向 8 个，须与标定文件一致。"/>
                                     <TextBox x:Name="TxtCalibBoardCols" Grid.Column="1" Text="11" Height="24" Margin="0,0,4,0" VerticalContentAlignment="Center"/>
-                                    <TextBlock Grid.Column="2" Text="行" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="2" Text="行" VerticalAlignment="Center"
+                                               ToolTip="棋盘格内角点行数。填错会导致透视拉歪。"/>
                                     <TextBox x:Name="TxtCalibBoardRows" Grid.Column="3" Text="8" Height="24" VerticalContentAlignment="Center"/>
                                 </Grid>
-                                <TextBox x:Name="TxtCalibSquareSizeMm" Text="5" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center" ToolTip="方格 mm"/>
-                                <TextBox x:Name="TxtCalibPxPerMm" Text="32" Height="24" Margin="16,0,0,4" VerticalContentAlignment="Center" ToolTip="像素/毫米（透视输出缩放）"/>
-                                <ComboBox x:Name="CmbPerspectiveOutputFrame" Height="26" Margin="16,0,0,6">
-                                    <ComboBoxItem Content="仅标定板 (board)" Tag="board"/>
-                                    <ComboBoxItem Content="原图+板内 (local)" Tag="local"/>
-                                    <ComboBoxItem Content="整图共面 (plane)" Tag="plane" IsSelected="True"/>
+                                <TextBox x:Name="TxtCalibSquareSizeMm" Text="5" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center"
+                                         ToolTip="棋盘格每个方格边长，单位 mm。必须与实物标定板一致（常见 5 或 10）。填错则 mm 尺寸和像素当量全错。"/>
+                                <TextBox x:Name="TxtCalibPxPerMm" Text="32" Height="24" Margin="16,0,0,4" VerticalContentAlignment="Center"
+                                         ToolTip="透视输出的像素/毫米。越大图越大、细节越多、越占内存。与量产流程保持同一数值，否则模板尺度对不上。"/>
+                                <ComboBox x:Name="CmbPerspectiveOutputFrame" Height="26" Margin="16,0,0,6"
+                                          ToolTip="透视矫正后输出哪一块。量产主流程通常要整幅图，选「整图共面」。只要标定板区域做模板可选「仅标定板」。">
+                                    <ComboBoxItem Content="仅标定板 (board)" Tag="board"
+                                                  ToolTip="输出裁到棋盘格板范围内。只在板上做模板/测量、不想要板外背景时选。"/>
+                                    <ComboBoxItem Content="原图+板内 (local)" Tag="local"
+                                                  ToolTip="保留与原图大致对齐、板内已拉平。调试对照原图位置时用。"/>
+                                    <ComboBoxItem Content="整图共面 (plane)" Tag="plane" IsSelected="True"
+                                                  ToolTip="默认。整幅图按标定平面拉成鸟瞰，后续形状模板、九点、轨迹都在这张图上做。现场主流程一般选这项。"/>
                                 </ComboBox>
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                                     <Button x:Name="BtnRotateCorrectedCcw90" Content="逆时针90°" Height="28" Margin="0,0,6,0" Click="BtnRotateCorrectedCcw90_Click"/>
@@ -368,7 +420,8 @@
                                     <Button Grid.Column="2" x:Name="BtnApplyPostCorrectRotate" Content="应用" Height="24" Margin="4,0,0,0"
                                             Click="BtnApplyPostCorrectRotate_Click"/>
                                 </Grid>
-                                <CheckBox x:Name="ChkRotateExpandCanvas" Content="扩大画布容纳整图" Foreground="#CCC" Margin="0,0,0,8" IsChecked="False"/>
+                                <CheckBox x:Name="ChkRotateExpandCanvas" Content="扩大画布容纳整图" Foreground="#CCC" Margin="0,0,0,8" IsChecked="False"
+                                          ToolTip="旋转后边角被裁掉时勾选，画布变大以放下整幅图。量产流程若未扩画布，这里也不要勾，避免和线上图像尺寸不一致。"/>
                                 <Button x:Name="BtnApplyCameraCorrection" Content="应用相机矫正" Height="28" Click="BtnApplyCameraCorrection_Click"/>
                             </StackPanel>
                         </Border>
@@ -376,7 +429,7 @@
                         <Separator Margin="0,10,0,10" Background="{StaticResource Ui.PanelBorder}"/>
 
                         <TextBlock FontWeight="Bold" Text="九点标定" Margin="0,0,0,6"/>
-                        <TextBlock Text="像素→世界 affine；ROI 存盘为 mm、测量几何亦用此 JSON。"
+                        <TextBlock Text="像素→世界 affine；ROI 存盘为 mm，「几何图形 → 轮廓」也用此 JSON。"
                                    FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,6"/>
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -443,21 +496,26 @@
                                     <ColumnDefinition Width="70"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="最小灰度" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="0" Text="最小灰度" VerticalAlignment="Center"
+                                           ToolTip="二值化下限 0~255。只保留灰度 ≥ 此值的像素。亮工件暗背景：提高最小灰度把背景甩掉。暗工件不要把最小灰度抬得太高。"/>
                                 <TextBox x:Name="TxtMinGray" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"
-                                         TextChanged="TxtMinGray_TextChanged"/>
+                                         TextChanged="TxtMinGray_TextChanged"
+                                         ToolTip="暗背景滤掉：提高。暗工件被切掉：降低。"/>
                             </Grid>
                             <Grid Margin="0,0,0,4">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="70"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="最大灰度" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="0" Text="最大灰度" VerticalAlignment="Center"
+                                           ToolTip="二值化上限。只保留灰度 ≤ 此值的像素。暗工件亮背景：降低最大灰度，去掉亮背景。亮斑过曝可把上限略降。"/>
                                 <TextBox x:Name="TxtMaxGray" Grid.Column="1" Text="255" Height="24" VerticalContentAlignment="Center"
-                                         TextChanged="TxtMaxGray_TextChanged"/>
+                                         TextChanged="TxtMaxGray_TextChanged"
+                                         ToolTip="亮背景滤掉：降低。亮工件被切掉：提高。可点「自动阈值」作起点再微调。"/>
                             </Grid>
                             <Button x:Name="BtnAutoThreshold" Content="自动阈值" Width="100" Height="26" Margin="0,4,0,0" 
-                                    HorizontalAlignment="Left" Click="BtnAutoThreshold_Click"/>
+                                    HorizontalAlignment="Left" Click="BtnAutoThreshold_Click"
+                                    ToolTip="按 ROI 内灰度直方图估一组最小/最大灰度。作为起点，再用预览看轮廓是否贴边，必要时手动微调。"/>
                         </StackPanel>
                         <StackPanel x:Name="PnlPolygonCloseSettings">
                         <Grid Margin="0,8,0,0">
@@ -497,21 +555,27 @@
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3" Visibility="Collapsed">
                     <StackPanel>
                         <TextBlock FontWeight="Bold" Text="手绘边线梯度" Margin="0,0,0,6"/>
-                        <TextBlock Text="闭合多边形/环形手绘边线模板时使用；开放轨迹不走此项。" 
-                                   FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                        <TextBlock Text="闭合多边形/环形手绘边线模板时使用；开放轨迹不走此项。梯度=沿轮廓法向的明暗方向，必须与真实成像一致，反了会找不到。"
+                                   Style="{StaticResource Ui.ParamHelp}"/>
                         <StackPanel x:Name="PnlGradientPolarity" Orientation="Horizontal" Margin="0,0,0,8">
                             <RadioButton x:Name="RbGradientOutward" Content="向外" GroupName="GradPol"
-                                         Foreground="#CCC" Margin="0,0,12,0" IsChecked="True"/>
+                                         Foreground="#CCC" Margin="0,0,12,0" IsChecked="True"
+                                         ToolTip="法向从区域内部指向外部。外轮廓常用：内部是工件（往往较暗或较亮一块）、外部是背景。预览箭头应指向背景一侧。"/>
                             <RadioButton x:Name="RbGradientInward" Content="向内" GroupName="GradPol"
-                                         Foreground="#CCC"/>
+                                         Foreground="#CCC"
+                                         ToolTip="法向从外指向内。孔、窗口的内边缘常用（孔内是背景）。外轮廓选向内通常会匹配失败。"/>
                         </StackPanel>
                         <StackPanel x:Name="PnlRingInnerGradientSettings" Visibility="Collapsed">
                             <TextBlock Text="环形内圈梯度" FontSize="11" Foreground="#888" Margin="0,0,0,4"/>
                             <ComboBox x:Name="CmbRingInnerGradientMode" Height="26" Margin="0,0,0,6"
-                                      SelectionChanged="RingInnerGradientMode_Changed">
-                                <ComboBoxItem Content="内圈与外圈相反" Tag="opposite" IsSelected="True"/>
-                                <ComboBoxItem Content="内圈与外圈相同" Tag="same"/>
-                                <ComboBoxItem Content="内圈单独设置" Tag="custom"/>
+                                      SelectionChanged="RingInnerGradientMode_Changed"
+                                      ToolTip="圆环有外圈和内圈两条边。外圈与内圈的明暗方向常常相反（都是「从材料指向空气」）。">
+                                <ComboBoxItem Content="内圈与外圈相反" Tag="opposite" IsSelected="True"
+                                              ToolTip="默认。外圈向外、内圈向内（或相反），符合「材料在环带上、内外都是背景」的垫圈/环。"/>
+                                <ComboBoxItem Content="内圈与外圈相同" Tag="same"
+                                              ToolTip="内外圈明暗方向一样。少见，仅当内外侧光照使灰度变化同向时。"/>
+                                <ComboBoxItem Content="内圈单独设置" Tag="custom"
+                                              ToolTip="内外圈成像不一致时，下面单独选内圈向外或向内。"/>
                             </ComboBox>
                             <StackPanel x:Name="PnlRingInnerGradientCustom" Orientation="Horizontal" Visibility="Collapsed">
                                 <RadioButton x:Name="RbInnerGradientOutward" Content="内圈向外" GroupName="GradPolInner"
@@ -528,42 +592,69 @@
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
                     <StackPanel>
                         <TextBlock FontWeight="Bold" Text="模板来源与模型类型" Margin="0,0,0,6"/>
+                        <TextBlock Text="先选「从什么生成模板」，再选「允许工件怎么变」。选完后点「预览轮廓」确认绿线贴合工件，再创建模型。"
+                                   Style="{StaticResource Ui.ParamHelp}"/>
                         <TextBlock Text="模板来源" FontSize="11" Foreground="#888" Margin="0,0,0,2"/>
-                        <ComboBox x:Name="CmbTemplateSource" Height="26" Margin="0,0,0,8"
-                                  SelectionChanged="CreateOption_Changed">
-                            <ComboBoxItem Content="ROI 内灰度阈值 → 轮廓" Tag="ThresholdXld" IsSelected="True"/>
-                            <ComboBoxItem Content="ROI 内 Canny 边缘 → 轮廓" Tag="EdgesXld"/>
-                            <ComboBoxItem Content="手绘 ROI 边线 (设梯度方向)" Tag="PolygonXld"/>
-                            <ComboBoxItem Content="矩形 ROI 灰度图" Tag="ImageRectangle"/>
-                            <ComboBoxItem Content="多边形域灰度图" Tag="ImagePolygon"/>
-                            <ComboBoxItem Content="测量几何 → 轮廓 (可手调)" Tag="GeometryXld"/>
+                        <ComboBox x:Name="CmbTemplateSource" Height="26" Margin="0,0,0,4"
+                                  SelectedValuePath="Tag"
+                                  SelectionChanged="CreateOption_Changed"
+                                  ToolTip="决定用灰度、边缘还是几何图形来建模板。成像干净、灰差大用阈值；光照不均用 Canny；外形已知用手绘边线或几何图形；要纹理/内部图案用灰度图。">
+                            <ComboBoxItem Content="ROI 内灰度阈值 → 轮廓" Tag="ThresholdXld" IsSelected="True"
+                                          ToolTip="首选：工件与背景灰度差明显。在 ROI 内按最小/最大灰度二值化后抽轮廓。暗件亮底：降低最大灰度；亮件暗底：提高最小灰度。可点「自动阈值」。不要把背景杂物圈进 ROI。"/>
+                            <ComboBoxItem Content="ROI 内 Canny 边缘 → 轮廓" Tag="EdgesXld"
+                                          ToolTip="阈值分不开、但边缘清晰时用。对光照渐变更稳。平滑 α 增大可抑噪（1~2）；低阈抓弱边、高阈只留强边，高阈约为低阈 2 倍。适合反光件、渐变背景。"/>
+                            <ComboBoxItem Content="手绘 ROI 边线 (设梯度方向)" Tag="PolygonXld"
+                                          ToolTip="外形已知或成像脏、自动轮廓碎时，用多边形/环形描出真实边。必须设置「手绘边线梯度」：外轮廓一般选「向外」（内部工件、外部背景）；孔边选「向内」。梯度反了会找不到或找反。"/>
+                            <ComboBoxItem Content="矩形 ROI 灰度图" Tag="ImageRectangle"
+                                          ToolTip="把矩形里整块灰度交给 HALCON，不只用外框。适合内部图案、字符、定位孔阵列。ROI 尽量只包目标、背景简单。对比度填 auto 即可。"/>
+                            <ComboBoxItem Content="多边形域灰度图" Tag="ImagePolygon"
+                                          ToolTip="与矩形灰度图相同，但区域是多边形，可躲开旁边工件/夹具。适合不规则外形且要用内部纹理匹配。"/>
+                            <ComboBoxItem Content="几何图形 → 轮廓" Tag="GeometryXld"
+                                          ToolTip="用圆、矩形、圆弧或路径生成理想轮廓，可手调中心/宽高/半径。标准件、尺寸稳定时首选。先画 ROI 再「从 ROI 同步」，或直接填参数（有九点标定时按 mm 理解）。不是尺寸测量工具。"/>
                         </ComboBox>
+                        <TextBlock Text="阈值轮廓：灰差大、外形封闭。Canny：边缘清晰但不好二值化。手绘边线：自动轮廓碎、必须人工指定边与明暗方向。灰度图：靠内部纹理而不是外框。几何图形：圆/矩形/圆弧/路径的理想轮廓，可手调尺寸。"
+                                   Style="{StaticResource Ui.ParamHelp}"/>
                         <TextBlock Text="模型类型" FontSize="11" Foreground="#888" Margin="0,0,0,2"/>
-                        <ComboBox x:Name="CmbModelKind" Height="26" SelectionChanged="CreateOption_Changed">
-                            <ComboBoxItem Content="标准形状" Tag="Shape" IsSelected="True"/>
-                            <ComboBoxItem Content="缩放形状" Tag="ScaledShape"/>
-                            <ComboBoxItem Content="可变形(局部)" Tag="Deformable"/>
-                            <ComboBoxItem Content="可变形(透视)" Tag="PlanarDeformable"/>
+                        <ComboBox x:Name="CmbModelKind" Height="26" SelectedValuePath="Tag"
+                                  SelectionChanged="CreateOption_Changed"
+                                  ToolTip="工件在图上会怎么变：只旋转用标准；整体变大变小用缩放；软料局部拧/皱用局部可变形；斜视梯形用透视可变形。范围开得越大越慢、越容易误检。">
+                            <ComboBoxItem Content="标准形状" Tag="Shape" IsSelected="True"
+                                          ToolTip="刚性模板（.shm）。尺寸几乎不变，只允许「起始角+角度范围」内旋转。速度最快、最稳，量产首选。镜头高度固定、产品不缩水时选这项。"/>
+                            <ComboBoxItem Content="缩放形状" Tag="ScaledShape"
+                                          ToolTip="刚性+整体缩放（.shm）。镜头高度会变、打印件有缩放时用。最小/最大缩放尽量贴实际，如 0.95~1.05；不要无故开到 0.8~1.2，会变慢且误匹配。步长 0=自动。"/>
+                            <ComboBoxItem Content="可变形(局部)" Tag="Deformable"
+                                          ToolTip="局部可变形（.dfm）。软膜、布、局部拉伸褶皱。比刚性慢，且容易吸到相似干扰。仅当标准/缩放明显跟不住形变时再用。导出后流程须加载对应 .dfm，不能当 .shm 用。"/>
+                            <ComboBoxItem Content="可变形(透视)" Tag="PlanarDeformable"
+                                          ToolTip="平面透视可变形（.dfm）。相机斜看平面件出现梯形、近大远小时用。能矫正的尽量先做透视矫正，再用标准形状，比可变形更稳。"/>
                         </ComboBox>
+                        <TextBlock Text="标准：只转不缩放。缩放：整体变大变小。局部可变形：软料褶皱。透视可变形：斜视梯形。能用标准就不用可变形。"
+                                   Style="{StaticResource Ui.ParamHelp}"/>
                     </StackPanel>
                 </Border>
 
                 <Border x:Name="PnlGeometryMeasure" Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}"
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3" Visibility="Collapsed">
                     <StackPanel>
-                        <TextBlock FontWeight="Bold" Text="测量与几何轮廓" Margin="0,0,0,6"/>
-                        <TextBlock Text="模板来源选「测量几何」时使用；坐标显示 mm（见上方九点标定）。"
+                        <TextBlock FontWeight="Bold" Text="几何图形轮廓" Margin="0,0,0,6"/>
+                        <TextBlock Text="模板来源选「几何图形 → 轮廓」时使用：用圆/矩形/圆弧/路径生成轮廓，不是测尺寸。有九点标定时坐标可显示 mm。"
                                    FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,8"/>
                         <TextBlock x:Name="TxtMeasureSummary" Text="测量: —" Foreground="#B0BEC5" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
                         <TextBlock x:Name="TxtGeomMmHints" Text="" Foreground="#80CBC4" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,8"/>
                         <TextBlock Text="几何类型" FontSize="11" Foreground="#888" Margin="0,0,0,2"/>
-                        <ComboBox x:Name="CmbGeometryKind" Height="26" Margin="0,0,0,6" SelectionChanged="GeometryParam_Changed">
-                            <ComboBoxItem Content="轴对齐矩形" Tag="AxisAlignedRectangle" IsSelected="True"/>
-                            <ComboBoxItem Content="旋转矩形" Tag="RotatedRectangle"/>
-                            <ComboBoxItem Content="圆" Tag="Circle"/>
-                            <ComboBoxItem Content="圆弧(圆心+起止角)" Tag="Arc"/>
-                            <ComboBoxItem Content="三点圆弧" Tag="ArcThreePoint"/>
-                            <ComboBoxItem Content="手绘路径(含弧段)" Tag="RoiPolyline"/>
+                        <ComboBox x:Name="CmbGeometryKind" Height="26" Margin="0,0,0,6" SelectionChanged="GeometryParam_Changed"
+                                  ToolTip="选最接近真实外形的几何。轴对齐矩形边平行于图像；旋转矩形可带角度；圆/圆弧用于孔和弧边；三点圆弧过已知三点；手绘路径用于直线+圆弧拼接的轨迹。">
+                            <ComboBoxItem Content="轴对齐矩形" Tag="AxisAlignedRectangle" IsSelected="True"
+                                          ToolTip="边平行于图像行列。工件摆正、要矩形外框时用。填中心 X/Y 与宽高（像素；有九点标定可对照 mm 提示）。"/>
+                            <ComboBoxItem Content="旋转矩形" Tag="RotatedRectangle"
+                                          ToolTip="矩形可旋转。长边方向填「角度°」。斜放标签、非水平料片用这个，不要用轴对齐硬套。"/>
+                            <ComboBoxItem Content="圆" Tag="Circle"
+                                          ToolTip="整圆孔/外圆。填中心与半径。半径按预览绿圈贴合边缘微调，不要按理论值硬套若成像有透视。"/>
+                            <ComboBoxItem Content="圆弧(圆心+起止角)" Tag="Arc"
+                                          ToolTip="已知圆心和半径的一段弧。起始角 0°=图像 +X（向右），张角逆时针为正。适合扇形缺口、部分圆周。"/>
+                            <ComboBoxItem Content="三点圆弧" Tag="ArcThreePoint"
+                                          ToolTip="只知道弧上三点、圆心不好量时用。填起点、弧上一点、终点。三点不要共线。"/>
+                            <ComboBoxItem Content="手绘路径(含弧段)" Tag="RoiPolyline"
+                                          ToolTip="先在画布用直线/圆弧画闭合或开放路径，点「从 ROI 同步」。再在路径段列表里改某段为直线或三点弧。适合复杂外轮廓轨迹。"/>
                         </ComboBox>
                         <Grid x:Name="RowGeomCenter" Margin="0,0,0,4">
                             <Grid.ColumnDefinitions>
@@ -660,8 +751,10 @@
                                          SelectionChanged="GeomPathSegment_SelectionChanged"/>
                                 <TextBlock Text="段类型" FontSize="10" Foreground="#888" Margin="0,0,0,2"/>
                                 <ComboBox x:Name="CmbGeomPathSegKind" Height="24" Margin="0,0,0,4" SelectionChanged="GeomPathSegmentParam_Changed">
-                                    <ComboBoxItem Content="直线" Tag="Line" IsSelected="True"/>
-                                    <ComboBoxItem Content="圆弧(三点)" Tag="Arc"/>
+                                    <ComboBoxItem Content="直线" Tag="Line" IsSelected="True"
+                                                  ToolTip="该段为直线。两个端点之间不应有圆角。"/>
+                                    <ComboBoxItem Content="圆弧(三点)" Tag="Arc"
+                                                  ToolTip="该段为过起点、弧上点、终点的圆弧。改半径时起点终点不变，鼓出方向不变。"/>
                                 </ComboBox>
                                 <Grid Margin="0,0,0,4">
                                     <Grid.ColumnDefinitions>
@@ -727,21 +820,30 @@
                         <TextBlock FontWeight="Bold" Text="轮廓提取" Margin="0,0,0,8"/>
                         <StackPanel x:Name="PnlGenContourMode">
                             <TextBlock Text="轮廓生成模式" FontSize="11" Foreground="#888" Margin="0,0,0,2"/>
-                            <ComboBox x:Name="CmbGenContourMode" Height="26" Margin="0,0,0,6">
-                                <ComboBoxItem Content="边界" Tag="border" IsSelected="True"/>
-                                <ComboBoxItem Content="边界(含孔)" Tag="border_holes"/>
-                                <ComboBoxItem Content="中心线" Tag="center"/>
+                            <ComboBox x:Name="CmbGenContourMode" Height="26" Margin="0,0,0,4"
+                                      ToolTip="阈值/区域变成轮廓时要哪条线。只要外形选边界；孔也是特征选含孔；细长筋/轨迹选中心线。">
+                                <ComboBoxItem Content="边界" Tag="border" IsSelected="True"
+                                              ToolTip="只要外轮廓。常规外形匹配选这项。内孔会忽略，避免孔边缘噪声。"/>
+                                <ComboBoxItem Content="边界(含孔)" Tag="border_holes"
+                                              ToolTip="外轮廓 + 孔边都进模板。定位孔、窗口是重要特征时选。孔很多或孔边毛刺时反而更不稳。"/>
+                                <ComboBoxItem Content="中心线" Tag="center"
+                                              ToolTip="抽区域骨架/中心线，不是外框。细长胶路、刻线、窄筋用。面状大块区域不要选，轮廓会跑到中间。"/>
                             </ComboBox>
+                            <TextBlock Text="外框→边界；孔也要当特征→含孔；细长轨迹→中心线。"
+                                       Style="{StaticResource Ui.ParamHelp}"/>
                         </StackPanel>
                         <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="110"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="最少轮廓点数" VerticalAlignment="Center"/>
-                            <TextBox x:Name="TxtMinContourPoints" Grid.Column="1" Text="10" Height="24" VerticalContentAlignment="Center"/>
+                            <TextBlock Grid.Column="0" Text="最少轮廓点数" VerticalAlignment="Center"
+                                       ToolTip="短于该点数的碎轮廓丢掉。背景噪点多时提高到 20~40；真实小特征被删则降低到 8~10。"/>
+                            <TextBox x:Name="TxtMinContourPoints" Grid.Column="1" Text="10" Height="24" VerticalContentAlignment="Center"
+                                     ToolTip="过滤碎边。噪点多→加大；小特征丢失→减小。"/>
                         </Grid>
-                        <CheckBox x:Name="ChkLargestContourOnly" Content="仅保留最长轮廓" Foreground="#CCC" Margin="0,4,0,0"/>
+                        <CheckBox x:Name="ChkLargestContourOnly" Content="仅保留最长轮廓" Foreground="#CCC" Margin="0,4,0,0"
+                                  ToolTip="勾选后只留最长的一条，适合单个工件外框。多个孔/多个零件都要进模板时不要勾。"/>
                     </StackPanel>
                 </Border>
 
@@ -752,12 +854,18 @@
                         <TextBlock Text="先「预览轮廓」，再修剪；创建模型时使用修剪结果" FontSize="10" Foreground="#888" 
                                    TextWrapping="Wrap" Margin="0,0,0,6"/>
                         <TextBlock Text="修剪方式" FontSize="11" Foreground="#888" Margin="0,0,0,2"/>
-                        <ComboBox x:Name="CmbTrimMode" Height="26" Margin="0,0,0,6">
-                            <ComboBoxItem Content="简化 (Douglas-Peucker)" Tag="Simplify" IsSelected="True"/>
-                            <ComboBoxItem Content="平滑 (SmoothContoursXld)" Tag="Smooth"/>
-                            <ComboBoxItem Content="直线/圆弧分段" Tag="Segment"/>
-                            <ComboBoxItem Content="裁掉首尾" Tag="TrimEnds"/>
-                            <ComboBoxItem Content="删除短轮廓" Tag="FilterMinLength"/>
+                        <ComboBox x:Name="CmbTrimMode" Height="26" Margin="0,0,0,6"
+                                  ToolTip="预览轮廓后再修剪。点太多、锯齿→简化；毛刺→平滑；规则圆/直线件→分段；开放轮廓两端虚→裁首尾；碎渣→删短轮廓。">
+                            <ComboBoxItem Content="简化 (Douglas-Peucker)" Tag="Simplify" IsSelected="True"
+                                          ToolTip="按像素容差 ε 减少顶点。ε=1~3 常用：去锯齿仍贴边。ε 太大轮廓会削成折线，圆会变多边形。"/>
+                            <ComboBoxItem Content="平滑 (SmoothContoursXld)" Tag="Smooth"
+                                          ToolTip="平滑毛刺，保持点数较多。边缘抖、二值化发虚时用。过度平滑会把尖角抹圆。"/>
+                            <ComboBoxItem Content="直线/圆弧分段" Tag="Segment"
+                                          ToolTip="把轮廓拟合成直线和圆弧段。冲压件、钣金规则外形用。杂乱自然轮廓不要用。"/>
+                            <ComboBoxItem Content="裁掉首尾" Tag="TrimEnds"
+                                          ToolTip="沿弧长从两端各裁掉「首尾裁剪」像素。开放轨迹两端对不准、或起笔收笔多余时用。闭合外框一般填 0。"/>
+                            <ComboBoxItem Content="删除短轮廓" Tag="FilterMinLength"
+                                          ToolTip="周长小于「最短周长」的碎轮廓删除。阈值后满屏碎渣时用。最短周长按预览里噪声长度设，别删掉真实小孔。"/>
                         </ComboBox>
                         <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions>
@@ -783,7 +891,8 @@
                             <TextBlock Grid.Column="0" Text="最短周长" VerticalAlignment="Center"/>
                             <TextBox x:Name="TxtTrimMinLength" Grid.Column="1" Text="20" Height="24" VerticalContentAlignment="Center"/>
                         </Grid>
-                        <CheckBox x:Name="ChkTrimClosed" Content="闭合轮廓" IsChecked="True" Foreground="#CCC" Margin="0,2,0,6"/>
+                        <CheckBox x:Name="ChkTrimClosed" Content="闭合轮廓" IsChecked="True" Foreground="#CCC" Margin="0,2,0,6"
+                                  ToolTip="闭合外形（矩形/圆/封闭多边形）请勾选。开放轨迹、胶路线不要勾，否则会强行把头尾连上。"/>
                         <StackPanel Orientation="Horizontal">
                             <Button x:Name="BtnApplyTrim" Content="应用修剪" Width="90" Height="28" Margin="0,0,8,0" Click="BtnApplyTrim_Click"/>
                             <Button x:Name="BtnResetContours" Content="清除修剪" Width="90" Height="28" Click="BtnResetContours_Click"/>
@@ -796,20 +905,25 @@
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3" Visibility="Collapsed">
                     <StackPanel>
                         <TextBlock FontWeight="Bold" Text="Canny 边缘提取" Margin="0,0,0,8"/>
+                        <TextBlock Text="只在 ROI 内找边缘。预览应看到完整工件边、尽量少背景碎边。噪声大先加平滑；边断了降低阈值；碎边太多提高阈值。"
+                                   Style="{StaticResource Ui.ParamHelp}"/>
                         <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="50"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="平滑" VerticalAlignment="Center" ToolTip="Alpha"/>
-                            <TextBox x:Name="TxtEdgeAlpha" Grid.Column="1" Text="1" Height="24" VerticalContentAlignment="Center"/>
+                            <TextBlock Grid.Column="0" Text="平滑" VerticalAlignment="Center"
+                                       ToolTip="Canny 高斯平滑 α。1=默认。噪声大、麻点多为 1.5~2.5；加太大尖角会被抹圆、定位变钝。"/>
+                            <TextBox x:Name="TxtEdgeAlpha" Grid.Column="1" Text="1" Height="24" VerticalContentAlignment="Center"
+                                     ToolTip="噪声大→加大(1.5~2.5)；边变糊、尖角丢失→减小。"/>
                         </Grid>
                         <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="50"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="低阈" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="0" Text="低阈" VerticalAlignment="Center"
+                                       ToolTip="弱边缘门槛。边断成几截时降低(10~20)；背景纹理也被连进来时提高。"/>
                             <TextBox x:Name="TxtEdgeLow" Grid.Column="1" Text="20" Height="24" VerticalContentAlignment="Center"/>
                         </Grid>
                         <Grid Margin="0,0,0,4">
@@ -817,7 +931,8 @@
                                 <ColumnDefinition Width="50"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="高阈" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="0" Text="高阈" VerticalAlignment="Center"
+                                       ToolTip="强边缘门槛，建议约为低阈的 2 倍(如 20/40)。只留最亮的边时提高；主轮廓都进不来时降低。"/>
                             <TextBox x:Name="TxtEdgeHigh" Grid.Column="1" Text="40" Height="24" VerticalContentAlignment="Center"/>
                         </Grid>
                         <TextBlock Text="在 ROI 区域内做 Canny；与「手绘边线」模式不同" 
@@ -830,12 +945,15 @@
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3" Visibility="Collapsed">
                     <StackPanel>
                         <TextBlock FontWeight="Bold" Text="缩放范围" Margin="0,0,0,8"/>
+                        <TextBlock Text="相对模板图的整体放大缩小。先量现场最大/最小外观尺寸再设，宁窄勿宽。例如高度变化约 ±5% 就填 0.95~1.05。"
+                                   Style="{StaticResource Ui.ParamHelp}"/>
                         <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="70"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="最小缩放" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="0" Text="最小缩放" VerticalAlignment="Center"
+                                       ToolTip="能搜到的最小尺寸/模板尺寸。漏掉偏小件时略降(如 0.92)；误把远处干扰当缩小件时提高下限。"/>
                             <TextBox x:Name="TxtScaleMin" Grid.Column="1" Text="0.9" Height="24" VerticalContentAlignment="Center"/>
                         </Grid>
                         <Grid Margin="0,0,0,4">
@@ -843,7 +961,8 @@
                                 <ColumnDefinition Width="70"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="最大缩放" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="0" Text="最大缩放" VerticalAlignment="Center"
+                                       ToolTip="能搜到的最大尺寸/模板尺寸。漏掉偏大件时略升；误检多时收窄上限。"/>
                             <TextBox x:Name="TxtScaleMax" Grid.Column="1" Text="1.1" Height="24" VerticalContentAlignment="Center"/>
                         </Grid>
                         <Grid Margin="0,0,0,4">
@@ -851,10 +970,12 @@
                                 <ColumnDefinition Width="70"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="缩放步长" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="0" Text="缩放步长" VerticalAlignment="Center"
+                                       ToolTip="0=HALCON 自动。要更密的尺寸采样可填 0.02~0.05，会变慢。"/>
                             <TextBox x:Name="TxtScaleStep" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
                         </Grid>
-                        <TextBlock Text="缩放步长=0 表示自动" FontSize="10" Foreground="#888"/>
+                        <TextBlock Text="步长 0=自动。范围越大匹配越慢、越容易误检。"
+                                   Style="{StaticResource Ui.ParamHelp}"/>
                     </StackPanel>
                 </Border>
 
@@ -863,9 +984,11 @@
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
                     <StackPanel>
                         <Button x:Name="BtnPreviewContour" Content="预览轮廓 / 模板域" Height="28"
-                                Margin="0,0,0,8" Click="BtnPreviewContour_Click"/>
+                                Margin="0,0,0,8" Click="BtnPreviewContour_Click"
+                                ToolTip="按当前来源参数抽出轮廓叠在图上。绿线应贴合要匹配的边，没有背景碎渣。不满意先改阈值/ROI/修剪，再创建模型。"/>
                         <Button x:Name="BtnCreateModel" Content="创建形状模型" Height="32" FontWeight="Bold"
-                                Click="BtnCreateModel_Click"/>
+                                Click="BtnCreateModel_Click"
+                                ToolTip="用当前预览轮廓和匹配模型参数生成 .shm 或 .dfm。创建后到右侧测试；确认稳定再导出供流程加载。"/>
                     </StackPanel>
                 </Border>
 
@@ -874,24 +997,29 @@
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
                     <StackPanel>
                         <TextBlock FontWeight="Bold" Text="匹配模型参数" Margin="0,0,0,8"/>
+                        <TextBlock Text="这些参数写进 .shm/.dfm。角度范围按现场实际摆放留余量即可，不要无故开到 ±180°。创建后用右侧「测试形状匹配」验证。"
+                                   Style="{StaticResource Ui.ParamHelp}"/>
 
                         <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="80"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="金字塔层数" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="0" Text="金字塔层数" VerticalAlignment="Center"
+                                       ToolTip="粗到细的搜索层数。0=自动。目标很小或细节重要可改为 3~4；很大很清楚可用 5~6 加快。层数过多小特征会在粗层丢失。查找时的「搜索层数」建议与这里一致。"/>
                             <TextBox x:Name="TxtNumLevels" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"
-                                     ToolTip="0 = 自动"/>
+                                     ToolTip="0=自动。小目标/要细节→3~4；大目标要速度→5~6。"/>
                         </Grid>
-                        <TextBlock Text="层数 / 角度步长 / 缩放步长：0 = 自动" FontSize="10" Foreground="#888" Margin="0,0,0,6"/>
+                        <TextBlock Text="层数 / 角度步长 / 缩放步长填 0 表示 HALCON 自动估算。"
+                                   Style="{StaticResource Ui.ParamHelp}"/>
 
                         <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="80"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="起始角°" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="0" Text="起始角°" VerticalAlignment="Center"
+                                       ToolTip="允许的最小旋转角（相对模板创建时的朝向）。例如工件最多逆时针偏 20°、顺时针偏 40°，可设起始 -20、范围 60。完全随意旋转才考虑 -180 和范围 360，会明显变慢。"/>
                             <TextBox x:Name="TxtAngleStart" Grid.Column="1" Text="-30" Height="24" VerticalContentAlignment="Center"/>
                         </Grid>
 
@@ -900,7 +1028,8 @@
                                 <ColumnDefinition Width="80"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="角度范围°" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="0" Text="角度范围°" VerticalAlignment="Center"
+                                       ToolTip="从起始角起允许的转角跨度。起始 -30、范围 60 → 覆盖 -30°~+30°。漏检且明显转过了这个范围时再加大；误把倒置件当正件时收窄或改用极性。"/>
                             <TextBox x:Name="TxtAngleExtent" Grid.Column="1" Text="60" Height="24" VerticalContentAlignment="Center"/>
                         </Grid>
 
@@ -909,7 +1038,8 @@
                                 <ColumnDefinition Width="80"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="角度步长°" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="0" Text="角度步长°" VerticalAlignment="Center"
+                                       ToolTip="0=自动。要更密的角度采样可填 0.5~1，更慢更准。角度不需要很精时保持 0。"/>
                             <TextBox x:Name="TxtAngleStep" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
                         </Grid>
 
@@ -918,9 +1048,10 @@
                                 <ColumnDefinition Width="80"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="对比度" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="0" Text="对比度" VerticalAlignment="Center"
+                                       ToolTip="仅灰度图模板（矩形/多边形域）有效。auto=自动选边缘对比度。轮廓太碎可填较大整数(如 20~40)只留强边；轮廓缺失则改 auto 或减小。XLD 轮廓模板可忽略此项。"/>
                             <TextBox x:Name="TxtContrast" Grid.Column="1" Text="auto" Height="24" VerticalContentAlignment="Center"
-                                     ToolTip="图像模板：auto 或整数阈值"/>
+                                     ToolTip="图像模板：auto 或整数。碎边→加大；轮廓缺→减小或 auto。"/>
                         </Grid>
 
                         <Grid Margin="0,0,0,4">
@@ -928,26 +1059,42 @@
                                 <ColumnDefinition Width="80"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="最小对比度" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="0" Text="最小对比度" VerticalAlignment="Center"
+                                       ToolTip="查找时边缘至少要这么强才计入。现场比模板图更暗/更糊时略降(5~8)；误匹配背景纹理时提高(12~20)。默认 10 适合大多数工业图。"/>
                             <TextBox x:Name="TxtMinContrast" Grid.Column="1" Text="10" Height="24" VerticalContentAlignment="Center"/>
                         </Grid>
 
                         <TextBlock Text="优化" FontSize="11" Foreground="#888" Margin="0,6,0,2"/>
-                        <ComboBox x:Name="CmbOptimization" Height="26" Margin="0,0,0,4">
-                            <ComboBoxItem Content="自动" Tag="auto" IsSelected="True"/>
-                            <ComboBoxItem Content="无" Tag="none"/>
-                            <ComboBoxItem Content="点减少-低" Tag="point_reduction_low"/>
-                            <ComboBoxItem Content="点减少-中" Tag="point_reduction_medium"/>
-                            <ComboBoxItem Content="点减少-高" Tag="point_reduction_high"/>
+                        <ComboBox x:Name="CmbOptimization" Height="26" Margin="0,0,0,4"
+                                  ToolTip="减少模板点数换速度。一般选自动。轮廓点极多、查找超时再逐步加大「点减少」。精度不够时改「无」。">
+                            <ComboBoxItem Content="自动" Tag="auto" IsSelected="True"
+                                          ToolTip="HALCON 按模型自行取舍点数。不知道选什么时用这项。"/>
+                            <ComboBoxItem Content="无" Tag="none"
+                                          ToolTip="不减点，精度优先。模板点数不多、或亚像素定位要求高时选。会更慢。"/>
+                            <ComboBoxItem Content="点减少-低" Tag="point_reduction_low"
+                                          ToolTip="略减点。查找稍慢、轮廓较密时的第一步加速。"/>
+                            <ComboBoxItem Content="点减少-中" Tag="point_reduction_medium"
+                                          ToolTip="中等加速。大模板、整图搜索超时常用。若得分明显下降或定位抖，改回低或无。"/>
+                            <ComboBoxItem Content="点减少-高" Tag="point_reduction_high"
+                                          ToolTip="最多减点、最快。只适合很大很清楚的外形粗定位；精定位不要用。"/>
                         </ComboBox>
+                        <TextBlock Text="默认自动。查找太慢再加大点减少；定位发虚则改为无。"
+                                   Style="{StaticResource Ui.ParamHelp}"/>
 
                         <TextBlock Text="极性度量" FontSize="11" Foreground="#888" Margin="0,6,0,2"/>
-                        <ComboBox x:Name="CmbMetric" Height="26">
-                            <ComboBoxItem Content="忽略局部极性" Tag="ignore_local_polarity" IsSelected="True"/>
-                            <ComboBoxItem Content="忽略全局极性" Tag="ignore_global_polarity"/>
-                            <ComboBoxItem Content="忽略颜色极性" Tag="ignore_color_polarity"/>
-                            <ComboBoxItem Content="使用极性" Tag="use_polarity"/>
+                        <ComboBox x:Name="CmbMetric" Height="26"
+                                  ToolTip="边缘明暗方向要不要严格一致。反光不均、局部亮暗颠倒用忽略局部（默认）。整图可能黑白反相用忽略全局。明暗方向固定且要防反色误匹配才用「使用极性」。">
+                            <ComboBoxItem Content="忽略局部极性" Tag="ignore_local_polarity" IsSelected="True"
+                                          ToolTip="默认。允许工件上有的边亮外暗、有的边相反（反光、印刷深浅不一）。阈值/XLD 轮廓模板推荐。"/>
+                            <ComboBoxItem Content="忽略全局极性" Tag="ignore_global_polarity"
+                                          ToolTip="整幅图对比度可能整体反相（正片/负片、前后光源切换）时用。比忽略局部更松，误检可能略增。"/>
+                            <ComboBoxItem Content="忽略颜色极性" Tag="ignore_color_polarity"
+                                          ToolTip="彩色图通道极性不一致时用。工业灰度相机一般不必选。"/>
+                            <ComboBoxItem Content="使用极性" Tag="use_polarity"
+                                          ToolTip="严格要求边缘明暗方向与模板相同。例如必须「内部暗、外部亮」的外轮廓，防止阴阳反件、相似反色图案。照明稳定、极性明确时能减少误检；照明一变就容易漏检。"/>
                         </ComboBox>
+                        <TextBlock Text="反光不均→忽略局部。可能整图反色→忽略全局。明暗方向固定要防反件→使用极性。"
+                                   Style="{StaticResource Ui.ParamHelp}"/>
                     </StackPanel>
                 </Border>
             </StackPanel>

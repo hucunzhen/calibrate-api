@@ -1244,10 +1244,11 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "display",
                 DisplayName = "显示图像",
-                Description = "每个画布上的「显示图像」节点独占一个预览窗口（标题含短 Guid）；同一节点多次运行会刷新该窗口。可选 Points（单条点列）或 PointsList（多条点列；可接「循环收集」PointsList / List、flow_loop 的 PointsList）。可选 Xld：叠加 HALCON XLD 折线（橘色）。可选 BarIds 与参数「点列折线」控制青色折线：默认 auto 仅在条号不全相同时分段；焊头/整段轨迹选 single。右键连线看图仍共用快捷预览窗口。",
+                Description = "每个画布上的「显示图像」节点独占一个预览窗口（标题含短 Guid）；同一节点多次运行会刷新该窗口。可同时接多路 Points（Points、Points2…，接满最后一个自动再加一口，最多 8 路，每路一种颜色）。也可接 PointsList（多条点列；可接「循环收集」PointsList / List、flow_loop 的 PointsList）。可选 Xld：叠加 HALCON XLD 折线（橘色）。可选 BarIds 与参数「点列折线」控制折线：默认 auto 仅在条号不全相同时分段；焊头/整段轨迹选 single。多路 Points 始终各自成段、互不连线。右键连线看图仍共用快捷预览窗口。",
                 Category = "可视化",
                 Params =
                 {
+                    new OperatorParam { Name = "pointPortCount", DisplayName = "点列端口数", DefaultValue = "2", Description = "Points 输入口数量（Points、Points2…）。接满最后一个后自动再加一个，最多 8。每路点列用不同颜色叠加" },
                     new OperatorParam { Name = "dotRadius", DisplayName = "点位半径", DefaultValue = "3", Description = "叠加点位的圆点半径 (像素)" },
                     new OperatorParam
                     {

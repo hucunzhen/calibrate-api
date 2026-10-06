@@ -8,7 +8,7 @@ using CalibOperatorPInvoke;
 #if HALCON_ENABLED
 namespace CalibOperatorCLI_Example
 {
-    /// <summary>测量几何「手绘路径」：保留顶点/弧段结构并支持逐段手调。</summary>
+    /// <summary>几何图形「手绘路径」：保留顶点/弧段结构并支持逐段手调。</summary>
     public static class HalconGeometryPathEditor
     {
         public static RoiContourPath ClonePath(RoiContourPath? src)

@@ -42,7 +42,7 @@ namespace CalibOperatorCLI_Example
         ImageRectangle,
         /// <summary>多边形域内灰度图 → create_shape_model</summary>
         ImagePolygon,
-        /// <summary>由测量/ROI 参数生成几何轮廓 XLD，可手调宽高角后建模板。</summary>
+        /// <summary>由圆/矩形/圆弧/路径等几何图形生成轮廓 XLD，可手调宽高角后建模板。</summary>
         GeometryXld
     }
 

@@ -5305,7 +5305,7 @@ namespace CalibOperatorCLI_Example
             {
                 MessageBox.Show(
                     "几何参数无效。圆弧需填写圆心/半径/起始角/张角；三点弧需有效弧上点；手绘路径需先「从 ROI 同步」。",
-                    "测量几何",
+                    "几何图形轮廓",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
                 return false;
@@ -5315,7 +5315,7 @@ namespace CalibOperatorCLI_Example
                 _imgWidth, _imgHeight, p, _geometryRoiPolylineContour, _geometryRoiPath);
             if (bundle.Contours == null || bundle.Contours.Count == 0 || bundle.Contours[0].Length < 2)
             {
-                MessageBox.Show("未能生成轮廓，请检查参数。", "测量几何", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show("未能生成轮廓，请检查参数。", "几何图形轮廓", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
 

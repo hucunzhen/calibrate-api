@@ -1215,6 +1215,8 @@ namespace CalibOperatorCLI_Example
                 return BuildFlowLoopDynamicPorts(node);
             if (string.Equals(node.Def.TypeId, "list_pick", StringComparison.Ordinal))
                 return BuildListPickDynamicPorts(node);
+            if (string.Equals(node.Def.TypeId, "display", StringComparison.Ordinal))
+                return BuildDisplayDynamicPorts(node);
             return node.Def.Ports;
         }
 
@@ -1293,7 +1295,111 @@ namespace CalibOperatorCLI_Example
         private static bool NodeUsesDynamicPorts(FlowNode node) =>
             string.Equals(node.Def.TypeId, "composite", StringComparison.Ordinal)
             || string.Equals(node.Def.TypeId, "flow_loop", StringComparison.Ordinal)
-            || string.Equals(node.Def.TypeId, "list_pick", StringComparison.Ordinal);
+            || string.Equals(node.Def.TypeId, "list_pick", StringComparison.Ordinal)
+            || string.Equals(node.Def.TypeId, "display", StringComparison.Ordinal);
+
+        private const int DisplayPointPortMax = 8;
+
+        private static readonly (string Hex, int A, int R, int G, int B)[] DisplayPointSeriesPalette =
+        {
+            ("#2196F3", 200, 0, 200, 255),
+            ("#F06292", 220, 240, 98, 146),
+            ("#FFEE58", 230, 255, 238, 88),
+            ("#9CCC65", 220, 156, 204, 101),
+            ("#CE93D8", 220, 206, 147, 216),
+            ("#FF8A65", 220, 255, 138, 101),
+            ("#E0E0E0", 230, 224, 224, 224),
+            ("#4DD0E1", 220, 77, 208, 225)
+        };
+
+        private static bool TryParseDisplayPointPortIndex(string? name, out int index)
+        {
+            index = 0;
+            if (string.IsNullOrWhiteSpace(name))
+                return false;
+            if (string.Equals(name, "Points", StringComparison.Ordinal))
+            {
+                index = 1;
+                return true;
+            }
+
+            if (!name.StartsWith("Points", StringComparison.Ordinal) || name.Length <= "Points".Length)
+                return false;
+            if (!int.TryParse(name["Points".Length..], out int n) || n < 2 || n > DisplayPointPortMax)
+                return false;
+            index = n;
+            return true;
+        }
+
+        private static int ReadDisplayPointPortCount(FlowNode node)
+        {
+            if (int.TryParse((node.Params.GetValueOrDefault("pointPortCount") ?? "").Trim(), out int n))
+                return Math.Clamp(n, 1, DisplayPointPortMax);
+            return 2;
+        }
+
+        private static IReadOnlyList<PortDef> BuildDisplayDynamicPorts(FlowNode node)
+        {
+            int slots = ReadDisplayPointPortCount(node);
+            var ports = new List<PortDef>(node.Def.Ports.Count + Math.Max(0, slots - 1));
+            foreach (var port in node.Def.Ports)
+            {
+                ports.Add(port);
+                if (port.Direction != PortDirection.Input || !string.Equals(port.Name, "Points", StringComparison.Ordinal))
+                    continue;
+                for (int i = 2; i <= slots; i++)
+                {
+                    int paletteIndex = (i - 1) % DisplayPointSeriesPalette.Length;
+                    ports.Add(new PortDef
+                    {
+                        Name = "Points" + i,
+                        Direction = PortDirection.Input,
+                        DataType = typeof(Point2D[]),
+                        ColorHex = DisplayPointSeriesPalette[paletteIndex].Hex,
+                        IsOptional = true
+                    });
+                }
+            }
+
+            return ports;
+        }
+
+        /// <summary>
+        /// 按已连接（以及即将连上）的 Points 口，保证端口数不少于配置值；最后一个口已被占用时再留一个空口。
+        /// </summary>
+        private bool TrySyncDisplayPointPortCount(FlowNode node, IEnumerable<string>? plannedInputPortNames = null)
+        {
+            if (!string.Equals(node.Def.TypeId, "display", StringComparison.Ordinal))
+                return false;
+
+            int highest = 0;
+            foreach (var conn in _connections)
+            {
+                if (!ReferenceEquals(conn.ToPort.Owner, node))
+                    continue;
+                if (TryParseDisplayPointPortIndex(conn.ToPort.Definition.Name, out int idx))
+                    highest = Math.Max(highest, idx);
+            }
+
+            if (plannedInputPortNames != null)
+            {
+                foreach (string name in plannedInputPortNames)
+                {
+                    if (TryParseDisplayPointPortIndex(name, out int idx))
+                        highest = Math.Max(highest, idx);
+                }
+            }
+
+            int desired = Math.Max(ReadDisplayPointPortCount(node), highest);
+            if (highest > 0 && highest >= desired && desired < DisplayPointPortMax)
+                desired++;
+            desired = Math.Clamp(desired, 1, DisplayPointPortMax);
+            string text = desired.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (string.Equals(node.Params.GetValueOrDefault("pointPortCount"), text, StringComparison.Ordinal))
+                return false;
+            node.Params["pointPortCount"] = text;
+            return true;
+        }
 
         private void EnsureDynamicNodePortLayout(FlowNode node)
         {
@@ -1973,7 +2079,14 @@ namespace CalibOperatorCLI_Example
         // ================================================================
 
         private void CreateConnection(PortVisual from, PortVisual to)
-            => CreateConnectionCore(from, to, pushUndoSnapshot: true);
+        {
+            CreateConnectionCore(from, to, pushUndoSnapshot: true);
+            var inPort = from.Definition.Direction == PortDirection.Input ? from : to;
+            if (!TryParseDisplayPointPortIndex(inPort.Definition.Name, out _))
+                return;
+            if (TrySyncDisplayPointPortCount(inPort.Owner))
+                EnsureDynamicNodePortLayout(inPort.Owner);
+        }
 
         private void CreateConnectionCore(PortVisual from, PortVisual to, bool pushUndoSnapshot)
         {
@@ -2601,6 +2714,17 @@ namespace CalibOperatorCLI_Example
             }
 
             var conns = data.Connections ?? new List<FlowConnData>();
+            foreach (var kv in mapOldIdToNode)
+            {
+                if (!string.Equals(kv.Value.Def.TypeId, "display", StringComparison.Ordinal))
+                    continue;
+                var planned = conns
+                    .Where(c => string.Equals(c.ToNodeId, kv.Key, StringComparison.OrdinalIgnoreCase))
+                    .Select(c => c.ToPort ?? "");
+                if (TrySyncDisplayPointPortCount(kv.Value, planned))
+                    EnsureDynamicNodePortLayout(kv.Value);
+            }
+
             foreach (var cd in conns)
             {
                 if (!mapOldIdToNode.TryGetValue(cd.FromNodeId, out var fromN)) continue;
@@ -2698,7 +2822,19 @@ namespace CalibOperatorCLI_Example
                 nodeLookup[nd.Id] = node;
             }
 
-            foreach (var cd in data.Connections ?? new List<FlowConnData>())
+            var pendingConnections = data.Connections ?? new List<FlowConnData>();
+            foreach (var kv in nodeLookup)
+            {
+                if (!string.Equals(kv.Value.Def.TypeId, "display", StringComparison.Ordinal))
+                    continue;
+                var planned = pendingConnections
+                    .Where(c => string.Equals(c.ToNodeId, kv.Key, StringComparison.OrdinalIgnoreCase))
+                    .Select(c => c.ToPort ?? "");
+                if (TrySyncDisplayPointPortCount(kv.Value, planned))
+                    EnsureDynamicNodePortLayout(kv.Value);
+            }
+
+            foreach (var cd in pendingConnections)
             {
                 if (!nodeLookup.TryGetValue(cd.FromNodeId, out var fromNode))
                     continue;
@@ -8611,35 +8747,120 @@ namespace CalibOperatorCLI_Example
             return result;
         }
 
-        private static (Point2D[]? Points, int[]? BarIds) MergeDisplayPointOverlays(
-            Point2D[]? singlePts,
+        private static Point2D[]? CoerceDisplayPointInput(object? src)
+        {
+            return src switch
+            {
+                Point2D[] p2 => p2,
+                CalibPoint3D[] p3 => p3.Select(p => new Point2D(p.X, p.Y)).ToArray(),
+                _ => null
+            };
+        }
+
+        private static List<(Point2D[] Points, int Series)> CollectDisplayPointInputs(IReadOnlyDictionary<string, object?> inputs)
+        {
+            var list = new List<(Point2D[] Points, int Series)>();
+            for (int i = 1; i <= DisplayPointPortMax; i++)
+            {
+                string key = i == 1 ? "Points" : "Points" + i;
+                if (!inputs.TryGetValue(key, out var obj) || obj == null)
+                    continue;
+                Point2D[]? pts = CoerceDisplayPointInput(obj);
+                if (pts == null || pts.Length == 0)
+                    continue;
+                list.Add((pts, i));
+            }
+
+            return list;
+        }
+
+        private static (Point2D[]? Points, int[]? BarIds, int[]? SeriesIds) MergeDisplayPointOverlays(
+            IReadOnlyList<(Point2D[] Points, int Series)> pointInputs,
             object? pointsListObj,
             int[]? explicitBarIds)
         {
-            var polylines = CoerceToPoint2DPolylineList(pointsListObj);
-            if (singlePts != null && singlePts.Length > 0)
-                polylines.Add(singlePts);
+            var polylines = new List<(Point2D[] Pts, int Series)>();
+            if (pointInputs != null)
+            {
+                foreach (var item in pointInputs)
+                {
+                    if (item.Points != null && item.Points.Length > 0)
+                        polylines.Add((item.Points, item.Series));
+                }
+            }
+
+            var fromList = CoerceToPoint2DPolylineList(pointsListObj);
+            for (int i = 0; i < fromList.Count; i++)
+                polylines.Add((fromList[i], 100 + i));
 
             if (polylines.Count == 0)
-                return (null, null);
+                return (null, null, null);
 
-            if (explicitBarIds != null
-                && polylines.Count == 1
-                && explicitBarIds.Length == polylines[0].Length)
+            if (polylines.Count == 1
+                && explicitBarIds != null
+                && explicitBarIds.Length == polylines[0].Pts.Length)
             {
-                return (polylines[0], explicitBarIds);
+                int[] series = Enumerable.Repeat(polylines[0].Series, polylines[0].Pts.Length).ToArray();
+                return (polylines[0].Pts, explicitBarIds, series);
             }
 
             var mergedPts = new List<Point2D>();
             var mergedBarIds = new List<int>();
-            for (int i = 0; i < polylines.Count; i++)
+            var mergedSeries = new List<int>();
+            bool useExplicitOnFirst = explicitBarIds != null && explicitBarIds.Length == polylines[0].Pts.Length;
+            if (useExplicitOnFirst)
             {
-                Point2D[] seg = polylines[i];
-                mergedPts.AddRange(seg);
-                mergedBarIds.AddRange(Enumerable.Repeat(i, seg.Length));
+                mergedPts.AddRange(polylines[0].Pts);
+                mergedBarIds.AddRange(explicitBarIds!);
+                mergedSeries.AddRange(Enumerable.Repeat(polylines[0].Series, polylines[0].Pts.Length));
+                int nextBar = explicitBarIds!.Max() + 1;
+                for (int i = 1; i < polylines.Count; i++)
+                {
+                    Point2D[] seg = polylines[i].Pts;
+                    mergedPts.AddRange(seg);
+                    mergedBarIds.AddRange(Enumerable.Repeat(nextBar, seg.Length));
+                    mergedSeries.AddRange(Enumerable.Repeat(polylines[i].Series, seg.Length));
+                    nextBar++;
+                }
+            }
+            else
+            {
+                for (int i = 0; i < polylines.Count; i++)
+                {
+                    Point2D[] seg = polylines[i].Pts;
+                    mergedPts.AddRange(seg);
+                    mergedBarIds.AddRange(Enumerable.Repeat(i, seg.Length));
+                    mergedSeries.AddRange(Enumerable.Repeat(polylines[i].Series, seg.Length));
+                }
             }
 
-            return (mergedPts.ToArray(), mergedBarIds.ToArray());
+            return (mergedPts.ToArray(), mergedBarIds.ToArray(), mergedSeries.ToArray());
+        }
+
+        private static bool DisplayOverlayUsesSeriesColors(int[]? seriesIds)
+        {
+            if (seriesIds == null || seriesIds.Length == 0)
+                return false;
+            int firstKey = seriesIds[0] >= 100 ? 100 : seriesIds[0];
+            for (int i = 1; i < seriesIds.Length; i++)
+            {
+                int key = seriesIds[i] >= 100 ? 100 : seriesIds[i];
+                if (key != firstKey)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static System.Drawing.Color DisplaySeriesLineColor(int seriesId)
+        {
+            if (seriesId <= 1)
+                return System.Drawing.Color.FromArgb(200, 0, 200, 255);
+            int idx = seriesId >= 100
+                ? (seriesId - 100 + 2) % DisplayPointSeriesPalette.Length
+                : (seriesId - 1) % DisplayPointSeriesPalette.Length;
+            var p = DisplayPointSeriesPalette[idx];
+            return System.Drawing.Color.FromArgb(p.A, p.R, p.G, p.B);
         }
 
         private static CalibImage FuseExposureCalibImages(IReadOnlyList<CalibImage> images, string mode)
@@ -12315,29 +12536,24 @@ namespace CalibOperatorCLI_Example
                         var backgroundImg = (inputs.TryGetValue("Img", out var bgObj) ? bgObj : null) as CalibImage;
                         if (foregroundImg == null && backgroundImg == null)
                             throw new InvalidOperationException("显示: 缺少输入图像(Image 或 Img)");
-                        inputs.TryGetValue("Points", out var ptsObj);
-                        Point2D[]? singlePts = ptsObj switch
-                        {
-                            Point2D[] p2 => p2,
-                            CalibPoint3D[] p3 => p3.Select(p => new Point2D(p.X, p.Y)).ToArray(),
-                            _ => null
-                        };
+                        var pointInputs = CollectDisplayPointInputs(inputs);
                         inputs.TryGetValue("PointsList", out var ptsListObj);
                         inputs.TryGetValue("BarIds", out var barIdsObj);
                         int[]? explicitBarIds = barIdsObj as int[];
-                        var (overlayPts, overlayBarIds) = MergeDisplayPointOverlays(singlePts, ptsListObj, explicitBarIds);
+                        var (overlayPts, overlayBarIds, overlaySeriesIds) = MergeDisplayPointOverlays(pointInputs, ptsListObj, explicitBarIds);
                         inputs.TryGetValue("Xld", out var xldObj);
                         var xldBundle = xldObj as HalconXldContourBundle;
                         int dotRadius = int.TryParse(node.Params.GetValueOrDefault("dotRadius"), out int r) ? r : 3;
                         string dispSlot = node.Id.ToString("D");
                         string dispTitle = $"{node.Def.DisplayName} [{node.Id.ToString("N")[..8]}]";
                         string pointLineJoin = (node.Params.GetValueOrDefault("pointLineJoin", "auto") ?? "auto").Trim();
-                        ShowImagePreview(foregroundImg, overlayPts, dotRadius, backgroundImg, dispSlot, dispTitle, overlayBarIds, pointLineJoin, xldBundle);
-                        int polylineCount = CoerceToPoint2DPolylineList(ptsListObj).Count + (singlePts != null && singlePts.Length > 0 ? 1 : 0);
+                        ShowImagePreview(foregroundImg, overlayPts, dotRadius, backgroundImg, dispSlot, dispTitle, overlayBarIds, pointLineJoin, xldBundle, null, overlaySeriesIds);
+                        int listCount = CoerceToPoint2DPolylineList(ptsListObj).Count;
+                        int polylineCount = pointInputs.Count + listCount;
                         node.ResultSummary = overlayPts == null
                             ? "显示图像"
                             : polylineCount > 1
-                                ? $"显示 {overlayPts.Length} 点 · {polylineCount} 条折线"
+                                ? $"显示 {overlayPts.Length} 点 · {polylineCount} 路点列"
                                 : $"显示 {overlayPts.Length} 点";
                         break;
                     }
@@ -15519,6 +15735,8 @@ namespace CalibOperatorCLI_Example
                         value = FormatPathForFlowParam(value);
                     node.Params[paramDef.Name] = value;
                 }
+                if (string.Equals(node.Def.TypeId, "display", StringComparison.Ordinal))
+                    TrySyncDisplayPointPortCount(node);
                 if (NodeUsesDynamicPorts(node))
                 {
                     string newDynamicPortSchema = BuildDesiredNodePortSchemaSignature(node);
@@ -16042,7 +16260,8 @@ namespace CalibOperatorCLI_Example
             int[]? overlayBarIds = null,
             string? overlayPointLineJoinMode = null,
             HalconXldContourBundle? xldOverlay = null,
-            Action<System.Drawing.Bitmap>? customBitmapDraw = null)
+            Action<System.Drawing.Bitmap>? customBitmapDraw = null,
+            int[]? overlaySeriesIds = null)
         {
             var baseSource = backgroundImg ?? img;
             if (baseSource == null) return;
@@ -16094,13 +16313,18 @@ namespace CalibOperatorCLI_Example
                     g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
                     if (drawPts && overlayPoints != null)
                     {
+                        bool colorBySeries = DisplayOverlayUsesSeriesColors(overlaySeriesIds)
+                            && overlaySeriesIds != null
+                            && overlaySeriesIds.Length == overlayPoints.Length;
                         if (overlayPoints.Length >= 2)
                         {
                             using var linePen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(200, 0, 200, 255), 1.8f);
                             linePen.StartCap = linePen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
                             linePen.LineJoin = System.Drawing.Drawing2D.LineJoin.Round;
                             bool useGrid = CalibrationPointGrid.IsGridLineJoinMode(overlayPointLineJoinMode);
-                            bool useBarSplit = !useGrid && ShouldUseBarSplitForPointOverlay(overlayBarIds, overlayPoints.Length, overlayPointLineJoinMode);
+                            bool useBarSplit = !useGrid && (
+                                colorBySeries
+                                || ShouldUseBarSplitForPointOverlay(overlayBarIds, overlayPoints.Length, overlayPointLineJoinMode));
                             if (useGrid)
                             {
                                 var (gridRows, gridCols) = CalibrationPointGrid.InferLayout(overlayPoints.Length);
@@ -16111,7 +16335,14 @@ namespace CalibOperatorCLI_Example
                                 int segStart = 0;
                                 for (int i = 1; i <= overlayPoints.Length; i++)
                                 {
-                                    if (i == overlayPoints.Length || overlayBarIds![i] != overlayBarIds[i - 1])
+                                    bool barBreak = i < overlayPoints.Length
+                                        && overlayBarIds != null
+                                        && overlayBarIds.Length == overlayPoints.Length
+                                        && overlayBarIds[i] != overlayBarIds[i - 1];
+                                    bool seriesBreak = colorBySeries
+                                        && i < overlayPoints.Length
+                                        && overlaySeriesIds![i] != overlaySeriesIds[i - 1];
+                                    if (i == overlayPoints.Length || barBreak || seriesBreak)
                                     {
                                         int segLen = i - segStart;
                                         if (segLen >= 2)
@@ -16123,6 +16354,8 @@ namespace CalibOperatorCLI_Example
                                                 gdiSeg[k] = new System.Drawing.PointF((float)p.X, (float)p.Y);
                                             }
 
+                                            if (colorBySeries)
+                                                linePen.Color = DisplaySeriesLineColor(overlaySeriesIds![segStart]);
                                             DrawPointOverlaySegment(g, linePen, gdiSeg);
                                         }
 
@@ -16143,6 +16376,8 @@ namespace CalibOperatorCLI_Example
                             var p = overlayPoints[i];
                             int cx = (int)p.X, cy = (int)p.Y;
                             int r = dotRadius;
+                            if (colorBySeries)
+                                pointPen.Color = DisplaySeriesLineColor(overlaySeriesIds![i]);
                             g.DrawEllipse(pointPen, cx - r, cy - r, r * 2, r * 2);
                             g.DrawLine(pointPen, cx - r - 1, cy, cx + r + 1, cy);
                             g.DrawLine(pointPen, cx, cy - r - 1, cx, cy + r + 1);
@@ -16181,6 +16416,9 @@ namespace CalibOperatorCLI_Example
             if (overlayPoints != null && overlayPoints.Length > 0)
                 previewTitle += $" ({overlayPoints.Length} 个点)";
             if (overlayPoints != null && overlayPoints.Length > 0 &&
+                DisplayOverlayUsesSeriesColors(overlaySeriesIds))
+                previewTitle += " · 多路分色";
+            else if (overlayPoints != null && overlayPoints.Length > 0 &&
                 ShouldUseBarSplitForPointOverlay(overlayBarIds, overlayPoints.Length, overlayPointLineJoinMode))
                 previewTitle += " · 分包连线";
             if (xldOverlay != null && xldOverlay.ContourCount > 0)
