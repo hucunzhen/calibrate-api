@@ -220,8 +220,8 @@ namespace CalibOperatorCLI_Example
             return p.Kind switch
             {
                 HalconMeasuredGeometryKind.Circle => BuildCircle(p.CenterCol, p.CenterRow, p.RadiusPx),
-                HalconMeasuredGeometryKind.AxisAlignedRectangle => BuildAxisAlignedRectangle(
-                    p.CenterCol, p.CenterRow, p.WidthPx, p.HeightPx),
+                HalconMeasuredGeometryKind.AxisAlignedRectangle => BuildRotatedRectangle(
+                    p.CenterCol, p.CenterRow, p.WidthPx * 0.5, p.HeightPx * 0.5, 0),
                 HalconMeasuredGeometryKind.RotatedRectangle => BuildRotatedRectangle(
                     p.CenterCol, p.CenterRow, p.WidthPx * 0.5, p.HeightPx * 0.5, p.AngleDeg),
                 HalconMeasuredGeometryKind.Arc => BuildCircularArc(

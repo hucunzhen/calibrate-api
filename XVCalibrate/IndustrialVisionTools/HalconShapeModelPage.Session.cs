@@ -414,8 +414,6 @@ namespace CalibOperatorCLI_Example
                 return "circle";
             if (_hasRoi && RbPolygonMode?.IsChecked == true)
                 return "polygon";
-            if (_hasRoi && RbRectMode?.IsChecked == true)
-                return "rect";
             if (HasUsableRotatedRectRoi())
                 return "rotatedrect";
             return "none";
@@ -424,10 +422,10 @@ namespace CalibOperatorCLI_Example
         private void CaptureRoiIntoSettings(HalconShapeModelUiSettings s)
         {
             s.RoiMode = CaptureCurrentRoiMode();
-            s.RoiRectX = _roiRectImage.X;
-            s.RoiRectY = _roiRectImage.Y;
-            s.RoiRectW = _roiRectImage.Width;
-            s.RoiRectH = _roiRectImage.Height;
+            s.RoiRectX = _rotRectCenterX - _rotRectWidth * 0.5;
+            s.RoiRectY = _rotRectCenterY - _rotRectHeight * 0.5;
+            s.RoiRectW = _rotRectWidth;
+            s.RoiRectH = _rotRectHeight;
             s.RotRectCenterX = _rotRectCenterX;
             s.RotRectCenterY = _rotRectCenterY;
             s.RotRectWidth = _rotRectWidth;
@@ -511,7 +509,7 @@ namespace CalibOperatorCLI_Example
                 case "rect":
                     if (s.RoiRectW > 5 && s.RoiRectH > 5)
                     {
-                        _roiRectImage = new Rect(s.RoiRectX, s.RoiRectY, s.RoiRectW, s.RoiRectH);
+                        ApplyAxisAlignedRectAsRotatedRoi(s.RoiRectX, s.RoiRectY, s.RoiRectW, s.RoiRectH);
                         _hasRoi = true;
                     }
                     break;
@@ -629,10 +627,21 @@ namespace CalibOperatorCLI_Example
                 case "opentrajectories":
                     RbOpenTrajectoriesMode.IsChecked = true;
                     break;
+                case "rect":
                 default:
-                    RbRectMode.IsChecked = true;
+                    RbRotatedRectMode.IsChecked = true;
                     break;
             }
+        }
+
+        private void ApplyAxisAlignedRectAsRotatedRoi(double left, double top, double width, double height)
+        {
+            _rotRectCenterX = left + width * 0.5;
+            _rotRectCenterY = top + height * 0.5;
+            _rotRectWidth = width;
+            _rotRectHeight = height;
+            _rotRectAngleDeg = 0;
+            _rotRectSettingAngle = false;
         }
 
         private static void ImportRoiPath(RoiContourPath path, HalconShapeModelRoiPathDto? dto)

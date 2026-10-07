@@ -55,21 +55,17 @@
                         </StackPanel>
                         <WrapPanel Grid.Row="1" Margin="0,0,0,6">
                             <TextBlock Text="形状" Width="40" VerticalAlignment="Center" Foreground="#90A4AE" FontSize="11" Margin="0,0,8,4"/>
-                            <RadioButton x:Name="RbRectMode" Content="矩形" GroupName="DrawMode" IsChecked="True"
+                            <RadioButton x:Name="RbRotatedRectMode" Content="矩形" GroupName="DrawMode" IsChecked="True"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
-                                         ToolTip="轴对齐矩形 ROI。适合摆正的工件外框、阈值/Canny/灰度图模板。选中后可弹参数框或在画布拖绘。"/>
-                            <RadioButton x:Name="RbRotatedRectMode" Content="旋转矩形" GroupName="DrawMode"
-                                         Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
-                                         MinHeight="32" Checked="DrawMode_Changed"
-                                         ToolTip="带角度的矩形。斜放料片、标签用。中心、宽高、角度在对话框输入，比在图上估角更准。"/>
+                                         ToolTip="矩形 ROI，可带角度。角度填 0 即为轴对齐。选中后弹参数框填中心、宽高、角度；也可在画布拖绘后再点方向定角。"/>
                             <RadioButton x:Name="RbCircleMode" Content="圆形" GroupName="DrawMode"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
                                          ToolTip="圆孔/外圆 ROI。圆心与半径在对话框输入。用于圆模板或「几何图形 → 轮廓」里的圆。"/>
                             <Button x:Name="BtnPrimitiveRoiParams" Content="参数…" MinWidth="56" Height="32" Padding="8,4"
                                     Margin="0,0,6,4" Visibility="Collapsed" Click="BtnPrimitiveRoiParams_Click"
-                                    ToolTip="编辑当前矩形/旋转矩形/圆的 ROI 参数（中心、宽高、半径、角度）"/>
+                                    ToolTip="编辑当前矩形/圆的 ROI 参数（中心、宽高、半径、角度）"/>
                             <RadioButton x:Name="RbPolygonMode" Content="多边形" GroupName="DrawMode"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
@@ -606,13 +602,13 @@
                             <ComboBoxItem Content="手绘 ROI 边线 (设梯度方向)" Tag="PolygonXld"
                                           ToolTip="外形已知或成像脏、自动轮廓碎时，用多边形/环形描出真实边。必须设置「手绘边线梯度」：外轮廓一般选「向外」（内部工件、外部背景）；孔边选「向内」。梯度反了会找不到或找反。"/>
                             <ComboBoxItem Content="矩形 ROI 灰度图" Tag="ImageRectangle"
-                                          ToolTip="把矩形里整块灰度交给 HALCON，不只用外框。适合内部图案、字符、定位孔阵列。ROI 尽量只包目标、背景简单。对比度填 auto 即可。"/>
+                                          ToolTip="把矩形里整块灰度交给 HALCON，不只用外框。矩形可带角度。适合内部图案、字符、定位孔阵列。ROI 尽量只包目标、背景简单。对比度填 auto 即可。"/>
                             <ComboBoxItem Content="多边形域灰度图" Tag="ImagePolygon"
                                           ToolTip="与矩形灰度图相同，但区域是多边形，可躲开旁边工件/夹具。适合不规则外形且要用内部纹理匹配。"/>
                             <ComboBoxItem Content="几何图形 → 轮廓" Tag="GeometryXld"
                                           ToolTip="用圆、矩形、圆弧或路径生成理想轮廓，可手调中心/宽高/半径。标准件、尺寸稳定时首选。先画 ROI 再「从 ROI 同步」，或直接填参数（有九点标定时按 mm 理解）。不是尺寸测量工具。"/>
                         </ComboBox>
-                        <TextBlock Text="阈值轮廓：灰差大、外形封闭。Canny：边缘清晰但不好二值化。手绘边线：自动轮廓碎、必须人工指定边与明暗方向。灰度图：靠内部纹理而不是外框。几何图形：圆/矩形/圆弧/路径的理想轮廓，可手调尺寸。"
+                        <TextBlock Text="阈值轮廓：灰差大、外形封闭。Canny：边缘清晰但不好二值化。手绘边线：自动轮廓碎、必须人工指定边与明暗方向。灰度图：靠内部纹理而不是外框。几何图形：圆/矩形（可带角度）/圆弧/路径的理想轮廓，可手调尺寸。"
                                    Style="{StaticResource Ui.ParamHelp}"/>
                         <TextBlock Text="模型类型" FontSize="11" Foreground="#888" Margin="0,0,0,2"/>
                         <ComboBox x:Name="CmbModelKind" Height="26" SelectedValuePath="Tag"
@@ -642,11 +638,9 @@
                         <TextBlock x:Name="TxtGeomMmHints" Text="" Foreground="#80CBC4" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,8"/>
                         <TextBlock Text="几何类型" FontSize="11" Foreground="#888" Margin="0,0,0,2"/>
                         <ComboBox x:Name="CmbGeometryKind" Height="26" Margin="0,0,0,6" SelectionChanged="GeometryParam_Changed"
-                                  ToolTip="选最接近真实外形的几何。轴对齐矩形边平行于图像；旋转矩形可带角度；圆/圆弧用于孔和弧边；三点圆弧过已知三点；手绘路径用于直线+圆弧拼接的轨迹。">
-                            <ComboBoxItem Content="轴对齐矩形" Tag="AxisAlignedRectangle" IsSelected="True"
-                                          ToolTip="边平行于图像行列。工件摆正、要矩形外框时用。填中心 X/Y 与宽高（像素；有九点标定可对照 mm 提示）。"/>
-                            <ComboBoxItem Content="旋转矩形" Tag="RotatedRectangle"
-                                          ToolTip="矩形可旋转。长边方向填「角度°」。斜放标签、非水平料片用这个，不要用轴对齐硬套。"/>
+                                  ToolTip="选最接近真实外形的几何。矩形可带角度（0°=边平行于图像）；圆/圆弧用于孔和弧边；三点圆弧过已知三点；手绘路径用于直线+圆弧拼接的轨迹。">
+                            <ComboBoxItem Content="矩形" Tag="RotatedRectangle" IsSelected="True"
+                                          ToolTip="矩形外框。长边方向填「角度°」，0° 为轴对齐。斜放标签、非水平料片改角度即可。填中心 X/Y 与宽高（像素；有九点标定可对照 mm 提示）。"/>
                             <ComboBoxItem Content="圆" Tag="Circle"
                                           ToolTip="整圆孔/外圆。填中心与半径。半径按预览绿圈贴合边缘微调，不要按理论值硬套若成像有透视。"/>
                             <ComboBoxItem Content="圆弧(圆心+起止角)" Tag="Arc"
@@ -685,7 +679,7 @@
                                 <ColumnDefinition Width="72"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="角度(°)" VerticalAlignment="Center" ToolTip="旋转矩形长边方向"/>
+                            <TextBlock Grid.Column="0" Text="角度(°)" VerticalAlignment="Center" ToolTip="矩形长边方向，0°=图像 +X"/>
                             <TextBox x:Name="TxtGeomAngleDeg" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
                         </Grid>
                         <Grid x:Name="RowGeomRadius" Margin="0,0,0,4" Visibility="Collapsed">

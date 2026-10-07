@@ -141,14 +141,14 @@ namespace CalibOperatorCLI_Example
             HalconDlSegPage => "HalconDlSeg",
             SamTrainPage => "SamOnnx",
             HalconShapeModelPage => "HalconShapeModel",
-            _ => "Flow"
+            _ => "Operator"
         };
 
         private void SaveNavigationTab(Page? activePage = null)
         {
             try
             {
-                Page page = activePage ?? (MainFrame.Content as Page) ?? _flowHostPage;
+                Page page = activePage ?? (MainFrame.Content as Page) ?? _operatorProductionPage;
                 var s = new AppNavigationUiSettings { LastTab = TabKeyFromPage(page) };
                 s.Save();
             }
@@ -158,10 +158,36 @@ namespace CalibOperatorCLI_Example
             }
         }
 
+        private static bool CanRestoreTabForCurrentRole(string tab)
+        {
+            var role = AppSession.Current.Role;
+            return tab switch
+            {
+                "Flow" => AppRolePermissions.CanOpenFlowEditor(role),
+                "HalconShapeModel" => AppRolePermissions.CanOpenShapeTemplate(role),
+                "Controller" => AppRolePermissions.CanOpenLightController(role),
+                "Histogram" or "YoloSeg" or "HalconDlSeg" or "SamOnnx" =>
+                    AppRolePermissions.CanOpenAdvancedTools(role),
+                _ => true
+            };
+        }
+
+        /// <summary>切到无权限角色后，离开当前工程页，避免仍停在上次视觉用户打开的页面。</summary>
+        private void EnsureCurrentPageAllowedForRole()
+        {
+            string tab = TabKeyFromPage(MainFrame.Content as Page ?? _operatorProductionPage);
+            if (CanRestoreTabForCurrentRole(tab))
+                return;
+
+            NavigateTo(_operatorProductionPage);
+            HighlightTab("Operator");
+            _operatorProductionPage.RefreshCardUi();
+        }
+
         private void RestoreLastNavigationTab()
         {
             string tab = AppNavigationUiSettings.Load().LastTab;
-            if (tab == "Flow" && !AppRolePermissions.CanOpenFlowEditor(AppSession.Current.Role))
+            if (string.IsNullOrWhiteSpace(tab) || !CanRestoreTabForCurrentRole(tab))
                 tab = "Operator";
 
             switch (tab)
@@ -351,12 +377,7 @@ namespace CalibOperatorCLI_Example
             _plcPage.ApplyRolePolicy(AppSession.Current.Role);
             _operatorProductionPage.RefreshCardUi();
 
-            if (!AppRolePermissions.CanOpenFlowEditor(AppSession.Current.Role)
-                && MainFrame.Content is FlowHostPage)
-            {
-                NavigateTo(_operatorProductionPage);
-                HighlightTab("Operator");
-            }
+            EnsureCurrentPageAllowedForRole();
         }
 
         private void ApplyRoleToNavigation()

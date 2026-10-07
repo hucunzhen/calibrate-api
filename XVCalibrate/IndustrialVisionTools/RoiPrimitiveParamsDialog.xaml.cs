@@ -14,11 +14,6 @@ namespace CalibOperatorCLI_Example
         private int _imgWidth;
         private int _imgHeight;
 
-        public double RectLeft { get; private set; }
-        public double RectTop { get; private set; }
-        public double RectWidth { get; private set; }
-        public double RectHeight { get; private set; }
-
         public double RotCenterX { get; private set; }
         public double RotCenterY { get; private set; }
         public double RotWidth { get; private set; }
@@ -36,10 +31,6 @@ namespace CalibOperatorCLI_Example
 
         public void Initialize(
             RoiPrimitiveKind kind,
-            double rectLeftPx,
-            double rectTopPx,
-            double rectWidthPx,
-            double rectHeightPx,
             double rotCenterXPx,
             double rotCenterYPx,
             double rotWidthPx,
@@ -57,31 +48,14 @@ namespace CalibOperatorCLI_Example
             _imgWidth = imgWidth;
             _imgHeight = imgHeight;
 
-            PnlRect.Visibility = kind == RoiPrimitiveKind.Rectangle ? Visibility.Visible : Visibility.Collapsed;
             PnlRotatedRect.Visibility = kind == RoiPrimitiveKind.RotatedRectangle ? Visibility.Visible : Visibility.Collapsed;
             PnlCircle.Visibility = kind == RoiPrimitiveKind.Circle ? Visibility.Visible : Visibility.Collapsed;
 
-            Title = kind switch
-            {
-                RoiPrimitiveKind.Rectangle => "矩形 ROI 参数 (mm)",
-                RoiPrimitiveKind.RotatedRectangle => "旋转矩形 ROI 参数 (mm)",
-                _ => "圆形 ROI 参数 (mm)"
-            };
+            Title = kind == RoiPrimitiveKind.RotatedRectangle ? "矩形 ROI 参数 (mm)" : "圆形 ROI 参数 (mm)";
 
-            TxtHint.Text = kind switch
-            {
-                RoiPrimitiveKind.Rectangle => "左上角世界坐标 X/Y 与宽、高（mm，由九点标定换算）。",
-                RoiPrimitiveKind.RotatedRectangle => "中心 X/Y、宽、高（mm）与长边方向角（0°=图像 +X，逆时针为正）。",
-                _ => "圆心 X/Y 与半径（mm）。"
-            };
-
-            var topLeftMm = HalconGeometryContourBuilder.ImagePixelToWorldMm(rectLeftPx, rectTopPx, _affine);
-            (double rectWMm, double rectHMm) = HalconGeometryContourBuilder.PixelSizeToWorldMm(
-                rectWidthPx, rectHeightPx, rectLeftPx, rectTopPx, _affine);
-            TxtRectLeft.Text = topLeftMm.X.ToString("F3", CultureInfo.InvariantCulture);
-            TxtRectTop.Text = topLeftMm.Y.ToString("F3", CultureInfo.InvariantCulture);
-            TxtRectWidth.Text = rectWMm.ToString("F3", CultureInfo.InvariantCulture);
-            TxtRectHeight.Text = rectHMm.ToString("F3", CultureInfo.InvariantCulture);
+            TxtHint.Text = kind == RoiPrimitiveKind.RotatedRectangle
+                ? "中心 X/Y、宽、高（mm）与长边方向角（0°=图像 +X，逆时针为正；0° 即为轴对齐）。"
+                : "圆心 X/Y 与半径（mm）。";
 
             var rotCenterMm = HalconGeometryContourBuilder.ImagePixelToWorldMm(rotCenterXPx, rotCenterYPx, _affine);
             double rad = rotAngleDeg * Math.PI / 180.0;
@@ -111,37 +85,6 @@ namespace CalibOperatorCLI_Example
         {
             switch (_kind)
             {
-                case RoiPrimitiveKind.Rectangle:
-                    if (!TryParse(TxtRectLeft, out double leftMm)
-                        || !TryParse(TxtRectTop, out double topMm)
-                        || !TryParse(TxtRectWidth, out double widthMm)
-                        || !TryParse(TxtRectHeight, out double heightMm))
-                    {
-                        ShowInvalid("请输入有效的左上角坐标与宽高（mm）。");
-                        return;
-                    }
-
-                    if (widthMm <= 0 || heightMm <= 0)
-                    {
-                        ShowInvalid("宽、高须大于 0 mm。");
-                        return;
-                    }
-
-                    var tl = HalconGeometryContourBuilder.WorldMmToImagePixel(leftMm, topMm, _affine);
-                    double wPx = HalconGeometryContourBuilder.WorldMmWidthToPixelWidth(widthMm, tl.X, tl.Y, _affine);
-                    double hPx = HalconGeometryContourBuilder.WorldMmHeightToPixelHeight(heightMm, tl.X, tl.Y, _affine);
-                    if (wPx <= 5 || hPx <= 5)
-                    {
-                        ShowInvalid("换算后的宽、高过小（< 5 px），请增大 mm 尺寸。");
-                        return;
-                    }
-
-                    RectLeft = tl.X;
-                    RectTop = tl.Y;
-                    RectWidth = wPx;
-                    RectHeight = hPx;
-                    break;
-
                 case RoiPrimitiveKind.RotatedRectangle:
                     if (!TryParse(TxtRotCenterX, out double cxMm)
                         || !TryParse(TxtRotCenterY, out double cyMm)

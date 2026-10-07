@@ -140,7 +140,7 @@ namespace CalibOperatorCLI_Example
 
             "rect" => "矩形",
 
-            "rotatedrect" => "旋转矩形",
+            "rotatedrect" => "矩形",
 
             "circle" => "圆形",
 

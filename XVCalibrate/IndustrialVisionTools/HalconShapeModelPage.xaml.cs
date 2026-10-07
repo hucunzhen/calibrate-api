@@ -43,9 +43,7 @@ namespace CalibOperatorCLI_Example
         /// <summary>相切圆弧：true=切线左侧鼓出，false=右侧，null=随鼠标位置。</summary>
         private bool? _tangentArcPreferLeft;
         private bool _hasRoi;
-        private Rect _roiRectImage;
-
-        /// <summary>旋转矩形 ROI：中心、宽高(像素)、长边方向角(°)。</summary>
+        /// <summary>矩形 ROI：中心、宽高(像素)、长边方向角(°)。角度 0 为轴对齐。</summary>
         private double _rotRectCenterX;
         private double _rotRectCenterY;
         private double _rotRectWidth;
@@ -141,12 +139,11 @@ namespace CalibOperatorCLI_Example
         private RoiDragKind _roiDragKind;
         private RoiDragSnapshot _roiDragSnapshot;
 
-        private enum RoiDragKind { None, Rect, RotatedRect, Circle, Polygon, Ring }
+        private enum RoiDragKind { None, RotatedRect, Circle, Polygon, Ring }
 
         private sealed class RoiDragSnapshot
         {
             public RoiDragKind Kind;
-            public Rect Rect;
             public double RotCenterX;
             public double RotCenterY;
             public double RotWidth;
@@ -749,16 +746,10 @@ namespace CalibOperatorCLI_Example
         }
 
         private bool IsPrimitiveRoiDrawModeActive() =>
-            RbRectMode?.IsChecked == true || IsRotatedRectModeActive() || IsCircleModeActive();
+            IsRotatedRectModeActive() || IsCircleModeActive();
 
-        private RoiPrimitiveKind GetActivePrimitiveRoiKind()
-        {
-            if (IsCircleModeActive())
-                return RoiPrimitiveKind.Circle;
-            if (IsRotatedRectModeActive())
-                return RoiPrimitiveKind.RotatedRectangle;
-            return RoiPrimitiveKind.Rectangle;
-        }
+        private RoiPrimitiveKind GetActivePrimitiveRoiKind() =>
+            IsCircleModeActive() ? RoiPrimitiveKind.Circle : RoiPrimitiveKind.RotatedRectangle;
 
         private Point GetImageCenterPoint() =>
             _imgWidth > 0 && _imgHeight > 0
@@ -772,8 +763,6 @@ namespace CalibOperatorCLI_Example
 
         private Point GetPrimitiveRoiDialogAnchorHint()
         {
-            if (_hasRoi && RbRectMode?.IsChecked == true && _roiRectImage.Width > 5 && _roiRectImage.Height > 5)
-                return new Point(_roiRectImage.X, _roiRectImage.Y);
             if (HasUsableRotatedRectRoi())
                 return new Point(_rotRectCenterX, _rotRectCenterY);
             if (HasUsableCircleRoi())
@@ -789,19 +778,6 @@ namespace CalibOperatorCLI_Example
             var kind = GetActivePrimitiveRoiKind();
             Point anchor = ClampImagePoint(anchorHint);
             double extent = DefaultPrimitiveExtent();
-
-            double rectLeft = anchor.X;
-            double rectTop = anchor.Y;
-            double rectWidth = extent;
-            double rectHeight = Math.Max(40, extent * 0.75);
-            if (kind == RoiPrimitiveKind.Rectangle && _hasRoi && RbRectMode?.IsChecked == true
-                && _roiRectImage.Width > 5 && _roiRectImage.Height > 5)
-            {
-                rectLeft = _roiRectImage.X;
-                rectTop = _roiRectImage.Y;
-                rectWidth = _roiRectImage.Width;
-                rectHeight = _roiRectImage.Height;
-            }
 
             double rotCx = anchor.X;
             double rotCy = anchor.Y;
@@ -831,7 +807,7 @@ namespace CalibOperatorCLI_Example
             if (!TryGetNinePointAffine(out AffineTransform affine, out string affineErr))
             {
                 MessageBox.Show(
-                    $"矩形/旋转矩形/圆形 ROI 参数使用 mm，须先加载有效的九点标定文件。\n{affineErr}",
+                    $"矩形/圆形 ROI 参数使用 mm，须先加载有效的九点标定文件。\n{affineErr}",
                     "九点标定",
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
@@ -840,7 +816,6 @@ namespace CalibOperatorCLI_Example
 
             dlg.Initialize(
                 kind,
-                rectLeft, rectTop, rectWidth, rectHeight,
                 rotCx, rotCy, rotW, rotH, rotAngle,
                 circleCx, circleCy, circleR,
                 affine,
@@ -858,26 +833,6 @@ namespace CalibOperatorCLI_Example
 
             switch (GetActivePrimitiveRoiKind())
             {
-                case RoiPrimitiveKind.Rectangle:
-                {
-                    double x = dlg.RectLeft;
-                    double y = dlg.RectTop;
-                    double w = dlg.RectWidth;
-                    double h = dlg.RectHeight;
-                    ClampRoiToImage(ref x, ref y, ref w, ref h);
-                    _roiRectImage = new Rect(x, y, w, h);
-                    _hasRoi = true;
-                    _rotRectSettingAngle = false;
-                    if (hasAffine)
-                    {
-                        var tlMm = HalconGeometryContourBuilder.ImagePixelToWorldMm(x, y, affine);
-                        (double wMm, double hMm) = HalconGeometryContourBuilder.PixelSizeToWorldMm(w, h, x, y, affine);
-                        AppendLog($"矩形ROI: ({tlMm.X:F2},{tlMm.Y:F2}) mm {wMm:F2}×{hMm:F2} mm");
-                    }
-                    else
-                        AppendLog($"矩形ROI: ({x:F0},{y:F0}) {w:F0}x{h:F0} px");
-                    break;
-                }
                 case RoiPrimitiveKind.RotatedRectangle:
                 {
                     _rotRectCenterX = dlg.RotCenterX;
@@ -897,10 +852,10 @@ namespace CalibOperatorCLI_Example
                             _rotRectWidth, _rotRectCenterX, _rotRectCenterY, dirX, dirY, affine);
                         double rhMm = RoiSegmentMeasure.PixelLengthToWorldMm(
                             _rotRectHeight, _rotRectCenterX, _rotRectCenterY, -dirY, dirX, affine);
-                        AppendLog($"旋转矩形 ROI: 中心=({centerMm.X:F2},{centerMm.Y:F2}) mm {rwMm:F2}×{rhMm:F2} mm ∠{_rotRectAngleDeg:F1}°");
+                        AppendLog($"矩形 ROI: 中心=({centerMm.X:F2},{centerMm.Y:F2}) mm {rwMm:F2}×{rhMm:F2} mm ∠{_rotRectAngleDeg:F1}°");
                     }
                     else
-                        AppendLog($"旋转矩形 ROI: 中心=({_rotRectCenterX:F0},{_rotRectCenterY:F0}) {_rotRectWidth:F0}×{_rotRectHeight:F0} px ∠{_rotRectAngleDeg:F1}°");
+                        AppendLog($"矩形 ROI: 中心=({_rotRectCenterX:F0},{_rotRectCenterY:F0}) {_rotRectWidth:F0}×{_rotRectHeight:F0} px ∠{_rotRectAngleDeg:F1}°");
                     break;
                 }
                 default:
@@ -1081,17 +1036,9 @@ namespace CalibOperatorCLI_Example
 
         private void RefreshRoiVisuals()
         {
-            if (RoiRect == null || PolygonLine == null) return;
+            if (PolygonLine == null) return;
 
-            if (_hasRoi && RbRectMode?.IsChecked == true)
-            {
-                RoiRect.Visibility = Visibility.Visible;
-                Canvas.SetLeft(RoiRect, _roiRectImage.X);
-                Canvas.SetTop(RoiRect, _roiRectImage.Y);
-                RoiRect.Width = _roiRectImage.Width;
-                RoiRect.Height = _roiRectImage.Height;
-            }
-            else
+            if (RoiRect != null)
                 RoiRect.Visibility = Visibility.Collapsed;
 
             UpdateRotatedRectPreview();
@@ -3371,15 +3318,8 @@ namespace CalibOperatorCLI_Example
                 ViewHost.ReleaseMouseCapture();
         }
 
-        private bool IsPointInRectRoi(double x, double y) =>
-            _hasRoi && RbRectMode?.IsChecked == true
-            && _roiRectImage.Width > 5 && _roiRectImage.Height > 5
-            && _roiRectImage.Contains(new Point(x, y));
-
         private bool IsPointInActiveRoi(double x, double y)
         {
-            if (IsPointInRectRoi(x, y))
-                return true;
             if (HasUsableRotatedRectRoi() && IsPointInRotatedRectRoi(x, y))
                 return true;
             if (HasUsableCircleRoi() && IsPointInCircleRoi(x, y))
@@ -3427,13 +3367,6 @@ namespace CalibOperatorCLI_Example
         private RoiDragSnapshot CaptureRoiDragSnapshot(Point imgPt)
         {
             var snap = new RoiDragSnapshot();
-            if (IsPointInRectRoi(imgPt.X, imgPt.Y))
-            {
-                snap.Kind = RoiDragKind.Rect;
-                snap.Rect = _roiRectImage;
-                return snap;
-            }
-
             if (HasUsableRotatedRectRoi() && IsPointInRotatedRectRoi(imgPt.X, imgPt.Y))
             {
                 snap.Kind = RoiDragKind.RotatedRect;
@@ -3475,17 +3408,6 @@ namespace CalibOperatorCLI_Example
         {
             switch (_roiDragKind)
             {
-                case RoiDragKind.Rect:
-                {
-                    double x = _roiDragSnapshot.Rect.X + delta.X;
-                    double y = _roiDragSnapshot.Rect.Y + delta.Y;
-                    double w = _roiDragSnapshot.Rect.Width;
-                    double h = _roiDragSnapshot.Rect.Height;
-                    ClampRoiToImage(ref x, ref y, ref w, ref h);
-                    _roiRectImage = new Rect(x, y, w, h);
-                    _hasRoi = true;
-                    break;
-                }
                 case RoiDragKind.RotatedRect:
                     _rotRectCenterX = _roiDragSnapshot.RotCenterX + delta.X;
                     _rotRectCenterY = _roiDragSnapshot.RotCenterY + delta.Y;
@@ -3535,7 +3457,6 @@ namespace CalibOperatorCLI_Example
 
             return _roiDragKind switch
             {
-                RoiDragKind.Rect => ClampDeltaForRect(delta, _roiDragSnapshot.Rect),
                 RoiDragKind.RotatedRect => ClampDeltaForCenter(delta, _roiDragSnapshot.RotCenterX, _roiDragSnapshot.RotCenterY),
                 RoiDragKind.Circle => ClampDeltaForCircle(delta, _roiDragSnapshot),
                 RoiDragKind.Polygon when _roiDragSnapshot.Polygon != null
@@ -3544,15 +3465,6 @@ namespace CalibOperatorCLI_Example
                     => ClampDeltaForPath(delta, _roiDragSnapshot.RingOuter),
                 _ => delta
             };
-        }
-
-        private Vector ClampDeltaForRect(Vector delta, Rect rect)
-        {
-            double x = rect.X + delta.X;
-            double y = rect.Y + delta.Y;
-            x = Math.Max(0, Math.Min(x, _imgWidth - rect.Width));
-            y = Math.Max(0, Math.Min(y, _imgHeight - rect.Height));
-            return new Vector(x - rect.X, y - rect.Y);
         }
 
         private Vector ClampDeltaForCenter(Vector delta, double centerX, double centerY)
@@ -3623,12 +3535,6 @@ namespace CalibOperatorCLI_Example
             if (TryBeginRoiDrag(imgPt))
             {
                 e.Handled = true;
-                return;
-            }
-
-            if (RbRectMode.IsChecked == true)
-            {
-                TryPromptPrimitiveRoiParams(imgPt);
                 return;
             }
 
@@ -3821,7 +3727,7 @@ namespace CalibOperatorCLI_Example
                 return;
             }
 
-            if (RbRectMode.IsChecked != true && !IsRotatedRectModeActive())
+            if (!IsRotatedRectModeActive())
                 return;
 
             double ix = Math.Min(_drawStartImage.X, cur.X);
@@ -3830,24 +3736,12 @@ namespace CalibOperatorCLI_Example
             double ih = Math.Abs(cur.Y - _drawStartImage.Y);
             ClampRoiToImage(ref ix, ref iy, ref iw, ref ih);
 
-            if (IsRotatedRectModeActive())
-            {
-                _rotRectCenterX = ix + iw * 0.5;
-                _rotRectCenterY = iy + ih * 0.5;
-                _rotRectWidth = iw;
-                _rotRectHeight = ih;
-                _rotRectAngleDeg = Math.Atan2(cur.Y - _rotRectCenterY, cur.X - _rotRectCenterX) * 180.0 / Math.PI;
-                UpdateRotatedRectPreview();
-                return;
-            }
-
-            if (RoiRect != null)
-            {
-                Canvas.SetLeft(RoiRect, ix);
-                Canvas.SetTop(RoiRect, iy);
-                RoiRect.Width = iw;
-                RoiRect.Height = ih;
-            }
+            _rotRectCenterX = ix + iw * 0.5;
+            _rotRectCenterY = iy + ih * 0.5;
+            _rotRectWidth = iw;
+            _rotRectHeight = ih;
+            _rotRectAngleDeg = Math.Atan2(cur.Y - _rotRectCenterY, cur.X - _rotRectCenterX) * 180.0 / Math.PI;
+            UpdateRotatedRectPreview();
         }
 
         private void CommitRotatedRectFromAnglePick(Point imgPt)
@@ -3859,7 +3753,7 @@ namespace CalibOperatorCLI_Example
             _hasRoi = true;
             RefreshRoiVisuals();
             UpdateThresholdPreview();
-            AppendLog($"旋转矩形 ROI: 中心=({_rotRectCenterX:F0},{_rotRectCenterY:F0}) {_rotRectWidth:F0}×{_rotRectHeight:F0}° {_rotRectAngleDeg:F1}");
+            AppendLog($"矩形 ROI: 中心=({_rotRectCenterX:F0},{_rotRectCenterY:F0}) {_rotRectWidth:F0}×{_rotRectHeight:F0} ∠{_rotRectAngleDeg:F1}°");
             PersistSessionChange();
 #if HALCON_ENABLED
             TryAutoSyncGeometryFromRoiIfNeeded();
@@ -3879,7 +3773,7 @@ namespace CalibOperatorCLI_Example
             if (RoiRect != null)
                 RoiRect.Visibility = Visibility.Collapsed;
             UpdateRotatedRectPreview();
-            AppendLog("旋转矩形: 移动鼠标确定角度，单击确认");
+            AppendLog("矩形: 移动鼠标确定角度，单击确认");
             return true;
         }
 
@@ -3924,7 +3818,7 @@ namespace CalibOperatorCLI_Example
                 return;
             }
 
-            if (RbRectMode.IsChecked == true || IsRotatedRectModeActive())
+            if (IsRotatedRectModeActive())
             {
                 double x = Math.Min(_drawStartImage.X, cur.X);
                 double y = Math.Min(_drawStartImage.Y, cur.Y);
@@ -3934,19 +3828,6 @@ namespace CalibOperatorCLI_Example
 
                 if (TryBeginRotatedRectAnglePhase(x, y, w, h))
                     return;
-
-                if (w > 5 && h > 5 && RbRectMode.IsChecked == true)
-                {
-                    _hasRoi = true;
-                    _roiRectImage = new Rect(x, y, w, h);
-                    RefreshRoiVisuals();
-                    UpdateThresholdPreview();
-                    AppendLog($"矩形ROI: ({x:F0},{y:F0}) {w:F0}x{h:F0}");
-                    PersistSessionChange();
-#if HALCON_ENABLED
-                    TryAutoSyncGeometryFromRoiIfNeeded();
-#endif
-                }
                 else if (RoiRect != null)
                 {
                     RoiRect.Visibility = Visibility.Collapsed;
@@ -4186,7 +4067,6 @@ namespace CalibOperatorCLI_Example
             // 大津法：仅在 ROI 内统计（无 ROI 则用全图）
             int[] hist = new int[256];
             int roiHits = 0;
-            bool useRect = _hasRoi && RbRectMode?.IsChecked == true;
             bool useRotated = HasUsableRotatedRectRoi();
             bool useCircle = HasUsableCircleRoi();
             bool usePoly = RbPolygonMode?.IsChecked == true && _hasRoi && _roiPath.VertexCount >= 3;
@@ -4197,13 +4077,7 @@ namespace CalibOperatorCLI_Example
             {
                 for (int x = 0; x < _imgWidth; x++)
                 {
-                    if (useRect)
-                    {
-                        if (x + 0.5 < _roiRectImage.X || x + 0.5 >= _roiRectImage.Right ||
-                            y + 0.5 < _roiRectImage.Y || y + 0.5 >= _roiRectImage.Bottom)
-                            continue;
-                    }
-                    else if (useRotated)
+                    if (useRotated)
                     {
                         if (!IsPointInRotatedRectRoi(x + 0.5, y + 0.5))
                             continue;
@@ -4270,9 +4144,6 @@ namespace CalibOperatorCLI_Example
 
             bool InsideRoi(int x, int y)
             {
-                if (useRect)
-                    return x + 0.5 >= _roiRectImage.X && x + 0.5 < _roiRectImage.Right &&
-                           y + 0.5 >= _roiRectImage.Y && y + 0.5 < _roiRectImage.Bottom;
                 if (useRotated)
                     return IsPointInRotatedRectRoi(x + 0.5, y + 0.5);
                 if (useCircle)
@@ -4291,7 +4162,7 @@ namespace CalibOperatorCLI_Example
                 _grayPixels, _imgWidth, _imgHeight, thresh, InsideRoi);
             TxtMinGray.Text = minG.ToString(CultureInfo.InvariantCulture);
             TxtMaxGray.Text = maxG.ToString(CultureInfo.InvariantCulture);
-            AppendLog(useRect || useRotated || useCircle || usePoly || useRing
+            AppendLog(useRotated || useCircle || usePoly || useRing
                 ? $"ROI 内自动阈值: [{minG}, {maxG}]（Otsu={thresh}，样本 {roiHits} 像素）"
                 : $"全图自动阈值: [{minG}, {maxG}]（Otsu={thresh}）");
             UpdateThresholdPreview();
@@ -4377,21 +4248,13 @@ namespace CalibOperatorCLI_Example
             int w = _imgWidth;
             int h = _imgHeight;
             int x0 = 0, y0 = 0, x1 = w, y1 = h;
-            bool useRect = _hasRoi && RbRectMode?.IsChecked == true;
             bool useRotated = HasUsableRotatedRectRoi();
             bool useCircle = HasUsableCircleRoi();
             bool usePoly = RbPolygonMode?.IsChecked == true && _hasRoi && _roiPath.VertexCount >= 3;
             bool useRing = HasUsableRingRoi();
             List<Point>? polyFlat = usePoly ? GetPolygonFlattened(forHitTest: true) : null;
 
-            if (useRect)
-            {
-                x0 = Math.Max(0, (int)Math.Floor(_roiRectImage.X));
-                y0 = Math.Max(0, (int)Math.Floor(_roiRectImage.Y));
-                x1 = Math.Min(w, (int)Math.Ceiling(_roiRectImage.Right));
-                y1 = Math.Min(h, (int)Math.Ceiling(_roiRectImage.Bottom));
-            }
-            else if (useRotated)
+            if (useRotated)
             {
                 var rotCorners = GetRotatedRectCornerPoints(
                     _rotRectCenterX, _rotRectCenterY, _rotRectWidth, _rotRectHeight, _rotRectAngleDeg);
@@ -4571,7 +4434,7 @@ namespace CalibOperatorCLI_Example
             string? tag = (CmbGeometryKind?.SelectedItem as ComboBoxItem)?.Tag?.ToString();
             return Enum.TryParse(tag, out HalconMeasuredGeometryKind k)
                 ? k
-                : HalconMeasuredGeometryKind.AxisAlignedRectangle;
+                : HalconMeasuredGeometryKind.RotatedRectangle;
         }
 
         private void UpdateGeometryPanelRowsVisibility()
@@ -4582,8 +4445,7 @@ namespace CalibOperatorCLI_Example
             bool isArc = kind == HalconMeasuredGeometryKind.Arc;
             bool isArc3 = kind == HalconMeasuredGeometryKind.ArcThreePoint;
             bool isRoiPath = kind == HalconMeasuredGeometryKind.RoiPolyline;
-            bool isRect = kind is HalconMeasuredGeometryKind.AxisAlignedRectangle
-                or HalconMeasuredGeometryKind.RotatedRectangle;
+            bool isRect = kind == HalconMeasuredGeometryKind.RotatedRectangle;
 
             if (RowGeomRectSize != null)
                 RowGeomRectSize.Visibility = isRect ? Visibility.Visible : Visibility.Collapsed;
@@ -4700,6 +4562,8 @@ namespace CalibOperatorCLI_Example
         private static void SelectGeometryKindCombo(ComboBox? cmb, HalconMeasuredGeometryKind kind)
         {
             if (cmb == null) return;
+            if (kind == HalconMeasuredGeometryKind.AxisAlignedRectangle)
+                kind = HalconMeasuredGeometryKind.RotatedRectangle;
             foreach (var item in cmb.Items.OfType<ComboBoxItem>())
             {
                 if (string.Equals(item.Tag?.ToString(), kind.ToString(), StringComparison.Ordinal))
@@ -4786,7 +4650,6 @@ namespace CalibOperatorCLI_Example
                         + $"弧上 {HalconGeometryContourBuilder.FormatWorldPointMm(p.ArcViaCol, p.ArcViaRow, t)}，"
                         + $"终 {HalconGeometryContourBuilder.FormatWorldPointMm(p.ArcEndCol, p.ArcEndRow, t)}";
                     break;
-                case HalconMeasuredGeometryKind.AxisAlignedRectangle:
                 case HalconMeasuredGeometryKind.RotatedRectangle:
                 {
                     var (wMm, hMm) = HalconGeometryContourBuilder.PixelSizeToWorldMm(
@@ -5120,12 +4983,6 @@ namespace CalibOperatorCLI_Example
                 || !TryParse(TxtGeomHeight, out p.HeightPx) || p.HeightPx < 1)
                 return false;
 
-            if (p.Kind == HalconMeasuredGeometryKind.AxisAlignedRectangle)
-            {
-                p.AngleDeg = 0;
-                return true;
-            }
-
             return TryParse(TxtGeomAngleDeg, out p.AngleDeg);
 
             static bool TryParse(TextBox? box, out double v) =>
@@ -5175,22 +5032,6 @@ namespace CalibOperatorCLI_Example
                 return true;
             }
 
-            if (RbRectMode?.IsChecked == true && _hasRoi && _roiRectImage.Width > 5 && _roiRectImage.Height > 5)
-            {
-                WriteGeometryParamsToUi(new HalconMeasuredGeometryParams
-                {
-                    Kind = HalconMeasuredGeometryKind.AxisAlignedRectangle,
-                    CenterCol = _roiRectImage.X + _roiRectImage.Width * 0.5,
-                    CenterRow = _roiRectImage.Y + _roiRectImage.Height * 0.5,
-                    WidthPx = _roiRectImage.Width,
-                    HeightPx = _roiRectImage.Height
-                });
-                _geometryRoiPath = null;
-                _geometryRoiPolylineContour = null;
-                message = $"已从矩形 ROI 同步: {_roiRectImage.Width:F0}×{_roiRectImage.Height:F0}";
-                return true;
-            }
-
             if (HasUsableRotatedRectRoi())
             {
                 WriteGeometryParamsToUi(new HalconMeasuredGeometryParams
@@ -5204,7 +5045,7 @@ namespace CalibOperatorCLI_Example
                 });
                 _geometryRoiPath = null;
                 _geometryRoiPolylineContour = null;
-                message = $"已从旋转矩形 ROI 同步: {_rotRectWidth:F0}×{_rotRectHeight:F0}° {_rotRectAngleDeg:F1}";
+                message = $"已从矩形 ROI 同步: {_rotRectWidth:F0}×{_rotRectHeight:F0} ∠{_rotRectAngleDeg:F1}°";
                 return true;
             }
 
@@ -5273,7 +5114,7 @@ namespace CalibOperatorCLI_Example
                 }
             }
 
-            message = "请先绘制矩形、旋转矩形、圆、闭合多边形(含弧)或环形 ROI";
+            message = "请先绘制矩形、圆、闭合多边形(含弧)或环形 ROI";
             return false;
         }
 
@@ -5455,15 +5296,6 @@ namespace CalibOperatorCLI_Example
                 return HalconFlowBridge.GenRegionPolygonFilled(pts);
             }
 
-            if (_hasRoi && RbRectMode.IsChecked == true)
-            {
-                double r1 = _roiRectImage.Y;
-                double c1 = _roiRectImage.X;
-                double r2 = _roiRectImage.Bottom;
-                double c2 = _roiRectImage.Right;
-                return HalconFlowBridge.GenRegionRectangle(r1, c1, r2, c2);
-            }
-
             if (HasUsableRotatedRectRoi())
             {
                 return HalconFlowBridge.GenRegionRectangle2(
@@ -5503,10 +5335,7 @@ namespace CalibOperatorCLI_Example
                         _rotRectHeight * 0.5);
                 }
 
-                if (!_hasRoi || RbRectMode.IsChecked != true)
-                    throw new InvalidOperationException("矩形灰度模板：请用「矩形」「旋转矩形」「圆形」或「环形」模式绘制 ROI。");
-                return HalconFlowBridge.GenRegionRectangle(
-                    _roiRectImage.Y, _roiRectImage.X, _roiRectImage.Bottom, _roiRectImage.Right);
+                throw new InvalidOperationException("矩形灰度模板：请用「矩形」「圆形」或「环形」模式绘制 ROI。");
             }
 
             if (HasUsableCircleRoi())
@@ -5527,17 +5356,6 @@ namespace CalibOperatorCLI_Example
                 return CircleToPolygonPoints(_circleCenterImage, _circleRadiusImage)
                     .Select(p => new Point2D(p.X, p.Y))
                     .ToList();
-            }
-
-            if (_hasRoi && RbRectMode?.IsChecked == true)
-            {
-                return new[]
-                {
-                    new Point2D(_roiRectImage.X, _roiRectImage.Y),
-                    new Point2D(_roiRectImage.Right, _roiRectImage.Y),
-                    new Point2D(_roiRectImage.Right, _roiRectImage.Bottom),
-                    new Point2D(_roiRectImage.Left, _roiRectImage.Bottom)
-                };
             }
 
             if (HasUsableRotatedRectRoi())
@@ -6071,10 +5889,14 @@ namespace CalibOperatorCLI_Example
 
         private HalconXldContourBundle? ExtractXldFromRoi(double minGray, double maxGray)
         {
-            int x0 = Math.Max(0, (int)_roiRectImage.X);
-            int y0 = Math.Max(0, (int)_roiRectImage.Y);
-            int x1 = Math.Min(_imgWidth, (int)(_roiRectImage.X + _roiRectImage.Width));
-            int y1 = Math.Min(_imgHeight, (int)(_roiRectImage.Y + _roiRectImage.Height));
+            var rotCorners = GetRotatedRectCornerPoints(
+                _rotRectCenterX, _rotRectCenterY, _rotRectWidth, _rotRectHeight, _rotRectAngleDeg);
+            if (!TryGetPolygonBounds(rotCorners, out Rect rotBounds))
+                return null;
+            int x0 = Math.Max(0, (int)Math.Floor(rotBounds.X));
+            int y0 = Math.Max(0, (int)Math.Floor(rotBounds.Y));
+            int x1 = Math.Min(_imgWidth, (int)Math.Ceiling(rotBounds.Right));
+            int y1 = Math.Min(_imgHeight, (int)Math.Ceiling(rotBounds.Bottom));
 
             var roiPixels = new byte[(x1 - x0) * (y1 - y0)];
             for (int y = y0; y < y1; y++)
