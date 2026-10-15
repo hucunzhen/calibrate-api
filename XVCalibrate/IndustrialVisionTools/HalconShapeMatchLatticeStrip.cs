@@ -42,10 +42,14 @@ namespace CalibOperatorCLI_Example
             double[]? angles,
             double[]? scores,
             double minScoreKeep = 0,
-            string? diagnosticTag = null)
+            string? diagnosticTag = null,
+            LatticeOriginCorner originCorner = LatticeOriginCorner.TopLeft,
+            LatticeWeldOrder weldOrder = LatticeWeldOrder.ColMajor,
+            int weldInterval = 1,
+            bool weldIntervalReverse = true)
         {
             var inner = HalconShapeMatchGridFilter.StripLatticeFill(
-                context, rows, cols, angles, scores, minScoreKeep, diagnosticTag);
+                context, rows, cols, angles, scores, minScoreKeep, diagnosticTag, originCorner, weldOrder, weldInterval, weldIntervalReverse);
             return ToChainDirectionResult(inner);
         }
 
@@ -57,10 +61,14 @@ namespace CalibOperatorCLI_Example
             double[]? angles,
             double[]? scores,
             double minScoreKeep = 0,
-            string? diagnosticTag = null)
+            string? diagnosticTag = null,
+            LatticeOriginCorner originCorner = LatticeOriginCorner.TopLeft,
+            LatticeWeldOrder weldOrder = LatticeWeldOrder.ColMajor,
+            int weldInterval = 1,
+            bool weldIntervalReverse = true)
         {
             var ctx = PickColumn0(context, rows, cols, scores, diagnosticTag);
-            var result = FillStrip(ctx, rows, cols, angles, scores, minScoreKeep, diagnosticTag);
+            var result = FillStrip(ctx, rows, cols, angles, scores, minScoreKeep, diagnosticTag, originCorner, weldOrder, weldInterval, weldIntervalReverse);
             return (ctx, result);
         }
 
@@ -88,14 +96,18 @@ namespace CalibOperatorCLI_Example
             int gridRows,
             int gridCols,
             double minScoreKeep = 0,
-            string? diagnosticTag = null)
+            string? diagnosticTag = null,
+            LatticeOriginCorner originCorner = LatticeOriginCorner.TopLeft,
+            LatticeWeldOrder weldOrder = LatticeWeldOrder.ColMajor,
+            int weldInterval = 1,
+            bool weldIntervalReverse = true)
         {
             var boot = Bootstrap(rows, cols, angles, scores, gridRows, gridCols, diagnosticTag);
             var ctx = BuildOrient(rows, cols, angles, scores, gridRows, gridCols, boot, diagnosticTag);
             if (ctx == null)
                 return new HalconShapeMatchChainDirectionResult { InputCount = boot.InputCount };
             ctx = PickColumn0(ctx, rows, cols, scores, diagnosticTag);
-            return FillStrip(ctx, rows, cols, angles, scores, minScoreKeep, diagnosticTag);
+            return FillStrip(ctx, rows, cols, angles, scores, minScoreKeep, diagnosticTag, originCorner, weldOrder, weldInterval, weldIntervalReverse);
         }
     }
 }

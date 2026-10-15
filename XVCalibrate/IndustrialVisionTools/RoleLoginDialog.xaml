@@ -13,15 +13,29 @@
         <Style TargetType="ComboBox" BasedOn="{StaticResource Ui.DarkComboBox}"/>
     </Window.Resources>
     <StackPanel Margin="20" MinWidth="340">
-        <TextBlock Text="选择角色并输入密码" Style="{StaticResource Ui.SectionHeader}"/>
-        <TextBlock Text="操作员无需密码；工艺/视觉/管理员需密码（出厂默认见帮助文档）。"
-                   Foreground="{StaticResource Ui.TextMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/>
+        <TextBlock Text="选择角色并输入密码" Style="{StaticResource Ui.SectionHeader}" Margin="0,0,0,12"/>
         <TextBlock Text="角色" Margin="0,0,0,4"/>
-        <ComboBox x:Name="CmbRole" Height="30" Style="{StaticResource Ui.DarkComboBox}" Margin="0,0,0,10"/>
+        <ComboBox x:Name="CmbRole" Height="30" Style="{StaticResource Ui.DarkComboBox}" Margin="0,0,0,10"
+                  SelectionChanged="CmbRole_SelectionChanged"/>
         <TextBlock Text="密码" Margin="0,0,0,4"/>
-        <PasswordBox x:Name="TxtPassword" Height="30" Padding="8,4" Margin="0,0,0,8"/>
+        <Grid Margin="0,0,0,8">
+            <PasswordBox x:Name="TxtPassword" Height="30" Padding="8,4"
+                         Background="{StaticResource Ui.InputBackground}"
+                         Foreground="{StaticResource Ui.TextPrimary}"
+                         BorderBrush="{StaticResource Ui.InputBorder}"
+                         CaretBrush="{StaticResource Ui.TextPrimary}"
+                         PasswordChanged="TxtPassword_PasswordChanged"/>
+            <TextBlock x:Name="TxtPasswordHint"
+                       IsHitTestVisible="False"
+                       VerticalAlignment="Center"
+                       Margin="10,0,0,0"
+                       Foreground="{StaticResource Ui.TextMuted}"
+                       FontSize="12"/>
+        </Grid>
         <TextBlock x:Name="TxtError" Foreground="{StaticResource Ui.Danger}" TextWrapping="Wrap" Visibility="Collapsed"/>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="修改密码" Style="{StaticResource IndustrialToolbarButton}"
+                    MinWidth="88" Margin="0,0,8,0" Click="ChangePassword_Click"/>
             <Button Content="确定" IsDefault="True" Style="{StaticResource IndustrialToolbarPrimaryButton}"
                     MinWidth="80" Margin="0,0,8,0" Click="Ok_Click"/>
             <Button Content="取消" IsCancel="True" Style="{StaticResource IndustrialToolbarButton}" MinWidth="80"/>

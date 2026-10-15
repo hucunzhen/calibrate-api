@@ -144,7 +144,7 @@
                         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                             <CheckBox x:Name="ChkAutoRead" Content="自动刷新" VerticalAlignment="Center" Margin="0,0,8,0" IsChecked="False"
                                       Checked="ChkAutoRead_Checked" Unchecked="ChkAutoRead_Unchecked"
-                                      ToolTip="定时读取 XYZ，并读 D800+GVAR 刷新 3D"/>
+                                      ToolTip="定时读取 XYZ、可读状态（模式/运行/使能/点动/焊接标志等），并读 D800+GVAR 刷新 3D"/>
                             <TextBlock Text="间隔 ms" VerticalAlignment="Center" Foreground="{StaticResource Ui.TextSecondary}" Margin="0,0,4,0"/>
                             <TextBox x:Name="TxtReadInterval" Text="500" Width="52" Height="26" VerticalContentAlignment="Center" TextChanged="TxtReadInterval_TextChanged"/>
                             <Button x:Name="BtnReadOnce" Content="读取" Width="56" Height="28" Margin="10,0,0,0" Click="BtnReadOnce_Click"/>

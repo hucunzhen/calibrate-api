@@ -40,7 +40,7 @@ namespace CalibOperatorCLI_Example
             """,
             """
             目标：得到棋盘内参、畸变和多视图外参，并确定透视用的 viewIndex。
-            流程：flows/v4/chessboard_intrinsics_from_dir.flow.json。
+            流程页快捷「棋盘格标定」：chessboard_intrinsics_from_dir.flow.json。
             输出：chessboard/calibration_result.json。
 
             采图
@@ -63,7 +63,8 @@ namespace CalibOperatorCLI_Example
             """,
             """
             目标：用「一个中心 + 两个步距」生成 3×3 九点世界坐标，不是逐点示教 9 次。
-            流程：calibSendContour.flow.json 里的 weld_trajectory_world。
+            流程页快捷「九点打点」：calibSendContour.flow.json 里的 weld_trajectory_world。
+            这是给九点标定生成世界坐标，不是量产焊接。
             输出：models/world_pos.txt，供阶段 3 使用。
 
             PLC 顺序（必须遵守）
@@ -89,14 +90,14 @@ namespace CalibOperatorCLI_Example
             """,
             """
             目标：在已矫正的标定板图像上检出 9 个圆点，建立像素到世界的仿射。
-            流程：caliNinePoint.flow.json。
+            流程页快捷「九点标定」：caliNinePoint.flow.json。
             输出：models/calibration_nine_point.json。
 
             链路
             · 取图（与量产同曝光）→ 去畸变（chessboard/calibration_result.json）→ 透视（viewIndex 用阶段 1 记录值）。
             · detect_calibration_dots：gridRows=3，gridCols=3。画面应是绿框加 9 个蓝圈，不要框住金属边。
             · calibrate：worldPointsFile = 阶段 2 的 world_pos.txt，confirmCorrespondence=true。
-            · 对话框里核对 9 组像素与世界点的对应。需要时用 adjust_affine_calibration 微调。
+            · 对话框里核对 9 组像素与世界点的对应。误差仍大时，用快捷「微调」打开 adjustAffineCalibration.flow.json，不要再塞进九点求解流程。
 
             验收
             · 检出不少于 9 点，配对正确，重投影误差合格。
@@ -123,7 +124,7 @@ namespace CalibOperatorCLI_Example
             """,
             """
             目标：打通 采集 → 矫正 → 粗/精匹配 → 轮廓 → img_to_world → send_plc。
-            流程：main.flow.json。
+            流程页快捷「主流程」：main.flow.json。
 
             标定与图像
             · load_calibration_result 指向阶段 3 的 models/calibration_nine_point.json。
@@ -151,7 +152,7 @@ namespace CalibOperatorCLI_Example
             · 相机、镜头、光圈、焦距变了：从阶段 1 重做。
             · 光源变化大：先复验，严重则重标。
             · 棋盘或标定板换了：重标。
-            · 九点物理位置变了：重做阶段 2 和 3。
+            · 九点物理位置变了：重做阶段 2、3，必要时再跑快捷「微调」。
             · 只改了模板或 ROI：阶段 4、5 验证即可，不必重做九点。
 
             勾选本阶段并勾选「允许量产」后，操作员才能启动主流程。

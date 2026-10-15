@@ -76,6 +76,15 @@ fail += AssertFullGrid(rotUv, 16);
 fail += AssertLatticeAngle(rotUv, 2.0 + rotateDeg, 8.0);
 fail += AssertImageChainAngle(rotUv, 90.0 + rotateDeg, 12.0);
 fail += AssertCol1Count(rotUv, 8);
+fail += AssertOriginCorner(uv, LatticeOriginCorner.TopLeft, "默认左上");
+fail += AssertOriginCorner(rotUv, LatticeOriginCorner.TopLeft, "旋转后仍左上");
+
+var uvBr = HalconShapeMatchLatticePick.PickUvGridAfterBootstrap(
+    rows, cols, angles, scores, gridRows, gridCols,
+    stripBoot.LatticeAngleDeg, stripBoot.BootstrapPickIndices, 0, 0, "TestUvGridBR",
+    pcaChainAngleDeg: stripBoot.PcaChainAngleDeg,
+    originCorner: LatticeOriginCorner.BottomRight);
+fail += AssertOriginCorner(uvBr, LatticeOriginCorner.BottomRight, "可设右下");
 
 Console.WriteLine($"诊断日志: {logPath}");
 Console.WriteLine(File.Exists(svgPath)
@@ -205,6 +214,42 @@ static void RotatePoints(
         outCols[i] = cx + dc * cos - dr * sin;
         outRows[i] = cy + dc * sin + dr * cos;
     }
+}
+
+static int AssertOriginCorner(
+    HalconShapeMatchLatticePickResult pick,
+    LatticeOriginCorner origin,
+    string name)
+{
+    int i00 = -1, iLast = -1;
+    int lastR = pick.LatticeRows - 1;
+    int lastC = pick.LatticeCols - 1;
+    for (int k = 0; k < pick.KeptCount; k++)
+    {
+        if (pick.GridRow[k] == 0 && pick.GridCol[k] == 0) i00 = k;
+        if (pick.GridRow[k] == lastR && pick.GridCol[k] == lastC) iLast = k;
+    }
+    if (i00 < 0 || iLast < 0)
+    {
+        Console.WriteLine($"  FAIL {name}: 缺角点 (0,0) 或 ({lastR},{lastC})");
+        return 1;
+    }
+    const double w = 1_000_000.0;
+    double Score(double row, double col) => origin switch
+    {
+        LatticeOriginCorner.TopRight => row * w - col,
+        LatticeOriginCorner.BottomLeft => -row * w + col,
+        LatticeOriginCorner.BottomRight => -row * w - col,
+        _ => row * w + col
+    };
+    bool ok = Score(pick.Rows[i00], pick.Cols[i00]) < Score(pick.Rows[iLast], pick.Cols[iLast]);
+    if (ok)
+    {
+        Console.WriteLine($"  OK   {name}: (0,0) Row={pick.Rows[i00]:F1} Col={pick.Cols[i00]:F1}");
+        return 0;
+    }
+    Console.WriteLine($"  FAIL {name}: (0,0)=({pick.Rows[i00]:F1},{pick.Cols[i00]:F1}) last=({pick.Rows[iLast]:F1},{pick.Cols[iLast]:F1})");
+    return 1;
 }
 
 static int AssertCol1Count(HalconShapeMatchLatticePickResult pick, int expected)

@@ -202,18 +202,18 @@
                     <Separator Width="1" Background="#555" Margin="10,4,10,8"/>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
                                 Margin="0,4,8,4"
-                                ToolTip="写入 flow Meta；HALCON 落格算子 gridRows/gridCols 留空或 0 时继承">
+                                ToolTip="写入 flow Meta；HALCON 落格算子以工具栏行列为准（覆盖节点 gridRows/gridCols）。">
                         <TextBlock Text="阵列行列" Foreground="#B8D4A8" FontSize="11"
                                    VerticalAlignment="Center" Margin="0,0,6,0"/>
                         <TextBlock Text="行" Foreground="#AAA" FontSize="11"
                                    VerticalAlignment="Center" Margin="0,0,4,0"/>
                         <TextBox x:Name="LatticeGridRowsBox" Width="36" Height="24"
-                                 VerticalContentAlignment="Center" FontSize="11"
+                                 VerticalContentAlignment="Center" FontSize="11" Text="8"
                                  LostFocus="LatticeGridConfig_LostFocus"/>
                         <TextBlock Text="列" Foreground="#AAA" FontSize="11"
                                    VerticalAlignment="Center" Margin="8,0,4,0"/>
                         <TextBox x:Name="LatticeGridColsBox" Width="36" Height="24"
-                                 VerticalContentAlignment="Center" FontSize="11"
+                                 VerticalContentAlignment="Center" FontSize="11" Text="2"
                                  LostFocus="LatticeGridConfig_LostFocus"/>
                     </StackPanel>
                     <Separator Width="1" Background="#555" Margin="10,4,10,8"/>

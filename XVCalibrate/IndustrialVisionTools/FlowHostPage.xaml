@@ -31,12 +31,18 @@
                         <Button x:Name="BtnOpenRecipeMain" Content="主流程" Style="{StaticResource IndustrialToolbarPrimaryButton}"
                                 Click="BtnOpenRecipeMain_Click"
                                 ToolTip="在当前标签加载所选配方的 main.flow.json"/>
-                        <Button x:Name="BtnOpenNinePointCalib" Content="九点标定" Style="{StaticResource IndustrialToolbarButton}"
-                                Margin="6,0,0,0" Click="BtnOpenNinePointCalib_Click"
-                                ToolTip="在当前标签加载 calibSendContour.flow.json"/>
                         <Button x:Name="BtnOpenChessboardCalib" Content="棋盘格标定" Style="{StaticResource IndustrialToolbarButton}"
                                 Margin="6,0,0,0" Click="BtnOpenChessboardCalib_Click"
                                 ToolTip="在当前标签加载 chessboard_intrinsics_from_dir.flow.json"/>
+                        <Button x:Name="BtnOpenWeldFlow" Content="九点打点" Style="{StaticResource IndustrialToolbarButton}"
+                                Margin="6,0,0,0" Click="BtnOpenWeldFlow_Click"
+                                ToolTip="机台按中心+步距走出九点世界坐标（calibSendContour.flow.json），写出 world_pos.txt，供「九点标定」使用"/>
+                        <Button x:Name="BtnOpenNinePointCalib" Content="九点标定" Style="{StaticResource IndustrialToolbarButton}"
+                                Margin="6,0,0,0" Click="BtnOpenNinePointCalib_Click"
+                                ToolTip="在当前标签加载 caliNinePoint.flow.json"/>
+                        <Button x:Name="BtnOpenAffineAdjust" Content="微调" Style="{StaticResource IndustrialToolbarButton}"
+                                Margin="6,0,0,0" Click="BtnOpenAffineAdjust_Click"
+                                ToolTip="在当前标签加载 adjustAffineCalibration.flow.json（加载已保存的九点 JSON，对话框平移/缩放后覆盖保存）"/>
                     </StackPanel>
                 </Border>
 

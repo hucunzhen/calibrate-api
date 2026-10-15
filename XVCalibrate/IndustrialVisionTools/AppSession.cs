@@ -7,9 +7,12 @@ namespace CalibOperatorCLI_Example
     {
         public static AppSession Current { get; } = new();
 
-        private AppSession() { }
+        private AppSession()
+        {
+            Role = AppSessionUiSettings.ReadPersistedRole();
+        }
 
-        public AppUserRole Role { get; private set; } = AppUserRole.Operator;
+        public AppUserRole Role { get; private set; }
 
         public string RoleDisplayName => AppRolePermissions.DisplayName(Role);
 
@@ -25,18 +28,23 @@ namespace CalibOperatorCLI_Example
                 return false;
             }
 
-            Role = role;
-            RoleChanged?.Invoke();
+            SetRole(role);
             return true;
         }
 
+        public bool TryChangePassword(AppUserRole role, string currentPassword, string newPassword, out string error) =>
+            AppRoleCredentialStore.Load().TryChangePassword(role, currentPassword ?? "", newPassword ?? "", out error);
+
         /// <summary>回到操作员（无需密码，用于交班）。</summary>
-        public void SignOutToOperator()
+        public void SignOutToOperator() => SetRole(AppUserRole.Operator);
+
+        private void SetRole(AppUserRole role)
         {
-            if (Role == AppUserRole.Operator)
-                return;
-            Role = AppUserRole.Operator;
-            RoleChanged?.Invoke();
+            bool changed = Role != role;
+            Role = role;
+            AppSessionUiSettings.WritePersistedRole(role);
+            if (changed)
+                RoleChanged?.Invoke();
         }
     }
 }

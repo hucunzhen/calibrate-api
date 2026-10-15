@@ -8,19 +8,25 @@
 
 ## 部署顺序概览
 
+流程页快捷（从左到右）：**主流程** → **棋盘格标定** → **九点打点** → **九点标定** → **微调**。
+
 ```mermaid
 flowchart LR
-  A[1 棋盘格标定] --> B[2 九点标定]
-  B --> C[3 制作模板]
-  C --> D[4 主流程 main.flow.json]
+  A[1 棋盘格标定] --> B[2 九点打点]
+  B --> C[3 九点标定]
+  C --> D[3b 微调可选]
+  D --> E[4 制作模板]
+  E --> F[5 主流程]
 ```
 
-| 步骤 | 目的 |
-|------|------|
-| 1. 棋盘格标定 | 内参去畸变、透视展开；**选定一张正视角**作为后续 `viewIndex` |
-| 2. 九点标定 | 像素坐标系 → PLC / 世界坐标系（仿射变换） |
-| 3. 制作模板 | 外框 / 粗匹配 / 精匹配 / 标定板 / 焊点 等 `.shm` / `.dfm` |
-| 4. 流程文件 | 加载标定结果，跑检测、匹配、轨迹下发 |
+| 步骤 | 快捷按钮 | 目的 |
+|------|----------|------|
+| 1. 棋盘格标定 | **棋盘格标定** | 内参去畸变、透视展开；**选定一张正视角**作为后续 `viewIndex` |
+| 2. 九点打点 | **九点打点** | 中心+步距生成九点世界坐标（`world_pos.txt`），供九点标定，不是量产焊 |
+| 3. 九点标定 | **九点标定** | 像素坐标系 → PLC / 世界坐标系（仿射变换） |
+| 3b. 微调 | **微调** | 对已保存仿射做平移/缩放，覆盖九点 JSON |
+| 4. 制作模板 | — | 外框 / 粗匹配 / 精匹配 / 标定板 / 焊点 等 `.shm` / `.dfm` |
+| 5. 主流程 | **主流程** | 加载标定结果，跑检测、匹配、轨迹下发 |
 
 ---
 
@@ -50,9 +56,10 @@ flowchart LR
 
 **推荐顺序**：
 
-1. 机台确定 **中心点** 与 **stepXmm / stepYmm**，填入 [`v4/calibSendContour.flow.json`](v4/calibSendContour.flow.json) 的 **weld_trajectory_world**，生成 `v4/models/world_pos.txt`（详见 [产线视觉标定与主流程.md](产线视觉标定与主流程.md) 阶段 2）。  
-2. 拍一张九点可见的标定图，用 [`v4/caliNinePoint.flow.json`](v4/caliNinePoint.flow.json)（圆点网格检测）求变换并保存 `models/calibration_nine_point.json`。  
-   圆点检测专章 [v4/九点标定_圆点检测.md](v4/九点标定_圆点检测.md)。
+1. 点快捷 **九点打点**，打开 [`v4/calibSendContour.flow.json`](v4/calibSendContour.flow.json)。机台确定 **中心点** 与 **stepXmm / stepYmm**，填入 **weld_trajectory_world**，生成 `v4/models/world_pos.txt`（详见 [产线视觉标定与主流程.md](产线视觉标定与主流程.md) 阶段 2）。  
+2. 拍一张九点可见的标定图，点快捷 **九点标定**，用 [`v4/caliNinePoint.flow.json`](v4/caliNinePoint.flow.json)（圆点网格检测）求变换并保存 `models/calibration_nine_point.json`。  
+   圆点检测专章 [v4/九点标定_圆点检测.md](v4/九点标定_圆点检测.md)。  
+3. 整体平移/缩放仍偏时，点快捷 **微调**，打开 [`v4/adjustAffineCalibration.flow.json`](v4/adjustAffineCalibration.flow.json)，覆盖同一 JSON。不要把 `adjust_affine_calibration` 加回九点求解流程。
 
 **注意**：
 
@@ -128,32 +135,37 @@ flowchart LR
 | **采图** | 棋盘完整、共面、姿态多样；**其中一张要较正**，记下其 `viewIndex` 供透视展开 |
 | **算子参数** | `cols` / `rows` / `squareSizeMm` 须与物理棋盘一致 |
 
-### 4.2 `v4/calibSendContour.flow.json`（产线）
+### 4.2 `v4/calibSendContour.flow.json`（快捷 **九点打点**）
 
-> 历史副本：`halcon/caliSendContour.flow.json`。
-
-| 项 | 说明 |
-|----|------|
-| **用途** | 激光焊**九点轨迹下发**，经 PLC 下发焊接轨迹，得到九点**世界坐标**（供下一步九点标定） |
-| **使用前** | 修改组合子流程内的 **焊接轨迹** 算子（`weld_trajectory_world`）：**中心点**（`centerX` / `centerY` / `centerZ`）、**步距**（`stepXmm` / `stepYmm`）、**绕中心旋转**（`rotateDeg`，可选 `rotateCenterX/Y`）与现场九点布局一致 |
-| **子流程** | 参数 `innerFlowPath` 指向实际轨迹生成 flow；部署时改为本机相对路径 |
-| **输出** | `send_plc` 写入 GVAR；PLC 执行后世界坐标用于填写 `caliNinePoint` 的 `worldPoints` |
-
-> 文件名：`caliSendContour.flow.json`（非 calibSendContour）。
-
-### 4.3 `v4/caliNinePoint.flow.json`（产线）
-
-> 历史 HALCON 圆点链：`halcon/caliNinePoint.flow.json` + `findCircle.flow.json`；产线改用 **detect_calibration_dots**。
+> 历史副本：`halcon/caliSendContour.flow.json`。产线文件名是 **`calibSendContour.flow.json`**。
 
 | 项 | 说明 |
 |----|------|
-| **用途** | 计算**九点标定**仿射参数 |
-| **输入** | 标定图 + 子流程 [`findCircle.flow.json`](halcon/findCircle.flow.json) 输出的 9 个像素点 |
-| **worldPoints** | 由 **`caliSendContour.flow.json`** 对应 PLC 坐标填写；**顺序与像素点一一对应** |
-| **输出** | `save_calibration_result` → 如 `calibration_nine_point.json`（含 `systemError` 系统整体误差，需填写 `calibrationJsonFile` 或连接 `CalibrationJson`） |
+| **用途** | 为九点标定**打世界坐标点**：中心+步距生成 3×3 `world_pos.txt`。可选再经 PLC 走一圈九点轨迹核对。**不是**量产焊接主流程 |
+| **使用前** | 修改 **weld_trajectory_world**：**中心点**（`centerX` / `centerY` / `centerZ`）、**步距**（`stepXmm` / `stepYmm`）、**绕中心旋转**（`rotateDeg`）与现场九点布局一致 |
+| **输出** | `models/world_pos.txt`；供 `caliNinePoint` 的 `worldPointsFile` |
+
+### 4.3 `v4/caliNinePoint.flow.json`（快捷 **九点标定**）
+
+> 历史 HALCON 圆点链：`halcon/caliNinePoint.flow.json` + `findCircle.flow.json`；产线改用 **detect_calibration_dots**。本流程**不含**仿射微调。
+
+| 项 | 说明 |
+|----|------|
+| **用途** | 计算**九点标定**仿射参数并保存 JSON |
+| **输入** | 标定图 + `detect_calibration_dots` 输出的像素点 + 阶段 2 的 `world_pos.txt` |
+| **worldPoints** | 由快捷 **九点打点** 生成；**顺序与像素点一一对应** |
+| **输出** | `save_calibration_result` → `models/calibration_nine_point.json` |
 | **核对** | `confirmCorrespondence=true` 时可交互确认像素↔世界配对 |
 
-### 4.4 `v4/main.flow.json`（产线）
+### 4.3b `v4/adjustAffineCalibration.flow.json`（快捷 **微调**）
+
+| 项 | 说明 |
+|----|------|
+| **用途** | 读取已保存九点 JSON，对话框平移/缩放后**覆盖**写回 |
+| **输入** | `models/calibration_nine_point.json`（可选标定图、世界点作预览/缩放中心） |
+| **时机** | 九点求解已保存、整体偏差仍在时；不要嵌回 `caliNinePoint` |
+
+### 4.4 `v4/main.flow.json`（快捷 **主流程**）
 
 > 历史副本：`halcon/main.flow.json`。
 
@@ -185,7 +197,7 @@ load_calibration_result         →  Transform         →  img_to_world → sen
 A: 使用 `perspectiveOutputScale=metric`；并确保 `viewIndex` 对应「较正」那张标定图。
 
 **Q: 九点标定重投影误差大？**  
-A: 检查 `worldPoints` 是否与 `caliSendContour` 一致；像素 9 点顺序是否与 `findCircle` 网格排序一致。
+A: 检查 `worldPoints` 是否与快捷 **九点打点**（`calibSendContour`）生成的 `world_pos.txt` 一致；像素 9 点顺序是否与 3×3 网格一致。整体平移/缩放仍偏时用快捷 **微调**。
 
 **Q: 如何查看棋盘格 + 九点的系统整体误差？**  
 A: 九点标定算子填写 `calibrationJsonFile`（或连接棋盘 `CalibrationJson`），运行后对话框末尾有 **[系统整体误差]** 段；`SystemErrorJson` 接 `save_calibration_result` 会写入 `systemError` 字段（合成 avg/max，单位 mm）。
@@ -193,5 +205,5 @@ A: 九点标定算子填写 `calibrationJsonFile`（或连接棋盘 `Calibration
 **Q: 精匹配偏差大？**  
 A: 确认粗匹配已缩小位置/角度；精模板边缘是否贴合物体；Mask / `CoarseAngle` 是否接入。
 
-**Q: caliSendContour 子流程路径无效？**  
-A: 将 `innerFlowPath` 改为相对 `caliSendContour.flow.json` 的路径，并配置其中的 `weld_trajectory_world`（`centerX/Y`、`stepXmm/stepYmm`）。
+**Q: 九点打点（calibSendContour）子流程路径无效？**  
+A: 将 `innerFlowPath` 改为相对该 flow 的路径，并配置其中的 `weld_trajectory_world`（`centerX/Y`、`stepXmm/stepYmm`）。

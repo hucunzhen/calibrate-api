@@ -6,7 +6,7 @@
 
 - **[产线视觉标定与主流程.md](产线视觉标定与主流程.md)** — **§1 量产日常运行** + 换产品时标定部署（阶段 0–6）  
   PDF：[产线视觉标定与主流程.pdf](产线视觉标定与主流程.pdf)（更新 Markdown 后运行 `python flows/_md_to_pdf.py` 重新生成；依赖 `markdown` 与系统自带 Edge 浏览器）
-- **[README_workflow_guide.md](README_workflow_guide.md)** — 技术部署指南（棋盘格标定 → 九点标定 → 形状模板 → 主流程）
+- **[README_workflow_guide.md](README_workflow_guide.md)** — 技术部署指南（棋盘格标定 → 九点打点 → 九点标定 → 微调 → 形状模板 → 主流程）
 
 ---
 
@@ -29,7 +29,7 @@
 
 ## 运行方式
 
-1. 流程页 → **加载** 或 **新标签** 打开 `.flow.json`
+1. 流程页选配方后点快捷按钮（**主流程 / 棋盘格标定 / 九点打点 / 九点标定 / 微调**），或 **加载** / **新标签** 打开 `.flow.json`
 2. **运行**（F5）：托管引擎，便于查看各节点端口数据
 3. **Native**：C++ NativeFlowEngine（部分算子仅 Native 或仅托管，失败时会回退）
 
@@ -40,10 +40,11 @@
 ```
 产线视觉标定与主流程.md                           # 产线全流程
 v4/README.md                                      # v4 流程索引
-v4/chessboard_intrinsics_from_dir.flow.json
-v4/calibSendContour.flow.json
-v4/caliNinePoint.flow.json
-v4/main.flow.json
+v4/main.flow.json                                # 快捷「主流程」
+v4/chessboard_intrinsics_from_dir.flow.json      # 快捷「棋盘格标定」
+v4/calibSendContour.flow.json                    # 快捷「九点打点」
+v4/caliNinePoint.flow.json                       # 快捷「九点标定」
+v4/adjustAffineCalibration.flow.json             # 快捷「微调」
 ```
 
 **棋盘 / HALCON 专题**

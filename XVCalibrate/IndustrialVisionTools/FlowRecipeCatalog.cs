@@ -19,12 +19,16 @@ namespace CalibOperatorCLI_Example
     {
         public const string DefaultMainFlowFileName = "main.flow.json";
 
-        public const string NinePointCalibFlowFileName = "calibSendContour.flow.json";
+        public const string NinePointCalibFlowFileName = "caliNinePoint.flow.json";
+
+        public const string WeldFlowFileName = "calibSendContour.flow.json";
 
         /// <summary>部分配方目录中的历史拼写。</summary>
-        public const string NinePointCalibFlowFileNameAlt = "caliSendContour.flow.json";
+        public const string WeldFlowFileNameAlt = "caliSendContour.flow.json";
 
         public const string ChessboardIntrinsicsFlowFileName = "chessboard_intrinsics_from_dir.flow.json";
+
+        public const string AffineAdjustFlowFileName = "adjustAffineCalibration.flow.json";
 
         public static string? TryFindFlowsRootDirectory()
         {
@@ -172,7 +176,28 @@ namespace CalibOperatorCLI_Example
             if (string.IsNullOrWhiteSpace(recipeDirectory) || !Directory.Exists(recipeDirectory))
                 return null;
 
-            foreach (string fileName in new[] { NinePointCalibFlowFileName, NinePointCalibFlowFileNameAlt })
+            string path = Path.Combine(recipeDirectory, NinePointCalibFlowFileName);
+            return File.Exists(path) ? Path.GetFullPath(path) : null;
+        }
+
+        public static string? TryGetSelectedNinePointCalibFlowPath()
+        {
+            var settings = FlowRecipeUiSettings.Load();
+            return TryGetNinePointCalibFlowPath(settings.SelectedRecipe);
+        }
+
+        public static string? TryGetWeldFlowPath(string recipeName)
+        {
+            string? dir = TryGetRecipeDirectory(recipeName);
+            return dir == null ? null : TryResolveWeldFlowPath(dir);
+        }
+
+        public static string? TryResolveWeldFlowPath(string recipeDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(recipeDirectory) || !Directory.Exists(recipeDirectory))
+                return null;
+
+            foreach (string fileName in new[] { WeldFlowFileName, WeldFlowFileNameAlt })
             {
                 string path = Path.Combine(recipeDirectory, fileName);
                 if (File.Exists(path))
@@ -180,12 +205,6 @@ namespace CalibOperatorCLI_Example
             }
 
             return null;
-        }
-
-        public static string? TryGetSelectedNinePointCalibFlowPath()
-        {
-            var settings = FlowRecipeUiSettings.Load();
-            return TryGetNinePointCalibFlowPath(settings.SelectedRecipe);
         }
 
         public static string? TryGetChessboardIntrinsicsFlowPath(string recipeName)
@@ -200,6 +219,21 @@ namespace CalibOperatorCLI_Example
                 return null;
 
             string path = Path.Combine(recipeDirectory, ChessboardIntrinsicsFlowFileName);
+            return File.Exists(path) ? Path.GetFullPath(path) : null;
+        }
+
+        public static string? TryGetAffineAdjustFlowPath(string recipeName)
+        {
+            string? dir = TryGetRecipeDirectory(recipeName);
+            return dir == null ? null : TryResolveAffineAdjustFlowPath(dir);
+        }
+
+        public static string? TryResolveAffineAdjustFlowPath(string recipeDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(recipeDirectory) || !Directory.Exists(recipeDirectory))
+                return null;
+
+            string path = Path.Combine(recipeDirectory, AffineAdjustFlowFileName);
             return File.Exists(path) ? Path.GetFullPath(path) : null;
         }
 

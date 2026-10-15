@@ -1606,7 +1606,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "adjust_affine_calibration",
                 DisplayName = "微调九点标定",
-                Description = "在世界坐标系(mm)下平移/缩放仿射标定结果。interactiveAdjust=true 时在对话框中逐步微调；false 时仅按参数一次性修正。接「九点标定」Transform，并建议连 ImagePts（或 WorldPts）以便缩放绕网格中心。",
+                Description = "在世界坐标系(mm)下平移/缩放仿射标定结果。独立于九点求解：可接「读取标定结果」Transform，运行后覆盖保存 JSON。interactiveAdjust=true 时在对话框中逐步微调；false 时仅按参数一次性修正。建议连 WorldPts（或 ImagePts）以便缩放绕网格中心；可选 Image 供预览。",
                 Category = "标定",
                 Params =
                 {
@@ -1693,6 +1693,7 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "Transform", Direction = PortDirection.Input, DataType = typeof(AffineTransform), ColorHex = "#E91E63" },
                     new PortDef { Name = "WorldPts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3", IsOptional = true },
                     new PortDef { Name = "ImagePts", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3", IsOptional = true },
+                    new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50", IsOptional = true },
                     new PortDef { Name = "Transform", Direction = PortDirection.Output, DataType = typeof(AffineTransform), ColorHex = "#E91E63" }
                 }
             },
@@ -3846,10 +3847,25 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam
                     {
                         Name = "connectOrder",
-                        DisplayName = "匹配顺序",
+                        DisplayName = "焊接顺序",
                         DefaultValue = "col_major",
-                        Description = "落格实例的拼接顺序",
-                        Options = new List<string> { "row_major", "col_major", "snake_row", "snake_col" }
+                        Description = $"落格实例拼接顺序。{LatticeWeldOrderMetaHint}",
+                        Options = new List<string> { "col_major", "row_major", "snake_col", "snake_row" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "weldInterval",
+                        DisplayName = "焊接间隔",
+                        DefaultValue = "1",
+                        Description = LatticeWeldIntervalMetaHint
+                    },
+                    new OperatorParam
+                    {
+                        Name = "weldIntervalReverse",
+                        DisplayName = "间隔反向",
+                        DefaultValue = "true",
+                        Description = LatticeWeldIntervalReverseMetaHint,
+                        Options = new List<string> { "true", "false" }
                     },
                     new OperatorParam
                     {
@@ -3888,6 +3904,37 @@ namespace CalibOperatorCLI_Example
                 {
                     new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8", Description = $"阵列行数；{LatticeGridMetaHint}" },
                     new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2", Description = $"阵列列数；{LatticeGridMetaHint}" },
+                    new OperatorParam
+                    {
+                        Name = "originCorner",
+                        DisplayName = "落格原点",
+                        DefaultValue = "top_left",
+                        Description = LatticeOriginMetaHint,
+                        Options = new List<string> { "top_left", "top_right", "bottom_left", "bottom_right" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "weldOrder",
+                        DisplayName = "焊接顺序",
+                        DefaultValue = "col_major",
+                        Description = LatticeWeldOrderMetaHint,
+                        Options = new List<string> { "col_major", "row_major", "snake_col", "snake_row" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "weldInterval",
+                        DisplayName = "焊接间隔",
+                        DefaultValue = "1",
+                        Description = LatticeWeldIntervalMetaHint
+                    },
+                    new OperatorParam
+                    {
+                        Name = "weldIntervalReverse",
+                        DisplayName = "间隔反向",
+                        DefaultValue = "true",
+                        Description = LatticeWeldIntervalReverseMetaHint,
+                        Options = new List<string> { "true", "false" }
+                    },
                     new OperatorParam { Name = "minScoreKeep", DisplayName = "最低得分", DefaultValue = "0", Description = "0=关闭；每格保留匹配的最低 Score" },
                     new OperatorParam { Name = "snapTolerancePx", DisplayName = "吸附容差(px)", DefaultValue = "0", Description = "0=自动；u/v 落格吸附半径" },
                     new OperatorParam { Name = "ransacIterations", DisplayName = "RANSAC 迭代", DefaultValue = "500", Description = "假设采样次数（含 θ 扰动与三点最小集）" },
@@ -3901,10 +3948,12 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "Angle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
                     new PortDef { Name = "Score", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "Scale", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#26A69A", IsOptional = true },
                     new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF5722" },
                     new PortDef { Name = "Score", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FFC107" },
+                    new PortDef { Name = "Scale", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#26A69A" },
                     new PortDef { Name = "GridRow", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#8BC34A" },
                     new PortDef { Name = "GridCol", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#CDDC39" },
                     new PortDef { Name = "LatticeAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#C5E1A5" },
@@ -3929,6 +3978,37 @@ namespace CalibOperatorCLI_Example
                 {
                     new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8", Description = $"阵列行数（2 列×8 行 → 行=8、列=2；内部可自动 swap）；{LatticeGridMetaHint}" },
                     new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2", Description = $"阵列列数；{LatticeGridMetaHint}" },
+                    new OperatorParam
+                    {
+                        Name = "originCorner",
+                        DisplayName = "落格原点",
+                        DefaultValue = "top_left",
+                        Description = LatticeOriginMetaHint,
+                        Options = new List<string> { "top_left", "top_right", "bottom_left", "bottom_right" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "weldOrder",
+                        DisplayName = "焊接顺序",
+                        DefaultValue = "col_major",
+                        Description = LatticeWeldOrderMetaHint,
+                        Options = new List<string> { "col_major", "row_major", "snake_col", "snake_row" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "weldInterval",
+                        DisplayName = "焊接间隔",
+                        DefaultValue = "1",
+                        Description = LatticeWeldIntervalMetaHint
+                    },
+                    new OperatorParam
+                    {
+                        Name = "weldIntervalReverse",
+                        DisplayName = "间隔反向",
+                        DefaultValue = "true",
+                        Description = LatticeWeldIntervalReverseMetaHint,
+                        Options = new List<string> { "true", "false" }
+                    },
                     new OperatorParam { Name = "minScoreKeep", DisplayName = "最低得分", DefaultValue = "0", Description = "0=关闭；每格保留匹配的最低 Score" },
                     new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto", Description = "写入 *.grid-filter.log" }
                 },
@@ -3938,10 +4018,12 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "Angle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
                     new PortDef { Name = "Score", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "Scale", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#26A69A", IsOptional = true },
                     new PortDef { Name = "Row", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#4CAF50" },
                     new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF5722" },
                     new PortDef { Name = "Score", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FFC107" },
+                    new PortDef { Name = "Scale", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#26A69A" },
                     new PortDef { Name = "GridRow", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#8BC34A" },
                     new PortDef { Name = "GridCol", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#CDDC39" },
                     new PortDef { Name = "LatticeAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#C5E1A5" },
@@ -3990,6 +4072,37 @@ namespace CalibOperatorCLI_Example
                 {
                     new OperatorParam { Name = "gridRows", DisplayName = "行数", DefaultValue = "8", Description = LatticeGridMetaHint },
                     new OperatorParam { Name = "gridCols", DisplayName = "列数", DefaultValue = "2", Description = LatticeGridMetaHint },
+                    new OperatorParam
+                    {
+                        Name = "originCorner",
+                        DisplayName = "落格原点",
+                        DefaultValue = "top_left",
+                        Description = LatticeOriginMetaHint,
+                        Options = new List<string> { "top_left", "top_right", "bottom_left", "bottom_right" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "weldOrder",
+                        DisplayName = "焊接顺序",
+                        DefaultValue = "col_major",
+                        Description = LatticeWeldOrderMetaHint,
+                        Options = new List<string> { "col_major", "row_major", "snake_col", "snake_row" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "weldInterval",
+                        DisplayName = "焊接间隔",
+                        DefaultValue = "1",
+                        Description = LatticeWeldIntervalMetaHint
+                    },
+                    new OperatorParam
+                    {
+                        Name = "weldIntervalReverse",
+                        DisplayName = "间隔反向",
+                        DefaultValue = "true",
+                        Description = LatticeWeldIntervalReverseMetaHint,
+                        Options = new List<string> { "true", "false" }
+                    },
                     new OperatorParam { Name = "minScoreKeep", DisplayName = "最低得分(已忽略)", DefaultValue = "0", Description = "保留参数兼容；落格不再按分过滤，请在前级匹配设 minScore" },
                     new OperatorParam { Name = "snapTolerancePx", DisplayName = "格点容差(px)", DefaultValue = "0", Description = "0=自动" },
                     new OperatorParam { Name = "uvProjectionSvg", DisplayName = "u/v投影SVG", DefaultValue = "", Description = "相对 flow 目录或绝对路径；留空不写 SVG" },
@@ -4001,6 +4114,7 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "Column", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "Angle", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FF5722", IsOptional = true },
                     new PortDef { Name = "Score", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "Scale", Direction = PortDirection.Input, DataType = typeof(double[]), ColorHex = "#26A69A", IsOptional = true },
                     new PortDef { Name = "ChainBootstrapAngle", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#C5E1A5", IsOptional = true },
                     new PortDef { Name = "PcaChainAngle", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#FF9800", IsOptional = true },
                     new PortDef { Name = "BootstrapPickIndices", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#8BC34A", IsOptional = true },
@@ -4008,6 +4122,7 @@ namespace CalibOperatorCLI_Example
                     new PortDef { Name = "Column", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "Angle", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FF5722" },
                     new PortDef { Name = "Score", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#FFC107" },
+                    new PortDef { Name = "Scale", Direction = PortDirection.Output, DataType = typeof(double[]), ColorHex = "#26A69A" },
                     new PortDef { Name = "GridRow", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#8BC34A" },
                     new PortDef { Name = "GridCol", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#CDDC39" },
                     new PortDef { Name = "LatticeAngle", Direction = PortDirection.Output, DataType = typeof(double), ColorHex = "#C5E1A5" },
@@ -4060,6 +4175,37 @@ namespace CalibOperatorCLI_Example
                 Category = "HALCON",
                 Params =
                 {
+                    new OperatorParam
+                    {
+                        Name = "originCorner",
+                        DisplayName = "落格原点",
+                        DefaultValue = "top_left",
+                        Description = LatticeOriginMetaHint,
+                        Options = new List<string> { "top_left", "top_right", "bottom_left", "bottom_right" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "weldOrder",
+                        DisplayName = "焊接顺序",
+                        DefaultValue = "col_major",
+                        Description = LatticeWeldOrderMetaHint,
+                        Options = new List<string> { "col_major", "row_major", "snake_col", "snake_row" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "weldInterval",
+                        DisplayName = "焊接间隔",
+                        DefaultValue = "1",
+                        Description = LatticeWeldIntervalMetaHint
+                    },
+                    new OperatorParam
+                    {
+                        Name = "weldIntervalReverse",
+                        DisplayName = "间隔反向",
+                        DefaultValue = "true",
+                        Description = LatticeWeldIntervalReverseMetaHint,
+                        Options = new List<string> { "true", "false" }
+                    },
                     new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto" }
                 },
                 Ports =

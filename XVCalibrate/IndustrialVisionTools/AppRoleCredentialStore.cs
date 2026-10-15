@@ -23,6 +23,15 @@ namespace CalibOperatorCLI_Example
 
         public void Save() => AppUiSettingsStore.Save(FileName, this);
 
+        public static string FactoryDefaultPasswordHint(AppUserRole role) => role switch
+        {
+            AppUserRole.Operator => "无需密码",
+            AppUserRole.Process => "默认 process",
+            AppUserRole.Vision => "默认 vision",
+            AppUserRole.Admin => "默认 admin",
+            _ => "请输入密码",
+        };
+
         public void EnsureFactoryDefaults()
         {
             SetPassword(AppUserRole.Operator, "");
@@ -42,6 +51,26 @@ namespace CalibOperatorCLI_Example
                 return string.IsNullOrEmpty(password);
 
             return string.Equals(wantHex, Hash(password), StringComparison.OrdinalIgnoreCase);
+        }
+
+        public bool TryChangePassword(AppUserRole role, string currentPassword, string newPassword, out string error)
+        {
+            error = "";
+            if (!Verify(role, currentPassword ?? ""))
+            {
+                error = "当前密码错误。";
+                return false;
+            }
+
+            if (role != AppUserRole.Operator && string.IsNullOrEmpty(newPassword))
+            {
+                error = "工艺 / 视觉 / 管理员的新密码不能为空。";
+                return false;
+            }
+
+            SetPassword(role, newPassword ?? "");
+            Save();
+            return true;
         }
 
         public void SetPassword(AppUserRole role, string password)

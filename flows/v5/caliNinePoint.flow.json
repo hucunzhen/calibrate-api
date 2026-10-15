@@ -165,26 +165,6 @@
         "enable": "true",
         "disable": "false"
       }
-    },
-    {
-      "Id": "6930e941-43ea-4713-8ba0-0a5768b487ac",
-      "TypeId": "adjust_affine_calibration",
-      "X": 1034,
-      "Y": 396,
-      "Params": {
-        "interactiveAdjust": "true",
-        "offsetWorldX": "0",
-        "offsetWorldY": "0",
-        "nudgePreset": "none",
-        "nudgeStepMm": "0.5",
-        "scaleStepPercent": "0.1",
-        "scaleX": "1",
-        "scaleY": "1",
-        "pivotWorldX": "0",
-        "pivotWorldY": "0",
-        "enable": "true",
-        "disable": "false"
-      }
     }
   ],
   "Connections": [
@@ -250,12 +230,6 @@
     },
     {
       "FromNodeId": "62879182-0f97-45ea-800c-48cf296b72f1",
-      "FromPort": "Transform",
-      "ToNodeId": "6930e941-43ea-4713-8ba0-0a5768b487ac",
-      "ToPort": "Transform"
-    },
-    {
-      "FromNodeId": "6930e941-43ea-4713-8ba0-0a5768b487ac",
       "FromPort": "Transform",
       "ToNodeId": "91090304-28ba-437e-b090-e4c52c2e6dee",
       "ToPort": "Transform"

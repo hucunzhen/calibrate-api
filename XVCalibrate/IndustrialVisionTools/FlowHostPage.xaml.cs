@@ -168,7 +168,9 @@ namespace CalibOperatorCLI_Example
             BtnRefreshRecipes.IsEnabled = manage || engineer;
 
             BtnOpenNinePointCalib.IsEnabled = engineer;
+            BtnOpenWeldFlow.IsEnabled = engineer;
             BtnOpenChessboardCalib.IsEnabled = engineer;
+            BtnOpenAffineAdjust.IsEnabled = engineer;
             BtnOpenRecipeMain.IsEnabled = engineer || manage;
         }
 
@@ -213,7 +215,9 @@ namespace CalibOperatorCLI_Example
                     CmbRecipe.IsEnabled = false;
                     BtnOpenRecipeMain.IsEnabled = false;
                     BtnOpenNinePointCalib.IsEnabled = false;
+                    BtnOpenWeldFlow.IsEnabled = false;
                     BtnOpenChessboardCalib.IsEnabled = false;
+                    BtnOpenAffineAdjust.IsEnabled = false;
                     BtnCopyRecipe.IsEnabled = false;
                     BtnRenameRecipe.IsEnabled = false;
                     BtnDeleteRecipe.IsEnabled = false;
@@ -223,7 +227,9 @@ namespace CalibOperatorCLI_Example
                 CmbRecipe.IsEnabled = true;
                 BtnOpenRecipeMain.IsEnabled = true;
                 BtnOpenNinePointCalib.IsEnabled = true;
+                BtnOpenWeldFlow.IsEnabled = true;
                 BtnOpenChessboardCalib.IsEnabled = true;
+                BtnOpenAffineAdjust.IsEnabled = true;
                 BtnCopyRecipe.IsEnabled = true;
                 BtnRenameRecipe.IsEnabled = true;
                 BtnDeleteRecipe.IsEnabled = true;
@@ -308,13 +314,25 @@ namespace CalibOperatorCLI_Example
         private void LoadSelectedRecipeNinePointCalibFlow(bool showErrors) =>
             LoadSelectedRecipeFlow(
                 FlowRecipeCatalog.TryGetNinePointCalibFlowPath,
-                $"{FlowRecipeCatalog.NinePointCalibFlowFileName} / {FlowRecipeCatalog.NinePointCalibFlowFileNameAlt}",
+                FlowRecipeCatalog.NinePointCalibFlowFileName,
+                showErrors);
+
+        private void LoadSelectedRecipeWeldFlow(bool showErrors) =>
+            LoadSelectedRecipeFlow(
+                FlowRecipeCatalog.TryGetWeldFlowPath,
+                $"{FlowRecipeCatalog.WeldFlowFileName} / {FlowRecipeCatalog.WeldFlowFileNameAlt}",
                 showErrors);
 
         private void LoadSelectedRecipeChessboardCalibFlow(bool showErrors) =>
             LoadSelectedRecipeFlow(
                 FlowRecipeCatalog.TryGetChessboardIntrinsicsFlowPath,
                 FlowRecipeCatalog.ChessboardIntrinsicsFlowFileName,
+                showErrors);
+
+        private void LoadSelectedRecipeAffineAdjustFlow(bool showErrors) =>
+            LoadSelectedRecipeFlow(
+                FlowRecipeCatalog.TryGetAffineAdjustFlowPath,
+                FlowRecipeCatalog.AffineAdjustFlowFileName,
                 showErrors);
 
         private void LoadSelectedRecipeFlow(Func<string, string?> pathResolver, string flowLabel, bool showErrors)
@@ -372,8 +390,14 @@ namespace CalibOperatorCLI_Example
         private void BtnOpenNinePointCalib_Click(object sender, RoutedEventArgs e) =>
             LoadSelectedRecipeNinePointCalibFlow(showErrors: true);
 
+        private void BtnOpenWeldFlow_Click(object sender, RoutedEventArgs e) =>
+            LoadSelectedRecipeWeldFlow(showErrors: true);
+
         private void BtnOpenChessboardCalib_Click(object sender, RoutedEventArgs e) =>
             LoadSelectedRecipeChessboardCalibFlow(showErrors: true);
+
+        private void BtnOpenAffineAdjust_Click(object sender, RoutedEventArgs e) =>
+            LoadSelectedRecipeAffineAdjustFlow(showErrors: true);
 
         private void BtnRefreshRecipes_Click(object sender, RoutedEventArgs e) =>
             RefreshRecipeCombo(selectFromSettings: false);

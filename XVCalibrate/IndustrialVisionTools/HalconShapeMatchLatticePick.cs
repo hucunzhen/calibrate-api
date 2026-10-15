@@ -1,5 +1,63 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
 namespace CalibOperatorCLI_Example
 {
+    /// <summary>格网 (0,0) 在图像上的角（Row 向下、Col 向右）。默认左上，避免链向翻 180° 时编号从左上跳到右下。</summary>
+    public enum LatticeOriginCorner
+    {
+        TopLeft,
+        TopRight,
+        BottomLeft,
+        BottomRight
+    }
+
+    /// <summary>落格输出 / 焊接遍历顺序（相对格 (0,0) 与行列编号）。main 的 flow_loop 与轨迹拼接均跟此顺序。</summary>
+    public enum LatticeWeldOrder
+    {
+        /// <summary>先沿列（行增大），再下一列。默认。</summary>
+        ColMajor,
+        /// <summary>先沿行（列增大），再下一行。</summary>
+        RowMajor,
+        /// <summary>按列蛇形：偶数列行↑，奇数列行↓。</summary>
+        SnakeCol,
+        /// <summary>按行蛇形：偶数行列→，奇数行列←。</summary>
+        SnakeRow
+    }
+
+    /// <summary>焊接间隔遍数：在基础顺序上每隔 N 取一点，共 N 遍；是否奇偶遍反向由参数控制。</summary>
+    public static class LatticeWeldSequence
+    {
+        /// <summary>
+        /// 间隔 N：先按基础序排好，再分 N 遍。第 k 遍取下标 k, k+N, k+2N…；
+        /// <paramref name="alternatePassReverse"/> 为 true 时奇数遍（第 2、4…遍）反向。N≤1 时原样返回。
+        /// </summary>
+        public static List<T> ApplyIntervalPasses<T>(
+            IReadOnlyList<T> baseOrder,
+            int interval,
+            bool alternatePassReverse = true)
+        {
+            if (baseOrder == null || baseOrder.Count == 0)
+                return new List<T>();
+            int n = Math.Clamp(interval, 1, baseOrder.Count);
+            if (n <= 1)
+                return baseOrder is List<T> asList ? new List<T>(asList) : baseOrder.ToList();
+
+            var result = new List<T>(baseOrder.Count);
+            for (int pass = 0; pass < n; pass++)
+            {
+                var sub = new List<T>((baseOrder.Count + n - 1) / n);
+                for (int i = pass; i < baseOrder.Count; i += n)
+                    sub.Add(baseOrder[i]);
+                if (alternatePassReverse && (pass & 1) == 1)
+                    sub.Reverse();
+                result.AddRange(sub);
+            }
+            return result;
+        }
+    }
+
     /// <summary>阵列格点筛选结果：每格一个最高分匹配，如 2×8 → 最多 16 个模板。</summary>
     public sealed class HalconShapeMatchLatticePickResult
     {
@@ -80,12 +138,16 @@ namespace CalibOperatorCLI_Example
             double snapTolerancePx = 0,
             string? diagnosticTag = null,
             string? uvProjectionSvgPath = null,
-            double pcaChainAngleDeg = double.NaN)
+            double pcaChainAngleDeg = double.NaN,
+            LatticeOriginCorner originCorner = LatticeOriginCorner.TopLeft,
+            LatticeWeldOrder weldOrder = LatticeWeldOrder.ColMajor,
+            int weldInterval = 1,
+            bool weldIntervalReverse = true)
         {
             var inner = HalconShapeMatchGridFilter.PickLatticeGridInUv(
                 rows, cols, angles, scores, gridRows, gridCols,
                 latticeAngleHintDeg, bootstrapPickIndices, minScoreKeep, snapTolerancePx, diagnosticTag,
-                uvProjectionSvgPath, pcaChainAngleDeg);
+                uvProjectionSvgPath, pcaChainAngleDeg, originCorner, weldOrder, weldInterval, weldIntervalReverse);
             return ToPickResult(inner);
         }
 
@@ -113,10 +175,14 @@ namespace CalibOperatorCLI_Example
             int gridRows,
             int gridCols,
             double minScoreKeep = 0,
-            string? diagnosticTag = null)
+            string? diagnosticTag = null,
+            LatticeOriginCorner originCorner = LatticeOriginCorner.TopLeft,
+            LatticeWeldOrder weldOrder = LatticeWeldOrder.ColMajor,
+            int weldInterval = 1,
+            bool weldIntervalReverse = true)
         {
             var inner = HalconShapeMatchGridFilter.PickLatticeGridMatches(
-                rows, cols, angles, scores, gridRows, gridCols, minScoreKeep, diagnosticTag);
+                rows, cols, angles, scores, gridRows, gridCols, minScoreKeep, diagnosticTag, originCorner, weldOrder, weldInterval, weldIntervalReverse);
             return ToPickResult(inner);
         }
 
@@ -133,12 +199,16 @@ namespace CalibOperatorCLI_Example
             string? diagnosticTag = null,
             string? uvProjectionSvgPath = null,
             int ransacIterations = 500,
-            double inlierSnapFactor = 0.45)
+            double inlierSnapFactor = 0.45,
+            LatticeOriginCorner originCorner = LatticeOriginCorner.TopLeft,
+            LatticeWeldOrder weldOrder = LatticeWeldOrder.ColMajor,
+            int weldInterval = 1,
+            bool weldIntervalReverse = true)
         {
             var inner = HalconShapeMatchGridFilter.PickLatticeRansac(
                 rows, cols, angles, scores, gridRows, gridCols,
                 minScoreKeep, snapTolerancePx, diagnosticTag, uvProjectionSvgPath,
-                ransacIterations, inlierSnapFactor);
+                ransacIterations, inlierSnapFactor, originCorner, weldOrder, weldInterval, weldIntervalReverse);
             return ToPickResult(inner);
         }
 

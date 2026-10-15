@@ -27,7 +27,9 @@ namespace CalibOperatorCLI_Example
             "v4/main.flow.json",
             "v4/calibSendContour.flow.json",
             "v4/caliNinePoint.flow.json",
+            "v4/adjustAffineCalibration.flow.json",
             "v4/chessboard_intrinsics_from_dir.flow.json",
+            "v5/adjustAffineCalibration.flow.json",
             "v4/halcon_coarse_shape_match.flow.json",
             "v4/halcon_fine_shape_match.flow.json",
         };

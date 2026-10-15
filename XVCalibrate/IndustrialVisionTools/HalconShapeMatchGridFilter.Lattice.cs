@@ -2332,6 +2332,224 @@ namespace CalibOperatorCLI_Example
             row = u * sin + v * cos;
         }
 
+        internal static LatticeOriginCorner ParseLatticeOriginCorner(string? raw)
+        {
+            string s = (raw ?? "").Trim().ToLowerInvariant();
+            return s switch
+            {
+                "top_right" or "tr" or "右上" => LatticeOriginCorner.TopRight,
+                "bottom_left" or "bl" or "左下" => LatticeOriginCorner.BottomLeft,
+                "bottom_right" or "br" or "右下" => LatticeOriginCorner.BottomRight,
+                _ => LatticeOriginCorner.TopLeft
+            };
+        }
+
+        internal static string FormatLatticeOriginCorner(LatticeOriginCorner origin) => origin switch
+        {
+            LatticeOriginCorner.TopRight => "top_right",
+            LatticeOriginCorner.BottomLeft => "bottom_left",
+            LatticeOriginCorner.BottomRight => "bottom_right",
+            _ => "top_left"
+        };
+
+        internal static LatticeWeldOrder ParseLatticeWeldOrder(string? raw)
+        {
+            string s = (raw ?? "").Trim().ToLowerInvariant();
+            return s switch
+            {
+                "row_major" or "rowmajor" or "row" or "行优先" => LatticeWeldOrder.RowMajor,
+                "snake_row" or "snakerow" or "蛇形行" => LatticeWeldOrder.SnakeRow,
+                "snake_col" or "snakecol" or "snake_column" or "蛇形列" => LatticeWeldOrder.SnakeCol,
+                _ => LatticeWeldOrder.ColMajor
+            };
+        }
+
+        internal static string FormatLatticeWeldOrder(LatticeWeldOrder order) => order switch
+        {
+            LatticeWeldOrder.RowMajor => "row_major",
+            LatticeWeldOrder.SnakeRow => "snake_row",
+            LatticeWeldOrder.SnakeCol => "snake_col",
+            _ => "col_major"
+        };
+
+        /// <summary>按焊接顺序收集已占格索引（跳过空格）。</summary>
+        private static List<int> CollectLatticeCellsInWeldOrder(
+            Dictionary<(int ir, int ic), int> cellBest,
+            int effRows,
+            int effCols,
+            LatticeWeldOrder order)
+        {
+            var list = new List<int>(Math.Max(0, effRows * effCols));
+            void TryAdd(int ir, int ic)
+            {
+                if (cellBest.TryGetValue((ir, ic), out int idx))
+                    list.Add(idx);
+            }
+
+            switch (order)
+            {
+                case LatticeWeldOrder.RowMajor:
+                    for (int ir = 0; ir < effRows; ir++)
+                        for (int ic = 0; ic < effCols; ic++)
+                            TryAdd(ir, ic);
+                    break;
+                case LatticeWeldOrder.SnakeRow:
+                    for (int ir = 0; ir < effRows; ir++)
+                    {
+                        if ((ir & 1) == 0)
+                        {
+                            for (int ic = 0; ic < effCols; ic++)
+                                TryAdd(ir, ic);
+                        }
+                        else
+                        {
+                            for (int ic = effCols - 1; ic >= 0; ic--)
+                                TryAdd(ir, ic);
+                        }
+                    }
+                    break;
+                case LatticeWeldOrder.SnakeCol:
+                    for (int ic = 0; ic < effCols; ic++)
+                    {
+                        if ((ic & 1) == 0)
+                        {
+                            for (int ir = 0; ir < effRows; ir++)
+                                TryAdd(ir, ic);
+                        }
+                        else
+                        {
+                            for (int ir = effRows - 1; ir >= 0; ir--)
+                                TryAdd(ir, ic);
+                        }
+                    }
+                    break;
+                default:
+                    for (int ic = 0; ic < effCols; ic++)
+                        for (int ir = 0; ir < effRows; ir++)
+                            TryAdd(ir, ic);
+                    break;
+            }
+
+            return list;
+        }
+
+        /// <summary>基础焊接序 + 间隔 N 遍（可选奇数遍反向）。</summary>
+        private static List<int> CollectLatticeCellsForWeld(
+            Dictionary<(int ir, int ic), int> cellBest,
+            int effRows,
+            int effCols,
+            LatticeWeldOrder order,
+            int weldInterval,
+            bool weldIntervalReverse = true)
+        {
+            var baseOrder = CollectLatticeCellsInWeldOrder(cellBest, effRows, effCols, order);
+            return LatticeWeldSequence.ApplyIntervalPasses(baseOrder, weldInterval, weldIntervalReverse);
+        }
+
+        /// <summary>翻转行/列编号，使格 (0,0) 落在指定图像角（图像 Row 向下、Col 向右）。</summary>
+        private static void ApplyLatticeOriginCorner(
+            LatticeOriginCorner origin,
+            double angleRad,
+            ref RowColumnLattice lattice,
+            Dictionary<(int ir, int ic), int> cellBest,
+            string? tag)
+        {
+            int rows = lattice.Rows;
+            int cols = lattice.Cols;
+            if (rows < 1 || cols < 1 || lattice.RowV.Length < rows || lattice.ColU.Length < cols)
+                return;
+
+            int bestIr = 0;
+            int bestIc = 0;
+            double bestScore = double.PositiveInfinity;
+            var corners = new[]
+            {
+                (0, 0),
+                (0, cols - 1),
+                (rows - 1, 0),
+                (rows - 1, cols - 1)
+            };
+            foreach (var (ir, ic) in corners)
+            {
+                UvToImage(lattice.IdealU(ir, ic), lattice.IdealV(ir), angleRad, out double col, out double row);
+                double score = LatticeOriginScore(origin, row, col);
+                if (score < bestScore)
+                {
+                    bestScore = score;
+                    bestIr = ir;
+                    bestIc = ic;
+                }
+            }
+
+            bool flipRows = bestIr != 0;
+            bool flipCols = bestIc != 0;
+            if (!flipRows && !flipCols)
+            {
+                DiagLattice(tag, $"落格原点 {FormatLatticeOriginCorner(origin)}：格 (0,0) 已在目标角");
+                return;
+            }
+
+            var rowV = (double[])lattice.RowV.Clone();
+            var colU = (double[])lattice.ColU.Clone();
+            if (flipRows)
+                Array.Reverse(rowV);
+            if (flipCols)
+                Array.Reverse(colU);
+
+            var pointRow = lattice.PointRow.Length > 0 ? (int[])lattice.PointRow.Clone() : lattice.PointRow;
+            var pointCol = lattice.PointCol.Length > 0 ? (int[])lattice.PointCol.Clone() : lattice.PointCol;
+            if (flipRows)
+            {
+                for (int i = 0; i < pointRow.Length; i++)
+                    if (pointRow[i] >= 0)
+                        pointRow[i] = rows - 1 - pointRow[i];
+            }
+            if (flipCols)
+            {
+                for (int i = 0; i < pointCol.Length; i++)
+                    if (pointCol[i] >= 0)
+                        pointCol[i] = cols - 1 - pointCol[i];
+            }
+
+            lattice = new RowColumnLattice
+            {
+                Rows = rows,
+                Cols = cols,
+                PitchU = lattice.PitchU,
+                PitchV = lattice.PitchV,
+                RowV = rowV,
+                ColU = colU,
+                PointRow = pointRow,
+                PointCol = pointCol
+            };
+
+            var remapped = new Dictionary<(int ir, int ic), int>(cellBest.Count);
+            foreach (var kv in cellBest)
+            {
+                int ir = flipRows ? rows - 1 - kv.Key.ir : kv.Key.ir;
+                int ic = flipCols ? cols - 1 - kv.Key.ic : kv.Key.ic;
+                remapped[(ir, ic)] = kv.Value;
+            }
+            cellBest.Clear();
+            foreach (var kv in remapped)
+                cellBest[kv.Key] = kv.Value;
+
+            DiagLattice(tag,
+                $"落格原点 {FormatLatticeOriginCorner(origin)}：翻转行={flipRows} 列={flipCols}（消除 180° 编号跳变）");
+        }
+
+        private static double LatticeOriginScore(LatticeOriginCorner origin, double imageRow, double imageCol)
+        {
+            const double rowWeight = 1_000_000.0;
+            return origin switch
+            {
+                LatticeOriginCorner.TopRight => imageRow * rowWeight - imageCol,
+                LatticeOriginCorner.BottomLeft => -imageRow * rowWeight + imageCol,
+                LatticeOriginCorner.BottomRight => -imageRow * rowWeight - imageCol,
+                _ => imageRow * rowWeight + imageCol
+            };
+        }
+
         /// <summary>格心一律由统一阵列 ColU/RowV 推算；仅 CellFound 区分是否命中，不用各匹配点坐标。</summary>
         private static void BuildCellGridGeometry(
             RowColumnLattice lattice,
@@ -3893,23 +4111,15 @@ namespace CalibOperatorCLI_Example
             return u[i] >= uMid ? 1 : 0;
         }
 
-        /// <summary>按 (行,列) 顺序收集双列条带索引，避免 cellBest.Values 混入零散格或重复语义。</summary>
+        /// <summary>按焊接顺序收集双列条带索引，避免 cellBest.Values 混入零散格或重复语义。</summary>
         private static List<int> CollectStripCellIndices(
             Dictionary<(int ir, int ic), int> cellBest,
             int effRows,
-            int effCols)
-        {
-            var list = new List<int>(effRows * effCols);
-            for (int ic = 0; ic < effCols; ic++)
-            {
-                for (int ir = 0; ir < effRows; ir++)
-                {
-                    if (cellBest.TryGetValue((ir, ic), out int idx))
-                        list.Add(idx);
-                }
-            }
-            return list;
-        }
+            int effCols,
+            LatticeWeldOrder weldOrder = LatticeWeldOrder.ColMajor,
+            int weldInterval = 1,
+            bool weldIntervalReverse = true) =>
+            CollectLatticeCellsForWeld(cellBest, effRows, effCols, weldOrder, weldInterval, weldIntervalReverse);
 
         private static double ProjectAlongChainDeg(double col, double row, double chainDirectionDeg)
         {
@@ -4896,7 +5106,11 @@ namespace CalibOperatorCLI_Example
             double[]? angles,
             double[]? scores,
             double minScoreKeep,
-            string? diagnosticTag)
+            string? diagnosticTag,
+            LatticeOriginCorner originCorner = LatticeOriginCorner.TopLeft,
+            LatticeWeldOrder weldOrder = LatticeWeldOrder.ColMajor,
+            int weldInterval = 1,
+            bool weldIntervalReverse = true)
         {
             string tag = string.IsNullOrEmpty(diagnosticTag) ? context.DiagnosticTag ?? "StripFill" : diagnosticTag;
             int n = context.InputCount;
@@ -4927,19 +5141,12 @@ namespace CalibOperatorCLI_Example
             if (linePick.Length > 0 && effCols == 2)
                 col1ChainPick = ApplyTwoColumnStripPicks(linePick, r, c, u, v, scores, n, effRows, lattice, chainWindow, cellBest, latticeAngleDeg, tag);
 
-            List<int> kept = effCols == 2
-                ? CollectStripCellIndices(cellBest, effRows, effCols)
-                : new List<int>(cellBest.Values);
+            ApplyLatticeOriginCorner(originCorner, context.AngleRad, ref lattice, cellBest, tag);
+
+            List<int> kept = CollectLatticeCellsForWeld(cellBest, effRows, effCols, weldOrder, weldInterval, weldIntervalReverse);
             var indexToCell = BuildIndexToCellMap(cellBest);
-            kept.Sort((a, b) =>
-            {
-                if (!indexToCell.TryGetValue(a, out var ka))
-                    return 1;
-                if (!indexToCell.TryGetValue(b, out var kb))
-                    return -1;
-                int c0 = ka.ir.CompareTo(kb.ir);
-                return c0 != 0 ? c0 : ka.ic.CompareTo(kb.ic);
-            });
+            DiagLattice(tag,
+                $"焊接顺序 {FormatLatticeWeldOrder(weldOrder)} 间隔={Math.Max(1, weldInterval)} 反向={(weldIntervalReverse ? "开" : "关")}，输出 {kept.Count}/{targetCells} 格");
 
             int[] pickIndices = kept.ToArray();
 
@@ -5071,7 +5278,11 @@ namespace CalibOperatorCLI_Example
             double snapTolerancePx,
             string? diagnosticTag,
             string? uvProjectionSvgPath = null,
-            double pcaChainAngleDeg = double.NaN)
+            double pcaChainAngleDeg = double.NaN,
+            LatticeOriginCorner originCorner = LatticeOriginCorner.TopLeft,
+            LatticeWeldOrder weldOrder = LatticeWeldOrder.ColMajor,
+            int weldInterval = 1,
+            bool weldIntervalReverse = true)
         {
             string tag = string.IsNullOrEmpty(diagnosticTag) ? "UvGridPick" : diagnosticTag;
             string? svgOut = !string.IsNullOrWhiteSpace(uvProjectionSvgPath)
@@ -5303,15 +5514,11 @@ namespace CalibOperatorCLI_Example
                         ? $"每格选取: 倾斜 u/v snap, 命中 {cellBest.Count}/{targetCells} 格"
                         : $"每格选取: snap 候选内分数优先, 命中 {cellBest.Count}/{targetCells} 格 (不按分筛选)");
 
-            var kept = new List<int>(targetCells);
-            for (int ic = 0; ic < effCols; ic++)
-            {
-                for (int ir = 0; ir < effRows; ir++)
-                {
-                    if (cellBest.TryGetValue((ir, ic), out int idx))
-                        kept.Add(idx);
-                }
-            }
+            ApplyLatticeOriginCorner(originCorner, angleRad, ref lattice, cellBest, tag);
+
+            var kept = CollectLatticeCellsForWeld(cellBest, effRows, effCols, weldOrder, weldInterval, weldIntervalReverse);
+            DiagLattice(tag,
+                $"焊接顺序 {FormatLatticeWeldOrder(weldOrder)} 间隔={Math.Max(1, weldInterval)} 反向={(weldIntervalReverse ? "开" : "关")}，输出 {kept.Count}/{targetCells} 格");
 
             LogUvGridPickRejectionReasons(tag, r, c, scores, u, v, n, lattice, snapU, snapV, perCell, cellBest, kept,
                 col0Img, col1Img, imgMargin, useImageColHeuristics);
@@ -5434,7 +5641,11 @@ namespace CalibOperatorCLI_Example
             int gridRows,
             int gridCols,
             double minScoreKeep,
-            string? diagnosticTag)
+            string? diagnosticTag,
+            LatticeOriginCorner originCorner = LatticeOriginCorner.TopLeft,
+            LatticeWeldOrder weldOrder = LatticeWeldOrder.ColMajor,
+            int weldInterval = 1,
+            bool weldIntervalReverse = true)
         {
             string tag = string.IsNullOrEmpty(diagnosticTag) ? "LatticePick" : diagnosticTag;
             int n = Math.Min(rows?.Length ?? 0, cols?.Length ?? 0);
@@ -5450,7 +5661,7 @@ namespace CalibOperatorCLI_Example
                 return new LatticePickResult { InputCount = n };
 
             ctx = StripLatticePickColumn0(ctx, rows!, cols!, scores, tag);
-            return StripLatticeFill(ctx, rows!, cols!, angles, scores, minScoreKeep, tag);
+            return StripLatticeFill(ctx, rows!, cols!, angles, scores, minScoreKeep, tag, originCorner, weldOrder, weldInterval, weldIntervalReverse);
         }
 
     }

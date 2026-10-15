@@ -355,6 +355,12 @@
       "ToPort": "Score"
     },
     {
+      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromPort": "Scale",
+      "ToNodeId": "2d4af07d-ab9f-42c8-88ee-22f93cb8297c",
+      "ToPort": "Scale"
+    },
+    {
       "FromNodeId": "aed55a5c-a7ff-465f-99ef-132724859ec0",
       "FromPort": "ChainBootstrapAngle",
       "ToNodeId": "2d4af07d-ab9f-42c8-88ee-22f93cb8297c",
@@ -475,7 +481,7 @@
       "ToPort": "In"
     },
     {
-      "FromNodeId": "b2000001-0001-4001-8001-000000000010",
+      "FromNodeId": "2d4af07d-ab9f-42c8-88ee-22f93cb8297c",
       "FromPort": "Scale",
       "ToNodeId": "e1000001-0001-4001-8001-000000000011",
       "ToPort": "CoarseScale"

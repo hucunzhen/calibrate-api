@@ -37,7 +37,9 @@ namespace CalibOperatorCLI_Example
             double closeTolPx,
             double defaultZ,
             int latticeGridRows = 0,
-            int latticeGridCols = 0)
+            int latticeGridCols = 0,
+            int weldInterval = 1,
+            bool weldIntervalReverse = true)
         {
 #if !HALCON_ENABLED
             _ = modelId;
@@ -76,7 +78,8 @@ namespace CalibOperatorCLI_Example
                 items.Add((i, gr, gc, rows[i], cols[i], ang));
             }
 
-            var ordered = OrderItems(items, connectOrder);
+            var ordered = LatticeWeldSequence.ApplyIntervalPasses(
+                OrderItems(items, connectOrder), weldInterval, weldIntervalReverse);
             bool useAllContours = string.Equals(
                 (contourMode ?? "outer").Trim(),
                 "all",
@@ -114,6 +117,9 @@ namespace CalibOperatorCLI_Example
                 sample[k] = new CalibPoint3D(pts[k].X, pts[k].Y, defaultZ);
 
             string orderTag = NormalizeConnectOrder(connectOrder);
+            int intervalTag = Math.Clamp(weldInterval, 1, Math.Max(1, ordered.Count));
+            if (intervalTag > 1)
+                orderTag += weldIntervalReverse ? $"×间隔{intervalTag}交替反向" : $"×间隔{intervalTag}";
             string barTag = NormalizeBarIdSource(barIdSource);
             string contourTag = useAllContours ? "全部子轮廓" : "外形";
             int uniqGroup = groupBarIds.Length > 0 ? groupBarIds.Distinct().Count() : 0;

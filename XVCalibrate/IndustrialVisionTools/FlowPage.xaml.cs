@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Globalization;
 using System.Diagnostics;
 using System.Collections.Generic;
@@ -12081,7 +12081,7 @@ namespace CalibOperatorCLI_Example
                             worldPtsForPivot = adjustContext.WorldPts;
                         if (imagePtsForPivot == null || imagePtsForPivot.Length == 0)
                             imagePtsForPivot = adjustContext.ImagePts;
-                        CalibImage? adjustPreviewImage = adjustContext.Image;
+                        CalibImage? adjustPreviewImage = TryResolveCalibImageInput(inputs) ?? adjustContext.Image;
                         Point2D[]? adjustWorldPts = worldPtsForPivot;
                         Point2D[]? adjustImagePts = imagePtsForPivot;
 
@@ -14479,7 +14479,10 @@ namespace CalibOperatorCLI_Example
                             ? clTr
                             : 1;
                         string contourMode = node.Params.GetValueOrDefault("contourMode", "outer") ?? "outer";
-                        string connectOrder = node.Params.GetValueOrDefault("connectOrder", "col_major") ?? "col_major";
+                        string connectOrderRaw = node.Params.GetValueOrDefault("connectOrder", "") ?? "";
+                        string connectOrder = string.IsNullOrWhiteSpace(connectOrderRaw)
+                            ? ResolveLatticeWeldOrderString(node)
+                            : connectOrderRaw.Trim();
                         string barIdSource = node.Params.GetValueOrDefault("barIdSource", "per_match") ?? "per_match";
                         double closeTolPx = double.TryParse(
                             node.Params.GetValueOrDefault("closeTolPx", "0.5")?.Trim(),
@@ -14511,7 +14514,9 @@ namespace CalibOperatorCLI_Example
                             closeTolPx,
                             defaultZ,
                             latticeGridRowsTr,
-                            latticeGridColsTr);
+                            latticeGridColsTr,
+                            ResolveLatticeWeldInterval(node),
+                            ResolveLatticeWeldIntervalReverse(node));
                         node.Outputs["Points"] = traj.Points;
                         node.Outputs["BarIds"] = traj.BarIds;
                         node.Outputs["GroupBarIds"] = traj.GroupBarIds;
@@ -14561,12 +14566,17 @@ namespace CalibOperatorCLI_Example
                             rows, cols, anglesUv, scoresUv,
                             gridRowsUv, gridColsUv, latticeHintDeg, bootIdx,
                             minScoreUv, snapTolUv,
-                            wantLogUv ? diagTagUv : null, svgOutPath, pcaChainDeg);
+                            wantLogUv ? diagTagUv : null, svgOutPath, pcaChainDeg,
+                            ResolveLatticeOrigin(node),
+                            ResolveLatticeWeldOrder(node),
+                            ResolveLatticeWeldInterval(node),
+                            ResolveLatticeWeldIntervalReverse(node));
 
                         node.Outputs["Row"] = pickUv.Rows;
                         node.Outputs["Column"] = pickUv.Cols;
                         node.Outputs["Angle"] = pickUv.Angles;
                         node.Outputs["Score"] = pickUv.Scores;
+                        AssignLatticePickAlignedScale(node, inputs, pickUv.KeptIndices);
                         node.Outputs["GridRow"] = pickUv.GridRow;
                         node.Outputs["GridCol"] = pickUv.GridCol;
                         node.Outputs["LatticeAngle"] = pickUv.LatticeAngleDeg;
@@ -14621,12 +14631,17 @@ namespace CalibOperatorCLI_Example
                             gridRowsRs, gridColsRs,
                             minScoreRs, snapTolRs,
                             wantLogRs ? diagTagRs : null, svgOutRs,
-                            ransacIter, inlierSnap);
+                            ransacIter, inlierSnap,
+                            ResolveLatticeOrigin(node),
+                            ResolveLatticeWeldOrder(node),
+                            ResolveLatticeWeldInterval(node),
+                            ResolveLatticeWeldIntervalReverse(node));
 
                         node.Outputs["Row"] = pickRs.Rows;
                         node.Outputs["Column"] = pickRs.Cols;
                         node.Outputs["Angle"] = pickRs.Angles;
                         node.Outputs["Score"] = pickRs.Scores;
+                        AssignLatticePickAlignedScale(node, inputs, pickRs.KeptIndices);
                         node.Outputs["GridRow"] = pickRs.GridRow;
                         node.Outputs["GridCol"] = pickRs.GridCol;
                         node.Outputs["LatticeAngle"] = pickRs.LatticeAngleDeg;
@@ -14672,12 +14687,17 @@ namespace CalibOperatorCLI_Example
                             rows, cols, anglesPk, scoresPk,
                             gridRowsPk, gridColsPk,
                             minScorePk,
-                            wantLogPk ? diagTagPk : null);
+                            wantLogPk ? diagTagPk : null,
+                            ResolveLatticeOrigin(node),
+                            ResolveLatticeWeldOrder(node),
+                            ResolveLatticeWeldInterval(node),
+                            ResolveLatticeWeldIntervalReverse(node));
 
                         node.Outputs["Row"] = pickResult.Rows;
                         node.Outputs["Column"] = pickResult.Cols;
                         node.Outputs["Angle"] = pickResult.Angles;
                         node.Outputs["Score"] = pickResult.Scores;
+                        AssignLatticePickAlignedScale(node, inputs, pickResult.KeptIndices);
                         node.Outputs["GridRow"] = pickResult.GridRow;
                         node.Outputs["GridCol"] = pickResult.GridCol;
                         node.Outputs["LatticeAngle"] = pickResult.LatticeAngleDeg;
@@ -14805,7 +14825,10 @@ namespace CalibOperatorCLI_Example
                                 }
 
                                 var fill = HalconShapeMatchLatticeStrip.FillStrip(
-                                    ctxFill, rows, cols, anglesSt, scoresSt, 0, logTag);
+                                    ctxFill, rows, cols, anglesSt, scoresSt, 0, logTag,
+                                    ResolveLatticeOrigin(node), ResolveLatticeWeldOrder(node),
+                                    ResolveLatticeWeldInterval(node),
+                                    ResolveLatticeWeldIntervalReverse(node));
                                 SetChainStripFillOutputs(node, fill);
                                 int nC0f = fill.GridCol.Count(ic => ic == 0);
                                 int nC1f = fill.GridCol.Count(ic => ic == 1);
@@ -14824,7 +14847,10 @@ namespace CalibOperatorCLI_Example
                                 }
 
                                 var (ctxPfOut, fillPf) = HalconShapeMatchLatticeStrip.PickColumn0AndFill(
-                                    ctxPf, rows, cols, anglesSt, scoresSt, 0, logTag);
+                                    ctxPf, rows, cols, anglesSt, scoresSt, 0, logTag,
+                                    ResolveLatticeOrigin(node), ResolveLatticeWeldOrder(node),
+                                    ResolveLatticeWeldInterval(node),
+                                    ResolveLatticeWeldIntervalReverse(node));
                                 double chainDegPf = ctxPfOut.LatticeAngleDeg;
                                 if (double.IsNaN(chainDegPf))
                                     chainDegPf = ctxPfOut.PcaAxisDeg;
@@ -16146,6 +16172,36 @@ namespace CalibOperatorCLI_Example
                 string s when double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double p) => p,
                 _ => 0
             };
+        }
+
+        /// <summary>落格输出顺序与 Find 不同；Scale 必须按 KeptIndices 重排，不能直接拿粗匹配前 N 个 Scale 去精匹配。</summary>
+        private static void AssignLatticePickAlignedScale(
+            FlowNode node,
+            IReadOnlyDictionary<string, object?> inputs,
+            int[] keptIndices)
+        {
+            double[]? src = null;
+            if (inputs.TryGetValue("Scale", out var obj) && obj != null)
+            {
+                try
+                {
+                    src = CoerceCoarseShapeSeries(obj, "Scale");
+                }
+                catch
+                {
+                    src = null;
+                }
+            }
+
+            int n = keptIndices?.Length ?? 0;
+            var aligned = new double[n];
+            for (int k = 0; k < n; k++)
+            {
+                int i = keptIndices![k];
+                aligned[k] = src != null && i >= 0 && i < src.Length ? src[i] : 1.0;
+            }
+
+            node.Outputs["Scale"] = aligned;
         }
 
         private static void SetChainStripFillOutputs(FlowNode node, HalconShapeMatchChainDirectionResult fill)

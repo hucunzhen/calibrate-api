@@ -96,7 +96,7 @@ namespace CalibOperatorCLI_Example
             string posY = TryReg("PositionY", "HD2200");
             string posZ = TryReg("PositionZ", "HD2000");
             string posHint = $"位置读取（plc_config）\nX: {posX}\nY: {posY}\nZ: {posZ}\nXY速度: {TryReg("SpeedXY", "---")}";
-            ChkAutoRead.ToolTip = posHint + "\n自动刷新时同步读 GVAR 3D";
+            ChkAutoRead.ToolTip = posHint + "\n自动刷新：XYZ、GVAR 3D，以及手动/标定/运行、轴使能与点动、激光/红光/吹气、焊接完成等可读状态";
             BtnReadOnce.ToolTip = posHint;
             TxtPosX.ToolTip = $"X 位置\n寄存器: {posX}";
             TxtPosY.ToolTip = $"Y 位置\n寄存器: {posY}";
@@ -296,12 +296,121 @@ namespace CalibOperatorCLI_Example
             _gvar3D.SetScene(_gvarList, _lastAxisX, _lastAxisY, _lastAxisZ, hasAxis);
         }
 
-        /// <summary>Auto Read 周期：读轴位置后读 D800+GVAR 并刷新 3D（不刷新表格）。</summary>
+        /// <summary>Auto Read 周期：轴位置、可读状态、D800+GVAR 3D（不刷新表格、不覆盖可编辑参数框）。</summary>
         private void AutoRefreshPlcCycle()
         {
             ReadAxisPositions();
-            UpdateRunStatus();
+            RefreshReadablePlcStatuses();
             ReadGvarListFor3D(silent: true);
+        }
+
+        /// <summary>刷新界面上能从 PLC 读回来的状态灯；不写速度/限位/点位等输入框，避免冲掉正在编辑的值。</summary>
+        private void RefreshReadablePlcStatuses()
+        {
+            if (!_plcConnected)
+                return;
+
+            try
+            {
+                UpdateManualModeStatus();
+                UpdateCalibrationModeStatus();
+                UpdateRunStatus();
+                UpdateAxisJogStatus(TxtXRotateStatus, "XRotate");
+                UpdateAxisJogStatus(TxtYRotateStatus, "YRotate");
+                UpdateAxisJogStatus(TxtZRotateStatus, "ZRotate");
+                UpdateBitEnableStatus(TxtXEnableStatus, "XEnableL");
+                UpdateBitEnableStatus(TxtYEnableStatus, "YEnableL");
+                UpdateBitEnableStatus(TxtZEnableStatus, "ZEnableL");
+                if (!_laserHoldActive)
+                    UpdateBitEnableStatus(TxtLaserEnableStatus, "LaserEnable");
+                UpdateBitEnableStatus(TxtRedLightEnableStatus, "RedLightEnable");
+                UpdateBitEnableStatus(TxtBlowEnableStatus, "BlowEnable");
+                UpdateWeldFlagStatuses();
+            }
+            catch (Exception ex)
+            {
+                Log($"[PLC] 状态刷新失败: {ex.Message}");
+            }
+        }
+
+        private void UpdateManualModeStatus()
+        {
+            if (!_plcConnected)
+                return;
+            bool on;
+            try
+            {
+                on = ReadCoil(Reg("ManualMode"));
+            }
+            catch
+            {
+                return;
+            }
+
+            Dispatcher.Invoke(() =>
+            {
+                TxtModeStatus.Text = on ? "Manual" : "手动关";
+                TxtModeStatus.Foreground = new SolidColorBrush(on ? Colors.Purple : Colors.Green);
+            });
+        }
+
+        private void UpdateAxisJogStatus(TextBlock status, string rotateRegKey)
+        {
+            if (_config?.Registers == null || !_config.Registers.TryGetValue(rotateRegKey, out string? addr) || string.IsNullOrWhiteSpace(addr))
+                return;
+
+            bool fwd = ReadBit(addr, 0, silent: true);
+            bool rev = ReadBit(addr, 8, silent: true);
+            Dispatcher.Invoke(() =>
+            {
+                if (fwd && !rev)
+                {
+                    status.Text = "正转";
+                    status.Foreground = new SolidColorBrush(Colors.OrangeRed);
+                }
+                else if (rev && !fwd)
+                {
+                    status.Text = "反转";
+                    status.Foreground = new SolidColorBrush(Colors.OrangeRed);
+                }
+                else
+                {
+                    status.Text = "停止";
+                    status.Foreground = new SolidColorBrush(Colors.Gray);
+                }
+            });
+        }
+
+        private void UpdateBitEnableStatus(TextBlock status, string regKey)
+        {
+            if (_config?.Registers == null || !_config.Registers.TryGetValue(regKey, out string? addr) || string.IsNullOrWhiteSpace(addr))
+                return;
+
+            bool on = ReadBit(addr, 0, silent: true);
+            Dispatcher.Invoke(() => SetEnableStatusDisplay(status, on));
+        }
+
+        private void UpdateWeldFlagStatuses()
+        {
+            var regs = _config?.Registers;
+            if (regs == null)
+                return;
+
+            if (regs.TryGetValue("WeldDoneFlag", out string? doneAddr) && !string.IsNullOrWhiteSpace(doneAddr))
+            {
+                bool done = ReadBit(doneAddr, 0, silent: true);
+                Dispatcher.Invoke(() => UpdateWeldDoneStatusDisplay(done));
+            }
+
+            if (regs.TryGetValue("WeldDoneHostFlag", out string? hostAddr) && !string.IsNullOrWhiteSpace(hostAddr))
+            {
+                bool notified = ReadBit(hostAddr, 0, silent: true);
+                Dispatcher.Invoke(() =>
+                {
+                    TxtWeldDoneHostStatus.Text = notified ? "已通知(1)" : "未通知(0)";
+                    TxtWeldDoneHostStatus.Foreground = new SolidColorBrush(notified ? Colors.Green : Colors.Gray);
+                });
+            }
         }
 
         /// <summary>读取 PLC 浮点：HD→Modbus；D→XinJETcpNet 信捷地址。</summary>
@@ -338,8 +447,8 @@ namespace CalibOperatorCLI_Example
         {
             if (!CheckPlcConnected()) return;
             ReadAxisPositions();
-            UpdateCalibrationModeStatus();
-            Log("[PLC] 手动读取位置完成");
+            RefreshReadablePlcStatuses();
+            Log("[PLC] 手动读取位置与状态完成");
         }
 
         private void UpdateCalibrationModeStatus()
@@ -731,7 +840,7 @@ namespace CalibOperatorCLI_Example
         /// 操作 D 寄存器的单个 bit：读取当前值 → 置位/复位 → 写回
         /// L后缀 → bit 0, H后缀 → bit 8
         /// </summary>
-        private bool ReadBit(string xinjeAddr, int bitIndex)
+        private bool ReadBit(string xinjeAddr, int bitIndex, bool silent = false)
         {
             if (_plcD == null || !_plcConnected) return false;
             string word = PlcXinjeHelper.NormalizeWordAddress(xinjeAddr, out int extraBitOffset);
@@ -739,7 +848,8 @@ namespace CalibOperatorCLI_Example
             var readResult = _plcD.ReadUInt16(word);
             if (!readResult.IsSuccess)
             {
-                Log($"[PLC] ReadBit {xinjeAddr} failed: {readResult.Message}");
+                if (!silent)
+                    Log($"[PLC] ReadBit {xinjeAddr} failed: {readResult.Message}");
                 return false;
             }
 
@@ -1304,7 +1414,7 @@ namespace CalibOperatorCLI_Example
             _readTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ms) };
             _readTimer.Tick += (_, _) => AutoRefreshPlcCycle();
             _readTimer.Start();
-            Log($"[PLC] 自动读取已启动（XYZ + GVAR 3D），间隔 {ms}ms");
+            Log($"[PLC] 自动读取已启动（XYZ、状态、GVAR 3D），间隔 {ms}ms");
         }
 
         private void ChkAutoRead_Unchecked(object sender, RoutedEventArgs e)

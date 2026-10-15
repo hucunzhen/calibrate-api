@@ -4,17 +4,23 @@
 **专章 PDF**：[九点标定_圆点检测.pdf](九点标定_圆点检测.pdf)  
 **PLC（换产品标定时）**：先 **手动模式**，再 **标定模式**（见文档 §PLC 页面）。
 
-## 流程文件一览
+## 流程页快捷按钮（从左到右）
 
-| 顺序 | 文件 | 用途 |
+| 按钮 | 文件 | 用途 |
 |------|------|------|
-| 1 | `chessboard_intrinsics_from_dir.flow.json` | 棋盘内参标定 → `chessboard/calibration_result.json` |
-| 2 | `calibSendContour.flow.json` | 机台定 **中心 + stepX/Y** → **weld_trajectory_world** → `models/world_pos.txt` |
-| 3 | `caliNinePoint.flow.json` | 圆点检测 + 九点像素标定 → `models/calibration_nine_point.json` |
-| 4 | `main.flow.json` | 量产主流程（粗/精匹配 + img_to_world + PLC） |
-| — | `halcon_coarse_shape_match.flow.json` | 粗匹配单步调试（`main` 组合子流程） |
-| — | `halcon_fine_shape_match.flow.json` | 精匹配单步调试 |
-| — | `chessboard_undistort_example.flow.json` | 去畸变对比示例 |
+| **主流程** | `main.flow.json` | 量产：粗/精匹配 + img_to_world + PLC |
+| **棋盘格标定** | `chessboard_intrinsics_from_dir.flow.json` | 棋盘内参 → `chessboard/calibration_result.json` |
+| **九点打点** | `calibSendContour.flow.json` | 机台 **中心 + stepX/Y** → **weld_trajectory_world** → `models/world_pos.txt`（给九点标定用，不是量产焊） |
+| **九点标定** | `caliNinePoint.flow.json` | 圆点检测 + 仿射求解 → `models/calibration_nine_point.json` |
+| **微调** | `adjustAffineCalibration.flow.json` | 读已保存九点 JSON，对话框平移/缩放后覆盖写回 |
+
+## 其它文件
+
+| 文件 | 用途 |
+|------|------|
+| `halcon_coarse_shape_match.flow.json` | 粗匹配单步调试（`main` 组合子流程） |
+| `halcon_fine_shape_match.flow.json` | 精匹配单步调试 |
+| `chessboard_undistort_example.flow.json` | 去畸变对比示例 |
 
 ## 目录约定（相对本文件夹）
 
@@ -27,6 +33,6 @@
 
 ## 加载方式
 
-流程页 → **加载** → 选择上表 `.flow.json`（路径以 **v4 目录** 为基准）。
+流程页选配方 **v4** 后点上表快捷按钮；也可 **加载** 选择 `.flow.json`（路径以 **v4 目录** 为基准）。
 
 **工艺卡**：`product_card.json`（换型阶段 0–6、是否允许量产）；操作员在 **量产** 页查看，工艺/视觉在 **换型向导** 中维护。

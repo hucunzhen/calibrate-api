@@ -71,7 +71,7 @@ calibrate-api/
 ├── flows/                                ← 产线 .flow.json 与帮助文档
 │   ├── README.md / README_workflow_guide.md
 │   ├── chessboard/                       ← 棋盘格标定示例
-│   └── v1|v2|v3…/                        ← 配方版本目录（含 caliNinePoint 等）
+│   └── v1|v2|v3…/                        ← 配方目录。快捷：main / 棋盘格 / 九点打点(calibSendContour) / 九点标定(caliNinePoint) / 微调(adjustAffineCalibration)
 ├── opencv/ / Development/ / models/      ← 第三方与模型资产
 └── bin/x64/Release/IndustrialVisionToolsNative.dll
 ```
