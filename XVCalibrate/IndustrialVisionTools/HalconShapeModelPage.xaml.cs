@@ -1768,17 +1768,25 @@ namespace CalibOperatorCLI_Example
             UpdateConnectorRubberVisual();
         }
 
+        private bool IsPathDrawModeActive() =>
+            RbPolygonMode?.IsChecked == true || IsRingModeActive() || IsOpenTrajectoriesModeActive();
+
         private void UpdateNextSegmentToolbar()
         {
+            bool pathMode = IsPathDrawModeActive();
             bool open = IsOpenTrajectoriesModeActive();
+            bool connector = pathMode && open && IsNextSegmentConnector();
+            bool arc = pathMode && IsNextSegmentArc() && !connector;
+
             if (RbNextSegmentConnector != null)
                 RbNextSegmentConnector.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
 
-            bool connector = IsNextSegmentConnector() && open;
             if (ChkTangentJoin != null)
-                ChkTangentJoin.Visibility = connector ? Visibility.Collapsed : Visibility.Visible;
-            if (connector && ChkTangentJoin?.IsChecked == true)
-                ChkTangentJoin.IsChecked = false;
+            {
+                ChkTangentJoin.Visibility = arc ? Visibility.Visible : Visibility.Collapsed;
+                if (!arc && ChkTangentJoin.IsChecked == true)
+                    ChkTangentJoin.IsChecked = false;
+            }
 
             UpdateTangentFlipButtonVisibility();
         }
@@ -3290,19 +3298,25 @@ namespace CalibOperatorCLI_Example
         private void UpdateDrawToolbarForMode()
         {
             bool open = IsOpenTrajectoriesModeActive();
+            bool pathMode = IsPathDrawModeActive();
+            bool polyOrRing = RbPolygonMode?.IsChecked == true || IsRingModeActive();
+
+            // 形状列：参数… ↔ 矩形/圆；完成本条/新建 ↔ 开放轨迹
             if (BtnFinishOpenTrajectory != null)
                 BtnFinishOpenTrajectory.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
             if (BtnNewOpenTrajectory != null)
                 BtnNewOpenTrajectory.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
-            if (BtnClosePolygon != null)
-                BtnClosePolygon.Visibility = open ? Visibility.Collapsed
-                    : RbPolygonMode?.IsChecked == true || IsRingModeActive()
-                        ? Visibility.Visible
-                        : Visibility.Collapsed;
             if (BtnPrimitiveRoiParams != null)
-                BtnPrimitiveRoiParams.Visibility = !open && IsPrimitiveRoiDrawModeActive()
+                BtnPrimitiveRoiParams.Visibility = IsPrimitiveRoiDrawModeActive()
                     ? Visibility.Visible
                     : Visibility.Collapsed;
+
+            // 路径列：仅多边形 / 环形 / 开放轨迹时显示
+            if (PnlPathToolbar != null)
+                PnlPathToolbar.Visibility = pathMode ? Visibility.Visible : Visibility.Collapsed;
+
+            if (BtnClosePolygon != null)
+                BtnClosePolygon.Visibility = polyOrRing ? Visibility.Visible : Visibility.Collapsed;
 
             if (!open && IsNextSegmentConnector() && RbNextSegmentLine != null)
                 RbNextSegmentLine.IsChecked = true;
@@ -4356,6 +4370,42 @@ namespace CalibOperatorCLI_Example
         private bool UsesHandDrawnEdgeGradient(string src) =>
             src == "PolygonXld" && !IsOpenTrajectoriesModeActive();
 
+        private void OptionDependentVisibility_Changed(object sender, RoutedEventArgs e) =>
+            UpdateOptionDependentPanelsVisibility();
+
+        /// <summary>勾选/选择相关项后才显示其子控件（阵列过滤、去畸变、透视、修剪参数）。</summary>
+        private void UpdateOptionDependentPanelsVisibility()
+        {
+            if (PnlFindGridFilterSettings != null)
+                PnlFindGridFilterSettings.Visibility = ChkFindApplyGridFilter?.IsChecked == true
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+
+            if (TxtUndistortAlpha != null)
+                TxtUndistortAlpha.Visibility = ChkEnableUndistort?.IsChecked == true
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+
+            if (PnlPerspectiveSettings != null)
+                PnlPerspectiveSettings.Visibility = ChkEnablePerspective?.IsChecked == true
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+
+            string? trimTag = (CmbTrimMode?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Simplify";
+            if (RowTrimEpsilon != null)
+                RowTrimEpsilon.Visibility = string.Equals(trimTag, "Simplify", StringComparison.OrdinalIgnoreCase)
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            if (RowTrimEnds != null)
+                RowTrimEnds.Visibility = string.Equals(trimTag, "TrimEnds", StringComparison.OrdinalIgnoreCase)
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            if (RowTrimMinLength != null)
+                RowTrimMinLength.Visibility = string.Equals(trimTag, "FilterMinLength", StringComparison.OrdinalIgnoreCase)
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+        }
+
         private void UpdateCreatePanelsVisibility()
         {
             if (CmbTemplateSource == null) return;
@@ -4368,12 +4418,16 @@ namespace CalibOperatorCLI_Example
             bool showGrayThreshold = IsGrayThresholdTemplateSource(src);
             bool showPolygonClose = !isGeometry && src is not "ImageRectangle";
 
+            bool pathDraw = IsPathDrawModeActive();
+            // 起点容差 / 弧段编辑：仅多边形·环形·开放轨迹绘制时有用
+            bool showCloseSettings = showPolygonClose && pathDraw;
+
             if (PnlGrayThreshold != null)
                 PnlGrayThreshold.Visibility = showGrayThreshold ? Visibility.Visible : Visibility.Collapsed;
             if (PnlPolygonCloseSettings != null)
-                PnlPolygonCloseSettings.Visibility = showPolygonClose ? Visibility.Visible : Visibility.Collapsed;
+                PnlPolygonCloseSettings.Visibility = showCloseSettings ? Visibility.Visible : Visibility.Collapsed;
             if (PnlThreshold != null)
-                PnlThreshold.Visibility = showGrayThreshold || showPolygonClose
+                PnlThreshold.Visibility = showGrayThreshold || showCloseSettings
                     ? Visibility.Visible
                     : Visibility.Collapsed;
             if (TxtThresholdPanelTitle != null)
@@ -4417,6 +4471,8 @@ namespace CalibOperatorCLI_Example
                 UpdateGeometryPanelRowsVisibility();
 #endif
             }
+
+            UpdateOptionDependentPanelsVisibility();
         }
 
         private void GeometryParam_Changed(object sender, RoutedEventArgs e)

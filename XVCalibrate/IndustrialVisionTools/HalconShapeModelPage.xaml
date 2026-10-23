@@ -84,7 +84,7 @@
                             <Button x:Name="BtnNewOpenTrajectory" Content="新建本条" MinWidth="72" Height="32" Padding="8,4" Margin="0,0,6,4"
                                     Visibility="Collapsed" Click="BtnNewOpenTrajectory_Click"/>
                         </WrapPanel>
-                        <WrapPanel Grid.Row="2">
+                        <WrapPanel x:Name="PnlPathToolbar" Grid.Row="2" Visibility="Collapsed">
                             <TextBlock Text="路径" Width="40" VerticalAlignment="Center" Foreground="#90A4AE" FontSize="11" Margin="0,0,8,0"/>
                             <RadioButton x:Name="RbNextSegmentLine" Content="直线" GroupName="NextSeg"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,0" Padding="8,4"
@@ -102,7 +102,7 @@
                                          Checked="NextSegment_Changed" Unchecked="NextSegment_Changed"
                                          ToolTip="仅开放轨迹：两条轨迹之间的辅助连线，不进入形状模板。"/>
                             <CheckBox x:Name="ChkTangentJoin" Content="相切" Foreground="#CCC" VerticalAlignment="Center"
-                                      Margin="0,0,6,0" Padding="8,4" MinHeight="32"
+                                      Margin="0,0,6,0" Padding="8,4" MinHeight="32" Visibility="Collapsed"
                                       Checked="TangentJoin_Changed" Unchecked="TangentJoin_Changed"
                                       ToolTip="圆弧与上一段直线/弧相切。保证圆角光滑。相切有左右两解，不对就点「换向」或按 F。"/>
                             <Button x:Name="BtnTangentFlipSide" Content="换向" MinWidth="48" Height="32" Padding="8,4" Margin="0,0,6,0"
@@ -110,6 +110,7 @@
                             <Button x:Name="BtnUndoPoint" Content="撤销点" MinWidth="60" Height="32" Padding="8,4" Margin="0,0,6,0"
                                     Click="BtnUndoPoint_Click" ToolTip="撤销顶点 (Ctrl+Z)"/>
                             <Button x:Name="BtnClosePolygon" Content="闭合说明" MinWidth="72" Height="32" Padding="8,4"
+                                    Visibility="Collapsed"
                                     Click="BtnClosePolygon_Click" ToolTip="段终点落在起点容差内自动闭合"/>
                         </WrapPanel>
                     </Grid>
@@ -211,48 +212,52 @@
                                                Style="{StaticResource Ui.ParamHelp}"/>
                                     <CheckBox x:Name="ChkFindApplyGridFilter" Content="阵列过滤（同 halcon_filter_shape_match_grid）"
                                               Margin="0,0,0,4" IsChecked="False"
+                                              Checked="OptionDependentVisibility_Changed"
+                                              Unchecked="OptionDependentVisibility_Changed"
                                               ToolTip="目标按固定行×列等距排列时勾选：每格只留最高分，去掉孤立误检。散乱放置、数量不固定时不要勾。"/>
-                                    <Grid Margin="0,0,0,4">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="90"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="90"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Text="行×列" VerticalAlignment="Center"
-                                                   ToolTip="阵列实际行数、列数，必须与工装一致。3×3 表示 9 个工位。填错会错格、漏件或把噪声当成一格。"/>
-                                        <TextBox x:Name="TxtFindGridRows" Grid.Column="1" Text="3" Height="24" VerticalContentAlignment="Center" Margin="0,0,4,0"
-                                                 ToolTip="阵列行数（沿料片纵向的个数）"/>
-                                        <TextBox x:Name="TxtFindGridCols" Grid.Column="2" Grid.ColumnSpan="2" Text="3" Height="24" VerticalContentAlignment="Center"
-                                                 ToolTip="阵列列数"/>
-                                    </Grid>
-                                    <Grid Margin="0,0,0,4">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="90"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Text="保留最低分" VerticalAlignment="Center"
-                                                   ToolTip="过滤之后再卡一刀分数。0=不过滤分数。可略高于「最低分数」，把落格后仍然偏低的候选去掉。"/>
-                                        <TextBox x:Name="TxtFindMinScoreKeep" Grid.Column="1" Text="0.45" Height="24" VerticalContentAlignment="Center" ToolTip="0=不按分数剔除"/>
-                                    </Grid>
-                                    <Grid Margin="0,0,0,4">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="90"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Text="阵列角度°" VerticalAlignment="Center"
-                                                   ToolTip="阵列行列在图上的方向。auto=用匹配角+PCA 自动估，并可能对调行列。整板固定摆放也可填死角度（相对图像 +X）。估错方向时先看日志里的 θ，再改成固定值。"/>
-                                        <TextBox x:Name="TxtFindGridAngleDeg" Grid.Column="1" Text="auto" Height="24" VerticalContentAlignment="Center"/>
-                                    </Grid>
-                                    <Grid Margin="0,0,0,4">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="90"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Text="角度偏差°" VerticalAlignment="Center"
-                                                   ToolTip="匹配角相对阵列方向允许的偏差。整板工件朝向一致可设 10~15，去掉转歪的误检。模板近似旋转对称（圆、正方）或角度不稳请填 0，否则真目标会被角度杀掉。"/>
-                                        <TextBox x:Name="TxtFindMaxAngleDev" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
-                                    </Grid>
+                                    <StackPanel x:Name="PnlFindGridFilterSettings" Visibility="Collapsed">
+                                        <Grid Margin="0,0,0,4">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="90"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="90"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="行×列" VerticalAlignment="Center"
+                                                       ToolTip="阵列实际行数、列数，必须与工装一致。3×3 表示 9 个工位。填错会错格、漏件或把噪声当成一格。"/>
+                                            <TextBox x:Name="TxtFindGridRows" Grid.Column="1" Text="3" Height="24" VerticalContentAlignment="Center" Margin="0,0,4,0"
+                                                     ToolTip="阵列行数（沿料片纵向的个数）"/>
+                                            <TextBox x:Name="TxtFindGridCols" Grid.Column="2" Grid.ColumnSpan="2" Text="3" Height="24" VerticalContentAlignment="Center"
+                                                     ToolTip="阵列列数"/>
+                                        </Grid>
+                                        <Grid Margin="0,0,0,4">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="90"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="保留最低分" VerticalAlignment="Center"
+                                                       ToolTip="过滤之后再卡一刀分数。0=不过滤分数。可略高于「最低分数」，把落格后仍然偏低的候选去掉。"/>
+                                            <TextBox x:Name="TxtFindMinScoreKeep" Grid.Column="1" Text="0.45" Height="24" VerticalContentAlignment="Center" ToolTip="0=不按分数剔除"/>
+                                        </Grid>
+                                        <Grid Margin="0,0,0,4">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="90"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="阵列角度°" VerticalAlignment="Center"
+                                                       ToolTip="阵列行列在图上的方向。auto=用匹配角+PCA 自动估，并可能对调行列。整板固定摆放也可填死角度（相对图像 +X）。估错方向时先看日志里的 θ，再改成固定值。"/>
+                                            <TextBox x:Name="TxtFindGridAngleDeg" Grid.Column="1" Text="auto" Height="24" VerticalContentAlignment="Center"/>
+                                        </Grid>
+                                        <Grid Margin="0,0,0,4">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="90"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="角度偏差°" VerticalAlignment="Center"
+                                                       ToolTip="匹配角相对阵列方向允许的偏差。整板工件朝向一致可设 10~15，去掉转歪的误检。模板近似旋转对称（圆、正方）或角度不稳请填 0，否则真目标会被角度杀掉。"/>
+                                            <TextBox x:Name="TxtFindMaxAngleDev" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
+                                        </Grid>
+                                    </StackPanel>
                                     <CheckBox x:Name="ChkFindAutoRetry" Content="零结果时自动降低最低分数重试"
                                               Margin="0,0,0,6" IsChecked="False"
                                               ToolTip="仅当 HALCON 返回 0 个匹配时重试；有匹配时不会增加数量"/>
@@ -366,40 +371,47 @@
                                     <Button Grid.Column="2" Content="..." Height="24" Margin="4,0,0,0" Click="BtnBrowseCalibrationJson_Click"/>
                                 </Grid>
                                 <CheckBox x:Name="ChkEnableUndistort" Content="内参畸变矫正" Foreground="#CCC" Margin="0,4,0,2"
+                                          Checked="OptionDependentVisibility_Changed"
+                                          Unchecked="OptionDependentVisibility_Changed"
                                           ToolTip="用棋盘格标定消除镜头桶形/枕形畸变。广角、边缘发弯时勾选。已经是远心/几乎无畸变可关掉，少一次插值。"/>
                                 <TextBox x:Name="TxtUndistortAlpha" Text="-1" Height="24" Margin="16,0,0,4" VerticalContentAlignment="Center"
+                                         Visibility="Collapsed"
                                          ToolTip="去畸变裁剪 α。-1=尽量保持原图尺寸（可能留黑边）。0=裁掉无效边只留有效像素。一般保持 -1，与量产流程一致。"/>
                                 <CheckBox x:Name="ChkEnablePerspective" Content="透视矫正 (棋盘鸟瞰)" Foreground="#CCC" Margin="0,4,0,4"
+                                          Checked="OptionDependentVisibility_Changed"
+                                          Unchecked="OptionDependentVisibility_Changed"
                                           ToolTip="把倾斜拍摄的平面拉成正视鸟瞰。相机不正对工作面时勾选，形状模板必须做在矫正后的图上，与量产同一套。"/>
-                                <TextBox x:Name="TxtCalibViewIndex" Text="0" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center"
-                                         ToolTip="标定文件里第几张视图（从 0 起）。多姿态标定时选与当前工位最接近的一张。只有一张就填 0。"/>
-                                <Grid Margin="16,0,0,2">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="36"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="36"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="列" VerticalAlignment="Center"
-                                               ToolTip="棋盘格内角点列数（宽边个数），不是格子数。11×8 表示横向 11 个角点、纵向 8 个，须与标定文件一致。"/>
-                                    <TextBox x:Name="TxtCalibBoardCols" Grid.Column="1" Text="11" Height="24" Margin="0,0,4,0" VerticalContentAlignment="Center"/>
-                                    <TextBlock Grid.Column="2" Text="行" VerticalAlignment="Center"
-                                               ToolTip="棋盘格内角点行数。填错会导致透视拉歪。"/>
-                                    <TextBox x:Name="TxtCalibBoardRows" Grid.Column="3" Text="8" Height="24" VerticalContentAlignment="Center"/>
-                                </Grid>
-                                <TextBox x:Name="TxtCalibSquareSizeMm" Text="5" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center"
-                                         ToolTip="棋盘格每个方格边长，单位 mm。必须与实物标定板一致（常见 5 或 10）。填错则 mm 尺寸和像素当量全错。"/>
-                                <TextBox x:Name="TxtCalibPxPerMm" Text="32" Height="24" Margin="16,0,0,4" VerticalContentAlignment="Center"
-                                         ToolTip="透视输出的像素/毫米。越大图越大、细节越多、越占内存。与量产流程保持同一数值，否则模板尺度对不上。"/>
-                                <ComboBox x:Name="CmbPerspectiveOutputFrame" Height="26" Margin="16,0,0,6"
-                                          ToolTip="透视矫正后输出哪一块。量产主流程通常要整幅图，选「整图共面」。只要标定板区域做模板可选「仅标定板」。">
-                                    <ComboBoxItem Content="仅标定板 (board)" Tag="board"
-                                                  ToolTip="输出裁到棋盘格板范围内。只在板上做模板/测量、不想要板外背景时选。"/>
-                                    <ComboBoxItem Content="原图+板内 (local)" Tag="local"
-                                                  ToolTip="保留与原图大致对齐、板内已拉平。调试对照原图位置时用。"/>
-                                    <ComboBoxItem Content="整图共面 (plane)" Tag="plane" IsSelected="True"
-                                                  ToolTip="默认。整幅图按标定平面拉成鸟瞰，后续形状模板、九点、轨迹都在这张图上做。现场主流程一般选这项。"/>
-                                </ComboBox>
+                                <StackPanel x:Name="PnlPerspectiveSettings" Visibility="Collapsed">
+                                    <TextBox x:Name="TxtCalibViewIndex" Text="0" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center"
+                                             ToolTip="标定文件里第几张视图（从 0 起）。多姿态标定时选与当前工位最接近的一张。只有一张就填 0。"/>
+                                    <Grid Margin="16,0,0,2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="36"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="36"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="列" VerticalAlignment="Center"
+                                                   ToolTip="棋盘格内角点列数（宽边个数），不是格子数。11×8 表示横向 11 个角点、纵向 8 个，须与标定文件一致。"/>
+                                        <TextBox x:Name="TxtCalibBoardCols" Grid.Column="1" Text="11" Height="24" Margin="0,0,4,0" VerticalContentAlignment="Center"/>
+                                        <TextBlock Grid.Column="2" Text="行" VerticalAlignment="Center"
+                                                   ToolTip="棋盘格内角点行数。填错会导致透视拉歪。"/>
+                                        <TextBox x:Name="TxtCalibBoardRows" Grid.Column="3" Text="8" Height="24" VerticalContentAlignment="Center"/>
+                                    </Grid>
+                                    <TextBox x:Name="TxtCalibSquareSizeMm" Text="5" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center"
+                                             ToolTip="棋盘格每个方格边长，单位 mm。必须与实物标定板一致（常见 5 或 10）。填错则 mm 尺寸和像素当量全错。"/>
+                                    <TextBox x:Name="TxtCalibPxPerMm" Text="32" Height="24" Margin="16,0,0,4" VerticalContentAlignment="Center"
+                                             ToolTip="透视输出的像素/毫米。越大图越大、细节越多、越占内存。与量产流程保持同一数值，否则模板尺度对不上。"/>
+                                    <ComboBox x:Name="CmbPerspectiveOutputFrame" Height="26" Margin="16,0,0,6"
+                                              ToolTip="透视矫正后输出哪一块。量产主流程通常要整幅图，选「整图共面」。只要标定板区域做模板可选「仅标定板」。">
+                                        <ComboBoxItem Content="仅标定板 (board)" Tag="board"
+                                                      ToolTip="输出裁到棋盘格板范围内。只在板上做模板/测量、不想要板外背景时选。"/>
+                                        <ComboBoxItem Content="原图+板内 (local)" Tag="local"
+                                                      ToolTip="保留与原图大致对齐、板内已拉平。调试对照原图位置时用。"/>
+                                        <ComboBoxItem Content="整图共面 (plane)" Tag="plane" IsSelected="True"
+                                                      ToolTip="默认。整幅图按标定平面拉成鸟瞰，后续形状模板、九点、轨迹都在这张图上做。现场主流程一般选这项。"/>
+                                    </ComboBox>
+                                </StackPanel>
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                                     <Button x:Name="BtnRotateCorrectedCcw90" Content="逆时针90°" Height="28" Margin="0,0,6,0" Click="BtnRotateCorrectedCcw90_Click"/>
                                     <Button x:Name="BtnRotateCorrectedCw90" Content="顺时针90°" Height="28" Margin="0,0,6,0" Click="BtnRotateCorrectedCw90_Click"/>
@@ -849,6 +861,7 @@
                                    TextWrapping="Wrap" Margin="0,0,0,6"/>
                         <TextBlock Text="修剪方式" FontSize="11" Foreground="#888" Margin="0,0,0,2"/>
                         <ComboBox x:Name="CmbTrimMode" Height="26" Margin="0,0,0,6"
+                                  SelectionChanged="OptionDependentVisibility_Changed"
                                   ToolTip="预览轮廓后再修剪。点太多、锯齿→简化；毛刺→平滑；规则圆/直线件→分段；开放轮廓两端虚→裁首尾；碎渣→删短轮廓。">
                             <ComboBoxItem Content="简化 (Douglas-Peucker)" Tag="Simplify" IsSelected="True"
                                           ToolTip="按像素容差 ε 减少顶点。ε=1~3 常用：去锯齿仍贴边。ε 太大轮廓会削成折线，圆会变多边形。"/>
@@ -861,7 +874,7 @@
                             <ComboBoxItem Content="删除短轮廓" Tag="FilterMinLength"
                                           ToolTip="周长小于「最短周长」的碎轮廓删除。阈值后满屏碎渣时用。最短周长按预览里噪声长度设，别删掉真实小孔。"/>
                         </ComboBox>
-                        <Grid Margin="0,0,0,4">
+                        <Grid x:Name="RowTrimEpsilon" Margin="0,0,0,4" Visibility="Collapsed">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="90"/>
                                 <ColumnDefinition Width="*"/>
@@ -869,7 +882,7 @@
                             <TextBlock Grid.Column="0" Text="简化 ε" VerticalAlignment="Center" ToolTip="像素容差，越大点越少"/>
                             <TextBox x:Name="TxtTrimEpsilon" Grid.Column="1" Text="2" Height="24" VerticalContentAlignment="Center"/>
                         </Grid>
-                        <Grid Margin="0,0,0,4">
+                        <Grid x:Name="RowTrimEnds" Margin="0,0,0,4" Visibility="Collapsed">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="90"/>
                                 <ColumnDefinition Width="*"/>
@@ -877,7 +890,7 @@
                             <TextBlock Grid.Column="0" Text="首尾裁剪" VerticalAlignment="Center" ToolTip="沿弧长各裁掉像素"/>
                             <TextBox x:Name="TxtTrimEndsPx" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
                         </Grid>
-                        <Grid Margin="0,0,0,4">
+                        <Grid x:Name="RowTrimMinLength" Margin="0,0,0,4" Visibility="Collapsed">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="90"/>
                                 <ColumnDefinition Width="*"/>

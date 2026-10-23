@@ -73,6 +73,7 @@ namespace CalibOperatorCLI_Example
             _suppressSessionPersist = false;
             UpdateTangentFlipButtonVisibility();
             UpdateRoiManagePanelVisibility();
+            UpdateOptionDependentPanelsVisibility();
         }
 
         private void HalconShapeModelPage_Unloaded(object sender, RoutedEventArgs e)
@@ -147,7 +148,11 @@ namespace CalibOperatorCLI_Example
                 TxtPostCorrectRotateDeg.LostFocus += (_, _) => ScheduleSessionPersist();
         }
 
-        private void OnCameraCorrectionSettingChanged(object sender, RoutedEventArgs e) => ScheduleSessionPersist();
+        private void OnCameraCorrectionSettingChanged(object sender, RoutedEventArgs e)
+        {
+            UpdateOptionDependentPanelsVisibility();
+            ScheduleSessionPersist();
+        }
 
         private void ScheduleSessionPersist()
         {
@@ -258,6 +263,7 @@ namespace CalibOperatorCLI_Example
             if (s.Controls == null || s.Controls.Count == 0)
                 return;
             PageUiBinder.Apply(this, s.Controls, HalconShapeModelUiSettings.PersistControlNameList);
+            UpdateOptionDependentPanelsVisibility();
         }
 
         private void SelectPerspectiveOutputFrame(string? tag)
