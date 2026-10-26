@@ -94,6 +94,15 @@ namespace CalibOperatorCLI_Example
         private RoiContourPath? _selectedRoiSegmentPath;
         private int _selectedRoiSegmentEdge = -1;
 
+        /// <summary>按下边线后：未明显拖动则松手弹窗；拖动则平移该段。</summary>
+        private bool _pendingRoiSegmentClickEdit;
+        private bool _isDraggingRoiSegment;
+        private Point _roiSegmentDragStartMouse;
+        private Point _roiSegmentDragOriginStart;
+        private Point _roiSegmentDragOriginEnd;
+        private Point? _roiSegmentDragOriginVia;
+        private const double RoiSegmentDragThresholdPx = 3.0;
+
         // 模型
         private long _modelId = -1;
         private HalconFlowModelKind _modelKind = HalconFlowModelKind.Shape;
@@ -3391,7 +3400,8 @@ namespace CalibOperatorCLI_Example
 
         private bool CanClickEditRoiSegments()
         {
-            if (_isPanning || _isMovingRoi || _isDrawing || _rotRectSettingAngle || _arcDraftEnd != null)
+            if (_isPanning || _isMovingRoi || _isDraggingRoiSegment || _isDrawing
+                || _rotRectSettingAngle || _arcDraftEnd != null)
                 return false;
             if (RbPolygonMode?.IsChecked == true)
                 return RoiContourPath.GetEdgeCount(_roiPath) > 0;
@@ -3492,7 +3502,7 @@ namespace CalibOperatorCLI_Example
             SelectedRoiSegmentLine.Visibility = Visibility.Visible;
         }
 
-        private bool TryHitAndEditRoiSegment(Point imgPt)
+        private bool TryBeginRoiSegmentPointer(Point imgPt)
         {
             if (!CanClickEditRoiSegments())
                 return false;
@@ -3501,7 +3511,186 @@ namespace CalibOperatorCLI_Example
 
             SetSelectedRoiSegmentHighlight(path, edgeIndex);
             SyncRoiArcComboToEdge(path, edgeIndex);
-            return PromptEditRoiSegment(path, edgeIndex);
+
+            RoiContourPath.GetEdgeEndpoints(path, edgeIndex, out Point start, out Point end);
+            _roiSegmentDragOriginStart = start;
+            _roiSegmentDragOriginEnd = end;
+            _roiSegmentDragOriginVia = null;
+            if (RoiContourPath.GetEdgeKind(path, edgeIndex) == RoiEdgeKind.Arc
+                && edgeIndex < path.ArcVia.Count)
+                _roiSegmentDragOriginVia = path.ArcVia[edgeIndex];
+
+            _roiSegmentDragStartMouse = imgPt;
+            _pendingRoiSegmentClickEdit = true;
+            _isDraggingRoiSegment = false;
+            ViewHost.CaptureMouse();
+            ViewHost.Cursor = Cursors.SizeAll;
+            return true;
+        }
+
+        private void ApplyRoiSegmentDragToMouse(Point imgPt)
+        {
+            if (_selectedRoiSegmentPath == null || _selectedRoiSegmentEdge < 0)
+                return;
+
+            Vector delta = imgPt - _roiSegmentDragStartMouse;
+            delta = ClampDeltaForSegmentEndpoints(
+                delta,
+                _roiSegmentDragOriginStart,
+                _roiSegmentDragOriginEnd,
+                _roiSegmentDragOriginVia);
+
+            Point start = new(
+                _roiSegmentDragOriginStart.X + delta.X,
+                _roiSegmentDragOriginStart.Y + delta.Y);
+            Point end = new(
+                _roiSegmentDragOriginEnd.X + delta.X,
+                _roiSegmentDragOriginEnd.Y + delta.Y);
+            Point? via = _roiSegmentDragOriginVia is Point ov
+                ? new Point(ov.X + delta.X, ov.Y + delta.Y)
+                : null;
+
+            if (!RoiContourPath.TrySetEdgeEndpointsAbsolute(
+                    _selectedRoiSegmentPath,
+                    _selectedRoiSegmentEdge,
+                    start,
+                    end,
+                    via,
+                    out _))
+                return;
+
+            RefreshRoiSegmentGeometryVisuals(_selectedRoiSegmentPath);
+            SetSelectedRoiSegmentHighlight(_selectedRoiSegmentPath, _selectedRoiSegmentEdge);
+        }
+
+        private Vector ClampDeltaForSegmentEndpoints(
+            Vector delta,
+            Point start,
+            Point end,
+            Point? via)
+        {
+            if (_imgWidth <= 0 || _imgHeight <= 0)
+                return delta;
+
+            double minX = Math.Min(start.X, end.X);
+            double maxX = Math.Max(start.X, end.X);
+            double minY = Math.Min(start.Y, end.Y);
+            double maxY = Math.Max(start.Y, end.Y);
+            if (via is Point v)
+            {
+                minX = Math.Min(minX, v.X);
+                maxX = Math.Max(maxX, v.X);
+                minY = Math.Min(minY, v.Y);
+                maxY = Math.Max(maxY, v.Y);
+            }
+
+            double dx = delta.X;
+            double dy = delta.Y;
+            if (minX + dx < 0)
+                dx -= minX + dx;
+            if (maxX + dx > _imgWidth - 1)
+                dx -= maxX + dx - (_imgWidth - 1);
+            if (minY + dy < 0)
+                dy -= minY + dy;
+            if (maxY + dy > _imgHeight - 1)
+                dy -= maxY + dy - (_imgHeight - 1);
+            return new Vector(dx, dy);
+        }
+
+        private void RefreshRoiSegmentGeometryVisuals(RoiContourPath path)
+        {
+            bool isOpenEntry = IsOpenTrajectoriesModeActive()
+                && _openTrajectoryEntries.Any(e => ReferenceEquals(e.Path, path));
+
+            if (ReferenceEquals(path, _roiPath))
+            {
+                InvalidatePolygonFlatCache();
+                UpdatePolygonPreview();
+                RebuildCommittedPolygonVisual();
+                if (IsOpenTrajectoriesModeActive())
+                {
+                    RebuildOpenTrajectoriesVisual();
+                    UpdatePolygonRubberVisual();
+                }
+            }
+            else if (isOpenEntry)
+            {
+                RebuildOpenTrajectoriesVisual();
+                RebuildCommittedPolygonVisual();
+            }
+            else
+            {
+                InvalidateRingFlatCache();
+                UpdateRingPreview();
+            }
+        }
+
+        private void FinishRoiSegmentPointer(bool openEditDialogIfPending)
+        {
+            bool wasDragging = _isDraggingRoiSegment;
+            bool pendingEdit = _pendingRoiSegmentClickEdit;
+            RoiContourPath? path = _selectedRoiSegmentPath;
+            int edge = _selectedRoiSegmentEdge;
+
+            _pendingRoiSegmentClickEdit = false;
+            _isDraggingRoiSegment = false;
+            ViewHost.Cursor = Cursors.Arrow;
+
+            if (wasDragging && path != null && edge >= 0)
+            {
+                AfterRoiSegmentEdited(path, edge, $"段 #{edge + 1} 已移动");
+                return;
+            }
+
+            if (openEditDialogIfPending && pendingEdit && path != null && edge >= 0)
+                PromptEditRoiSegment(path, edge);
+        }
+
+        private bool TryDeleteSelectedRoiSegment()
+        {
+            if (_selectedRoiSegmentPath == null || _selectedRoiSegmentEdge < 0)
+                return false;
+            if (_isDraggingRoiSegment || _pendingRoiSegmentClickEdit || _isMovingRoi || _isDrawing)
+                return false;
+
+            RoiContourPath path = _selectedRoiSegmentPath;
+            int edge = _selectedRoiSegmentEdge;
+            if (!RoiContourPath.TryRemoveEdge(path, edge, out string err))
+            {
+                MessageBox.Show(err, "删除线段", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return true;
+            }
+
+            ClearSelectedRoiSegmentHighlight();
+
+            if (RbPolygonMode?.IsChecked == true && ReferenceEquals(path, _roiPath) && !path.IsClosed)
+                _hasRoi = false;
+
+            if (IsRingModeActive() && !path.IsClosed)
+                _hasRingRoi = false;
+
+            if (IsOpenTrajectoriesModeActive())
+            {
+                int entryIdx = _openTrajectoryEntries.FindIndex(e => ReferenceEquals(e.Path, path));
+                if (entryIdx >= 0 && RoiContourPath.GetEdgeCount(path) <= 0)
+                {
+                    _openTrajectoryEntries.RemoveAt(entryIdx);
+                    if (_editingOpenTrajectoryIndex == entryIdx)
+                        _editingOpenTrajectoryIndex = null;
+                    else if (_editingOpenTrajectoryIndex is int ei && ei > entryIdx)
+                        _editingOpenTrajectoryIndex = ei - 1;
+                    RefreshOpenTrajectoryListUi();
+                }
+            }
+
+            RefreshRoiSegmentGeometryVisuals(path);
+            RefreshRoiArcEditUi();
+            MirrorGeometryPathFromRoiIfSynced();
+            if (_hasRoi || path.IsClosed || IsOpenTrajectoriesModeActive())
+                UpdateThresholdPreview();
+            PersistSessionChange();
+            AppendLog($"已删除 ROI 段 #{edge + 1}");
+            return true;
         }
 
         private void SyncRoiArcComboToEdge(RoiContourPath path, int edgeIndex)
@@ -3620,34 +3809,17 @@ namespace CalibOperatorCLI_Example
 
         private void AfterRoiSegmentEdited(RoiContourPath path, int edgeIndex, string logMsg)
         {
-            bool isOpenEntry = IsOpenTrajectoriesModeActive()
-                && _openTrajectoryEntries.Any(e => ReferenceEquals(e.Path, path));
+            RefreshRoiSegmentGeometryVisuals(path);
 
-            if (ReferenceEquals(path, _roiPath))
+            if (edgeIndex >= 0 && edgeIndex < RoiContourPath.GetEdgeCount(path))
             {
-                InvalidatePolygonFlatCache();
-                UpdatePolygonPreview();
-                RebuildCommittedPolygonVisual();
-                if (IsOpenTrajectoriesModeActive())
-                {
-                    RebuildOpenTrajectoriesVisual();
-                    UpdatePolygonRubberVisual();
-                }
-            }
-            else if (isOpenEntry)
-            {
-                RebuildOpenTrajectoriesVisual();
-                RebuildCommittedPolygonVisual();
+                SetSelectedRoiSegmentHighlight(path, edgeIndex);
+                SyncRoiArcComboToEdge(path, edgeIndex);
             }
             else
-            {
-                InvalidateRingFlatCache();
-                UpdateRingPreview();
-            }
+                ClearSelectedRoiSegmentHighlight();
 
-            SetSelectedRoiSegmentHighlight(path, edgeIndex);
             RefreshRoiArcEditUi();
-            SyncRoiArcComboToEdge(path, edgeIndex);
             MirrorGeometryPathFromRoiIfSynced();
             if (_hasRoi || path.IsClosed)
                 UpdateThresholdPreview();
@@ -3876,8 +4048,8 @@ namespace CalibOperatorCLI_Example
 
             var imgPt = GetImagePointFromMouse(e);
 
-            // 点选边线编辑优先于整体拖动 / 继续加点
-            if (TryHitAndEditRoiSegment(imgPt))
+            // 点选边线：按下选中；拖动平移；松手未拖动则弹窗编辑
+            if (TryBeginRoiSegmentPointer(imgPt))
             {
                 e.Handled = true;
                 return;
@@ -4013,6 +4185,23 @@ namespace CalibOperatorCLI_Example
                 return;
             }
 
+            if (_pendingRoiSegmentClickEdit || _isDraggingRoiSegment)
+            {
+                var segPt = GetImagePointFromMouse(e);
+                if (!_isDraggingRoiSegment)
+                {
+                    double moved = (segPt - _roiSegmentDragStartMouse).Length;
+                    if (moved < RoiSegmentDragThresholdPx)
+                        return;
+                    _isDraggingRoiSegment = true;
+                    _pendingRoiSegmentClickEdit = false;
+                    CancelFindShapeRun("已取消进行中的匹配（正在移动线段）");
+                }
+
+                ApplyRoiSegmentDragToMouse(segPt);
+                return;
+            }
+
             if (_isPanning)
             {
                 var current = e.GetPosition(ViewHost);
@@ -4051,11 +4240,18 @@ namespace CalibOperatorCLI_Example
                 }
             }
 
-            if (!_isMovingRoi && !_isPanning && !_isDrawing)
+            if (!_isMovingRoi && !_isPanning && !_isDrawing
+                && !_pendingRoiSegmentClickEdit && !_isDraggingRoiSegment)
             {
                 var hoverPt = GetImagePointFromMouse(e);
                 if (CanClickEditRoiSegments()
-                    && TryHitEditableRoiSegment(hoverPt, out _, out _))
+                    && TryHitEditableRoiSegment(hoverPt, out RoiContourPath hitPath, out int hitEdge)
+                    && _selectedRoiSegmentPath != null
+                    && ReferenceEquals(hitPath, _selectedRoiSegmentPath)
+                    && hitEdge == _selectedRoiSegmentEdge)
+                    ViewHost.Cursor = Cursors.SizeAll;
+                else if (CanClickEditRoiSegments()
+                         && TryHitEditableRoiSegment(hoverPt, out _, out _))
                     ViewHost.Cursor = Cursors.Hand;
                 else if (CanBeginRoiDragNow() && IsPointInActiveRoi(hoverPt.X, hoverPt.Y))
                     ViewHost.Cursor = Cursors.SizeAll;
@@ -4147,6 +4343,14 @@ namespace CalibOperatorCLI_Example
                 return;
             }
 
+            if (_pendingRoiSegmentClickEdit || _isDraggingRoiSegment)
+            {
+                FinishRoiSegmentPointer(openEditDialogIfPending: true);
+                ViewHost.ReleaseMouseCapture();
+                e.Handled = true;
+                return;
+            }
+
             ViewHost.ReleaseMouseCapture();
 
             if (!_isDrawing) return;
@@ -4211,11 +4415,28 @@ namespace CalibOperatorCLI_Example
             _circleRadiusImage = Math.Min(_circleRadiusImage, maxR);
         }
 
-        // ───────── 右键拖动 ─────────
+        // ───────── 右键：线段菜单 / 拖动画布 ─────────
+        private bool _pendingRoiSegmentContextMenu;
+
         private void Canvas_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
         {
             if (_imgWidth <= 0 || _imgHeight <= 0) return;
 
+            if (_pendingRoiSegmentClickEdit || _isDraggingRoiSegment)
+                FinishRoiSegmentPointer(openEditDialogIfPending: false);
+
+            var imgPt = GetImagePointFromMouse(e);
+            if (CanClickEditRoiSegments()
+                && TryHitEditableRoiSegment(imgPt, out RoiContourPath path, out int edgeIndex))
+            {
+                SetSelectedRoiSegmentHighlight(path, edgeIndex);
+                SyncRoiArcComboToEdge(path, edgeIndex);
+                _pendingRoiSegmentContextMenu = true;
+                e.Handled = true;
+                return;
+            }
+
+            _pendingRoiSegmentContextMenu = false;
             _isPanning = true;
             _panStart = e.GetPosition(ViewHost);
             _lastPanOffset = new Point(_offsetX, _offsetY);
@@ -4225,12 +4446,41 @@ namespace CalibOperatorCLI_Example
 
         private void Canvas_PreviewMouseRightButtonUp(object sender, MouseButtonEventArgs e)
         {
+            if (_pendingRoiSegmentContextMenu)
+            {
+                _pendingRoiSegmentContextMenu = false;
+                ShowRoiSegmentContextMenu();
+                e.Handled = true;
+                return;
+            }
+
             if (_isPanning)
             {
                 _isPanning = false;
                 ViewHost.ReleaseMouseCapture();
                 e.Handled = true;
             }
+        }
+
+        private void ShowRoiSegmentContextMenu()
+        {
+            if (_selectedRoiSegmentPath == null || _selectedRoiSegmentEdge < 0)
+                return;
+
+            var miDelete = new MenuItem { Header = "删除线段" };
+            miDelete.Click += (_, _) => TryDeleteSelectedRoiSegment();
+
+            var menu = new ContextMenu();
+            menu.Items.Add(miDelete);
+            menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
+            menu.PlacementTarget = ViewHost;
+            ViewHost.ContextMenu = menu;
+            menu.IsOpen = true;
+            menu.Closed += (_, _) =>
+            {
+                if (ReferenceEquals(ViewHost.ContextMenu, menu))
+                    ViewHost.ContextMenu = null;
+            };
         }
 
         // ───────── 鼠标滚轮缩放 ─────────

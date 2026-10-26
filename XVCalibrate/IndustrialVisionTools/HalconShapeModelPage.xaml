@@ -69,7 +69,7 @@
                             <RadioButton x:Name="RbPolygonMode" Content="多边形" GroupName="DrawMode"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
-                                         ToolTip="单击加点，路径可选直线或圆弧。回到起点容差内自动闭合。闭合后点击边线可选中并弹窗编辑该段；绘制中按住 Ctrl 点选已有边。用于不规则外形、手绘边线模板。开放轨迹请改用「开放轨迹」。"/>
+                                         ToolTip="单击加点，路径可选直线或圆弧。回到起点容差内自动闭合。点击边线选中：拖动可平移该段，松手未拖动则弹窗编辑；右键菜单可删除该段。用于不规则外形、手绘边线模板。开放轨迹请改用「开放轨迹」。"/>
                             <RadioButton x:Name="RbRingMode" Content="环形" GroupName="DrawMode"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
@@ -77,7 +77,7 @@
                             <RadioButton x:Name="RbOpenTrajectoriesMode" Content="开放轨迹" GroupName="DrawMode"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
-                                         ToolTip="不闭合的胶路/刻线。可画多条，「完成本条」加入列表。连接线只辅助显示，不进入模板。"/>
+                                         ToolTip="不闭合的胶路/刻线。可画多条，「完成本条」加入列表。点选线段可拖动平移，右键菜单删除；松手未拖动则弹窗编辑。连接线只辅助显示，不进入模板。"/>
                             <Button x:Name="BtnFinishOpenTrajectory" Content="完成本条" MinWidth="72" Height="32" Padding="8,4" Margin="0,0,6,4"
                                     Visibility="Collapsed" Click="BtnFinishOpenTrajectory_Click"
                                     ToolTip="当前轨迹≥2 点则加入列表"/>

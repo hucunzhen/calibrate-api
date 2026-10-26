@@ -491,6 +491,147 @@ namespace CalibOperatorCLI_Example
             return dest;
         }
 
+        /// <summary>平移一条边的两端点（圆弧含弧上点）；相邻边随共享顶点一起变形。</summary>
+        public static bool TryTranslateEdge(
+            RoiContourPath path,
+            int edgeIndex,
+            double dx,
+            double dy,
+            out string error)
+        {
+            error = "";
+            int edges = GetEdgeCount(path);
+            if (path == null || edgeIndex < 0 || edgeIndex >= edges)
+            {
+                error = "段序号无效";
+                return false;
+            }
+
+            int n = path.VertexCount;
+            int endIdx = path.IsClosed ? (edgeIndex + 1) % n : edgeIndex + 1;
+            Point s = path.Vertices[edgeIndex];
+            Point e = path.Vertices[endIdx];
+            path.Vertices[edgeIndex] = new Point(s.X + dx, s.Y + dy);
+            path.Vertices[endIdx] = new Point(e.X + dx, e.Y + dy);
+
+            if (GetEdgeKind(path, edgeIndex) == RoiEdgeKind.Arc
+                && edgeIndex < path.ArcVia.Count
+                && path.ArcVia[edgeIndex] is Point via)
+            {
+                path.ArcVia[edgeIndex] = new Point(via.X + dx, via.Y + dy);
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 将边两端（及圆弧弧上点）设为给定绝对坐标，用于拖动时按鼠标位移重放。
+        /// </summary>
+        public static bool TrySetEdgeEndpointsAbsolute(
+            RoiContourPath path,
+            int edgeIndex,
+            Point start,
+            Point end,
+            Point? arcVia,
+            out string error)
+        {
+            error = "";
+            int edges = GetEdgeCount(path);
+            if (path == null || edgeIndex < 0 || edgeIndex >= edges)
+            {
+                error = "段序号无效";
+                return false;
+            }
+
+            int n = path.VertexCount;
+            int endIdx = path.IsClosed ? (edgeIndex + 1) % n : edgeIndex + 1;
+            path.Vertices[edgeIndex] = start;
+            path.Vertices[endIdx] = end;
+
+            EnsureEdgeLists(path, path.IsClosed ? n : Math.Max(n - 1, 0));
+            if (GetEdgeKind(path, edgeIndex) == RoiEdgeKind.Arc)
+            {
+                if (arcVia is not Point via || !IsValidArcVia(start, via, end))
+                {
+                    error = "弧上点无效";
+                    return false;
+                }
+
+                path.ArcVia[edgeIndex] = via;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 删除一条边。开放路径：去掉该边终点顶点并接上后续边；
+        /// 闭合路径：去掉该边后变为开放折线（仍保留全部顶点）。
+        /// </summary>
+        public static bool TryRemoveEdge(RoiContourPath path, int edgeIndex, out string error)
+        {
+            error = "";
+            int edges = GetEdgeCount(path);
+            if (path == null || edgeIndex < 0 || edgeIndex >= edges)
+            {
+                error = "段序号无效";
+                return false;
+            }
+
+            if (path.IsClosed && path.VertexCount >= 3)
+            {
+                int n = path.VertexCount;
+                EnsureEdgeLists(path, n);
+                var newVerts = new List<Point>(n);
+                var newKinds = new List<RoiEdgeKind>(n - 1);
+                var newVias = new List<Point?>(n - 1);
+                int start = (edgeIndex + 1) % n;
+                for (int k = 0; k < n; k++)
+                    newVerts.Add(path.Vertices[(start + k) % n]);
+                for (int k = 0; k < n - 1; k++)
+                {
+                    int ei = (start + k) % n;
+                    newKinds.Add(path.EdgeKinds[ei]);
+                    newVias.Add(ei < path.ArcVia.Count ? path.ArcVia[ei] : null);
+                }
+
+                path.Vertices.Clear();
+                path.Vertices.AddRange(newVerts);
+                path.EdgeKinds.Clear();
+                path.EdgeKinds.AddRange(newKinds);
+                path.ArcVia.Clear();
+                path.ArcVia.AddRange(newVias);
+                path.IsClosed = false;
+                return true;
+            }
+
+            int endVert = edgeIndex + 1;
+            if (endVert >= path.Vertices.Count)
+            {
+                error = "段数据不一致";
+                return false;
+            }
+
+            path.Vertices.RemoveAt(endVert);
+            if (edgeIndex < path.EdgeKinds.Count)
+                path.EdgeKinds.RemoveAt(edgeIndex);
+            if (edgeIndex < path.ArcVia.Count)
+                path.ArcVia.RemoveAt(edgeIndex);
+
+            int maxEdges = Math.Max(path.Vertices.Count - 1, 0);
+            while (path.EdgeKinds.Count > maxEdges)
+                path.EdgeKinds.RemoveAt(path.EdgeKinds.Count - 1);
+            while (path.ArcVia.Count > path.EdgeKinds.Count)
+                path.ArcVia.RemoveAt(path.ArcVia.Count - 1);
+
+            if (path.Vertices.Count < 2)
+            {
+                path.EdgeKinds.Clear();
+                path.ArcVia.Clear();
+            }
+
+            return true;
+        }
+
         private static void EnsureEdgeLists(RoiContourPath path, int edgeCount)
         {
             while (path.EdgeKinds.Count < edgeCount)
