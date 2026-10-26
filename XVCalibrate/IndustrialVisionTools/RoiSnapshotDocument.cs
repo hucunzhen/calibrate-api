@@ -52,6 +52,8 @@ namespace CalibOperatorCLI_Example
         public List<string> OpenTrajectoryNames { get; set; } = new();
         public HalconShapeModelRoiPathDto? OpenTrajectoryDraft { get; set; }
         public List<HalconShapeModelRoiConnectorDto> OpenTrajectoryConnectors { get; set; } = new();
+        public List<OpenTrajHistoryItemDto> OpenTrajectoryUndo { get; set; } = new();
+        public List<OpenTrajHistoryItemDto> OpenTrajectoryRedo { get; set; } = new();
     }
 
     internal static class RoiSnapshotFileIo
@@ -147,7 +149,9 @@ namespace CalibOperatorCLI_Example
                 OpenTrajectoryNames = s.OpenTrajectoryNames?.ToList() ?? new List<string>(),
                 OpenTrajectoryDraft = ClonePathDto(s.OpenTrajectoryDraft),
                 OpenTrajectoryConnectors = s.OpenTrajectoryConnectors?.ToList()
-                                         ?? new List<HalconShapeModelRoiConnectorDto>()
+                                         ?? new List<HalconShapeModelRoiConnectorDto>(),
+                OpenTrajectoryUndo = CloneHistoryList(s.OpenTrajectoryUndo),
+                OpenTrajectoryRedo = CloneHistoryList(s.OpenTrajectoryRedo)
             };
         }
 
@@ -175,7 +179,9 @@ namespace CalibOperatorCLI_Example
                 OpenTrajectoryNames = doc.OpenTrajectoryNames?.ToList() ?? new List<string>(),
                 OpenTrajectoryDraft = ClonePathDto(doc.OpenTrajectoryDraft),
                 OpenTrajectoryConnectors = doc.OpenTrajectoryConnectors?.ToList()
-                                             ?? new List<HalconShapeModelRoiConnectorDto>()
+                                             ?? new List<HalconShapeModelRoiConnectorDto>(),
+                OpenTrajectoryUndo = CloneHistoryList(doc.OpenTrajectoryUndo),
+                OpenTrajectoryRedo = CloneHistoryList(doc.OpenTrajectoryRedo)
             };
         }
 
@@ -219,6 +225,8 @@ namespace CalibOperatorCLI_Example
             doc.OpenTrajectoryPaths ??= new List<HalconShapeModelRoiPathDto>();
             doc.OpenTrajectoryNames ??= new List<string>();
             doc.OpenTrajectoryConnectors ??= new List<HalconShapeModelRoiConnectorDto>();
+            doc.OpenTrajectoryUndo ??= new List<OpenTrajHistoryItemDto>();
+            doc.OpenTrajectoryRedo ??= new List<OpenTrajHistoryItemDto>();
         }
 
         private static HalconShapeModelRoiPathDto? ClonePathDto(HalconShapeModelRoiPathDto? src)
@@ -234,5 +242,54 @@ namespace CalibOperatorCLI_Example
             dst.ArcViaYs.AddRange(src.ArcViaYs);
             return dst;
         }
+
+        private static List<OpenTrajHistoryItemDto> CloneHistoryList(List<OpenTrajHistoryItemDto>? src)
+        {
+            var list = new List<OpenTrajHistoryItemDto>();
+            if (src == null)
+                return list;
+            foreach (OpenTrajHistoryItemDto? item in src)
+            {
+                if (item == null)
+                    continue;
+                list.Add(CloneHistoryItem(item));
+            }
+
+            return list;
+        }
+
+        internal static OpenTrajHistoryItemDto CloneHistoryItem(OpenTrajHistoryItemDto src) =>
+            new()
+            {
+                Kind = src.Kind ?? "",
+                IsFirstVertex = src.IsFirstVertex,
+                VertexX = src.VertexX,
+                VertexY = src.VertexY,
+                EdgeKind = src.EdgeKind ?? "Line",
+                ArcViaX = src.ArcViaX,
+                ArcViaY = src.ArcViaY,
+                Connector = src.Connector == null
+                    ? null
+                    : new HalconShapeModelRoiConnectorDto
+                    {
+                        StartX = src.Connector.StartX,
+                        StartY = src.Connector.StartY,
+                        EndX = src.Connector.EndX,
+                        EndY = src.Connector.EndY
+                    },
+                AutoFinishedName = src.AutoFinishedName,
+                AutoFinishedPath = ClonePathDto(src.AutoFinishedPath),
+                AutoFinishedReplacedEditIndex = src.AutoFinishedReplacedEditIndex,
+                AutoFinishedPreviousPath = ClonePathDto(src.AutoFinishedPreviousPath),
+                ClearedSingletonX = src.ClearedSingletonX,
+                ClearedSingletonY = src.ClearedSingletonY,
+                AddedResumeVertex = src.AddedResumeVertex,
+                ResumeVertexX = src.ResumeVertexX,
+                ResumeVertexY = src.ResumeVertexY,
+                FinishedName = src.FinishedName,
+                FinishedPath = ClonePathDto(src.FinishedPath),
+                FinishReplacedEditIndex = src.FinishReplacedEditIndex,
+                FinishPreviousPath = ClonePathDto(src.FinishPreviousPath)
+            };
     }
 }

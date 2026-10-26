@@ -32,6 +32,50 @@ namespace CalibOperatorCLI_Example
     {
         public string? CurrentFlowFilePath { get; private set; }
 
+        /// <summary>
+        /// 形状模板页测试：用此绝对路径替换匹配的 <c>halcon_load_shape_model</c>。
+        /// 若同时设置 <see cref="HalconShapeModelFilePathOverrideMatch"/>，则仅替换 filePath 指向该槽位的节点。
+        /// </summary>
+        public string? HalconShapeModelFilePathOverride { get; set; }
+
+        /// <summary>
+        /// 与 <see cref="HalconShapeModelFilePathOverride"/> 配对：相对路径或文件名（如 <c>models\shape_model_outline.shm</c>）。
+        /// 为空则覆盖所有形状模板加载（兼容旧行为）。
+        /// </summary>
+        public string? HalconShapeModelFilePathOverrideMatch { get; set; }
+
+        /// <summary>
+        /// 形状模板页测试：用此绝对路径替换匹配的 <c>halcon_load_deformable_model</c>。
+        /// </summary>
+        public string? HalconDeformableModelFilePathOverride { get; set; }
+
+        /// <summary>与 <see cref="HalconDeformableModelFilePathOverride"/> 配对的相对路径/文件名匹配。</summary>
+        public string? HalconDeformableModelFilePathOverrideMatch { get; set; }
+
+        /// <summary>
+        /// 形状模板页测试：入口图已是页面矫正结果时，去畸变/透视算子直通，避免二次变换导致外框尺度变小。
+        /// </summary>
+        public bool PassThroughCameraCorrectionOperators { get; set; }
+
+        /// <summary>
+        /// 将 <paramref name="absoluteImagePath"/> 写入所有 <c>load_image</c>；可选开启相机矫正直通。
+        /// </summary>
+        public void PrepareShapeTemplateTestEntryImage(string absoluteImagePath, bool passThroughCameraCorrection)
+        {
+            if (string.IsNullOrWhiteSpace(absoluteImagePath))
+                return;
+
+            string full = System.IO.Path.GetFullPath(absoluteImagePath.Trim());
+            foreach (var node in _nodes)
+            {
+                if (node.Def.TypeId != "load_image")
+                    continue;
+                node.Params["filePath"] = FormatPathForFlowParam(full, compositeInnerFlowBaseDir: null);
+            }
+
+            PassThroughCameraCorrectionOperators = passThroughCameraCorrection;
+        }
+
         /// <summary>配方目录重命名后，同步更新当前流程文件路径（不重新加载文件）。</summary>
         internal void RemapFlowFilePathForRecipeRename(string oldRecipeDirectory, string newRecipeDirectory)
         {
@@ -6621,6 +6665,45 @@ namespace CalibOperatorCLI_Example
             return System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, path));
         }
 
+        /// <summary>
+        /// 形状模板页测试覆盖：有 override 且（match 为空或 configuredPath 命中槽位）时改用 override 绝对路径。
+        /// </summary>
+        private static bool TryApplyHalconModelFileOverride(
+            string configuredPath,
+            string? overrideAbsolutePath,
+            string? matchRelativeOrFileName,
+            out string effectivePath)
+        {
+            effectivePath = configuredPath?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(overrideAbsolutePath))
+                return false;
+
+            if (!string.IsNullOrWhiteSpace(matchRelativeOrFileName)
+                && !HalconModelPathMatchesSlot(effectivePath, matchRelativeOrFileName))
+                return false;
+
+            effectivePath = overrideAbsolutePath.Trim();
+            return true;
+        }
+
+        private static bool HalconModelPathMatchesSlot(string configuredPath, string matchRelativeOrFileName)
+        {
+            if (string.IsNullOrWhiteSpace(configuredPath) || string.IsNullOrWhiteSpace(matchRelativeOrFileName))
+                return false;
+
+            string cfg = configuredPath.Trim().Replace('/', '\\');
+            string match = matchRelativeOrFileName.Trim().Replace('/', '\\');
+            string cfgName = System.IO.Path.GetFileName(cfg);
+            string matchName = System.IO.Path.GetFileName(match);
+            if (!string.IsNullOrWhiteSpace(cfgName)
+                && !string.IsNullOrWhiteSpace(matchName)
+                && string.Equals(cfgName, matchName, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return cfg.EndsWith(match, StringComparison.OrdinalIgnoreCase)
+                || match.EndsWith(cfg, StringComparison.OrdinalIgnoreCase);
+        }
+
         private static List<FlowNode> TopologicalSortInner(
             List<FlowNode> nodes,
             List<(Guid FromId, string FromPort, Guid ToId, string ToPort)> edges,
@@ -11862,6 +11945,16 @@ namespace CalibOperatorCLI_Example
                         var srcImg = inputs["Image"] as CalibImage;
                         if (srcImg == null)
                             throw new InvalidOperationException("内参畸变矫正: 缺少输入图像 Image");
+
+                        if (PassThroughCameraCorrectionOperators)
+                        {
+                            var passthrough = CalibAPI.DuplicateImage(srcImg);
+                            CalibAPI.EnsureNativeImageChannels(passthrough);
+                            PublishCalibImageOutputs(node, passthrough);
+                            node.ResultSummary = $"undistort 直通（形状模板测试用本页图）{srcImg.Width}x{srcImg.Height}";
+                            break;
+                        }
+
                         double alpha = double.TryParse(node.Params.GetValueOrDefault("alpha"), out double av) ? av : -1.0;
 
                         CalibImage outImg;
@@ -11884,6 +11977,16 @@ namespace CalibOperatorCLI_Example
                         var srcImg = inputs["Image"] as CalibImage;
                         if (srcImg == null)
                             throw new InvalidOperationException("棋盘透视展开: 缺少输入图像 Image");
+
+                        if (PassThroughCameraCorrectionOperators)
+                        {
+                            var passthrough = CalibAPI.DuplicateImage(srcImg);
+                            CalibAPI.EnsureNativeImageChannels(passthrough);
+                            PublishCalibImageOutputs(node, passthrough);
+                            node.ResultSummary = $"perspective 直通（形状模板测试用本页图）{srcImg.Width}x{srcImg.Height}";
+                            break;
+                        }
+
                         string calJson = ResolveChessboardCalibrationJson(node, inputs, compositeInnerFlowBaseDir, requireExtrinsics: true);
 
                         int viewIdx = ParseChessboardViewIndex(node.Params);
@@ -13960,12 +14063,19 @@ namespace CalibOperatorCLI_Example
                     case "halcon_load_shape_model":
                     {
                         string configuredPath = node.Params.GetValueOrDefault("filePath", "")?.Trim() ?? "";
-                        if (string.IsNullOrWhiteSpace(configuredPath))
+                        bool usedOverride = TryApplyHalconModelFileOverride(
+                            configuredPath,
+                            HalconShapeModelFilePathOverride,
+                            HalconShapeModelFilePathOverrideMatch,
+                            out string effectivePath);
+                        if (string.IsNullOrWhiteSpace(effectivePath))
                             throw new InvalidOperationException("HALCON 加载形状模型: filePath 为空");
-                        string resolvedPath = ResolveCompositeFlowPath(configuredPath, compositeInnerFlowBaseDir);
+                        string resolvedPath = ResolveCompositeFlowPath(effectivePath, compositeInnerFlowBaseDir);
                         long modelId = HalconFlowBridge.LoadShapeModelFromFile(resolvedPath);
                         node.Outputs["ModelId"] = modelId;
-                        node.ResultSummary = $"HALCON 已加载 .shm ModelId={modelId}";
+                        node.ResultSummary = usedOverride
+                            ? $"HALCON 已加载工作模板 .shm ModelId={modelId} ← {System.IO.Path.GetFileName(resolvedPath)}"
+                            : $"HALCON 已加载 .shm ModelId={modelId}";
                         break;
                     }
 
@@ -14008,13 +14118,20 @@ namespace CalibOperatorCLI_Example
                     case "halcon_load_deformable_model":
                     {
                         string configuredPath = node.Params.GetValueOrDefault("filePath", "")?.Trim() ?? "";
-                        if (string.IsNullOrWhiteSpace(configuredPath))
+                        bool usedOverride = TryApplyHalconModelFileOverride(
+                            configuredPath,
+                            HalconDeformableModelFilePathOverride,
+                            HalconDeformableModelFilePathOverrideMatch,
+                            out string effectivePath);
+                        if (string.IsNullOrWhiteSpace(effectivePath))
                             throw new InvalidOperationException("HALCON 加载可变形模型: filePath 为空");
-                        string resolvedPath = ResolveCompositeFlowPath(configuredPath, compositeInnerFlowBaseDir);
+                        string resolvedPath = ResolveCompositeFlowPath(effectivePath, compositeInnerFlowBaseDir);
                         long modelId = HalconFlowBridge.LoadDeformableModelFromFile(resolvedPath);
                         node.Outputs["ModelId"] = modelId;
                         string subtypeLabel = HalconFlowBridge.GetDeformableModelSubtypeLabel(modelId);
-                        node.ResultSummary = $"HALCON 已加载 .dfm ({subtypeLabel}) ModelId={modelId}";
+                        node.ResultSummary = usedOverride
+                            ? $"HALCON 已加载工作模板 .dfm ({subtypeLabel}) ModelId={modelId} ← {System.IO.Path.GetFileName(resolvedPath)}"
+                            : $"HALCON 已加载 .dfm ({subtypeLabel}) ModelId={modelId}";
                         break;
                     }
 
@@ -16937,6 +17054,14 @@ namespace CalibOperatorCLI_Example
                 if (preferNativeEngine && IsStandaloneDebugActive)
                 {
                     AppendLog("[WARN] 子流程独立调试仅支持托管「运行」，Native 已改用托管执行");
+                    preferNativeEngine = false;
+                }
+
+                if (preferNativeEngine
+                    && (!string.IsNullOrWhiteSpace(HalconShapeModelFilePathOverride)
+                        || !string.IsNullOrWhiteSpace(HalconDeformableModelFilePathOverride)))
+                {
+                    AppendLog("[WARN] 已设置形状模板工作路径覆盖，Native 引擎不支持，改用托管执行");
                     preferNativeEngine = false;
                 }
 

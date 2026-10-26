@@ -90,6 +90,9 @@ namespace CalibOperatorCLI_Example
 
         private readonly List<RoiArcEditEntry> _roiArcEditEntries = new();
         private bool _suppressRoiArcEditUi;
+        /// <summary>画布点击选中的 ROI 路径段（用于高亮与弹窗编辑）。</summary>
+        private RoiContourPath? _selectedRoiSegmentPath;
+        private int _selectedRoiSegmentEdge = -1;
 
         // 模型
         private long _modelId = -1;
@@ -922,6 +925,8 @@ namespace CalibOperatorCLI_Example
                 return false;
 
             path.AddFirstVertex(p);
+            ClearPathVertexRedo();
+            RecordOpenTrajPathVertexIfActive(path);
             bool fromConn = IsOpenTrajectoriesModeActive()
                             && TryGetLastConnectorEnd(out Point ce)
                             && Dist(p, ce) < 1.0;
@@ -1266,6 +1271,7 @@ namespace CalibOperatorCLI_Example
             _hasOpenTrajectoriesRoi = false;
             _trajectoryConnectors.Clear();
             _connectorDraftStart = null;
+            ClearOpenTrajHistory();
             if (OpenTrajectoriesLayer != null)
                 OpenTrajectoriesLayer.Children.Clear();
             RebuildConnectorsVisual();
@@ -1313,32 +1319,46 @@ namespace CalibOperatorCLI_Example
             return false;
         }
 
-        /// <summary>连接线落点后：必要时保存上一条草稿，并在连接线终点自动开始下一条轨迹。</summary>
-        private void OnConnectorCommitted(Point connectorEnd)
+        /// <summary>连接线落点后：必要时保存上一条草稿，并在连接线终点自动开始下一条轨迹。返回写入历史的动作。</summary>
+        private OpenTrajHistoryItem BuildConnectorHistoryAndSideEffects(RoiConnectorSegment seg)
         {
+            var item = new OpenTrajHistoryItem
+            {
+                Kind = OpenTrajHistoryKind.Connector,
+                Connector = seg
+            };
+
             if (_roiPath.VertexCount >= 2)
-                TryCommitCurrentOpenTrajectoryDraft(showMessage: false);
+            {
+                if (!TryCommitCurrentOpenTrajectoryDraft(showMessage: false, recordHistory: false, out OpenTrajHistoryItem? finishItem)
+                    || finishItem == null)
+                {
+                    // 完不成则仍记下连接线本身
+                }
+                else
+                {
+                    item.AutoFinishedEntry = finishItem.FinishedEntry;
+                    item.AutoFinishedReplacedEditIndex = finishItem.FinishReplacedEditIndex;
+                    item.AutoFinishedPreviousPath = finishItem.FinishPreviousPath;
+                }
+            }
             else if (_roiPath.VertexCount > 0)
+            {
+                item.ClearedSingletonVertex = _roiPath.Vertices[0];
                 _roiPath.Clear();
+            }
 
-            TryResumeTrajectoryAfterConnector(connectorEnd);
-        }
+            if (IsOpenTrajectoriesModeActive() && _roiPath.VertexCount == 0)
+            {
+                _roiPath.AddFirstVertex(seg.End);
+                item.AddedResumeVertex = true;
+                item.ResumeVertex = seg.End;
+                // 保持当前「下一段」类型（连接线/直线/圆弧），不强制切回直线
+                UpdateNextSegmentToolbar();
+                AppendLog($"开放轨迹: 已从连接线终点 ({seg.EndX:F1},{seg.EndY:F1}) 继续，移动鼠标后单击绘制下一段");
+            }
 
-        private void TryResumeTrajectoryAfterConnector(Point connectorEnd)
-        {
-            if (!IsOpenTrajectoriesModeActive() || _roiPath.VertexCount > 0)
-                return;
-
-            _roiPath.AddFirstVertex(connectorEnd);
-            if (RbNextSegmentLine != null)
-                RbNextSegmentLine.IsChecked = true;
-            UpdateNextSegmentToolbar();
-
-            InvalidatePolygonFlatCache();
-            UpdatePolygonPreview();
-            UpdateConnectorRubberVisual();
-            AppendLog($"开放轨迹: 已从连接线终点 ({connectorEnd.X:F1},{connectorEnd.Y:F1}) 继续，移动鼠标后单击绘制下一段");
-            PersistSessionChange();
+            return item;
         }
 
         private void RebuildConnectorsVisual()
@@ -1417,10 +1437,15 @@ namespace CalibOperatorCLI_Example
             var seg = new RoiConnectorSegment(anchorStart, connectorEnd);
             _trajectoryConnectors.Add(seg);
             _connectorDraftStart = null;
+            OpenTrajHistoryItem hist = BuildConnectorHistoryAndSideEffects(seg);
+            PushOpenTrajHistory(hist);
             RebuildConnectorsVisual();
+            RebuildOpenTrajectoriesVisual();
+            UpdatePolygonPreview();
             UpdateConnectorRubberVisual();
+            RefreshOpenTrajectoryListUi();
             AppendLog($"{logPrefix}: 连接线 ({seg.StartX:F1},{seg.StartY:F1})→({seg.EndX:F1},{seg.EndY:F1})，共 {_trajectoryConnectors.Count} 条（不参与模板）");
-            OnConnectorCommitted(connectorEnd);
+            PersistSessionChange();
             return true;
         }
 
@@ -1501,8 +1526,15 @@ namespace CalibOperatorCLI_Example
             return list;
         }
 
-        private bool TryCommitCurrentOpenTrajectoryDraft(bool showMessage)
+        private bool TryCommitCurrentOpenTrajectoryDraft(bool showMessage) =>
+            TryCommitCurrentOpenTrajectoryDraft(showMessage, recordHistory: true, out _);
+
+        private bool TryCommitCurrentOpenTrajectoryDraft(
+            bool showMessage,
+            bool recordHistory,
+            out OpenTrajHistoryItem? historyItem)
         {
+            historyItem = null;
             if (_arcDraftEnd != null)
             {
                 if (showMessage)
@@ -1519,31 +1551,50 @@ namespace CalibOperatorCLI_Example
                 return false;
             }
 
-            RoiContourPath saved = HalconGeometryPathEditor.ClonePath(_roiPath);
+            RoiContourPath saved = CloneContourPath(_roiPath);
             saved.IsClosed = false;
+            var hist = new OpenTrajHistoryItem
+            {
+                Kind = OpenTrajHistoryKind.FinishEntry,
+                FinishedEntry = new OpenTrajectoryEntry
+                {
+                    Name = "",
+                    Path = CloneContourPath(saved)
+                }
+            };
+
             if (_editingOpenTrajectoryIndex is int editIdx
                 && editIdx >= 0
                 && editIdx < _openTrajectoryEntries.Count)
             {
                 string name = _openTrajectoryEntries[editIdx].Name;
+                hist.FinishReplacedEditIndex = editIdx;
+                hist.FinishPreviousPath = CloneContourPath(_openTrajectoryEntries[editIdx].Path);
+                hist.FinishedEntry.Name = name;
                 _openTrajectoryEntries[editIdx].Path = saved;
                 _editingOpenTrajectoryIndex = null;
                 AppendLog($"开放轨迹: 已更新「{name}」");
             }
             else
             {
+                string name = DefaultTrajectoryName(_openTrajectoryEntries.Count);
+                hist.FinishedEntry.Name = name;
                 _openTrajectoryEntries.Add(new OpenTrajectoryEntry
                 {
-                    Name = DefaultTrajectoryName(_openTrajectoryEntries.Count),
+                    Name = name,
                     Path = saved
                 });
-                AppendLog($"开放轨迹: 已保存第 {_openTrajectoryEntries.Count} 条「{_openTrajectoryEntries[^1].Name}」（不闭合）");
+                AppendLog($"开放轨迹: 已保存第 {_openTrajectoryEntries.Count} 条「{name}」（不闭合）");
             }
 
             _roiPath.Clear();
             _hasOpenTrajectoriesRoi = true;
             _hasRoi = true;
             CancelArcDraft();
+            historyItem = hist;
+            if (recordHistory)
+                PushOpenTrajHistory(hist);
+
             InvalidatePolygonFlatCache();
             RebuildOpenTrajectoriesVisual();
             RebuildConnectorsVisual();
@@ -2038,6 +2089,8 @@ namespace CalibOperatorCLI_Example
             }
 
             CancelArcDraft();
+            ClearPathVertexRedo();
+            RecordOpenTrajPathVertexIfActive(path);
             AppendLog($"{logPrefix} 圆弧段已添加 R={dlg.RadiusPx:F1}px ∠={dlg.SweepDegrees:F1}°，顶点数 {path.VertexCount}");
             RefreshRoiArcEditUi();
             return ReferenceEquals(path, _roiPath) && _roiPath.IsClosed;
@@ -2147,6 +2200,8 @@ namespace CalibOperatorCLI_Example
                 return true;
 
             path.AddLineSegment(end);
+            ClearPathVertexRedo();
+            RecordOpenTrajPathVertexIfActive(path);
             AppendLog(alongTangent
                 ? $"{logPrefix} 直线段(沿弧切线) L={dlg.LengthPx:F1}px ∠={dlg.AngleDegrees:F1}° → ({end.X:F1},{end.Y:F1}) 顶点 {path.VertexCount}"
                 : $"{logPrefix} 直线段 L={dlg.LengthPx:F1}px ∠={dlg.AngleDegrees:F1}° → ({end.X:F1},{end.Y:F1}) 顶点 {path.VertexCount}");
@@ -2189,6 +2244,8 @@ namespace CalibOperatorCLI_Example
 
                 path.AddArcSegment(arcEnd, viaTan);
                 CancelArcDraft();
+                ClearPathVertexRedo();
+                RecordOpenTrajPathVertexIfActive(path);
                 AppendLog($"{logPrefix} 圆弧段已添加(与上段相切)，顶点数 {path.VertexCount}");
                 return true;
             }
@@ -2198,6 +2255,8 @@ namespace CalibOperatorCLI_Example
 
             path.AddArcSegment(draftEnd, clickPt);
             CancelArcDraft();
+            ClearPathVertexRedo();
+            RecordOpenTrajPathVertexIfActive(path);
             AppendLog($"{logPrefix} 圆弧段已添加，顶点数 {path.VertexCount}");
             return true;
         }
@@ -2902,6 +2961,7 @@ namespace CalibOperatorCLI_Example
             _roiPath.Clear();
             CancelArcDraft();
             _polygonCursorImage = null;
+            ClearSelectedRoiSegmentHighlight();
             InvalidatePolygonFlatCache();
             ResetCircleDrawState();
             ResetRingDrawState();
@@ -3325,6 +3385,276 @@ namespace CalibOperatorCLI_Example
             UpdateRoiManagePanelVisibility();
         }
 
+        // ───────── ROI 线段点击选中 / 弹窗编辑 ─────────
+        private double GetRoiSegmentHitTolerancePx() =>
+            Math.Max(8.0, ViewPixelsToImagePixels(12));
+
+        private bool CanClickEditRoiSegments()
+        {
+            if (_isPanning || _isMovingRoi || _isDrawing || _rotRectSettingAngle || _arcDraftEnd != null)
+                return false;
+            if (RbPolygonMode?.IsChecked == true)
+                return RoiContourPath.GetEdgeCount(_roiPath) > 0;
+            if (IsRingModeActive())
+            {
+                return (_ringOuterPath.IsClosed && RoiContourPath.GetEdgeCount(_ringOuterPath) > 0)
+                       || (_ringInnerPath.IsClosed && RoiContourPath.GetEdgeCount(_ringInnerPath) > 0);
+            }
+
+            if (IsOpenTrajectoriesModeActive())
+            {
+                if (RoiContourPath.GetEdgeCount(_roiPath) > 0)
+                    return true;
+                foreach (OpenTrajectoryEntry entry in _openTrajectoryEntries)
+                {
+                    if (RoiContourPath.GetEdgeCount(entry.Path) > 0)
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>有边即可点选编辑（开放/闭合相同；命中边线优先于继续加点）。</summary>
+        private static bool CanHitSegmentsOnPath(RoiContourPath path) =>
+            RoiContourPath.GetEdgeCount(path) > 0;
+
+        private bool TryHitEditableRoiSegment(Point imgPt, out RoiContourPath path, out int edgeIndex)
+        {
+            path = _roiPath;
+            edgeIndex = -1;
+            double tol = GetRoiSegmentHitTolerancePx();
+            double best = double.MaxValue;
+            RoiContourPath? bestPath = null;
+            int bestEdge = -1;
+
+            void Consider(RoiContourPath candidate)
+            {
+                if (!CanHitSegmentsOnPath(candidate))
+                    return;
+                if (!RoiContourPath.TryHitEdge(candidate, imgPt, tol, out int ei, out double dist))
+                    return;
+                if (dist >= best)
+                    return;
+                best = dist;
+                bestPath = candidate;
+                bestEdge = ei;
+            }
+
+            if (RbPolygonMode?.IsChecked == true)
+                Consider(_roiPath);
+            else if (IsOpenTrajectoriesModeActive())
+            {
+                // 先已保存轨迹，再当前草稿（同距时优先草稿）
+                foreach (OpenTrajectoryEntry entry in _openTrajectoryEntries)
+                    Consider(entry.Path);
+                Consider(_roiPath);
+            }
+            else if (IsRingModeActive())
+            {
+                Consider(_ringOuterPath);
+                Consider(_ringInnerPath);
+            }
+
+            if (bestPath == null || bestEdge < 0)
+                return false;
+
+            path = bestPath;
+            edgeIndex = bestEdge;
+            return true;
+        }
+
+        private void ClearSelectedRoiSegmentHighlight()
+        {
+            _selectedRoiSegmentPath = null;
+            _selectedRoiSegmentEdge = -1;
+            if (SelectedRoiSegmentLine == null)
+                return;
+            SelectedRoiSegmentLine.Visibility = Visibility.Collapsed;
+            SelectedRoiSegmentLine.Points.Clear();
+        }
+
+        private void SetSelectedRoiSegmentHighlight(RoiContourPath path, int edgeIndex)
+        {
+            _selectedRoiSegmentPath = path;
+            _selectedRoiSegmentEdge = edgeIndex;
+            if (SelectedRoiSegmentLine == null)
+                return;
+
+            var pts = RoiContourPath.SampleEdgePoints(path, edgeIndex, arcSegments: ClosedArcSegments);
+            if (pts.Count < 2)
+            {
+                ClearSelectedRoiSegmentHighlight();
+                return;
+            }
+
+            SelectedRoiSegmentLine.Points = new PointCollection(pts);
+            SelectedRoiSegmentLine.Visibility = Visibility.Visible;
+        }
+
+        private bool TryHitAndEditRoiSegment(Point imgPt)
+        {
+            if (!CanClickEditRoiSegments())
+                return false;
+            if (!TryHitEditableRoiSegment(imgPt, out RoiContourPath path, out int edgeIndex))
+                return false;
+
+            SetSelectedRoiSegmentHighlight(path, edgeIndex);
+            SyncRoiArcComboToEdge(path, edgeIndex);
+            return PromptEditRoiSegment(path, edgeIndex);
+        }
+
+        private void SyncRoiArcComboToEdge(RoiContourPath path, int edgeIndex)
+        {
+            if (CmbRoiArcSegment == null || _roiArcEditEntries.Count == 0)
+                return;
+            if (RoiContourPath.GetEdgeKind(path, edgeIndex) != RoiEdgeKind.Arc)
+                return;
+
+            for (int i = 0; i < _roiArcEditEntries.Count; i++)
+            {
+                if (!ReferenceEquals(_roiArcEditEntries[i].Path, path)
+                    || _roiArcEditEntries[i].EdgeIndex != edgeIndex)
+                    continue;
+                _suppressRoiArcEditUi = true;
+                try
+                {
+                    CmbRoiArcSegment.SelectedIndex = i;
+                }
+                finally
+                {
+                    _suppressRoiArcEditUi = false;
+                }
+
+                LoadSelectedRoiArcRadiusToUi();
+                break;
+            }
+        }
+
+        private bool PromptEditRoiSegment(RoiContourPath path, int edgeIndex)
+        {
+            RoiContourPath.GetEdgeEndpoints(path, edgeIndex, out Point start, out Point end);
+            var kind = RoiContourPath.GetEdgeKind(path, edgeIndex);
+            AffineTransform? affine = null;
+#if HALCON_ENABLED
+            affine = TryGetNinePointAffineOptional();
+#endif
+            if (kind == RoiEdgeKind.Arc)
+                return PromptEditRoiArcSegment(path, edgeIndex, start, end, affine);
+
+            return PromptEditRoiLineSegment(path, edgeIndex, start, end, affine);
+        }
+
+        private bool PromptEditRoiLineSegment(
+            RoiContourPath path,
+            int edgeIndex,
+            Point start,
+            Point end,
+            AffineTransform? affine)
+        {
+            double dx = end.X - start.X;
+            double dy = end.Y - start.Y;
+            double len = Math.Sqrt(dx * dx + dy * dy);
+            if (len < 0.5)
+                return true;
+
+            var dlg = new RoiLineSegmentParamsDialog
+            {
+                Owner = Window.GetWindow(this),
+                Title = $"编辑直线段 #{edgeIndex + 1}"
+            };
+            dlg.Initialize(start.X, start.Y, dx / len, dy / len, len, affine, alongTangent: false);
+            if (dlg.ShowDialog() != true)
+                return true;
+
+            var newEnd = new Point(dlg.EndColumnPx, dlg.EndRowPx);
+            if (!RoiContourPath.TrySetLineEdgeEnd(path, edgeIndex, newEnd, out string err))
+            {
+                MessageBox.Show(err, "编辑直线段", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return true;
+            }
+
+            AfterRoiSegmentEdited(path, edgeIndex, $"直线段 #{edgeIndex + 1} L={dlg.LengthPx:F1}px ∠={dlg.AngleDegrees:F1}°");
+            return true;
+        }
+
+        private bool PromptEditRoiArcSegment(
+            RoiContourPath path,
+            int edgeIndex,
+            Point start,
+            Point end,
+            AffineTransform? affine)
+        {
+            if (edgeIndex >= path.ArcVia.Count || path.ArcVia[edgeIndex] is not Point via)
+            {
+                MessageBox.Show("该圆弧段缺少弧上点，无法编辑。", "编辑圆弧段", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return true;
+            }
+
+            var dlg = new RoiArcSegmentParamsDialog
+            {
+                Owner = Window.GetWindow(this),
+                Title = $"编辑圆弧段 #{edgeIndex + 1}"
+            };
+            dlg.Initialize(start.X, start.Y, end.X, end.Y, via.X, via.Y, affine);
+            if (dlg.ShowDialog() != true)
+                return true;
+
+            var newVia = new Point(dlg.ViaColumnPx, dlg.ViaRowPx);
+            if (!RoiContourPath.TrySetArcEdgeVia(path, edgeIndex, newVia, out string err))
+            {
+                MessageBox.Show(err, "编辑圆弧段", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return true;
+            }
+
+            // 若半径相对三点半径有明显差异，再按弦+半径微调鼓出侧
+            if (RoiContourPath.TryGetArcGeometricRadius(start, newVia, end, out double rNow)
+                && Math.Abs(rNow - dlg.RadiusPx) > 0.25)
+            {
+                RoiContourPathTangent.TrySetArcEdgeRadius(path, edgeIndex, dlg.RadiusPx, out _);
+            }
+
+            AfterRoiSegmentEdited(path, edgeIndex, $"圆弧段 #{edgeIndex + 1} R={dlg.RadiusPx:F1}px");
+            return true;
+        }
+
+        private void AfterRoiSegmentEdited(RoiContourPath path, int edgeIndex, string logMsg)
+        {
+            bool isOpenEntry = IsOpenTrajectoriesModeActive()
+                && _openTrajectoryEntries.Any(e => ReferenceEquals(e.Path, path));
+
+            if (ReferenceEquals(path, _roiPath))
+            {
+                InvalidatePolygonFlatCache();
+                UpdatePolygonPreview();
+                RebuildCommittedPolygonVisual();
+                if (IsOpenTrajectoriesModeActive())
+                {
+                    RebuildOpenTrajectoriesVisual();
+                    UpdatePolygonRubberVisual();
+                }
+            }
+            else if (isOpenEntry)
+            {
+                RebuildOpenTrajectoriesVisual();
+                RebuildCommittedPolygonVisual();
+            }
+            else
+            {
+                InvalidateRingFlatCache();
+                UpdateRingPreview();
+            }
+
+            SetSelectedRoiSegmentHighlight(path, edgeIndex);
+            RefreshRoiArcEditUi();
+            SyncRoiArcComboToEdge(path, edgeIndex);
+            MirrorGeometryPathFromRoiIfSynced();
+            if (_hasRoi || path.IsClosed)
+                UpdateThresholdPreview();
+            PersistSessionChange();
+            AppendLog($"已编辑 ROI {logMsg}");
+        }
+
         // ───────── 画布鼠标事件 ─────────
         private void DrawToolbar_PreviewMouseDown(object sender, MouseButtonEventArgs e)
         {
@@ -3546,6 +3876,13 @@ namespace CalibOperatorCLI_Example
 
             var imgPt = GetImagePointFromMouse(e);
 
+            // 点选边线编辑优先于整体拖动 / 继续加点
+            if (TryHitAndEditRoiSegment(imgPt))
+            {
+                e.Handled = true;
+                return;
+            }
+
             if (TryBeginRoiDrag(imgPt))
             {
                 e.Handled = true;
@@ -3572,6 +3909,7 @@ namespace CalibOperatorCLI_Example
             }
             else if (RbPolygonMode.IsChecked == true)
             {
+                ClearSelectedRoiSegmentHighlight();
                 if (HandlePolygonClick(imgPt))
                     return;
 
@@ -3582,6 +3920,7 @@ namespace CalibOperatorCLI_Example
             }
             else if (IsOpenTrajectoriesModeActive())
             {
+                ClearSelectedRoiSegmentHighlight();
                 HandleOpenTrajectoryClick(imgPt);
                 RebuildCommittedPolygonVisual();
                 RebuildOpenTrajectoriesVisual();
@@ -3591,6 +3930,7 @@ namespace CalibOperatorCLI_Example
             }
             else if (IsRingModeActive())
             {
+                ClearSelectedRoiSegmentHighlight();
                 bool closedStep = HandleRingContourClick(imgPt);
                 UpdateRingPreview();
                 UpdateRingRubberVisual();
@@ -3711,10 +4051,16 @@ namespace CalibOperatorCLI_Example
                 }
             }
 
-            if (!_isMovingRoi && !_isPanning && !_isDrawing && CanBeginRoiDragNow())
+            if (!_isMovingRoi && !_isPanning && !_isDrawing)
             {
                 var hoverPt = GetImagePointFromMouse(e);
-                ViewHost.Cursor = IsPointInActiveRoi(hoverPt.X, hoverPt.Y) ? Cursors.SizeAll : Cursors.Arrow;
+                if (CanClickEditRoiSegments()
+                    && TryHitEditableRoiSegment(hoverPt, out _, out _))
+                    ViewHost.Cursor = Cursors.Hand;
+                else if (CanBeginRoiDragNow() && IsPointInActiveRoi(hoverPt.X, hoverPt.Y))
+                    ViewHost.Cursor = Cursors.SizeAll;
+                else
+                    ViewHost.Cursor = Cursors.Arrow;
             }
 
             if (_rotRectSettingAngle)
@@ -3909,10 +4255,16 @@ namespace CalibOperatorCLI_Example
         // ───────── 快捷键 ─────────
         private void Canvas_KeyDown(object sender, KeyEventArgs e)
         {
-            // Ctrl+Z 撤销多边形点
+            // Ctrl+Z 撤销；Ctrl+Y / Ctrl+Shift+Z 重做
             if (e.Key == Key.Z && Keyboard.Modifiers == ModifierKeys.Control)
             {
                 BtnUndoPoint_Click(sender, e);
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Y && Keyboard.Modifiers == ModifierKeys.Control
+                     || e.Key == Key.Z && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
+            {
+                BtnRedoPoint_Click(sender, e);
                 e.Handled = true;
             }
             else if (e.Key == Key.R && Keyboard.Modifiers == ModifierKeys.Control)
@@ -3941,13 +4293,14 @@ namespace CalibOperatorCLI_Example
             RefreshRoiArcEditUi();
         }
 
-        // ───────── 撤销多边形点 ─────────
+        // ───────── 撤销 / 重做 ─────────
         private void BtnUndoPoint_Click(object sender, RoutedEventArgs e)
         {
             if (IsCircleModeActive() && HasUsableCircleRoi())
             {
                 _hasRoi = false;
                 ResetCircleDrawState();
+                ClearPathVertexRedo();
                 UpdateThresholdPreview();
                 AppendLog("圆形 ROI 已清除");
                 return;
@@ -3955,60 +4308,9 @@ namespace CalibOperatorCLI_Example
 
             if (IsOpenTrajectoriesModeActive())
             {
-                if (_connectorDraftStart != null)
-                {
-                    _connectorDraftStart = null;
-                    UpdateConnectorRubberVisual();
-                    AppendLog("已取消未完成的连接线");
+                if (TryUndoOpenTrajectoryHistory())
                     return;
-                }
-
-                if (_trajectoryConnectors.Count > 0)
-                {
-                    RoiConnectorSegment removed = _trajectoryConnectors[^1];
-                    _trajectoryConnectors.RemoveAt(_trajectoryConnectors.Count - 1);
-                    if (_roiPath.VertexCount == 1 && Dist(_roiPath.Vertices[0], removed.End) < 1.0)
-                    {
-                        _roiPath.Clear();
-                        InvalidatePolygonFlatCache();
-                        UpdatePolygonPreview();
-                    }
-
-                    RebuildConnectorsVisual();
-                    UpdateConnectorRubberVisual();
-                    AppendLog($"连接线撤销: 剩余 {_trajectoryConnectors.Count} 条");
-                    PersistSessionChange();
-                    return;
-                }
-
-                if (_arcDraftEnd != null)
-                {
-                    CancelArcDraft();
-                    UpdatePolygonPreview();
-                    AppendLog("已取消未完成的圆弧段");
-                    return;
-                }
-
-                if (_roiPath.VertexCount > 0)
-                {
-                    _roiPath.RemoveLastVertex();
-                    UpdatePolygonPreview();
-                    AppendLog($"开放轨迹撤销: 当前条剩余 {_roiPath.VertexCount} 个顶点");
-                    return;
-                }
-
-                if (_openTrajectoryEntries.Count > 0)
-                {
-                    string removed = _openTrajectoryEntries[^1].Name;
-                    _openTrajectoryEntries.RemoveAt(_openTrajectoryEntries.Count - 1);
-                    _hasOpenTrajectoriesRoi = _openTrajectoryEntries.Count > 0;
-                    _hasRoi = _hasOpenTrajectoriesRoi || _roiPath.VertexCount >= 2;
-                    RebuildOpenTrajectoriesVisual();
-                    RefreshOpenTrajectoryListUi();
-                    AppendLog($"开放轨迹撤销: 已删除「{removed}」，剩余 {_openTrajectoryEntries.Count} 条");
-                    PersistSessionChange();
-                }
-
+                AppendLog("开放轨迹：没有可撤销的步骤");
                 return;
             }
 
@@ -4029,16 +4331,14 @@ namespace CalibOperatorCLI_Example
 
                 if (_ringInnerPath.VertexCount > 0)
                 {
-                    _ringInnerPath.RemoveLastVertex();
+                    UndoLastPathVertex(_ringInnerPath, "内圈撤销");
                     _hasRoi = false;
-                    AppendLog($"内圈撤销: 剩余 {_ringInnerPath.VertexCount} 个顶点");
                 }
                 else if (_ringOuterPath.VertexCount > 0)
                 {
-                    _ringOuterPath.RemoveLastVertex();
+                    UndoLastPathVertex(_ringOuterPath, "外圈撤销");
                     _ringPolygonPhase = 0;
                     _hasRoi = false;
-                    AppendLog($"外圈撤销: 剩余 {_ringOuterPath.VertexCount} 个顶点");
                 }
                 else
                     AppendLog("环形 ROI：已空");
@@ -4060,13 +4360,37 @@ namespace CalibOperatorCLI_Example
 
             if (_roiPath.VertexCount > 0)
             {
-                _roiPath.RemoveLastVertex();
+                UndoLastPathVertex(_roiPath, "撤销");
                 _hasRoi = false;
                 UpdatePolygonPreview();
-                if (_hasRoi)
-                    UpdateThresholdPreview();
-                AppendLog($"撤销: 剩余 {_roiPath.VertexCount} 个顶点");
+                UpdateThresholdPreview();
             }
+        }
+
+        private void BtnRedoPoint_Click(object sender, RoutedEventArgs e)
+        {
+            if (IsOpenTrajectoriesModeActive())
+            {
+                if (TryRedoOpenTrajectoryHistory())
+                    return;
+                AppendLog("开放轨迹：没有可重做的步骤");
+                return;
+            }
+
+            if (TryRedoPathVertex())
+            {
+                if (IsRingModeActive())
+                {
+                    UpdateRingPreview();
+                    UpdateRingRubberVisual();
+                }
+                else
+                    UpdatePolygonPreview();
+                PersistSessionChange();
+                return;
+            }
+
+            AppendLog("没有可重做的步骤");
         }
 
         // ───────── 自动阈值 ─────────
@@ -6010,6 +6334,8 @@ namespace CalibOperatorCLI_Example
             BtnTestFind.IsEnabled = !running;
             BtnStopFind.IsEnabled = running;
             BtnStopFind.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
+            BtnRunShapeTemplateTestFlow.IsEnabled = !running;
+            BtnReplaceGlobalShapeModel.IsEnabled = !running;
         }
 
         private void BeginFindShapeRun(out CancellationToken findToken, out int runId)
@@ -6061,6 +6387,403 @@ namespace CalibOperatorCLI_Example
             TxtFindResult.Text = "正在停止…（等待 HALCON 结束当前搜索）";
 #endif
         }
+
+        private async void BtnRunShapeTemplateTestFlow_Click(object sender, RoutedEventArgs e)
+        {
+            if (Window.GetWindow(this) is not MainWindow main)
+            {
+                MessageBox.Show("无法定位主窗口。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            string? flowPath = FlowRecipeCatalog.TryGetSelectedShapeTemplateTestFlowPath();
+            if (string.IsNullOrWhiteSpace(flowPath))
+            {
+                string recipe = main.GetSelectedRecipeName() ?? FlowRecipeUiSettings.Load().SelectedRecipe ?? "";
+                MessageBox.Show(
+                    string.IsNullOrWhiteSpace(recipe)
+                        ? $"未找到 {FlowRecipeCatalog.ShapeTemplateTestFlowFileName}。请先在流程编排中选择配方。"
+                        : $"配方「{recipe}」下未找到 {FlowRecipeCatalog.ShapeTemplateTestFlowFileName}。",
+                    "形状模板测试流程",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            FlowRecipeCatalog.EnsureGlobalShapeModelDefaults();
+
+            string? shapeOverride = null;
+            string? shapeOverrideMatch = null;
+            string? deformableOverride = null;
+            string? deformableOverrideMatch = null;
+            string? entryImagePath = null;
+            bool passThroughCameraCorrection = false;
+#if HALCON_ENABLED
+            if (_modelId >= 0)
+            {
+                try
+                {
+                    if (!TryResolveTestFlowModelSlotFromParamRecipe(
+                            out string slotLabel,
+                            out string slotRelativePath,
+                            out bool slotDeformable,
+                            out string paramRecipeName))
+                        return;
+
+                    if (slotDeformable)
+                    {
+                        if (_modelKind != HalconFlowModelKind.Deformable)
+                        {
+                            MessageBox.Show(
+                                $"参数配方「{paramRecipeName}」对应可变形槽位，但当前模型不是可变形类型。",
+                                "形状模板测试流程",
+                                MessageBoxButton.OK,
+                                MessageBoxImage.Warning);
+                            return;
+                        }
+
+                        deformableOverride = FlowRecipeCatalog.TryGetSelectedWorkingDeformableModelPath();
+                        if (string.IsNullOrWhiteSpace(deformableOverride))
+                            throw new InvalidOperationException("无法解析工作可变形模板路径（请先选择配方）。");
+                        string? dir = IoPath.GetDirectoryName(deformableOverride);
+                        if (!string.IsNullOrWhiteSpace(dir))
+                            Directory.CreateDirectory(dir);
+                        HalconFlowBridge.WriteDeformableModelToFile(_modelId, deformableOverride);
+                        deformableOverrideMatch = slotRelativePath;
+                        AppendLog($"测试优先使用本页{slotLabel}模板（配方「{paramRecipeName}」）→ 仅替换 {slotRelativePath}");
+                        AppendLog($"  工作文件: {deformableOverride}");
+                    }
+                    else
+                    {
+                        if (_modelKind == HalconFlowModelKind.Deformable)
+                        {
+                            MessageBox.Show(
+                                $"参数配方「{paramRecipeName}」对应形状槽位(.shm)，但当前是可变形模型。",
+                                "形状模板测试流程",
+                                MessageBoxButton.OK,
+                                MessageBoxImage.Warning);
+                            return;
+                        }
+
+                        shapeOverride = FlowRecipeCatalog.TryGetSelectedWorkingShapeModelPath();
+                        if (string.IsNullOrWhiteSpace(shapeOverride))
+                            throw new InvalidOperationException("无法解析工作形状模板路径（请先选择配方）。");
+                        string? dir = IoPath.GetDirectoryName(shapeOverride);
+                        if (!string.IsNullOrWhiteSpace(dir))
+                            Directory.CreateDirectory(dir);
+                        HalconFlowBridge.WriteShapeModelToFile(_modelId, shapeOverride);
+                        shapeOverrideMatch = slotRelativePath;
+                        AppendLog($"测试优先使用本页{slotLabel}模板（配方「{paramRecipeName}」）→ 仅替换 {slotRelativePath}");
+                        AppendLog($"  工作文件: {shapeOverride}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"写入工作模板失败:\n{ex.Message}", "形状模板测试流程", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+            }
+            else
+#endif
+            {
+                AppendLog("未创建/导入模型，测试流程将使用配方全局 models/shape_model_*.shm");
+            }
+
+            // 与「测试形状匹配」对齐：优先用本页当前图（已含页面相机矫正），避免流程再透视导致外框尺度变小
+            if (_currentImage != null)
+            {
+                try
+                {
+                    string? modelsDir = FlowRecipeCatalog.TryGetSelectedModelsDirectory();
+                    if (string.IsNullOrWhiteSpace(modelsDir))
+                        throw new InvalidOperationException("无法解析 models 目录。");
+                    entryImagePath = IoPath.Combine(modelsDir, "shape_template_test_input.bmp");
+                    if (!CalibAPI.SaveImage(entryImagePath, _currentImage))
+                        throw new InvalidOperationException($"保存本页图像失败: {entryImagePath}");
+                    passThroughCameraCorrection = true;
+                    AppendLog($"测试入口图=本页当前图 {_imgWidth}x{_imgHeight}（跳过流程内去畸变/透视）→ {entryImagePath}");
+                }
+                catch (Exception ex)
+                {
+                    AppendLog($"[警告] 未能导出本页图像，将弹窗选图并执行流程矫正: {ex.Message}");
+                    entryImagePath = null;
+                    passThroughCameraCorrection = false;
+                }
+            }
+            else
+            {
+                AppendLog("本页无图像：流程将弹窗选图，并执行去畸变/透视（尺度可能与建模图不一致）");
+            }
+
+            BtnRunShapeTemplateTestFlow.IsEnabled = false;
+            BtnReplaceGlobalShapeModel.IsEnabled = false;
+            BtnTestFind.IsEnabled = false;
+            try
+            {
+                AppendLog($"运行模板测试流程: {flowPath}");
+                bool ok = await main.RunFlowConfigInBackgroundAsync(
+                    flowPath,
+                    preferNativeEngine: true,
+                    shapeModelFilePathOverride: shapeOverride,
+                    deformableModelFilePathOverride: deformableOverride,
+                    shapeModelFilePathOverrideMatch: shapeOverrideMatch,
+                    deformableModelFilePathOverrideMatch: deformableOverrideMatch,
+                    entryImagePath: entryImagePath,
+                    passThroughCameraCorrection: passThroughCameraCorrection);
+                AppendLog(ok ? "模板测试流程已完成。" : "模板测试流程未完成或已停止。");
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"模板测试流程失败: {ex.Message}");
+                MessageBox.Show(ex.Message, "形状模板测试流程", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                BtnRunShapeTemplateTestFlow.IsEnabled = true;
+                BtnReplaceGlobalShapeModel.IsEnabled = true;
+                BtnTestFind.IsEnabled = _modelId >= 0;
+            }
+        }
+
+        private void BtnReplaceGlobalShapeModel_Click(object sender, RoutedEventArgs e)
+        {
+#if !HALCON_ENABLED
+            MessageBox.Show("当前构建未启用 HALCON。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+#else
+            if (_modelId < 0)
+            {
+                MessageBox.Show("请先创建或导入形状模型。", "替换全局模板", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            FlowRecipeCatalog.EnsureGlobalShapeModelDefaults();
+            if (FlowRecipeCatalog.TryGetSelectedRecipeDirectory() == null)
+            {
+                MessageBox.Show("未选择流程配方，无法定位 models/ 全局模板路径。", "替换全局模板", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (!TryResolveGlobalShapeModelTargetFromParamRecipe(
+                    out string targetPath,
+                    out bool writeDeformable,
+                    out string slotLabel,
+                    out string paramRecipeName))
+                return;
+
+            try
+            {
+                if (writeDeformable && _modelKind != HalconFlowModelKind.Deformable)
+                {
+                    MessageBox.Show(
+                        $"参数配方「{paramRecipeName}」对应可变形全局模板(.dfm)，但当前模型不是可变形类型。\n请先按该配方创建/导入可变形模型。",
+                        "替换全局模板",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    return;
+                }
+
+                if (!writeDeformable && _modelKind == HalconFlowModelKind.Deformable)
+                {
+                    MessageBox.Show(
+                        $"参数配方「{paramRecipeName}」对应形状全局模板(.shm)，但当前是可变形模型(.dfm)。\n请切换到「精匹配」配方，或先创建对应的形状/缩放模型。",
+                        "替换全局模板",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    return;
+                }
+
+                var confirm = MessageBox.Show(
+                    $"参数配方：{paramRecipeName}\n全局槽位：{slotLabel}\n\n覆盖文件：\n{targetPath}",
+                    "替换全局模板",
+                    MessageBoxButton.OKCancel,
+                    MessageBoxImage.Question);
+                if (confirm != MessageBoxResult.OK)
+                    return;
+
+                string? dir = IoPath.GetDirectoryName(targetPath);
+                if (!string.IsNullOrWhiteSpace(dir))
+                    Directory.CreateDirectory(dir);
+
+                if (writeDeformable)
+                    HalconFlowBridge.WriteDeformableModelToFile(_modelId, targetPath);
+                else
+                    HalconFlowBridge.WriteShapeModelToFile(_modelId, targetPath);
+
+                AppendLog($"已按参数配方「{paramRecipeName}」替换全局{slotLabel}模板: {targetPath}");
+                MessageBox.Show($"已写入全局{slotLabel}模板。", "替换全局模板", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"[错误] 替换全局模板失败: {ex.Message}");
+                MessageBox.Show(ex.Message, "替换全局模板", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+#endif
+        }
+
+        /// <summary>
+        /// 测试流程：按参数配方决定要替换的全局槽位相对路径（仅替换该槽，其它模型仍用全局文件）。
+        /// </summary>
+        private bool TryResolveTestFlowModelSlotFromParamRecipe(
+            out string slotLabel,
+            out string slotRelativePath,
+            out bool slotDeformable,
+            out string paramRecipeName)
+        {
+            slotLabel = "";
+            slotRelativePath = "";
+            slotDeformable = false;
+            paramRecipeName = "";
+
+            HalconShapeModelParamRecipe? recipe = SelectedParamRecipe;
+            string recipeId = recipe?.Id?.Trim()
+                ?? _lastParamRecipeId?.Trim()
+                ?? "";
+            paramRecipeName = recipe?.Name?.Trim()
+                ?? (string.IsNullOrWhiteSpace(recipeId) ? "(未选择)" : recipeId);
+
+            if (string.IsNullOrWhiteSpace(recipeId))
+            {
+                MessageBox.Show(
+                    "请先在左侧选择形状参数配方（外框 / 粗匹配 / 精匹配），以便测试时替换对应全局槽位。",
+                    "形状模板测试流程",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return false;
+            }
+
+            if (IsOutlineParamRecipe(recipeId, paramRecipeName))
+            {
+                slotLabel = "外框";
+                slotRelativePath = FlowRecipeCatalog.GlobalOutlineShapeModelRelativePath;
+                slotDeformable = false;
+                return true;
+            }
+
+            if (IsCoarseParamRecipe(recipeId, paramRecipeName))
+            {
+                slotLabel = "粗匹配";
+                slotRelativePath = FlowRecipeCatalog.GlobalCoarseShapeModelRelativePath;
+                slotDeformable = false;
+                return true;
+            }
+
+            if (IsFineParamRecipe(recipeId, paramRecipeName))
+            {
+                slotLabel = "精匹配";
+                if (_modelKind == HalconFlowModelKind.Deformable)
+                {
+                    slotRelativePath = FlowRecipeCatalog.GlobalFineDeformableModelRelativePath;
+                    slotDeformable = true;
+                }
+                else
+                {
+                    slotRelativePath = FlowRecipeCatalog.GlobalFineShapeModelRelativePath;
+                    slotDeformable = false;
+                }
+                return true;
+            }
+
+            MessageBox.Show(
+                $"当前参数配方「{paramRecipeName}」不是外框/粗匹配/精匹配槽位。\n请选择对应内置配方后再运行测试。",
+                "形状模板测试流程",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return false;
+        }
+
+        /// <summary>
+        /// 按左侧「参数配方」解析应覆盖的全局 models 路径：外框 / 粗匹配 / 精匹配。
+        /// </summary>
+        private bool TryResolveGlobalShapeModelTargetFromParamRecipe(
+            out string targetPath,
+            out bool writeDeformable,
+            out string slotLabel,
+            out string paramRecipeName)
+        {
+            targetPath = "";
+            writeDeformable = false;
+            slotLabel = "";
+            paramRecipeName = "";
+
+            HalconShapeModelParamRecipe? recipe = SelectedParamRecipe;
+            string recipeId = recipe?.Id?.Trim()
+                ?? _lastParamRecipeId?.Trim()
+                ?? "";
+            paramRecipeName = recipe?.Name?.Trim()
+                ?? (string.IsNullOrWhiteSpace(recipeId) ? "(未选择)" : recipeId);
+
+            if (string.IsNullOrWhiteSpace(recipeId))
+            {
+                MessageBox.Show(
+                    "请先在左侧选择形状参数配方（外框 / 粗匹配 / 精匹配）。",
+                    "替换全局模板",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return false;
+            }
+
+            string? path = null;
+            if (IsOutlineParamRecipe(recipeId, paramRecipeName))
+            {
+                slotLabel = "外框";
+                path = FlowRecipeCatalog.TryGetSelectedGlobalOutlineShapeModelPath();
+                writeDeformable = false;
+            }
+            else if (IsCoarseParamRecipe(recipeId, paramRecipeName))
+            {
+                slotLabel = "粗匹配";
+                path = FlowRecipeCatalog.TryGetSelectedGlobalCoarseShapeModelPath();
+                writeDeformable = false;
+            }
+            else if (IsFineParamRecipe(recipeId, paramRecipeName))
+            {
+                slotLabel = "精匹配";
+                if (_modelKind == HalconFlowModelKind.Deformable)
+                {
+                    path = FlowRecipeCatalog.TryGetSelectedGlobalFineDeformableModelPath();
+                    writeDeformable = true;
+                }
+                else
+                {
+                    path = FlowRecipeCatalog.TryGetSelectedGlobalFineShapeModelPath();
+                    writeDeformable = false;
+                }
+            }
+            else
+            {
+                MessageBox.Show(
+                    $"当前参数配方「{paramRecipeName}」不是外框/粗匹配/精匹配槽位。\n请选择内置「外框模型」「粗匹配模型」或「精匹配模型」后再替换。",
+                    "替换全局模板",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                MessageBox.Show($"无法解析全局{slotLabel}模板路径。", "替换全局模板", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return false;
+            }
+
+            targetPath = path;
+            return true;
+        }
+
+        private static bool IsOutlineParamRecipe(string recipeId, string recipeName) =>
+            recipeId.Equals(FlowRecipeCatalog.BuiltinOutlineParamRecipeId, StringComparison.OrdinalIgnoreCase)
+            || recipeId.Contains("outline", StringComparison.OrdinalIgnoreCase)
+            || recipeName.Contains("外框", StringComparison.Ordinal);
+
+        private static bool IsCoarseParamRecipe(string recipeId, string recipeName) =>
+            recipeId.Equals(FlowRecipeCatalog.BuiltinCoarseParamRecipeId, StringComparison.OrdinalIgnoreCase)
+            || recipeId.Contains("coarse", StringComparison.OrdinalIgnoreCase)
+            || recipeName.Contains("粗匹配", StringComparison.Ordinal);
+
+        private static bool IsFineParamRecipe(string recipeId, string recipeName) =>
+            recipeId.Equals(FlowRecipeCatalog.BuiltinFineParamRecipeId, StringComparison.OrdinalIgnoreCase)
+            || recipeId.Contains("fine", StringComparison.OrdinalIgnoreCase)
+            || recipeName.Contains("精匹配", StringComparison.Ordinal);
 
         private async void BtnTestFind_Click(object sender, RoutedEventArgs e)
         {

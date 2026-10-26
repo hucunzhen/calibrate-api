@@ -1,4 +1,4 @@
-{
+﻿{
   "Nodes": [
     {
       "Id": "e2000001-0001-4001-8001-00000000001a",
@@ -144,7 +144,7 @@
       "X": 213,
       "Y": 129,
       "Params": {
-        "filePath": "models\\contour_scaled_Poly_n0_am180x360_ilp_mc10_s90-110.shm",
+        "filePath": "models\\shape_model_fine.shm",
         "enable": "true",
         "disable": "false"
       }

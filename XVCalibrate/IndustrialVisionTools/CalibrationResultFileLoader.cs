@@ -104,17 +104,39 @@ namespace CalibOperatorCLI_Example
 
         public static string? TryGuessDefaultPath()
         {
-            var candidates = new List<string>();
+            string? fromRecipe = FlowRecipeCatalog.TryGetSelectedNinePointCalibrationResultPath();
+            if (!string.IsNullOrEmpty(fromRecipe))
+                return fromRecipe;
 
-            string? recipeDir = FlowRecipeCatalog.TryGetSelectedRecipeDirectory();
-            if (!string.IsNullOrEmpty(recipeDir))
+            var candidates = new List<string>
             {
-                candidates.Add(Path.Combine(recipeDir, "models", "calibration_result.json"));
-                candidates.Add(Path.Combine(recipeDir, "calibration_result.json"));
+                Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "flows", "v6", "models", "calibration_nine_point.json")),
+                Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "flows", "v1", "models", "calibration_nine_point.json"))
+            };
+
+            foreach (string p in candidates)
+            {
+                if (File.Exists(p))
+                    return p;
             }
 
-            candidates.Add(Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "flows", "halcon", "calibration_result.json")));
-            candidates.Add(Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "flows", "v1", "models", "calibration_result.json")));
+            return null;
+        }
+
+        /// <summary>当前配方全局棋盘标定文件；找不到再回退到常见仓库路径。</summary>
+        public static string? TryGuessDefaultChessboardCalibrationPath()
+        {
+            string? fromRecipe = FlowRecipeCatalog.TryGetSelectedChessboardCalibrationResultPath();
+            if (!string.IsNullOrEmpty(fromRecipe))
+                return fromRecipe;
+
+            var candidates = new List<string>
+            {
+                Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "flows", "v6", "models", "calibration_result.json")),
+                Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "flows", "v1", "models", "calibration_result.json")),
+                Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "flows", "v6", "chessboard", "calibration_result.json")),
+                Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "test_images", "chessboard_calibration_from_dir.json"))
+            };
 
             foreach (string p in candidates)
             {

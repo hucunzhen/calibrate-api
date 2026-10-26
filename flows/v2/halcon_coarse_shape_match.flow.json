@@ -55,7 +55,7 @@
       "X": 0,
       "Y": 290.3296,
       "Params": {
-        "filePath": "models\\shape_model_fixed.shm",
+        "filePath": "models\\shape_model_coarse.shm",
         "enable": "true",
         "disable": "false"
       }
@@ -208,7 +208,7 @@
       "X": 0,
       "Y": 449.3296,
       "Params": {
-        "filePath": "models\\shape_mode_outlinel.shm",
+        "filePath": "models\\shape_model_outline.shm",
         "enable": "true",
         "disable": "false"
       }
@@ -219,14 +219,14 @@
       "X": 233,
       "Y": 317.3296,
       "Params": {
-        "angleStart": "-3",
+        "angleStart": "-180",
         "angleExtent": "360",
-        "minScore": "0.1",
+        "minScore": "0.25",
         "numMatches": "0",
         "maxOverlap": "0.5",
         "subPixel": "none",
         "numLevels": "0",
-        "greediness": "0.01",
+        "greediness": "0.75",
         "allowRetry": "false",
         "coarseScaleMin": "1",
         "coarseScaleMax": "1",

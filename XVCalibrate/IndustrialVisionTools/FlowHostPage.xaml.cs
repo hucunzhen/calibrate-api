@@ -70,6 +70,7 @@ namespace CalibOperatorCLI_Example
                 }
 
                 int loaded = 0;
+                var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (string? raw in paths)
                 {
                     if (string.IsNullOrWhiteSpace(raw))
@@ -81,6 +82,8 @@ namespace CalibOperatorCLI_Example
 
                     string full = Path.GetFullPath(raw.Trim());
                     if (!File.Exists(full))
+                        continue;
+                    if (!seenPaths.Add(full))
                         continue;
 
                     var ti = AddEmptyTab(switchToSelected: false);
@@ -360,14 +363,7 @@ namespace CalibOperatorCLI_Example
 
         private void LoadFlowPathInActiveTab(string flowPath, bool showErrors)
         {
-            var fp = ActiveFlowOrFirst();
-            if (fp == null)
-            {
-                OpenFlowInNewTab(flowPath);
-                return;
-            }
-
-            fp.LoadFlowFromFile(flowPath, showErrorDialog: showErrors);
+            ActivateOrOpenFlow(flowPath, reload: true, showErrorDialog: showErrors);
         }
 
         private void CmbRecipe_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -604,12 +600,66 @@ namespace CalibOperatorCLI_Example
             return new FlowTabsSessionSnapshot(tabs, activeIndex);
         }
 
-        /// <summary>打开或切换到新标签并加载指定文件。</summary>
-        public void OpenFlowInNewTab(string filePath)
+        /// <summary>若已有标签打开同一路径则切换过去；否则新建标签加载。</summary>
+        public void OpenFlowInNewTab(string filePath) =>
+            ActivateOrOpenFlow(filePath, reload: true, showErrorDialog: true);
+
+        /// <summary>
+        /// 同一 .flow.json 只保留一个标签：已打开则选中（可选重新加载），否则新建。
+        /// </summary>
+        public FlowPage? ActivateOrOpenFlow(string filePath, bool reload = true, bool showErrorDialog = true)
         {
+            if (string.IsNullOrWhiteSpace(filePath))
+                return ActiveFlowOrFirst();
+
+            string full = Path.GetFullPath(filePath.Trim());
+            if (TryFindTabByFlowPath(full, out var existingTab) && existingTab.Content is FlowPage existingFp)
+            {
+                FlowTabs.SelectedItem = existingTab;
+                if (reload && !existingFp.LoadFlowFromFile(full, showErrorDialog: showErrorDialog))
+                    return null;
+                return existingFp;
+            }
+
+            // 当前标签为空文档时，直接在此加载，避免多出一个空白标签再开新页
+            var active = ActiveFlowOrFirst();
+            if (active != null && active.IsPristineEmptyDocument)
+            {
+                if (!active.LoadFlowFromFile(full, showErrorDialog: showErrorDialog))
+                    return null;
+                if (FlowTabs.SelectedItem is TabItem activeTi)
+                    SetTabHeader(activeTi, active.CurrentFlowFilePath);
+                return active;
+            }
+
             var ti = AddEmptyTab(switchToSelected: true);
-            if (ti.Content is FlowPage fp)
-                fp.LoadFlowFromFile(filePath, showErrorDialog: true);
+            if (ti.Content is not FlowPage fp)
+                return null;
+            if (!fp.LoadFlowFromFile(full, showErrorDialog: showErrorDialog))
+                return null;
+            return fp;
+        }
+
+        private bool TryFindTabByFlowPath(string fullPath, out TabItem tab)
+        {
+            tab = null!;
+            if (string.IsNullOrWhiteSpace(fullPath))
+                return false;
+
+            string want = Path.GetFullPath(fullPath.Trim());
+            foreach (TabItem ti in FlowTabs.Items)
+            {
+                if (ti.Content is not FlowPage fp || string.IsNullOrWhiteSpace(fp.CurrentFlowFilePath))
+                    continue;
+                string have = Path.GetFullPath(fp.CurrentFlowFilePath.Trim());
+                if (string.Equals(have, want, StringComparison.OrdinalIgnoreCase))
+                {
+                    tab = ti;
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private TabItem AddEmptyTab(bool switchToSelected)

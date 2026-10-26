@@ -60,6 +60,8 @@ namespace CalibOperatorCLI_Example
 
             mm.OpenTrajectoryNames = px.OpenTrajectoryNames?.ToList() ?? new List<string>();
             mm.OpenTrajectoryConnectors = ConvertConnectorsPixelToMillimeter(px.OpenTrajectoryConnectors, t);
+            mm.OpenTrajectoryUndo = ConvertHistoryListPixelToMillimeter(px.OpenTrajectoryUndo, t);
+            mm.OpenTrajectoryRedo = ConvertHistoryListPixelToMillimeter(px.OpenTrajectoryRedo, t);
             return mm;
         }
 
@@ -109,6 +111,8 @@ namespace CalibOperatorCLI_Example
 
             px.OpenTrajectoryNames = mm.OpenTrajectoryNames?.ToList() ?? new List<string>();
             px.OpenTrajectoryConnectors = ConvertConnectorsMillimeterToPixel(mm.OpenTrajectoryConnectors, t);
+            px.OpenTrajectoryUndo = ConvertHistoryListMillimeterToPixel(mm.OpenTrajectoryUndo, t);
+            px.OpenTrajectoryRedo = ConvertHistoryListMillimeterToPixel(mm.OpenTrajectoryRedo, t);
             return px;
         }
 
@@ -241,6 +245,120 @@ namespace CalibOperatorCLI_Example
             }
 
             return list;
+        }
+
+        private static List<OpenTrajHistoryItemDto> ConvertHistoryListPixelToMillimeter(
+            List<OpenTrajHistoryItemDto>? src,
+            in AffineTransform t)
+        {
+            var list = new List<OpenTrajHistoryItemDto>();
+            if (src == null)
+                return list;
+            foreach (OpenTrajHistoryItemDto? item in src)
+            {
+                if (item == null)
+                    continue;
+                list.Add(ConvertHistoryItemPixelToMillimeter(item, t));
+            }
+
+            return list;
+        }
+
+        private static List<OpenTrajHistoryItemDto> ConvertHistoryListMillimeterToPixel(
+            List<OpenTrajHistoryItemDto>? src,
+            in AffineTransform t)
+        {
+            var list = new List<OpenTrajHistoryItemDto>();
+            if (src == null)
+                return list;
+            foreach (OpenTrajHistoryItemDto? item in src)
+            {
+                if (item == null)
+                    continue;
+                list.Add(ConvertHistoryItemMillimeterToPixel(item, t));
+            }
+
+            return list;
+        }
+
+        private static OpenTrajHistoryItemDto ConvertHistoryItemPixelToMillimeter(
+            OpenTrajHistoryItemDto src,
+            in AffineTransform t)
+        {
+            OpenTrajHistoryItemDto dst = RoiSnapshotFileIo.CloneHistoryItem(src);
+            Point2D v = HalconGeometryContourBuilder.ImagePixelToWorldMm(src.VertexX, src.VertexY, t);
+            dst.VertexX = v.X;
+            dst.VertexY = v.Y;
+            if (src.ArcViaX is double avx && src.ArcViaY is double avy)
+            {
+                Point2D via = HalconGeometryContourBuilder.ImagePixelToWorldMm(avx, avy, t);
+                dst.ArcViaX = via.X;
+                dst.ArcViaY = via.Y;
+            }
+
+            if (src.Connector != null)
+            {
+                var connList = ConvertConnectorsPixelToMillimeter(
+                    new List<HalconShapeModelRoiConnectorDto> { src.Connector }, t);
+                dst.Connector = connList.Count > 0 ? connList[0] : null;
+            }
+
+            dst.AutoFinishedPath = ConvertPathPixelToMillimeter(src.AutoFinishedPath, t);
+            dst.AutoFinishedPreviousPath = ConvertPathPixelToMillimeter(src.AutoFinishedPreviousPath, t);
+            dst.FinishedPath = ConvertPathPixelToMillimeter(src.FinishedPath, t);
+            dst.FinishPreviousPath = ConvertPathPixelToMillimeter(src.FinishPreviousPath, t);
+
+            if (src.ClearedSingletonX is double sx && src.ClearedSingletonY is double sy)
+            {
+                Point2D s = HalconGeometryContourBuilder.ImagePixelToWorldMm(sx, sy, t);
+                dst.ClearedSingletonX = s.X;
+                dst.ClearedSingletonY = s.Y;
+            }
+
+            Point2D resume = HalconGeometryContourBuilder.ImagePixelToWorldMm(src.ResumeVertexX, src.ResumeVertexY, t);
+            dst.ResumeVertexX = resume.X;
+            dst.ResumeVertexY = resume.Y;
+            return dst;
+        }
+
+        private static OpenTrajHistoryItemDto ConvertHistoryItemMillimeterToPixel(
+            OpenTrajHistoryItemDto src,
+            in AffineTransform t)
+        {
+            OpenTrajHistoryItemDto dst = RoiSnapshotFileIo.CloneHistoryItem(src);
+            Point2D v = HalconGeometryContourBuilder.WorldMmToImagePixel(src.VertexX, src.VertexY, t);
+            dst.VertexX = v.X;
+            dst.VertexY = v.Y;
+            if (src.ArcViaX is double avx && src.ArcViaY is double avy)
+            {
+                Point2D via = HalconGeometryContourBuilder.WorldMmToImagePixel(avx, avy, t);
+                dst.ArcViaX = via.X;
+                dst.ArcViaY = via.Y;
+            }
+
+            if (src.Connector != null)
+            {
+                var connList = ConvertConnectorsMillimeterToPixel(
+                    new List<HalconShapeModelRoiConnectorDto> { src.Connector }, t);
+                dst.Connector = connList.Count > 0 ? connList[0] : null;
+            }
+
+            dst.AutoFinishedPath = ConvertPathMillimeterToPixel(src.AutoFinishedPath, t);
+            dst.AutoFinishedPreviousPath = ConvertPathMillimeterToPixel(src.AutoFinishedPreviousPath, t);
+            dst.FinishedPath = ConvertPathMillimeterToPixel(src.FinishedPath, t);
+            dst.FinishPreviousPath = ConvertPathMillimeterToPixel(src.FinishPreviousPath, t);
+
+            if (src.ClearedSingletonX is double sx && src.ClearedSingletonY is double sy)
+            {
+                Point2D s = HalconGeometryContourBuilder.WorldMmToImagePixel(sx, sy, t);
+                dst.ClearedSingletonX = s.X;
+                dst.ClearedSingletonY = s.Y;
+            }
+
+            Point2D resume = HalconGeometryContourBuilder.WorldMmToImagePixel(src.ResumeVertexX, src.ResumeVertexY, t);
+            dst.ResumeVertexX = resume.X;
+            dst.ResumeVertexY = resume.Y;
+            return dst;
         }
     }
 }

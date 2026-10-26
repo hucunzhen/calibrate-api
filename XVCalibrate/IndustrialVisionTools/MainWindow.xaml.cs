@@ -427,7 +427,15 @@ namespace CalibOperatorCLI_Example
             HighlightTab("Plc");
         }
 
-        public async Task<bool> RunFlowConfigInBackgroundAsync(string flowFilePath, bool preferNativeEngine = false)
+        public async Task<bool> RunFlowConfigInBackgroundAsync(
+            string flowFilePath,
+            bool preferNativeEngine = false,
+            string? shapeModelFilePathOverride = null,
+            string? deformableModelFilePathOverride = null,
+            string? shapeModelFilePathOverrideMatch = null,
+            string? deformableModelFilePathOverrideMatch = null,
+            string? entryImagePath = null,
+            bool passThroughCameraCorrection = false)
         {
             if (string.IsNullOrWhiteSpace(flowFilePath))
                 throw new ArgumentException("Flow 文件路径为空", nameof(flowFilePath));
@@ -437,13 +445,24 @@ namespace CalibOperatorCLI_Example
             NavigateTo(_flowHostPage);
             HighlightTab("Flow");
 
-            var fp = _flowHostPage.ActiveFlowOrFirst();
+            var fp = _flowHostPage.ActivateOrOpenFlow(flowFilePath, reload: true, showErrorDialog: false);
             if (fp == null)
                 return false;
-            bool loaded = fp.LoadFlowFromFile(flowFilePath, showErrorDialog: false);
-            if (!loaded) return false;
 
             SaveFlowSession();
+            fp.HalconShapeModelFilePathOverride = shapeModelFilePathOverride;
+            fp.HalconShapeModelFilePathOverrideMatch = shapeModelFilePathOverrideMatch;
+            fp.HalconDeformableModelFilePathOverride = deformableModelFilePathOverride;
+            fp.HalconDeformableModelFilePathOverrideMatch = deformableModelFilePathOverrideMatch;
+            if (!string.IsNullOrWhiteSpace(entryImagePath))
+                fp.PrepareShapeTemplateTestEntryImage(entryImagePath, passThroughCameraCorrection);
+            else
+                fp.PassThroughCameraCorrectionOperators = false;
+            // Native C++ 引擎不识别托管覆盖路径；有工作模板时必须走托管执行。
+            if (!string.IsNullOrWhiteSpace(shapeModelFilePathOverride)
+                || !string.IsNullOrWhiteSpace(deformableModelFilePathOverride)
+                || passThroughCameraCorrection)
+                preferNativeEngine = false;
             fp.MirrorErrorsToStderr = true;
             fp.TraceEnginePathToConsole = true;
             HalconShapeMatchGridDiagnostics.EnableForFlowFile(flowFilePath, mirrorConsole: true);
@@ -454,6 +473,11 @@ namespace CalibOperatorCLI_Example
             }
             finally
             {
+                fp.HalconShapeModelFilePathOverride = null;
+                fp.HalconShapeModelFilePathOverrideMatch = null;
+                fp.HalconDeformableModelFilePathOverride = null;
+                fp.HalconDeformableModelFilePathOverrideMatch = null;
+                fp.PassThroughCameraCorrectionOperators = false;
                 fp.MirrorErrorsToStderr = false;
                 fp.TraceEnginePathToConsole = false;
                 HalconShapeMatchGridDiagnostics.Disable();

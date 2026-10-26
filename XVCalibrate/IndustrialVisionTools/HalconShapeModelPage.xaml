@@ -69,7 +69,7 @@
                             <RadioButton x:Name="RbPolygonMode" Content="多边形" GroupName="DrawMode"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
-                                         ToolTip="单击加点，路径可选直线或圆弧。回到起点容差内自动闭合。用于不规则外形、手绘边线模板。开放轨迹请改用「开放轨迹」。"/>
+                                         ToolTip="单击加点，路径可选直线或圆弧。回到起点容差内自动闭合。闭合后点击边线可选中并弹窗编辑该段；绘制中按住 Ctrl 点选已有边。用于不规则外形、手绘边线模板。开放轨迹请改用「开放轨迹」。"/>
                             <RadioButton x:Name="RbRingMode" Content="环形" GroupName="DrawMode"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
@@ -107,8 +107,10 @@
                                       ToolTip="圆弧与上一段直线/弧相切。保证圆角光滑。相切有左右两解，不对就点「换向」或按 F。"/>
                             <Button x:Name="BtnTangentFlipSide" Content="换向" MinWidth="48" Height="32" Padding="8,4" Margin="0,0,6,0"
                                     Visibility="Collapsed" Click="BtnTangentFlipSide_Click" ToolTip="相切弧左右解 (F)"/>
-                            <Button x:Name="BtnUndoPoint" Content="撤销点" MinWidth="60" Height="32" Padding="8,4" Margin="0,0,6,0"
-                                    Click="BtnUndoPoint_Click" ToolTip="撤销顶点 (Ctrl+Z)"/>
+                            <Button x:Name="BtnUndoPoint" Content="撤销" MinWidth="52" Height="32" Padding="8,4" Margin="0,0,6,0"
+                                    Click="BtnUndoPoint_Click" ToolTip="按时间顺序撤销上一步（普通段与连接线同级）(Ctrl+Z)"/>
+                            <Button x:Name="BtnRedoPoint" Content="重做" MinWidth="52" Height="32" Padding="8,4" Margin="0,0,6,0"
+                                    Click="BtnRedoPoint_Click" ToolTip="重做 (Ctrl+Y / Ctrl+Shift+Z)"/>
                             <Button x:Name="BtnClosePolygon" Content="闭合说明" MinWidth="72" Height="32" Padding="8,4"
                                     Visibility="Collapsed"
                                     Click="BtnClosePolygon_Click" ToolTip="段终点落在起点容差内自动闭合"/>
@@ -136,6 +138,8 @@
                                  Fill="#2000FF00" Visibility="Collapsed" Canvas.Left="0" Canvas.Top="0"/>
                         <Polyline x:Name="PolygonLine" Stroke="#FFFF00" StrokeThickness="2"
                                   Visibility="Collapsed" Points=""/>
+                        <Polyline x:Name="SelectedRoiSegmentLine" Stroke="#00E5FF" StrokeThickness="3.5"
+                                  Visibility="Collapsed" IsHitTestVisible="False" Points=""/>
                         <Polyline x:Name="PolygonRubberAltLine" Stroke="#66FFAA00" StrokeThickness="1.2"
                                   StrokeDashArray="4 3" Visibility="Collapsed" IsHitTestVisible="False"/>
                         <Polyline x:Name="PolygonRubberLine" Stroke="#FFAA00" StrokeThickness="1.5"
@@ -277,6 +281,12 @@
                                                 IsEnabled="False" Visibility="Collapsed" Click="BtnStopFind_Click"
                                                 ToolTip="停止当前匹配（HALCON 须结束本轮搜索后 UI 恢复；自动重试会在两轮之间停止）"/>
                                     </Grid>
+                                    <Button x:Name="BtnRunShapeTemplateTestFlow" Content="运行模板测试流程" Height="28"
+                                            Margin="0,0,0,8" Click="BtnRunShapeTemplateTestFlow_Click"
+                                            ToolTip="加载 shape_template_test.flow.json。优先用本页当前图（跳过流程再矫正，避免外框尺度变小）；已创建模型按参数配方替换对应槽位。"/>
+                                    <Button x:Name="BtnReplaceGlobalShapeModel" Content="替换全局模板" Height="28"
+                                            Margin="0,0,0,8" Click="BtnReplaceGlobalShapeModel_Click"
+                                            ToolTip="按左侧「参数配方」写入对应全局模板：外框→shape_model_outline.shm；粗匹配→shape_model_coarse.shm；精匹配→shape_model_fine.shm/.dfm"/>
                                     <Button x:Name="BtnExportModel" Content="导出模型(.shm)" Height="28"
                                             Margin="0,0,0,0" Click="BtnExportModel_Click"
                                             ToolTip="默认文件名含创建参数（xv_shape_ThXld_n4_a-30x60_ilp_mc10…），便于按名选择模型"/>
@@ -366,8 +376,9 @@
                                         <ColumnDefinition Width="28"/>
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="标定文件" VerticalAlignment="Center"
-                                               ToolTip="棋盘格标定文件（CalibrationJson）"/>
-                                    <TextBox x:Name="TxtCalibrationJsonPath" Grid.Column="1" Height="24" VerticalContentAlignment="Center"/>
+                                               ToolTip="棋盘格标定文件（CalibrationJson）。默认取当前配方 models/calibration_result.json"/>
+                                    <TextBox x:Name="TxtCalibrationJsonPath" Grid.Column="1" Height="24" VerticalContentAlignment="Center"
+                                             ToolTip="默认使用当前配方 models/calibration_result.json；可手动改路径"/>
                                     <Button Grid.Column="2" Content="..." Height="24" Margin="4,0,0,0" Click="BtnBrowseCalibrationJson_Click"/>
                                 </Grid>
                                 <CheckBox x:Name="ChkEnableUndistort" Content="内参畸变矫正" Foreground="#CCC" Margin="0,4,0,2"
@@ -446,9 +457,10 @@
                                 <ColumnDefinition Width="28"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Text="九点标定文件" VerticalAlignment="Center"
-                                       ToolTip="calibration_result.json（含 affine）"/>
+                                       ToolTip="含 affine 的九点标定结果。默认取当前配方 models/calibration_nine_point.json"/>
                             <TextBox x:Name="TxtNinePointCalibPath" Grid.Column="1" Height="24" VerticalContentAlignment="Center"
-                                     TextChanged="NinePointCalibPath_Changed" LostFocus="NinePointCalibPath_Changed"/>
+                                     TextChanged="NinePointCalibPath_Changed" LostFocus="NinePointCalibPath_Changed"
+                                     ToolTip="默认使用当前配方 models/calibration_nine_point.json；可手动改路径"/>
                             <Button Grid.Column="2" Content="..." Height="24" Margin="4,0,0,0" Click="BtnBrowseNinePointCalib_Click"/>
                         </Grid>
                     </StackPanel>
@@ -538,7 +550,7 @@
                         <Border x:Name="PnlRoiArcEdit" Visibility="Collapsed" Background="#1A2528" BorderBrush="#37474F"
                                 BorderThickness="1" Padding="8" Margin="0,8,0,0" CornerRadius="2">
                             <StackPanel>
-                                <TextBlock Text="圆弧弧度（闭合后可调）" FontSize="11" Foreground="#90A4AE" Margin="0,0,0,4"/>
+                                <TextBlock Text="圆弧弧度（闭合后可调；亦可在画布点击边线弹窗编辑）" FontSize="11" Foreground="#90A4AE" Margin="0,0,0,4"/>
                                 <ComboBox x:Name="CmbRoiArcSegment" Height="24" Margin="0,0,0,4"
                                           SelectionChanged="RoiArcSegment_SelectionChanged"/>
                                 <Grid Margin="0,0,0,6">

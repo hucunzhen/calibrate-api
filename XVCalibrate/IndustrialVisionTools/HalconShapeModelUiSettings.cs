@@ -23,6 +23,36 @@ namespace CalibOperatorCLI_Example
         public bool IsClosed { get; set; }
     }
 
+    /// <summary>开放轨迹撤销/重做一步（随会话与 ROI 文件持久化）。</summary>
+    internal sealed class OpenTrajHistoryItemDto
+    {
+        /// <summary>PathVertex | Connector | FinishEntry</summary>
+        public string Kind { get; set; } = "";
+
+        public bool IsFirstVertex { get; set; }
+        public double VertexX { get; set; }
+        public double VertexY { get; set; }
+        public string EdgeKind { get; set; } = "Line";
+        public double? ArcViaX { get; set; }
+        public double? ArcViaY { get; set; }
+
+        public HalconShapeModelRoiConnectorDto? Connector { get; set; }
+        public string? AutoFinishedName { get; set; }
+        public HalconShapeModelRoiPathDto? AutoFinishedPath { get; set; }
+        public int? AutoFinishedReplacedEditIndex { get; set; }
+        public HalconShapeModelRoiPathDto? AutoFinishedPreviousPath { get; set; }
+        public double? ClearedSingletonX { get; set; }
+        public double? ClearedSingletonY { get; set; }
+        public bool AddedResumeVertex { get; set; }
+        public double ResumeVertexX { get; set; }
+        public double ResumeVertexY { get; set; }
+
+        public string? FinishedName { get; set; }
+        public HalconShapeModelRoiPathDto? FinishedPath { get; set; }
+        public int? FinishReplacedEditIndex { get; set; }
+        public HalconShapeModelRoiPathDto? FinishPreviousPath { get; set; }
+    }
+
     internal sealed class HalconShapeModelUiSettings
     {
         public string ImagePath { get; set; } = "";
@@ -69,6 +99,12 @@ namespace CalibOperatorCLI_Example
 
         /// <summary>开放轨迹之间的连接线（不参与模板）。</summary>
         public List<HalconShapeModelRoiConnectorDto> OpenTrajectoryConnectors { get; set; } = new();
+
+        /// <summary>开放轨迹撤销栈（时间序，末尾为最近一步）。</summary>
+        public List<OpenTrajHistoryItemDto> OpenTrajectoryUndo { get; set; } = new();
+
+        /// <summary>开放轨迹重做栈。</summary>
+        public List<OpenTrajHistoryItemDto> OpenTrajectoryRedo { get; set; } = new();
 
         /// <summary>相机矫正：内参去畸变。</summary>
         public bool EnableUndistort { get; set; }

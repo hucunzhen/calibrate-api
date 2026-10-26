@@ -30,6 +30,31 @@ namespace CalibOperatorCLI_Example
 
         public const string AffineAdjustFlowFileName = "adjustAffineCalibration.flow.json";
 
+        /// <summary>形状模板页测试用：无 PLC / 无外层循环 / 文件读图。</summary>
+        public const string ShapeTemplateTestFlowFileName = "shape_template_test.flow.json";
+
+        /// <summary>配方全局粗匹配形状模板（相对配方目录）。</summary>
+        public const string GlobalCoarseShapeModelRelativePath = @"models\shape_model_coarse.shm";
+
+        /// <summary>配方全局外轮廓粗匹配模板（相对配方目录）。</summary>
+        public const string GlobalOutlineShapeModelRelativePath = @"models\shape_model_outline.shm";
+
+        /// <summary>配方全局精匹配缩放形状模板（相对配方目录）。</summary>
+        public const string GlobalFineShapeModelRelativePath = @"models\shape_model_fine.shm";
+
+        /// <summary>配方全局精匹配可变形模板（相对配方目录；对应参数配方 builtin:fine）。</summary>
+        public const string GlobalFineDeformableModelRelativePath = @"models\shape_model_fine.dfm";
+
+        /// <summary>形状模板页测试优先写入的工作模板（相对配方目录）。</summary>
+        public const string WorkingShapeModelRelativePath = @"models\shape_model_working.shm";
+
+        /// <summary>形状模板页测试优先写入的可变形工作模板（相对配方目录）。</summary>
+        public const string WorkingDeformableModelRelativePath = @"models\shape_model_working.dfm";
+
+        public const string BuiltinOutlineParamRecipeId = "builtin:outline";
+        public const string BuiltinCoarseParamRecipeId = "builtin:coarse";
+        public const string BuiltinFineParamRecipeId = "builtin:fine";
+
         public static string? TryFindFlowsRootDirectory()
         {
             string? configured = TryGetConfiguredFlowsRootDirectory();
@@ -186,6 +211,39 @@ namespace CalibOperatorCLI_Example
             return TryGetNinePointCalibFlowPath(settings.SelectedRecipe);
         }
 
+        /// <summary>当前配方全局棋盘标定结果：<c>models/calibration_result.json</c>。</summary>
+        public static string? TryGetSelectedChessboardCalibrationResultPath()
+        {
+            string? dir = TryGetSelectedRecipeDirectory();
+            if (dir == null)
+                return null;
+
+            foreach (string relative in new[]
+                     {
+                         Path.Combine("models", "calibration_result.json"),
+                         Path.Combine("chessboard", "calibration_result.json"),
+                         Path.Combine("chessboard", "calibration_full.json")
+                     })
+            {
+                string path = Path.Combine(dir, relative);
+                if (File.Exists(path))
+                    return Path.GetFullPath(path);
+            }
+
+            return null;
+        }
+
+        /// <summary>当前配方全局九点标定结果：<c>models/calibration_nine_point.json</c>。</summary>
+        public static string? TryGetSelectedNinePointCalibrationResultPath()
+        {
+            string? dir = TryGetSelectedRecipeDirectory();
+            if (dir == null)
+                return null;
+
+            string path = Path.Combine(dir, "models", "calibration_nine_point.json");
+            return File.Exists(path) ? Path.GetFullPath(path) : null;
+        }
+
         public static string? TryGetWeldFlowPath(string recipeName)
         {
             string? dir = TryGetRecipeDirectory(recipeName);
@@ -235,6 +293,102 @@ namespace CalibOperatorCLI_Example
 
             string path = Path.Combine(recipeDirectory, AffineAdjustFlowFileName);
             return File.Exists(path) ? Path.GetFullPath(path) : null;
+        }
+
+        public static string? TryGetShapeTemplateTestFlowPath(string recipeName)
+        {
+            string? dir = TryGetRecipeDirectory(recipeName);
+            return dir == null ? null : TryResolveShapeTemplateTestFlowPath(dir);
+        }
+
+        public static string? TryResolveShapeTemplateTestFlowPath(string recipeDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(recipeDirectory) || !Directory.Exists(recipeDirectory))
+                return null;
+
+            string path = Path.Combine(recipeDirectory, ShapeTemplateTestFlowFileName);
+            return File.Exists(path) ? Path.GetFullPath(path) : null;
+        }
+
+        public static string? TryGetSelectedShapeTemplateTestFlowPath()
+        {
+            var settings = FlowRecipeUiSettings.Load();
+            return TryGetShapeTemplateTestFlowPath(settings.SelectedRecipe);
+        }
+
+        public static string? TryGetSelectedModelsDirectory()
+        {
+            string? dir = TryGetSelectedRecipeDirectory();
+            if (dir == null)
+                return null;
+
+            string models = Path.Combine(dir, "models");
+            Directory.CreateDirectory(models);
+            return Path.GetFullPath(models);
+        }
+
+        public static string? TryGetSelectedGlobalCoarseShapeModelPath() =>
+            TryResolveUnderSelectedRecipe(GlobalCoarseShapeModelRelativePath);
+
+        public static string? TryGetSelectedGlobalOutlineShapeModelPath() =>
+            TryResolveUnderSelectedRecipe(GlobalOutlineShapeModelRelativePath);
+
+        public static string? TryGetSelectedGlobalFineShapeModelPath() =>
+            TryResolveUnderSelectedRecipe(GlobalFineShapeModelRelativePath);
+
+        public static string? TryGetSelectedGlobalFineDeformableModelPath() =>
+            TryResolveUnderSelectedRecipe(GlobalFineDeformableModelRelativePath);
+
+        public static string? TryGetSelectedWorkingShapeModelPath() =>
+            TryResolveUnderSelectedRecipe(WorkingShapeModelRelativePath);
+
+        public static string? TryGetSelectedWorkingDeformableModelPath() =>
+            TryResolveUnderSelectedRecipe(WorkingDeformableModelRelativePath);
+
+        private static string? TryResolveUnderSelectedRecipe(string relativePath)
+        {
+            string? dir = TryGetSelectedRecipeDirectory();
+            if (dir == null || string.IsNullOrWhiteSpace(relativePath))
+                return null;
+            return Path.GetFullPath(Path.Combine(dir, relativePath));
+        }
+
+        /// <summary>
+        /// 若全局约定 .shm 尚不存在，则从历史文件名复制一份，便于旧配方平滑切换。
+        /// </summary>
+        public static void EnsureGlobalShapeModelDefaults(string? recipeDirectory = null)
+        {
+            string? dir = recipeDirectory ?? TryGetSelectedRecipeDirectory();
+            if (dir == null || !Directory.Exists(dir))
+                return;
+
+            string models = Path.Combine(dir, "models");
+            Directory.CreateDirectory(models);
+
+            SeedModelIfMissing(
+                Path.Combine(models, "shape_model_coarse.shm"),
+                Path.Combine(models, "shape_model_fixed_manual.shm"),
+                Path.Combine(models, "shape_model_fixed.shm"));
+            SeedModelIfMissing(
+                Path.Combine(models, "shape_model_outline.shm"),
+                Path.Combine(models, "shape_mode_outlinel_manual.shm"),
+                Path.Combine(models, "shape_mode_outlinel.shm"));
+            SeedModelIfMissing(
+                Path.Combine(models, "shape_model_fine.shm"),
+                Path.Combine(models, "contour_scaled_Poly_n0_am180x360_ilp_mc10_s90-110.shm"));
+        }
+
+        private static void SeedModelIfMissing(string target, params string[] legacySources)
+        {
+            if (File.Exists(target))
+                return;
+            foreach (string src in legacySources)
+            {
+                if (!File.Exists(src))
+                    continue;
+                File.Copy(src, target, overwrite: false);
+                return;
+            }
         }
 
         public static string? TryGetSelectedRecipeDirectory()

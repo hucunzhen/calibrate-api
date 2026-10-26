@@ -346,5 +346,196 @@ namespace CalibOperatorCLI_Example
             double dy = a.Y - b.Y;
             return Math.Sqrt(dx * dx + dy * dy);
         }
+
+        /// <summary>闭合时边数=顶点数；开放时边数=顶点数-1。</summary>
+        public static int GetEdgeCount(RoiContourPath path)
+        {
+            if (path == null || path.VertexCount < 2)
+                return 0;
+            if (path.IsClosed && path.VertexCount >= 3)
+                return path.VertexCount;
+            return path.VertexCount - 1;
+        }
+
+        public static void GetEdgeEndpoints(RoiContourPath path, int edgeIndex, out Point start, out Point end)
+        {
+            int n = path.VertexCount;
+            if (n < 2 || edgeIndex < 0 || edgeIndex >= GetEdgeCount(path))
+            {
+                start = end = default;
+                return;
+            }
+
+            start = path.Vertices[edgeIndex];
+            end = path.IsClosed
+                ? path.Vertices[(edgeIndex + 1) % n]
+                : path.Vertices[edgeIndex + 1];
+        }
+
+        public static RoiEdgeKind GetEdgeKind(RoiContourPath path, int edgeIndex) =>
+            edgeIndex >= 0 && edgeIndex < path.EdgeKinds.Count
+                ? path.EdgeKinds[edgeIndex]
+                : RoiEdgeKind.Line;
+
+        /// <summary>
+        /// 命中距点击点最近的边；容差单位为图像像素。
+        /// 直线用点到线段距离；圆弧用采样折线距离。
+        /// </summary>
+        public static bool TryHitEdge(
+            RoiContourPath path,
+            Point imagePt,
+            double tolerancePx,
+            out int edgeIndex,
+            out double distancePx)
+        {
+            edgeIndex = -1;
+            distancePx = double.MaxValue;
+            int edges = GetEdgeCount(path);
+            if (edges <= 0 || tolerancePx <= 0)
+                return false;
+
+            for (int i = 0; i < edges; i++)
+            {
+                GetEdgeEndpoints(path, i, out Point start, out Point end);
+                RoiEdgeKind kind = GetEdgeKind(path, i);
+                double d;
+                if (kind == RoiEdgeKind.Arc
+                    && i < path.ArcVia.Count
+                    && path.ArcVia[i] is Point via
+                    && IsValidArcVia(start, via, end))
+                {
+                    d = DistanceToSampledArc(imagePt, start, via, end);
+                }
+                else
+                {
+                    d = DistanceToSegment(imagePt, start, end);
+                }
+
+                if (d < distancePx)
+                {
+                    distancePx = d;
+                    edgeIndex = i;
+                }
+            }
+
+            return edgeIndex >= 0 && distancePx <= tolerancePx;
+        }
+
+        /// <summary>固定起点，改写该边终点（开放/闭合均可用）；直线边会清掉弧上点。</summary>
+        public static bool TrySetLineEdgeEnd(RoiContourPath path, int edgeIndex, Point newEnd, out string error)
+        {
+            error = "";
+            int edges = GetEdgeCount(path);
+            if (edgeIndex < 0 || edgeIndex >= edges)
+            {
+                error = "段序号无效";
+                return false;
+            }
+
+            GetEdgeEndpoints(path, edgeIndex, out Point start, out _);
+            if (Dist(start, newEnd) < 0.5)
+            {
+                error = "终点与起点过近";
+                return false;
+            }
+
+            int n = path.VertexCount;
+            int endIdx = path.IsClosed ? (edgeIndex + 1) % n : edgeIndex + 1;
+            path.Vertices[endIdx] = newEnd;
+            EnsureEdgeLists(path, path.IsClosed ? n : Math.Max(n - 1, 0));
+            if (edgeIndex < path.EdgeKinds.Count)
+                path.EdgeKinds[edgeIndex] = RoiEdgeKind.Line;
+            if (edgeIndex < path.ArcVia.Count)
+                path.ArcVia[edgeIndex] = null;
+            return true;
+        }
+
+        /// <summary>改写圆弧边的弧上点（半径随之变化）。</summary>
+        public static bool TrySetArcEdgeVia(RoiContourPath path, int edgeIndex, Point via, out string error)
+        {
+            error = "";
+            int edges = GetEdgeCount(path);
+            if (edgeIndex < 0 || edgeIndex >= edges)
+            {
+                error = "段序号无效";
+                return false;
+            }
+
+            GetEdgeEndpoints(path, edgeIndex, out Point start, out Point end);
+            if (!IsValidArcVia(start, via, end))
+            {
+                error = "弧上点与两端共线，无法构成圆弧";
+                return false;
+            }
+
+            EnsureEdgeLists(path, path.IsClosed ? path.VertexCount : Math.Max(path.VertexCount - 1, 0));
+            path.EdgeKinds[edgeIndex] = RoiEdgeKind.Arc;
+            path.ArcVia[edgeIndex] = via;
+            return true;
+        }
+
+        /// <summary>采样该边折线点（含起终点），用于高亮绘制。</summary>
+        public static List<Point> SampleEdgePoints(RoiContourPath path, int edgeIndex, int arcSegments = 24)
+        {
+            var dest = new List<Point>();
+            int edges = GetEdgeCount(path);
+            if (edgeIndex < 0 || edgeIndex >= edges)
+                return dest;
+
+            GetEdgeEndpoints(path, edgeIndex, out Point start, out Point end);
+            RoiEdgeKind kind = GetEdgeKind(path, edgeIndex);
+            Point? via = null;
+            if (kind == RoiEdgeKind.Arc && edgeIndex < path.ArcVia.Count)
+                via = path.ArcVia[edgeIndex];
+            AppendSegmentPoints(dest, start, end, kind, via, arcSegments);
+            return dest;
+        }
+
+        private static void EnsureEdgeLists(RoiContourPath path, int edgeCount)
+        {
+            while (path.EdgeKinds.Count < edgeCount)
+            {
+                path.EdgeKinds.Add(RoiEdgeKind.Line);
+                path.ArcVia.Add(null);
+            }
+
+            while (path.ArcVia.Count < path.EdgeKinds.Count)
+                path.ArcVia.Add(null);
+        }
+
+        private static double DistanceToSegment(Point p, Point a, Point b)
+        {
+            double dx = b.X - a.X;
+            double dy = b.Y - a.Y;
+            double len2 = dx * dx + dy * dy;
+            if (len2 < 1e-12)
+                return Dist(p, a);
+
+            double t = ((p.X - a.X) * dx + (p.Y - a.Y) * dy) / len2;
+            t = Math.Clamp(t, 0, 1);
+            return Dist(p, new Point(a.X + t * dx, a.Y + t * dy));
+        }
+
+        private static double DistanceToSampledArc(Point p, Point start, Point via, Point end)
+        {
+            double best = Dist(p, start);
+            Point prev = start;
+            bool first = true;
+            foreach (Point s in SampleArc(start, via, end, 32))
+            {
+                if (first)
+                {
+                    first = false;
+                    prev = s;
+                    continue;
+                }
+
+                best = Math.Min(best, DistanceToSegment(p, prev, s));
+                prev = s;
+            }
+
+            best = Math.Min(best, Dist(p, end));
+            return best;
+        }
     }
 }

@@ -230,128 +230,85 @@ namespace CalibOperatorCLI_Example
 
 
 
+        /// <summary>全量刷新（初始化用）。编辑某一框时勿调用，否则会重写当前输入并把光标打回开头。</summary>
         private void PushPolarToUi()
-
         {
-
             _syncing = true;
-
             TxtLengthPx.Text = LengthPx.ToString("F2", CultureInfo.InvariantCulture);
-
             TxtLengthMm.Text = FormatLengthMm(LengthPx);
-
             TxtAngleDeg.Text = AngleDegrees.ToString("F2", CultureInfo.InvariantCulture);
-
             TxtEndColPx.Text = EndColumnPx.ToString("F2", CultureInfo.InvariantCulture);
-
             TxtEndRowPx.Text = EndRowPx.ToString("F2", CultureInfo.InvariantCulture);
-
             _syncing = false;
-
         }
 
-
-
         private void OnLengthPxChanged()
-
         {
-
             if (_syncing)
-
                 return;
-
             if (!TryParse(TxtLengthPx, out double px) || px < 0.5)
-
                 return;
 
             LengthPx = px;
-
             UpdateEndFromPolar();
-
             _syncing = true;
-
+            // 不重写 TxtLengthPx，避免输入时光标跳到开头
             TxtLengthMm.Text = FormatLengthMm(px);
-
             TxtEndColPx.Text = EndColumnPx.ToString("F2", CultureInfo.InvariantCulture);
-
             TxtEndRowPx.Text = EndRowPx.ToString("F2", CultureInfo.InvariantCulture);
-
             _syncing = false;
-
         }
 
-
-
         private void OnLengthMmChanged()
-
         {
-
             if (_syncing || _affine is not AffineTransform aff)
-
                 return;
-
             if (!TryParse(TxtLengthMm, out double mm) || mm <= 0)
-
                 return;
 
             LengthPx = Math.Max(0.5, RoiSegmentMeasure.MmLengthToPixels(mm, _anchorCol, _anchorRow, _dirX, _dirY, aff));
-
             UpdateEndFromPolar();
-
-            PushPolarToUi();
-
+            _syncing = true;
+            // 不重写 TxtLengthMm（换算往返 F3 会打断正在输入的 mm）
+            TxtLengthPx.Text = LengthPx.ToString("F2", CultureInfo.InvariantCulture);
+            TxtEndColPx.Text = EndColumnPx.ToString("F2", CultureInfo.InvariantCulture);
+            TxtEndRowPx.Text = EndRowPx.ToString("F2", CultureInfo.InvariantCulture);
+            _syncing = false;
         }
 
-
-
         private void OnAngleDegChanged()
-
         {
-
             if (_syncing)
-
                 return;
-
             if (!TryParse(TxtAngleDeg, out double deg))
-
                 return;
 
             SetDirectionFromAngleDegrees(deg);
-
             UpdateEndFromPolar();
-
             _syncing = true;
-
+            TxtLengthPx.Text = LengthPx.ToString("F2", CultureInfo.InvariantCulture);
+            TxtLengthMm.Text = FormatLengthMm(LengthPx);
             TxtEndColPx.Text = EndColumnPx.ToString("F2", CultureInfo.InvariantCulture);
-
             TxtEndRowPx.Text = EndRowPx.ToString("F2", CultureInfo.InvariantCulture);
-
             _syncing = false;
-
         }
 
-
-
         private void OnEndCoordinatesChanged()
-
         {
-
             if (_syncing)
-
                 return;
-
             if (!TryParse(TxtEndColPx, out double col) || !TryParse(TxtEndRowPx, out double row))
-
                 return;
 
             EndColumnPx = col;
-
             EndRowPx = row;
-
             UpdatePolarFromEnd();
-
-            PushPolarToUi();
-
+            _syncing = true;
+            // 不重写终点框，只同步段长/角度
+            TxtLengthPx.Text = LengthPx.ToString("F2", CultureInfo.InvariantCulture);
+            TxtLengthMm.Text = FormatLengthMm(LengthPx);
+            TxtAngleDeg.Text = AngleDegrees.ToString("F2", CultureInfo.InvariantCulture);
+            _syncing = false;
         }
 
 

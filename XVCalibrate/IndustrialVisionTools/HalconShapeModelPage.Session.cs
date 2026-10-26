@@ -37,25 +37,11 @@ namespace CalibOperatorCLI_Example
         {
             _suppressSessionPersist = true;
             UpdateCreatePanelsVisibility();
-            if (string.IsNullOrWhiteSpace(TxtCalibrationJsonPath.Text))
-            {
-                string guess = IoPath.GetFullPath(IoPath.Combine(
-                    AppDomain.CurrentDomain.BaseDirectory,
-                    "..", "..", "..", "test_images", "chessboard_calibration_from_dir.json"));
-                if (File.Exists(guess))
-                    TxtCalibrationJsonPath.Text = guess;
-            }
-
-#if HALCON_ENABLED
-            if (TxtNinePointCalibPath != null && string.IsNullOrWhiteSpace(TxtNinePointCalibPath.Text))
-            {
-                string? nineGuess = CalibrationResultFileLoader.TryGuessDefaultPath();
-                if (!string.IsNullOrWhiteSpace(nineGuess))
-                    TxtNinePointCalibPath.Text = nineGuess;
-            }
-#endif
+            ApplyGlobalCalibrationPathDefaultsIfEmpty();
 
             ApplySessionFromSettingsIfNeeded(forceReload: true);
+            // 会话未写路径时，仍回落到当前配方全局配置
+            ApplyGlobalCalibrationPathDefaultsIfEmpty();
 
             if (_imgWidth > 0)
                 FitImageToView();
@@ -94,6 +80,29 @@ namespace CalibOperatorCLI_Example
         {
             _sessionPersistTimer?.Stop();
             PersistSessionFromUi();
+        }
+
+        /// <summary>
+        /// 棋盘/九点标定文件为空时，使用当前配方 <c>models/</c> 下全局约定文件
+        /// （calibration_result.json、calibration_nine_point.json）。
+        /// </summary>
+        private void ApplyGlobalCalibrationPathDefaultsIfEmpty()
+        {
+            if (TxtCalibrationJsonPath != null && string.IsNullOrWhiteSpace(TxtCalibrationJsonPath.Text))
+            {
+                string? chess = CalibrationResultFileLoader.TryGuessDefaultChessboardCalibrationPath();
+                if (!string.IsNullOrWhiteSpace(chess))
+                    TxtCalibrationJsonPath.Text = chess;
+            }
+
+#if HALCON_ENABLED
+            if (TxtNinePointCalibPath != null && string.IsNullOrWhiteSpace(TxtNinePointCalibPath.Text))
+            {
+                string? nine = CalibrationResultFileLoader.TryGuessDefaultPath();
+                if (!string.IsNullOrWhiteSpace(nine))
+                    TxtNinePointCalibPath.Text = nine;
+            }
+#endif
         }
 
         private void AttachSessionPersistHandlers()
@@ -364,10 +373,11 @@ namespace CalibOperatorCLI_Example
             _suppressDrawModeClear = true;
             try
             {
-                if (!string.IsNullOrWhiteSpace(s.CalibrationJsonPath))
-                    TxtCalibrationJsonPath.Text = s.CalibrationJsonPath;
-                if (!string.IsNullOrWhiteSpace(s.NinePointCalibrationPath))
-                    TxtNinePointCalibPath.Text = s.NinePointCalibrationPath;
+                if (!string.IsNullOrWhiteSpace(s.CalibrationJsonPath) && File.Exists(s.CalibrationJsonPath.Trim()))
+                    TxtCalibrationJsonPath.Text = s.CalibrationJsonPath.Trim();
+                if (!string.IsNullOrWhiteSpace(s.NinePointCalibrationPath) && File.Exists(s.NinePointCalibrationPath.Trim()))
+                    TxtNinePointCalibPath.Text = s.NinePointCalibrationPath.Trim();
+                ApplyGlobalCalibrationPathDefaultsIfEmpty();
                 ApplyCameraCorrectionFromSettings(s);
 
                 LoadImage(imagePath, clearRoi: false);
@@ -467,6 +477,8 @@ namespace CalibOperatorCLI_Example
                     EndY = conn.EndY
                 });
             }
+
+            CaptureOpenTrajHistoryIntoSettings(s);
         }
 
         private static HalconShapeModelRoiPathDto? ExportRoiPath(RoiContourPath path)
@@ -508,6 +520,8 @@ namespace CalibOperatorCLI_Example
             _hasOpenTrajectoriesRoi = false;
             _trajectoryConnectors.Clear();
             _connectorDraftStart = null;
+            ClearOpenTrajHistory();
+            ClearPathVertexRedo();
             ResetCircleDrawState();
 
             switch (s.RoiMode)
@@ -593,7 +607,14 @@ namespace CalibOperatorCLI_Example
 
                     _hasOpenTrajectoriesRoi = _openTrajectoryEntries.Count > 0;
                     _hasRoi = _hasOpenTrajectoriesRoi || _roiPath.VertexCount >= 2;
+                    ApplyOpenTrajHistoryFromSettings(s);
                     break;
+            }
+
+            if (!string.Equals(s.RoiMode, "opentrajectories", StringComparison.OrdinalIgnoreCase))
+            {
+                // 非开放轨迹模式不携带历史
+                ClearOpenTrajHistory();
             }
 
             _lastRoiFilePath = !string.IsNullOrWhiteSpace(s.LastRoiFile)
@@ -609,6 +630,7 @@ namespace CalibOperatorCLI_Example
             RebuildConnectorsVisual();
             UpdateConnectorRubberVisual();
             UpdateRingPreview();
+            RefreshOpenTrajectoryListUi();
             UpdateRoiManagePanelVisibility();
             if (_hasRoi || _hasRingRoi)
                 UpdateThresholdPreview();
