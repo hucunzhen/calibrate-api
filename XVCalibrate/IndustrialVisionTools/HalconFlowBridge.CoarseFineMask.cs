@@ -1150,12 +1150,38 @@ namespace CalibOperatorCLI_Example
                     throw;
                 }
 
+                // 原点固定为训练轮廓轴对齐包围盒中心（图形中心），与 Halcon create_*_xld 默认一致。
+                // 粗/精须用同一套轨迹几何建模，AABB 中心才会重合；不要改成首点/角点。
+                TryEnsureShapeModelOriginAtContourAabbCenter(shapeModel, conts);
+
                 return HalconShapeModelRegistry.Register(shapeModel);
             }
             finally
             {
                 if (disposeConts)
                     conts.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// 确保形状模型原点为训练轮廓轴对齐包围盒中心（图形中心）。
+        /// Halcon：Origin 的 Row/Col 相对「模型中心」(XLD=轮廓 AABB 中心)；(0,0) 即图形中心。
+        /// </summary>
+        private static void TryEnsureShapeModelOriginAtContourAabbCenter(HShapeModel shapeModel, HObject conts)
+        {
+            try
+            {
+                if (shapeModel == null)
+                    return;
+                _ = conts;
+
+                shapeModel.GetShapeModelOrigin(out double curRow, out double curCol);
+                if (Math.Abs(curRow) > 1e-9 || Math.Abs(curCol) > 1e-9)
+                    shapeModel.SetShapeModelOrigin(0.0, 0.0);
+            }
+            catch
+            {
+                // 保留 Halcon 默认 AABB 中心
             }
         }
 
@@ -3745,11 +3771,19 @@ namespace CalibOperatorCLI_Example
                 angleMarginDeg, minScore, fineNumLevels, greediness, scaleOpt, deformedContourSelect)
                 ?.FirstOrDefault();
 
-        private const double FineFixedPositionRoiHalfPx = 3.0;
+        /// <summary>固定 Coarse 位姿时，精匹配候选相对粗位姿的最大偏离半宽（px）。过小会导致有结果也被滤掉。</summary>
+        private const double FineFixedPositionRoiHalfPx = 16.0;
 
         /// <summary>在单张域内图上用 ScaledShape .shm 做 ROI 精匹配（FindScaledShapeModel）。</summary>
+        /// <param name="shapeContourMode">
+        /// none=不输出 ShapeXld；first=仅第 1 条模板轮廓；all=全部模板轮廓（多段开放外圈须用 all）。
+        /// 兼容旧调用：也可传 true/false（true→all，false→none）。
+        /// </param>
+        /// <param name="skipMatch">
+        /// true=不做 Find，按固定/锚点位姿直接输出模板轨迹（Score=1）；需能解析出行/列（Coarse 或域中心）。
+        /// </param>
         public static HalconCoarseFineMatchResult FineScaledShapeMatchOnDomainImage(
-            CalibImage domainImg,
+            CalibImage? domainImg,
             long scaledModelId,
             ScaledShapeFineFixedPose fixedPose = default,
             double anchorRow = double.NaN,
@@ -3761,17 +3795,20 @@ namespace CalibOperatorCLI_Example
             double fineGreediness = 0.75,
             double fineScaleMin = 0.97,
             double fineScaleMax = 1.03,
-            bool wantContour = true,
+            object? shapeContourMode = null,
             double roiMarginPx = 12,
             double maxRoiHalfPx = 120,
             CalibImage? fullImage = null,
             double fineEndScoreWeight = 0,
             double fineEndArcFraction = DefaultEndArcFraction,
             double angleSearchCenterDeg = double.NaN,
-            double angleSearchMarginDeg = double.NaN)
+            double angleSearchMarginDeg = double.NaN,
+            bool skipMatch = false)
         {
-            if (domainImg == null)
+            if (!skipMatch && domainImg == null)
                 throw new ArgumentNullException(nameof(domainImg));
+            if (skipMatch && domainImg == null && fullImage == null)
+                throw new InvalidOperationException("缩放形状精匹配(跳过匹配): 需提供 In 或 FullImage 以确定轨迹图幅");
 
             long shapeId = ResolveRegisteredShapeModelId(scaledModelId);
             if (shapeId < 0)
@@ -3784,19 +3821,36 @@ namespace CalibOperatorCLI_Example
 
             if (double.IsNaN(anchorRow) || double.IsNaN(anchorCol))
             {
-                if (!TryGetMaskedDomainCenterFromCalib(domainImg, out anchorRow, out anchorCol))
+                CalibImage? centerSrc = domainImg ?? fullImage;
+                if (centerSrc == null
+                    || !TryGetMaskedDomainCenterFromCalib(centerSrc, out anchorRow, out anchorCol))
                 {
-                    anchorRow = domainImg.Height * 0.5;
-                    anchorCol = domainImg.Width * 0.5;
+                    if (centerSrc != null)
+                    {
+                        centerSrc.RefreshProperties();
+                        anchorRow = centerSrc.Height * 0.5;
+                        anchorCol = centerSrc.Width * 0.5;
+                    }
+                    else
+                        throw new InvalidOperationException("缩放形状精匹配(跳过匹配): 无法解析位姿行/列，请接 CoarseRow/CoarseColumn");
                 }
             }
+
+            if (skipMatch)
+                return BuildScaledShapeTrajectoryAtPoseOnly(
+                    shapeId, fixedPose, anchorRow, anchorCol, poseAngleDeg,
+                    fineScaleMin, fineScaleMax, shapeContourMode, domainImg, fullImage);
+
+            // 上方已校验：非 skip 时 domainImg 非 null
+            CalibImage inDomain = domainImg!;
 
             double defaultAngleDeg = fixedPose.FixAngle ? fixedPose.AngleDeg : poseAngleDeg;
             double searchCenter = double.IsNaN(angleSearchCenterDeg) ? defaultAngleDeg : angleSearchCenterDeg;
             if (fixedPose.FixAngle)
                 searchCenter = fixedPose.AngleDeg;
+            // FixAngle 时仍保留极小角度窗，避免部分 HALCON 版本在 AngleExtent=0 时直接无候选
             double searchMargin = fixedPose.FixAngle
-                ? 0
+                ? 0.1
                 : double.IsNaN(angleSearchMarginDeg)
                     ? Math.Max(3.0, fineAngleMarginDeg)
                     : Math.Max(3.0, angleSearchMarginDeg);
@@ -3855,7 +3909,7 @@ namespace CalibOperatorCLI_Example
 
             if (!matched)
             {
-                HObject ho = CalibToHObject(domainImg);
+                HObject ho = CalibToHObject(inDomain);
                 try
                 {
                     HImage hMasked = new HImage(EnsureGray(ho));
@@ -3883,7 +3937,7 @@ namespace CalibOperatorCLI_Example
 
             ApplyFixedPoseToFineResult(ref fineRow, ref fineCol, ref fineAngleDeg, ref fineScale, fixedPose, sMin);
 
-            CalibImage scoreImg = fullImage ?? domainImg;
+            CalibImage scoreImg = fullImage ?? inDomain;
             if (fineEndScoreWeight > 0)
             {
                 HObject hoScore = CalibToHObject(scoreImg);
@@ -3901,19 +3955,25 @@ namespace CalibOperatorCLI_Example
                 }
             }
 
-            int xldW = fullImage?.Width ?? domainImg.Width;
-            int xldH = fullImage?.Height ?? domainImg.Height;
+            int xldW = fullImage?.Width ?? inDomain.Width;
+            int xldH = fullImage?.Height ?? inDomain.Height;
             HalconXldContourBundle? xld = null;
-            if (wantContour)
+            string contourMode = NormalizeShapeContourMode(shapeContourMode);
+            if (!string.Equals(contourMode, "none", StringComparison.OrdinalIgnoreCase))
             {
-                Point2D[]? contour = BuildScaledShapeModelContourAtPose(shapeId, fineRow, fineCol, fineAngleDeg, fineScale);
-                if (contour != null && contour.Length >= 2)
+                bool allContours = string.Equals(contourMode, "all", StringComparison.OrdinalIgnoreCase);
+                // 粗/精轨迹可以不同，但外框同大：导出时把精轮廓 AABB 中心对齐到位姿点（固定粗位姿时即粗原点），
+                // 避免两套模板默认原点相对外框有微小偏差导致叠不上。
+                List<Point2D[]> contours = BuildScaledShapeModelContoursAtPose(
+                    shapeId, fineRow, fineCol, fineAngleDeg, fineScale, allContours,
+                    alignGraphicCenterToPose: true);
+                if (contours.Count > 0)
                 {
                     xld = new HalconXldContourBundle
                     {
                         Width = xldW,
                         Height = xldH,
-                        Contours = new List<Point2D[]> { contour }
+                        Contours = contours
                     };
                 }
             }
@@ -3925,6 +3985,72 @@ namespace CalibOperatorCLI_Example
                 FineAngles = new[] { fineAngleDeg },
                 FineScales = new[] { fineScale },
                 FineScores = new[] { fineScore },
+                DeformedXld = xld
+            };
+        }
+
+        /// <summary>
+        /// 跳过 Find：按 Coarse/锚点位姿把 ScaledShape 模板轮廓变换为 ShapeXld（Score 恒为 1）。
+        /// </summary>
+        private static HalconCoarseFineMatchResult BuildScaledShapeTrajectoryAtPoseOnly(
+            long shapeId,
+            ScaledShapeFineFixedPose fixedPose,
+            double anchorRow,
+            double anchorCol,
+            double poseAngleDeg,
+            double fineScaleMin,
+            double fineScaleMax,
+            object? shapeContourMode,
+            CalibImage? domainImg,
+            CalibImage? fullImage)
+        {
+            double fineRow = fixedPose.FixRow ? fixedPose.Row : anchorRow;
+            double fineCol = fixedPose.FixCol ? fixedPose.Col : anchorCol;
+            double fineAngleDeg = fixedPose.FixAngle ? fixedPose.AngleDeg : poseAngleDeg;
+            double fineScale;
+            if (fixedPose.FixScale)
+                fineScale = Math.Max(0.01, Math.Abs(fixedPose.Scale) > 1e-9 ? fixedPose.Scale : 1.0);
+            else
+            {
+                // 未固定缩放时取搜索区间中点，缺省约 1.0
+                double sMin = Math.Max(0.01, Math.Min(fineScaleMin, fineScaleMax));
+                double sMax = Math.Max(sMin, Math.Max(fineScaleMin, fineScaleMax));
+                fineScale = 0.5 * (sMin + sMax);
+            }
+
+            ApplyFixedPoseToFineResult(ref fineRow, ref fineCol, ref fineAngleDeg, ref fineScale, fixedPose, fineScale);
+
+            CalibImage sizeSrc = fullImage ?? domainImg
+                ?? throw new InvalidOperationException("缩放形状精匹配(跳过匹配): 缺少图像尺寸来源");
+            sizeSrc.RefreshProperties();
+            int xldW = sizeSrc.Width;
+            int xldH = sizeSrc.Height;
+
+            HalconXldContourBundle? xld = null;
+            string contourMode = NormalizeShapeContourMode(shapeContourMode);
+            if (string.Equals(contourMode, "none", StringComparison.OrdinalIgnoreCase))
+                contourMode = "all"; // 跳过匹配的目的就是出轨迹，none 无意义时回退 all
+            bool allContours = !string.Equals(contourMode, "first", StringComparison.OrdinalIgnoreCase);
+            List<Point2D[]> contours = BuildScaledShapeModelContoursAtPose(
+                shapeId, fineRow, fineCol, fineAngleDeg, fineScale, allContours,
+                alignGraphicCenterToPose: true);
+            if (contours.Count > 0)
+            {
+                xld = new HalconXldContourBundle
+                {
+                    Width = xldW,
+                    Height = xldH,
+                    Contours = contours
+                };
+            }
+
+            return new HalconCoarseFineMatchResult
+            {
+                FineRows = new[] { fineRow },
+                FineCols = new[] { fineCol },
+                FineAngles = new[] { fineAngleDeg },
+                FineScales = new[] { fineScale },
+                FineScores = new[] { 1.0 },
                 DeformedXld = xld
             };
         }
@@ -4110,7 +4236,7 @@ namespace CalibOperatorCLI_Example
             double halfSq = Math.Max(halfLenRow, halfLenCol);
             if (fixedPose.PositionFixed)
                 halfSq = Math.Min(halfSq, FineFixedPositionRoiHalfPx);
-            double marginDeg = fixedPose.FixAngle ? 0 : Math.Max(3.0, angleMarginDeg);
+            double marginDeg = fixedPose.FixAngle ? 0.1 : Math.Max(3.0, angleMarginDeg);
             double phi = coarseAngleDeg * Math.PI / 180.0;
             HObject rect = new HObject();
             HObject cropped = new HObject();
@@ -4147,6 +4273,8 @@ namespace CalibOperatorCLI_Example
                     out HTuple hvAng,
                     out HTuple hvScale,
                     out HTuple hvScore);
+
+                ClampScaledShapeMatchScalesInRange(ref hvScale, sMin, sMax);
 
                 if (!SelectScaledShapeMatchNearestCoarse(
                         hvRow, hvCol, hvAng, hvScale, hvScore, cropRow1, cropCol1,
@@ -4202,7 +4330,7 @@ namespace CalibOperatorCLI_Example
             try
             {
                 int levels = numLevels > 0 ? Math.Min(numLevels, FineRoiMaxPyramidLevels) : FineRoiMaxPyramidLevels;
-                double marginDeg = fixedPose.FixAngle ? 0 : Math.Max(3.0, angleMarginDeg);
+                double marginDeg = fixedPose.FixAngle ? 0.1 : Math.Max(3.0, angleMarginDeg);
                 double angleStartRad = (searchAngleDeg - marginDeg) * Math.PI / 180.0;
                 double angleExtentRad = 2 * marginDeg * Math.PI / 180.0;
                 double sMin = Math.Max(0.01, Math.Min(scaleMin, scaleMax));
@@ -4229,6 +4357,8 @@ namespace CalibOperatorCLI_Example
                     out HTuple hvAng,
                     out HTuple hvScale,
                     out HTuple hvScore);
+
+                ClampScaledShapeMatchScalesInRange(ref hvScale, sMin, sMax);
 
                 if (!SelectScaledShapeMatchNearestCoarse(
                         hvRow, hvCol, hvAng, hvScale, hvScore, cropRow1, cropCol1,
@@ -4302,6 +4432,29 @@ namespace CalibOperatorCLI_Example
             return true;
         }
 
+        private static string NormalizeShapeContourMode(object? shapeContourMode)
+        {
+            if (shapeContourMode is bool b)
+                return b ? "all" : "none";
+            if (shapeContourMode is string s && !string.IsNullOrWhiteSpace(s))
+            {
+                string t = s.Trim();
+                if (string.Equals(t, "none", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(t, "first", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(t, "all", StringComparison.OrdinalIgnoreCase))
+                    return t.ToLowerInvariant();
+                if (string.Equals(t, "true", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(t, "1", StringComparison.OrdinalIgnoreCase))
+                    return "all";
+                if (string.Equals(t, "false", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(t, "0", StringComparison.OrdinalIgnoreCase))
+                    return "none";
+            }
+
+            // 未指定时默认 all：多段开放外圈（左右 U + 上下边）需整圈输出
+            return "all";
+        }
+
         private static Point2D[]? BuildScaledShapeModelContourAtPose(
             long scaledModelId,
             double row,
@@ -4309,14 +4462,90 @@ namespace CalibOperatorCLI_Example
             double angleDeg,
             double scale)
         {
-            Point2D[][] contours = GetShapeModelContourPoints(scaledModelId, 1);
-            if (contours.Length == 0 || contours[0].Length < 2)
-                return null;
-            Point2D[] src = contours[0];
-            var dst = new Point2D[src.Length];
-            for (int i = 0; i < src.Length; i++)
-                dst[i] = TransformShapeModelPointToImageScaled(src[i], row, col, angleDeg, scale);
-            return dst;
+            List<Point2D[]> list = BuildScaledShapeModelContoursAtPose(
+                scaledModelId, row, col, angleDeg, scale, allContours: false, alignGraphicCenterToPose: false);
+            return list.Count > 0 ? list[0] : null;
+        }
+
+        /// <summary>将形状模板轮廓变换到匹配位姿；allContours=false 时仅第 1 条。</summary>
+        /// <param name="alignGraphicCenterToPose">
+        /// true=变换后把全体轮廓轴对齐包围盒中心平移到 (col,row)，使「图形中心」落在匹配原点上。
+        /// 粗/精轨迹不同但外框同大时，用于叠图/焊道与粗位姿对齐。
+        /// </param>
+        private static List<Point2D[]> BuildScaledShapeModelContoursAtPose(
+            long scaledModelId,
+            double row,
+            double col,
+            double angleDeg,
+            double scale,
+            bool allContours,
+            bool alignGraphicCenterToPose = false)
+        {
+            // 开放外圈（多段 U/直线）禁止强制闭合，否则会在每段开口处画出假连接线
+            Point2D[][] contours = GetShapeModelContourPoints(scaledModelId, 1, forceClose: false);
+            var result = new List<Point2D[]>();
+            int n = allContours ? contours.Length : Math.Min(1, contours.Length);
+            for (int c = 0; c < n; c++)
+            {
+                Point2D[] src = contours[c];
+                if (src == null || src.Length < 2)
+                    continue;
+                var dst = new Point2D[src.Length];
+                for (int i = 0; i < src.Length; i++)
+                    dst[i] = TransformShapeModelPointToImageScaled(src[i], row, col, angleDeg, scale);
+                result.Add(dst);
+            }
+
+            if (alignGraphicCenterToPose && result.Count > 0
+                && TryGetContoursAabbCenter(result, out double cx, out double cy))
+            {
+                double dx = col - cx;
+                double dy = row - cy;
+                if (Math.Abs(dx) > 1e-6 || Math.Abs(dy) > 1e-6)
+                {
+                    for (int i = 0; i < result.Count; i++)
+                    {
+                        Point2D[] pts = result[i];
+                        var shifted = new Point2D[pts.Length];
+                        for (int k = 0; k < pts.Length; k++)
+                            shifted[k] = new Point2D(pts[k].X + dx, pts[k].Y + dy);
+                        result[i] = shifted;
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>全体折线点的轴对齐包围盒中心（图像坐标：X=列 Y=行）。</summary>
+        private static bool TryGetContoursAabbCenter(
+            IReadOnlyList<Point2D[]> contours,
+            out double centerCol,
+            out double centerRow)
+        {
+            centerCol = centerRow = 0;
+            double minX = double.PositiveInfinity, maxX = double.NegativeInfinity;
+            double minY = double.PositiveInfinity, maxY = double.NegativeInfinity;
+            bool any = false;
+            foreach (Point2D[] pts in contours)
+            {
+                if (pts == null)
+                    continue;
+                foreach (Point2D p in pts)
+                {
+                    any = true;
+                    if (p.X < minX) minX = p.X;
+                    if (p.X > maxX) maxX = p.X;
+                    if (p.Y < minY) minY = p.Y;
+                    if (p.Y > maxY) maxY = p.Y;
+                }
+            }
+
+            if (!any)
+                return false;
+            centerCol = 0.5 * (minX + maxX);
+            centerRow = 0.5 * (minY + maxY);
+            return true;
         }
 
         private static Point2D TransformShapeModelPointToImageScaled(
@@ -4879,7 +5108,11 @@ namespace CalibOperatorCLI_Example
                 bool disposeFillXld = false;
                 try
                 {
-                    if (erosionInsetPx > 0.5)
+                    // 多段开放外圈（非嵌套）最终走最小外接矩形填充；对开放折线做
+                    // gen_parallel_contour_xld 极易卡死。跳过法向内缩，直接用外接矩形作域。
+                    // 注意：不要再对矩形做 ErosionCircle(maskErosionPx)——薄跑道会被蚀空/偏域，导致精匹配无结果。
+                    bool skipNormalInset = ShouldSkipNormalInsetForOpenMultiContours(transXld);
+                    if (erosionInsetPx > 0.5 && !skipNormalInset)
                     {
                         if (!TryInsetTransformedContourXldNormal(transXld, erosionInsetPx, out HObject insetXld))
                             continue;
@@ -5080,7 +5313,8 @@ namespace CalibOperatorCLI_Example
 
                     HObject fillXld = transXld;
                     bool disposeFillXld = false;
-                    if (maskErosionPx > 0.5)
+                    bool skipNormalInset = ShouldSkipNormalInsetForOpenMultiContours(transXld);
+                    if (maskErosionPx > 0.5 && !skipNormalInset)
                     {
                         if (!TryInsetTransformedContourXldNormal(transXld, maskErosionPx, out HObject insetXld))
                             return $" 首候选轮廓内缩失败（maskErosionPx={maskErosionPx}）；可尝试减小该值。";
@@ -5244,7 +5478,25 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>
+        /// 多段轮廓：法向内缩无收益且 <c>gen_parallel_contour_xld</c> 易卡死，跳过。
+        /// （不再做逐点包含判定，避免密轮廓 O(n²) 假死。）
+        /// </summary>
+        private static bool ShouldSkipNormalInsetForOpenMultiContours(HObject transXld)
+        {
+            try
+            {
+                HOperatorSet.CountObj(transXld, out HTuple n);
+                return n.I >= 2;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
         /// 沿轮廓法向内缩变换后的模板 XLD（<c>gen_parallel_contour_xld</c>，非 <c>erosion_circle</c> 全向腐蚀）。
+        /// 对多对象 XLD 逐条内缩再合并，避免整包开放折线一次调用卡死。
         /// </summary>
         private static bool TryInsetTransformedContourXldNormal(HObject transXld, double insetPx, out HObject insetXld)
         {
@@ -5256,13 +5508,64 @@ namespace CalibOperatorCLI_Example
 
             try
             {
-                HOperatorSet.GenParallelContourXld(
-                    transXld,
-                    out insetXld,
-                    new HTuple("regression_normal"),
-                    -insetPx);
-                HOperatorSet.CountObj(insetXld, out HTuple n);
-                return n.I > 0;
+                HOperatorSet.CountObj(transXld, out HTuple nObj);
+                int n = nObj.I;
+                if (n <= 1)
+                {
+                    HOperatorSet.GenParallelContourXld(
+                        transXld,
+                        out insetXld,
+                        new HTuple("regression_normal"),
+                        -insetPx);
+                    HOperatorSet.CountObj(insetXld, out HTuple n1);
+                    return n1.I > 0;
+                }
+
+                // 多段：逐条 parallel，失败的段跳过；全部失败则空
+                HOperatorSet.GenEmptyObj(out insetXld);
+                bool any = false;
+                for (int i = 1; i <= n; i++)
+                {
+                    HOperatorSet.SelectObj(transXld, out HObject one, i);
+                    try
+                    {
+                        HOperatorSet.GenParallelContourXld(
+                            one,
+                            out HObject oneInset,
+                            new HTuple("regression_normal"),
+                            -insetPx);
+                        try
+                        {
+                            HOperatorSet.CountObj(oneInset, out HTuple ni);
+                            if (ni.I <= 0)
+                                continue;
+                            HOperatorSet.ConcatObj(insetXld, oneInset, out HObject concat);
+                            insetXld.Dispose();
+                            insetXld = concat;
+                            any = true;
+                        }
+                        finally
+                        {
+                            oneInset.Dispose();
+                        }
+                    }
+                    catch (HOperatorException)
+                    {
+                        // 该段开放折线 parallel 失败则跳过
+                    }
+                    finally
+                    {
+                        one.Dispose();
+                    }
+                }
+
+                if (!any)
+                {
+                    insetXld.Dispose();
+                    HOperatorSet.GenEmptyObj(out insetXld);
+                }
+
+                return any;
             }
             catch (HOperatorException)
             {
@@ -5272,9 +5575,9 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>
-        /// 形状模型为边缘折线：默认用最小外接矩形实心化（避免凸包把长条两端撑长）；
-        /// <paramref name="maskFillDilatePx"/>&gt;0 时改用手动膨胀（凹形工件）。
-        /// 多条轮廓且非嵌套（如 C 形/开口环的两段弧）时，用包含全部轮廓的最小外接矩形，避免只保留最大连通域。
+        /// 形状模型边缘折线 → 实心 Mask 域。
+        /// 一律用轮廓点轴对齐包围盒生成矩形（可选外扩），避免
+        /// <c>gen_region_contour_xld</c> / <c>fill_up</c> 在开放/密外框上卡死。
         /// </summary>
         private static HRegion? BuildFilledRegionFromTransformedXld(HObject transXld, double maskFillDilatePx)
         {
@@ -5283,81 +5586,64 @@ namespace CalibOperatorCLI_Example
                 return null;
 
             List<Point2D[]> contourPts = ContourXldToPointArrays(transXld);
-            if (contourPts.Count >= 2 && !AreShapeModelContoursNested(contourPts))
-                return BuildFilledRegionMinRectEnclosingContours(transXld, maskFillDilatePx);
-
-            HOperatorSet.GenRegionContourXld(transXld, out HObject marginObj, new HTuple("margin"));
-            HRegion work;
-            try
-            {
-                work = new HRegion(marginObj);
-            }
-            finally
-            {
-                marginObj.Dispose();
-            }
-
-            if (!work.IsInitialized())
+            if (contourPts.Count == 0)
                 return null;
 
-            bool useManualDilate = maskFillDilatePx > 0.5;
-            if (useManualDilate)
+            return BuildFilledRegionAabbFromContourPoints(contourPts, maskFillDilatePx);
+        }
+
+        /// <summary>全体轮廓点 AABB → GenRectangle1；dilatePx&gt;0 时四边外扩。</summary>
+        private static HRegion? BuildFilledRegionAabbFromContourPoints(
+            IReadOnlyList<Point2D[]> contourPts,
+            double dilatePx)
+        {
+            double minX = double.PositiveInfinity, maxX = double.NegativeInfinity;
+            double minY = double.PositiveInfinity, maxY = double.NegativeInfinity;
+            bool any = false;
+            foreach (Point2D[] pts in contourPts)
             {
-                double dilatePx = maskFillDilatePx;
-                HRegion dilated = work.DilationCircle(dilatePx);
-                work.Dispose();
-                work = dilated;
+                if (pts == null)
+                    continue;
+                foreach (Point2D p in pts)
+                {
+                    any = true;
+                    if (p.X < minX) minX = p.X;
+                    if (p.X > maxX) maxX = p.X;
+                    if (p.Y < minY) minY = p.Y;
+                    if (p.Y > maxY) maxY = p.Y;
+                }
             }
-            else
+
+            if (!any)
+                return null;
+
+            double pad = dilatePx > 0.5 ? dilatePx : 0;
+            double row1 = minY - pad;
+            double col1 = minX - pad;
+            double row2 = maxY + pad;
+            double col2 = maxX + pad;
+            if (row2 - row1 < 2 || col2 - col1 < 2)
+                return null;
+
+            HOperatorSet.GenRectangle1(out HObject rectHo, row1, col1, row2, col2);
+            try
             {
-                work = ReplaceRegionWithSmallestRectangle2(work);
-                if (work == null || !work.IsInitialized())
+                var rect = new HRegion(rectHo);
+                if (!rect.IsInitialized())
                     return null;
-            }
+                HOperatorSet.AreaCenter(rect, out HTuple areaT, out HTuple _, out HTuple _);
+                double area = areaT.Length > 0 ? areaT[0].D : 0;
+                if (area < 64)
+                {
+                    rect.Dispose();
+                    return null;
+                }
 
-            HOperatorSet.FillUp(work, out HObject fillHo);
-            try
-            {
-                HRegion filled = new HRegion(fillHo);
-                work.Dispose();
-                work = filled;
+                return rect;
             }
             finally
             {
-                fillHo.Dispose();
-            }
-
-            HOperatorSet.AreaCenter(work, out HTuple areaAfter, out HTuple _, out HTuple _);
-            double filledArea = areaAfter.Length > 0 ? areaAfter[0].D : 0;
-            if (filledArea < 64)
-            {
-                work.Dispose();
-                return null;
-            }
-
-            HOperatorSet.Connection(work, out HObject connHo);
-            try
-            {
-                HOperatorSet.SelectShapeStd(connHo, out HObject largestHo, "max_area", 70);
-                try
-                {
-                    var outer = new HRegion(largestHo);
-                    if (!outer.IsInitialized())
-                        return null;
-
-                    work.Dispose();
-                    if (useManualDilate)
-                        return SubtractInteriorHoleRegions(outer, connHo);
-                    return outer;
-                }
-                finally
-                {
-                    largestHo.Dispose();
-                }
-            }
-            finally
-            {
-                connHo.Dispose();
+                rectHo.Dispose();
             }
         }
 

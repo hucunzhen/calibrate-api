@@ -355,114 +355,47 @@
                 <Border Background="{StaticResource Ui.CardDark}" BorderBrush="{StaticResource Ui.PanelBorder}"
                         BorderThickness="1" Padding="10" Margin="0,0,0,8" CornerRadius="3">
                     <StackPanel>
-                        <TextBlock FontWeight="Bold" Text="相机矫正" Margin="0,0,0,6"/>
-                        <Border x:Name="PnlCameraCorrection" Background="Transparent" BorderThickness="0" Padding="0">
-                            <StackPanel>
-                                <TextBlock Text="棋盘格内参去畸变 / 透视鸟瞰 / 矫正后旋转；设备索引与顶部「相机单帧采集」共用。"
-                                           FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,8"/>
-                                <Grid Margin="0,0,0,6">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="72"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="设备索引" VerticalAlignment="Center"
-                                               ToolTip="海康相机列表中的序号，从 0 开始。多相机时与现场工位对应。与顶部「相机单帧采集」共用。"/>
-                                    <TextBox x:Name="TxtCameraDeviceIndex" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
-                                </Grid>
-                                <Grid Margin="0,0,0,4">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="72"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="28"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="标定文件" VerticalAlignment="Center"
-                                               ToolTip="棋盘格标定文件（CalibrationJson）。默认取当前配方 models/calibration_result.json"/>
-                                    <TextBox x:Name="TxtCalibrationJsonPath" Grid.Column="1" Height="24" VerticalContentAlignment="Center"
-                                             ToolTip="默认使用当前配方 models/calibration_result.json；可手动改路径"/>
-                                    <Button Grid.Column="2" Content="..." Height="24" Margin="4,0,0,0" Click="BtnBrowseCalibrationJson_Click"/>
-                                </Grid>
-                                <CheckBox x:Name="ChkEnableUndistort" Content="内参畸变矫正" Foreground="#CCC" Margin="0,4,0,2"
-                                          Checked="OptionDependentVisibility_Changed"
-                                          Unchecked="OptionDependentVisibility_Changed"
-                                          ToolTip="用棋盘格标定消除镜头桶形/枕形畸变。广角、边缘发弯时勾选。已经是远心/几乎无畸变可关掉，少一次插值。"/>
-                                <TextBox x:Name="TxtUndistortAlpha" Text="-1" Height="24" Margin="16,0,0,4" VerticalContentAlignment="Center"
-                                         Visibility="Collapsed"
-                                         ToolTip="去畸变裁剪 α。-1=尽量保持原图尺寸（可能留黑边）。0=裁掉无效边只留有效像素。一般保持 -1，与量产流程一致。"/>
-                                <CheckBox x:Name="ChkEnablePerspective" Content="透视矫正 (棋盘鸟瞰)" Foreground="#CCC" Margin="0,4,0,4"
-                                          Checked="OptionDependentVisibility_Changed"
-                                          Unchecked="OptionDependentVisibility_Changed"
-                                          ToolTip="把倾斜拍摄的平面拉成正视鸟瞰。相机不正对工作面时勾选，形状模板必须做在矫正后的图上，与量产同一套。"/>
-                                <StackPanel x:Name="PnlPerspectiveSettings" Visibility="Collapsed">
-                                    <TextBox x:Name="TxtCalibViewIndex" Text="0" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center"
-                                             ToolTip="标定文件里第几张视图（从 0 起）。多姿态标定时选与当前工位最接近的一张。只有一张就填 0。"/>
-                                    <Grid Margin="16,0,0,2">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="36"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="36"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Text="列" VerticalAlignment="Center"
-                                                   ToolTip="棋盘格内角点列数（宽边个数），不是格子数。11×8 表示横向 11 个角点、纵向 8 个，须与标定文件一致。"/>
-                                        <TextBox x:Name="TxtCalibBoardCols" Grid.Column="1" Text="11" Height="24" Margin="0,0,4,0" VerticalContentAlignment="Center"/>
-                                        <TextBlock Grid.Column="2" Text="行" VerticalAlignment="Center"
-                                                   ToolTip="棋盘格内角点行数。填错会导致透视拉歪。"/>
-                                        <TextBox x:Name="TxtCalibBoardRows" Grid.Column="3" Text="8" Height="24" VerticalContentAlignment="Center"/>
-                                    </Grid>
-                                    <TextBox x:Name="TxtCalibSquareSizeMm" Text="5" Height="24" Margin="16,0,0,2" VerticalContentAlignment="Center"
-                                             ToolTip="棋盘格每个方格边长，单位 mm。必须与实物标定板一致（常见 5 或 10）。填错则 mm 尺寸和像素当量全错。"/>
-                                    <TextBox x:Name="TxtCalibPxPerMm" Text="32" Height="24" Margin="16,0,0,4" VerticalContentAlignment="Center"
-                                             ToolTip="透视输出的像素/毫米。越大图越大、细节越多、越占内存。与量产流程保持同一数值，否则模板尺度对不上。"/>
-                                    <ComboBox x:Name="CmbPerspectiveOutputFrame" Height="26" Margin="16,0,0,6"
-                                              ToolTip="透视矫正后输出哪一块。量产主流程通常要整幅图，选「整图共面」。只要标定板区域做模板可选「仅标定板」。">
-                                        <ComboBoxItem Content="仅标定板 (board)" Tag="board"
-                                                      ToolTip="输出裁到棋盘格板范围内。只在板上做模板/测量、不想要板外背景时选。"/>
-                                        <ComboBoxItem Content="原图+板内 (local)" Tag="local"
-                                                      ToolTip="保留与原图大致对齐、板内已拉平。调试对照原图位置时用。"/>
-                                        <ComboBoxItem Content="整图共面 (plane)" Tag="plane" IsSelected="True"
-                                                      ToolTip="默认。整幅图按标定平面拉成鸟瞰，后续形状模板、九点、轨迹都在这张图上做。现场主流程一般选这项。"/>
-                                    </ComboBox>
-                                </StackPanel>
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                                    <Button x:Name="BtnRotateCorrectedCcw90" Content="逆时针90°" Height="28" Margin="0,0,6,0" Click="BtnRotateCorrectedCcw90_Click"/>
-                                    <Button x:Name="BtnRotateCorrectedCw90" Content="顺时针90°" Height="28" Margin="0,0,6,0" Click="BtnRotateCorrectedCw90_Click"/>
-                                    <Button x:Name="BtnResetCorrectedRotate" Content="重置旋转" Height="28" Click="BtnResetCorrectedRotate_Click"/>
-                                </StackPanel>
-                                <Grid Margin="0,0,0,4">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="72"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="44"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="角度(°)" VerticalAlignment="Center"/>
-                                    <TextBox x:Name="TxtPostCorrectRotateDeg" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
-                                    <Button Grid.Column="2" x:Name="BtnApplyPostCorrectRotate" Content="应用" Height="24" Margin="4,0,0,0"
-                                            Click="BtnApplyPostCorrectRotate_Click"/>
-                                </Grid>
-                                <CheckBox x:Name="ChkRotateExpandCanvas" Content="扩大画布容纳整图" Foreground="#CCC" Margin="0,0,0,8" IsChecked="False"
-                                          ToolTip="旋转后边角被裁掉时勾选，画布变大以放下整幅图。量产流程若未扩画布，这里也不要勾，避免和线上图像尺寸不一致。"/>
-                                <Button x:Name="BtnApplyCameraCorrection" Content="应用相机矫正" Height="28" Click="BtnApplyCameraCorrection_Click"/>
-                            </StackPanel>
-                        </Border>
-
-                        <Separator Margin="0,10,0,10" Background="{StaticResource Ui.PanelBorder}"/>
-
-                        <TextBlock FontWeight="Bold" Text="九点标定" Margin="0,0,0,6"/>
-                        <TextBlock Text="像素→世界 affine；ROI 存盘为 mm，「几何图形 → 轮廓」也用此 JSON。"
+                        <TextBlock Text="棋盘/九点标定与矫正参数由当前流程配方统一管理（models/camera_correction.json）。"
                                    FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,6"/>
-                        <Grid>
+                        <TextBlock x:Name="TxtRecipeCalibrationSummary" Text="（未加载配方配置）"
+                                   FontSize="11" Foreground="#B0BEC5" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                        <Button x:Name="BtnEditRecipeCalibrationDefaults" Content="编辑配方配置…" Height="28" Margin="0,0,0,10"
+                                HorizontalAlignment="Left" MinWidth="120"
+                                Click="BtnEditRecipeCalibrationDefaults_Click"
+                                ToolTip="编辑并保存当前配方的 models/camera_correction.json，保存后自动应用到本页。"/>
+
+                        <Grid Margin="0,0,0,8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="72"/>
                                 <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="28"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="九点标定文件" VerticalAlignment="Center"
-                                       ToolTip="含 affine 的九点标定结果。默认取当前配方 models/calibration_nine_point.json"/>
-                            <TextBox x:Name="TxtNinePointCalibPath" Grid.Column="1" Height="24" VerticalContentAlignment="Center"
-                                     TextChanged="NinePointCalibPath_Changed" LostFocus="NinePointCalibPath_Changed"
-                                     ToolTip="默认使用当前配方 models/calibration_nine_point.json；可手动改路径"/>
-                            <Button Grid.Column="2" Content="..." Height="24" Margin="4,0,0,0" Click="BtnBrowseNinePointCalib_Click"/>
+                            <TextBlock Grid.Column="0" Text="设备索引" VerticalAlignment="Center"
+                                       ToolTip="海康相机列表中的序号，从 0 开始。与顶部「相机单帧采集」共用。"/>
+                            <TextBox x:Name="TxtCameraDeviceIndex" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
                         </Grid>
+
+                        <TextBlock FontWeight="SemiBold" Text="本页显示" Margin="0,0,0,6"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                            <Button x:Name="BtnRotateCorrectedCcw90" Content="逆时针90°" Height="28" Margin="0,0,6,0" Click="BtnRotateCorrectedCcw90_Click"/>
+                            <Button x:Name="BtnRotateCorrectedCw90" Content="顺时针90°" Height="28" Margin="0,0,6,0" Click="BtnRotateCorrectedCw90_Click"/>
+                            <Button x:Name="BtnResetCorrectedRotate" Content="重置旋转" Height="28" Click="BtnResetCorrectedRotate_Click"/>
+                        </StackPanel>
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="72"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="44"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="角度(°)" VerticalAlignment="Center"/>
+                            <TextBox x:Name="TxtPostCorrectRotateDeg" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
+                            <Button Grid.Column="2" x:Name="BtnApplyPostCorrectRotate" Content="应用" Height="24" Margin="4,0,0,0"
+                                    Click="BtnApplyPostCorrectRotate_Click"/>
+                        </Grid>
+                        <CheckBox x:Name="ChkRotateExpandCanvas" Content="扩大画布容纳整图" Foreground="#CCC" Margin="0,0,0,8" IsChecked="False"
+                                  ToolTip="旋转后边角被裁掉时勾选。量产流程若未扩画布，这里也不要勾。"/>
+                        <Button x:Name="BtnApplyCameraCorrection" Content="按配方配置矫正当前图" Height="28"
+                                Click="BtnApplyCameraCorrection_Click"
+                                ToolTip="用当前配方的标定与矫正参数处理本页已加载图像。"/>
                     </StackPanel>
                 </Border>
 
@@ -473,7 +406,7 @@
                         Margin="0,0,0,8" CornerRadius="3">
                     <StackPanel>
                         <TextBlock FontWeight="Bold" Text="ROI 保存 / 加载" Margin="0,0,0,6"/>
-                        <TextBlock Text="保存为 .xvroi.json（mm 坐标）；加载时用上方九点标定反算像素。"
+                        <TextBlock Text="保存为 .xvroi.json（mm 坐标）；加载时用配方九点标定反算像素。"
                                    FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,8"/>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                             <Button x:Name="BtnSaveRoi" Content="保存 ROI" Width="88" Height="26"

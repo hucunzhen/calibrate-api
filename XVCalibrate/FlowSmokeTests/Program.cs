@@ -22,6 +22,12 @@ namespace FlowSmokeTests
                     return HalconCoarseFineSmokeTest.Run(root);
                 }
 
+                if (args[i] == "--halcon-outline-mask")
+                {
+                    Console.WriteLine("=== HalconOutlineMaskSmokeTest ===");
+                    return HalconOutlineMaskSmokeTest.Run(root);
+                }
+
                 if (args[i] == "--nested-flow-loop")
                 {
                     Console.WriteLine("=== FlowNestedLoopSmokeTest ===");

@@ -198,7 +198,8 @@ namespace CalibOperatorCLI_Example
             if (contour == null || contour.Length < 2)
                 return nextSegmentBarId;
 
-            Point2D[] closed = HalconFlowBridge.EnsureClosedContourPoints(contour, closeTolPx, forceClose: true);
+            // 开放外圈禁止强制闭合（否则 U 开口/直线两端会被连成假边）
+            Point2D[] closed = HalconFlowBridge.CloseShapeModelContourIfNeeded(contour, Math.Max(closeTolPx, 2.0));
             int segId = nextSegmentBarId;
             foreach (Point2D p in closed)
             {

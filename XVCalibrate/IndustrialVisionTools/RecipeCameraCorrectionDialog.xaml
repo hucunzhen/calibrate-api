@@ -1,0 +1,103 @@
+<Window x:Class="CalibOperatorCLI_Example.RecipeCameraCorrectionDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="配方标定与矫正配置"
+        Width="460"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        Background="#2D2D30"
+        Foreground="#E0E0E0"
+        ShowInTaskbar="False">
+    <Border Padding="16">
+        <StackPanel>
+            <TextBlock x:Name="TxtRecipeHint" Text="" TextWrapping="Wrap" Margin="0,0,0,10"
+                       Foreground="#B0BEC5" FontSize="12"/>
+            <TextBlock x:Name="TxtFilePath" Text="" FontSize="10" Foreground="#888" TextWrapping="Wrap"
+                       Margin="0,0,0,12"/>
+
+            <TextBlock Text="标定文件（相对配方目录）" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <Grid Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="88"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="棋盘标定" VerticalAlignment="Center"/>
+                <TextBox x:Name="TxtChessboardFile" Grid.Column="1" Height="26" VerticalContentAlignment="Center"/>
+            </Grid>
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="88"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="九点标定" VerticalAlignment="Center"/>
+                <TextBox x:Name="TxtNinePointFile" Grid.Column="1" Height="26" VerticalContentAlignment="Center"/>
+            </Grid>
+
+            <TextBlock Text="相机矫正" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <CheckBox x:Name="ChkEnableUndistort" Content="内参畸变矫正" Foreground="#CCC" Margin="0,0,0,4"/>
+            <Grid Margin="16,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="72"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Alpha" VerticalAlignment="Center"/>
+                <TextBox x:Name="TxtUndistortAlpha" Grid.Column="1" Height="26" VerticalContentAlignment="Center"/>
+            </Grid>
+            <CheckBox x:Name="ChkEnablePerspective" Content="透视矫正 (棋盘鸟瞰)" Foreground="#CCC" Margin="0,0,0,6"/>
+            <Grid Margin="16,0,0,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="72"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="视图号" VerticalAlignment="Center"/>
+                <TextBox x:Name="TxtViewIndex" Grid.Column="1" Height="26" VerticalContentAlignment="Center"/>
+            </Grid>
+            <Grid Margin="16,0,0,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="72"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="36"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="列" VerticalAlignment="Center"/>
+                <TextBox x:Name="TxtBoardCols" Grid.Column="1" Height="26" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
+                <TextBlock Grid.Column="2" Text="行" VerticalAlignment="Center"/>
+                <TextBox x:Name="TxtBoardRows" Grid.Column="3" Height="26" VerticalContentAlignment="Center"/>
+            </Grid>
+            <Grid Margin="16,0,0,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="72"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="方格 mm" VerticalAlignment="Center"/>
+                <TextBox x:Name="TxtSquareSizeMm" Grid.Column="1" Height="26" VerticalContentAlignment="Center"/>
+            </Grid>
+            <Grid Margin="16,0,0,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="72"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="px/mm" VerticalAlignment="Center"/>
+                <TextBox x:Name="TxtPxPerMm" Grid.Column="1" Height="26" VerticalContentAlignment="Center"/>
+            </Grid>
+            <Grid Margin="16,0,0,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="72"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="输出帧" VerticalAlignment="Center"/>
+                <ComboBox x:Name="CmbPerspectiveOutputFrame" Grid.Column="1" Height="26">
+                    <ComboBoxItem Content="仅标定板 (board)" Tag="board"/>
+                    <ComboBoxItem Content="原图+板内 (local)" Tag="local"/>
+                    <ComboBoxItem Content="整图共面 (plane)" Tag="plane"/>
+                </ComboBox>
+            </Grid>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="取消" Width="80" Height="28" Margin="0,0,8,0" IsCancel="True" Click="BtnCancel_Click"/>
+                <Button Content="保存" Width="80" Height="28" IsDefault="True" Click="BtnSave_Click"/>
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

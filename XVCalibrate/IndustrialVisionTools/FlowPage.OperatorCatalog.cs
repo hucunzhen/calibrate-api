@@ -3587,8 +3587,8 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "numLevels", DisplayName = "NumLevels", DefaultValue = "0", Description = "金字塔层数，0=模型默认" },
                     new OperatorParam { Name = "greediness", DisplayName = "Greediness", DefaultValue = "0.85", Description = "贪心系数" },
                     new OperatorParam { Name = "allowRetry", DisplayName = "失败重试", DefaultValue = "false", Description = "无结果时降分再搜" },
-                    new OperatorParam { Name = "coarseScaleMin", DisplayName = "粗 ScaleMin", DefaultValue = "1.0", Description = "粗匹配缩放下限；=1 时不缩放搜索（需 ScaledShape 模型才支持缩放）" },
-                    new OperatorParam { Name = "coarseScaleMax", DisplayName = "粗 ScaleMax", DefaultValue = "1.0", Description = "粗匹配缩放上限；=1 时不缩放搜索（需 ScaledShape 模型才支持缩放）" },
+                    new OperatorParam { Name = "coarseScaleMin", DisplayName = "粗 ScaleMin", DefaultValue = "1.0", Description = "粗匹配缩放下限；与 Max 均为 1 时不缩放搜索。非 1 时需 ScaledShape；HALCON 精修越界的 Scale 会钳制到本区间" },
+                    new OperatorParam { Name = "coarseScaleMax", DisplayName = "粗 ScaleMax", DefaultValue = "1.0", Description = "粗匹配缩放上限；与 Min 均为 1 时不缩放搜索。非 1 时需 ScaledShape；HALCON 精修越界的 Scale 会钳制到本区间" },
                     new OperatorParam { Name = "endScoreWeight", DisplayName = "端部得分权重", DefaultValue = "0.8", Description = "端部边缘对齐在分数中的权重，0=不修正；1=完全由端部决定。修正公式：score×(1-w+w×端部因子)" },
                     new OperatorParam { Name = "endArcFraction", DisplayName = "端部弧长占比", DefaultValue = "0.12", Description = "轮廓总长中两端各取的比例，用于端部边缘采样" }
                 },
@@ -3696,10 +3696,11 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "halcon_fine_scaled_shape_match",
                 DisplayName = "HALCON 缩放形状精匹配",
-                Description = "仅 ScaledShape .shm + 单张域内图 In；在粗位姿 ROI 内精定位。CoarseRow/Column/Angle/Scale 任一端口有输入则该自由度固定为粗值、不再搜索；未接的 DOF 仍按 fineAngleMargin / fineScaleMin/Max 搜索。",
+                Description = "仅 ScaledShape .shm + 单张域内图 In；在粗位姿 ROI 内精定位。CoarseRow/Column/Angle/Scale 任一端口有输入则该自由度固定为粗值、不再搜索；未接的 DOF 仍按 fineAngleMargin / fineScaleMin/Max 搜索。skipMatch=true 时不做 Find，按 Coarse*（缺省用域中心/0°/1.0）直接输出模板轨迹 ShapeXld。",
                 Category = "HALCON",
                 Params =
                 {
+                    new OperatorParam { Name = "skipMatch", DisplayName = "跳过匹配仅出轨迹", DefaultValue = "false", Description = "true=不调用 FindScaledShapeModel，按 ModelId + CoarseRow/Column/Angle/Scale（未接则域中心/0°/1）直接输出 ShapeXld 与位姿；false=正常精匹配" },
                     new OperatorParam { Name = "fineAngleStart", DisplayName = "精 AngleStart(°)", DefaultValue = "", Description = "相对 CoarseAngle 输入的起始偏移(度)；留空时由「精角度余量」推导(=-余量)" },
                     new OperatorParam { Name = "fineAngleExtent", DisplayName = "精 AngleExtent(°)", DefaultValue = "", Description = "相对 CoarseAngle 输入的角度搜索范围(度)；留空时由「精角度余量」推导(=2×余量)" },
                     new OperatorParam { Name = "fineAngleMargin", DisplayName = "精角度余量(°)", DefaultValue = "5", Description = "未设 fineAngleStart/Extent 且未接 CoarseAngle 时：以 CoarseAngle 为中心 ± 该值(度)" },
@@ -3708,7 +3709,7 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "fineGreediness", DisplayName = "精 Greediness", DefaultValue = "0.75", Description = "贪心系数" },
                     new OperatorParam { Name = "fineScaleMin", DisplayName = "精 ScaleMin", DefaultValue = "0.97", Description = "未接 CoarseScale 时的缩放下限；已接 CoarseScale 时忽略" },
                     new OperatorParam { Name = "fineScaleMax", DisplayName = "精 ScaleMax", DefaultValue = "1.03", Description = "未接 CoarseScale 时的缩放上限；已接 CoarseScale 时忽略" },
-                    new OperatorParam { Name = "shapeContourMode", DisplayName = "模板轮廓", DefaultValue = "first", Description = "none=不输出；first=输出缩放后的模板轮廓" },
+                    new OperatorParam { Name = "shapeContourMode", DisplayName = "模板轮廓", DefaultValue = "all", Description = "none=不输出；first=仅第1条模板轮廓；all=全部轮廓（多段开放外圈须用 all）", Options = new List<string> { "all", "first", "none" } },
                     new OperatorParam { Name = "roiMarginPx", DisplayName = "ROI边距(px)", DefaultValue = "12", Description = "粗位姿周围 CropRectangle2 的额外边距" },
                     new OperatorParam { Name = "maxRoiHalfPx", DisplayName = "ROI半长上限(px)", DefaultValue = "120", Description = "限制精匹配裁剪区半长，0=不限制" },
                     new OperatorParam { Name = "fineEndScoreWeight", DisplayName = "精端部得分权重", DefaultValue = "0.8", Description = "精匹配 Score 端部修正，0=关闭" },
@@ -3716,7 +3717,7 @@ namespace CalibOperatorCLI_Example
                 },
                 Ports =
                 {
-                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800", IsOptional = true },
                     new PortDef { Name = "ModelId", Direction = PortDirection.Input, DataType = typeof(long), ColorHex = "#9C27B0" },
                     new PortDef { Name = "FullImage", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800", IsOptional = true },
                     new PortDef { Name = "CoarseRow", Direction = PortDirection.Input, DataType = typeof(double), ColorHex = "#8BC34A", IsOptional = true },

@@ -3548,7 +3548,7 @@ namespace CalibOperatorCLI_Example
             return EnsureClosedPolylineEndpoints(simplified.ToArray());
         }
 
-        /// <summary>简化后的闭合轮廓补回终点，供显示 DrawPolygon / 焊道闭合段使用。</summary>
+        /// <summary>简化后的闭合轮廓补回终点，供焊道闭合段使用（点列首尾重合即可，显示侧不再 DrawPolygon）。</summary>
         private static Point2D[] EnsureClosedPolylineEndpoints(Point2D[]? pts)
         {
             if (pts == null || pts.Length < 2)
@@ -14243,14 +14243,29 @@ namespace CalibOperatorCLI_Example
                     case "halcon_fine_scaled_shape_match":
                     {
 #if HALCON_ENABLED
-                        if (inputs["In"] is not CalibImage scaledDomainImg)
+                        static double Spf(IReadOnlyDictionary<string, string> p, string key, double def) =>
+                            double.TryParse(p.GetValueOrDefault(key), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : def;
+                        static int Spfi(IReadOnlyDictionary<string, string> p, string key, int def) =>
+                            int.TryParse(p.GetValueOrDefault(key), out var v) ? v : def;
+                        static string Spfs(IReadOnlyDictionary<string, string> p, string key, string def) =>
+                            string.IsNullOrWhiteSpace(p.GetValueOrDefault(key)) ? def : p[key]!.Trim();
+                        static bool Spfb(IReadOnlyDictionary<string, string> p, string key, bool def) =>
+                            bool.TryParse(p.GetValueOrDefault(key), out var v) ? v : def;
+
+                        bool skipMatch = Spfb(node.Params, "skipMatch", false);
+                        CalibImage? scaledDomainImg = inputs.TryGetValue("In", out var sinObj) ? sinObj as CalibImage : null;
+                        CalibImage? scaledFullImg = inputs.TryGetValue("FullImage", out var sfiObj) ? sfiObj as CalibImage : null;
+                        if (!skipMatch && scaledDomainImg == null)
                             throw new InvalidOperationException(
                                 "HALCON 缩放形状精匹配: 缺少 In（接 halcon_reduce_domain_by_mask 的 Out）。");
+                        if (skipMatch && scaledDomainImg == null && scaledFullImg == null)
+                            throw new InvalidOperationException(
+                                "HALCON 缩放形状精匹配(跳过匹配): 请接 In 或 FullImage（用于轨迹图幅）。");
+
                         long scaledModelId = HalconFlowBridge.ResolveRegisteredShapeModelId(
                             Convert.ToInt64(inputs["ModelId"]));
                         if (scaledModelId < 0)
                             throw new InvalidOperationException("HALCON 缩放形状精匹配: ModelId 无效或已释放（须为 ScaledShape .shm）");
-                        CalibImage? scaledFullImg = inputs.TryGetValue("FullImage", out var sfiObj) ? sfiObj as CalibImage : null;
                         inputs.TryGetValue("CoarseRow", out var scrObj);
                         inputs.TryGetValue("CoarseColumn", out var sccObj);
                         inputs.TryGetValue("CoarseAngle", out var scaObj);
@@ -14260,6 +14275,9 @@ namespace CalibOperatorCLI_Example
                         bool fixCol = sccObj != null && HalconFlowBridge.TryReadCoarseScalar(sccObj, out coarseColVal);
                         bool fixAngle = scaObj != null && HalconFlowBridge.TryReadCoarseScalar(scaObj, out coarseAngleVal);
                         bool fixScale = scsObj != null && HalconFlowBridge.TryReadCoarseScalar(scsObj, out coarseScaleVal);
+                        if (skipMatch && (!fixRow || !fixCol))
+                            throw new InvalidOperationException(
+                                "HALCON 缩放形状精匹配(跳过匹配): 请接 CoarseRow 与 CoarseColumn。");
                         var scaledFixedPose = new ScaledShapeFineFixedPose
                         {
                             FixRow = fixRow,
@@ -14273,20 +14291,13 @@ namespace CalibOperatorCLI_Example
                         };
                         double scaledPoseAngle = fixAngle ? coarseAngleVal : 0;
 
-                        static double Spf(IReadOnlyDictionary<string, string> p, string key, double def) =>
-                            double.TryParse(p.GetValueOrDefault(key), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : def;
-                        static int Spfi(IReadOnlyDictionary<string, string> p, string key, int def) =>
-                            int.TryParse(p.GetValueOrDefault(key), out var v) ? v : def;
-                        static string Spfs(IReadOnlyDictionary<string, string> p, string key, string def) =>
-                            string.IsNullOrWhiteSpace(p.GetValueOrDefault(key)) ? def : p[key]!.Trim();
-
                         var (scaledFineRelStart, scaledFineRelExtent) = HalconFlowBridge.ResolveFineRelativeAngleRangeFromParams(
                             node.Params, "fineAngleStart", "fineAngleExtent", "fineAngleMargin", 5);
                         var (scaledFineSearchCenter, scaledFineSearchMargin) = HalconFlowBridge.ResolveFineAngleSearchCenterMargin(
                             scaledPoseAngle, scaledFineRelStart, scaledFineRelExtent);
 
-                        string shapeContourMode = Spfs(node.Params, "shapeContourMode", "first");
-                        bool wantShapeContour = !string.Equals(shapeContourMode, "none", StringComparison.OrdinalIgnoreCase);
+                        // all=整圈外轮廓（多段开放轨迹）；first=仅第1条；none=不输出
+                        string shapeContourMode = Spfs(node.Params, "shapeContourMode", "all");
 
                         HalconCoarseFineMatchResult scaledFineResult = HalconFlowBridge.FineScaledShapeMatchOnDomainImage(
                             scaledDomainImg,
@@ -14301,16 +14312,16 @@ namespace CalibOperatorCLI_Example
                             Spf(node.Params, "fineGreediness", 0.75),
                             Spf(node.Params, "fineScaleMin", 0.97),
                             Spf(node.Params, "fineScaleMax", 1.03),
-                            wantShapeContour,
+                            shapeContourMode,
                             Spf(node.Params, "roiMarginPx", 12),
                             Spf(node.Params, "maxRoiHalfPx", 120),
                             scaledFullImg,
                             Spf(node.Params, "fineEndScoreWeight", HalconFlowBridge.DefaultEndScoreWeight),
                             Spf(node.Params, "fineEndArcFraction", HalconFlowBridge.DefaultEndArcFraction),
                             angleSearchCenterDeg: scaledFineSearchCenter,
-                            angleSearchMarginDeg: scaledFineSearchMargin);
+                            angleSearchMarginDeg: scaledFineSearchMargin,
+                            skipMatch: skipMatch);
 
-                        scaledDomainImg.RefreshProperties();
                         var fixedDofParts = new List<string>(4);
                         if (fixRow) fixedDofParts.Add($"row={coarseRowVal:G4}");
                         if (fixCol) fixedDofParts.Add($"col={coarseColVal:G4}");
@@ -14319,10 +14330,21 @@ namespace CalibOperatorCLI_Example
                         string fixedDofNote = fixedDofParts.Count > 0
                             ? $"固定[{string.Join(", ", fixedDofParts)}], "
                             : string.Empty;
-                        AppendLog(
-                            $"[HALCON] 缩放精匹配: 域内图 {scaledDomainImg.Width}x{scaledDomainImg.Height}, " +
-                            fixedDofNote +
-                            $"thread_num={HalconRuntimeSettings.LastParallelFindThreadNum}");
+                        if (scaledDomainImg != null)
+                        {
+                            scaledDomainImg.RefreshProperties();
+                            AppendLog(
+                                $"[HALCON] 缩放精匹配{(skipMatch ? "(跳过匹配)" : "")}: 域内图 {scaledDomainImg.Width}x{scaledDomainImg.Height}, " +
+                                fixedDofNote +
+                                $"thread_num={HalconRuntimeSettings.LastParallelFindThreadNum}");
+                        }
+                        else
+                        {
+                            AppendLog(
+                                $"[HALCON] 缩放精匹配(跳过匹配): " +
+                                fixedDofNote +
+                                $"thread_num={HalconRuntimeSettings.LastParallelFindThreadNum}");
+                        }
 
                         node.Outputs["Row"] = scaledFineResult.FineRows;
                         node.Outputs["Column"] = scaledFineResult.FineCols;
@@ -14332,13 +14354,23 @@ namespace CalibOperatorCLI_Example
                         if (scaledFineResult.DeformedXld != null)
                             node.Outputs["ShapeXld"] = scaledFineResult.DeformedXld;
 
-                        node.ResultSummary = scaledFineResult.FineCount == 0
-                            ? fixedDofParts.Count > 0
-                                ? $"缩放精匹配无结果 ({string.Join(", ", fixedDofParts)})"
-                                : "缩放精匹配无结果"
-                            : fixedDofParts.Count > 0
-                                ? $"缩放精 1 sc={scaledFineResult.FineScores[0]:F3} ({string.Join(", ", fixedDofParts)})"
-                                : $"缩放精 1 sc={scaledFineResult.FineScores[0]:F3} scale={scaledFineResult.FineScales[0]:G4}";
+                        if (skipMatch)
+                        {
+                            int nCont = scaledFineResult.DeformedXld?.Contours?.Count ?? 0;
+                            node.ResultSummary = nCont > 0
+                                ? $"跳过匹配·轨迹 {nCont} 段 ({string.Join(", ", fixedDofParts)})"
+                                : $"跳过匹配·无轨迹 ({string.Join(", ", fixedDofParts)})";
+                        }
+                        else
+                        {
+                            node.ResultSummary = scaledFineResult.FineCount == 0
+                                ? fixedDofParts.Count > 0
+                                    ? $"缩放精匹配无结果 ({string.Join(", ", fixedDofParts)})"
+                                    : "缩放精匹配无结果"
+                                : fixedDofParts.Count > 0
+                                    ? $"缩放精 1 sc={scaledFineResult.FineScores[0]:F3} ({string.Join(", ", fixedDofParts)})"
+                                    : $"缩放精 1 sc={scaledFineResult.FineScores[0]:F3} scale={scaledFineResult.FineScales[0]:G4}";
+                        }
                         break;
 #else
                         throw new InvalidOperationException("HALCON 缩放形状精匹配: 需要 HALCON 支持编译");
@@ -16249,7 +16281,11 @@ namespace CalibOperatorCLI_Example
             return bmp;
         }
 
-        /// <summary>绘制点列折线段；≥3 点时用 DrawPolygon 自动闭合首尾。</summary>
+        /// <summary>
+        /// 绘制点列折线段。始终用 DrawLines，不自动首尾闭合。
+        /// （旧实现 DrawPolygon 会给开放 U/直线补假边，多路分色/分包连线时出现多余连接线。）
+        /// 真正闭合的轮廓应由点列自身首尾重合（或上游 closed 简化补点），不必再 DrawPolygon。
+        /// </summary>
         private static void DrawPointOverlaySegment(
             System.Drawing.Graphics g,
             System.Drawing.Pen pen,
@@ -16257,10 +16293,7 @@ namespace CalibOperatorCLI_Example
         {
             if (arr.Length < 2)
                 return;
-            if (arr.Length >= 3)
-                g.DrawPolygon(pen, arr);
-            else
-                g.DrawLines(pen, arr);
+            g.DrawLines(pen, arr);
         }
 
         /// <summary>HALCON FindShapeModel 专用预览：模板轮廓按位姿叠加、十字、得分。</summary>

@@ -412,6 +412,19 @@ namespace CalibOperatorCLI_Example
 
         public string? GetSelectedRecipeName() => _flowHostPage.GetSelectedRecipeName();
 
+        /// <summary>流程配方切换后，同步形状模板页「标定与矫正」到该配方全局默认。</summary>
+        internal void NotifyRecipeChangedForShapeCalibration()
+        {
+            try
+            {
+                _halconShapeModelPage.SyncRecipeGlobalCalibrationFromHost(forceCorrectionParams: true);
+            }
+            catch
+            {
+                // 形状页未就绪时忽略
+            }
+        }
+
         public async Task<bool> RunSelectedRecipeMainFlowAsync(bool preferNativeEngine = true)
         {
             if (!_flowHostPage.TryLoadSelectedRecipeMainFlow(showErrors: true))

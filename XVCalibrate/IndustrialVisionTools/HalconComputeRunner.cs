@@ -16,6 +16,15 @@ namespace CalibOperatorCLI_Example
             CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(work);
+            cancellationToken.ThrowIfCancellationRequested();
+            // 已在门闩线程内：禁止再 Task.Run + GetResult，否则新线程抢同一 lock 会死锁
+            // （典型：ExecuteNode 内再调 BuildCoarseShapeMaskBatchForNode）。
+            if (HalconRuntimeSettings.IsInsideOperatorGate)
+            {
+                HalconRuntimeSettings.EnsureApplied();
+                return HalconRuntimeSettings.RunExclusive(work, policy);
+            }
+
             return RunAsync(work, policy, cancellationToken).GetAwaiter().GetResult();
         }
 
@@ -25,7 +34,11 @@ namespace CalibOperatorCLI_Example
             CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(work);
-            RunAsync(work, policy, cancellationToken).GetAwaiter().GetResult();
+            Run<object?>(() =>
+            {
+                work();
+                return null;
+            }, policy, cancellationToken);
         }
 
         public static Task<T> RunAsync<T>(
@@ -45,6 +58,14 @@ namespace CalibOperatorCLI_Example
             CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(work);
+            if (HalconRuntimeSettings.IsInsideOperatorGate)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                HalconRuntimeSettings.EnsureApplied();
+                return Task.FromResult(
+                    HalconRuntimeSettings.RunExclusive(() => work(cancellationToken), policy));
+            }
+
             return Task.Run(
                 () =>
                 {
@@ -61,6 +82,13 @@ namespace CalibOperatorCLI_Example
             CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(work);
+            if (HalconRuntimeSettings.IsInsideOperatorGate)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                HalconRuntimeSettings.EnsureApplied();
+                return Task.FromResult(HalconRuntimeSettings.RunExclusive(work, policy));
+            }
+
             return Task.Run(
                 () =>
                 {

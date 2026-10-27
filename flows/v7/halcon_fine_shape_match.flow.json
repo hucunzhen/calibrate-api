@@ -1,4 +1,4 @@
-﻿{
+{
   "Nodes": [
     {
       "Id": "e2000001-0001-4001-8001-00000000001a",
@@ -20,7 +20,7 @@
       "Y": 320.6639952706669,
       "Params": {
         "epsilon": "0.1",
-        "closed": "true",
+        "closed": "false",
         "enable": "true",
         "disable": "false"
       }
@@ -110,15 +110,16 @@
       "X": 623,
       "Y": 64,
       "Params": {
-        "fineAngleStart": "-2",
-        "fineAngleExtent": "4",
-        "fineAngleMargin": "5",
+        "skipMatch": "true",
+        "fineAngleStart": "-1",
+        "fineAngleExtent": "2",
+        "fineAngleMargin": "1",
         "fineMinScore": "0.1",
         "fineNumLevels": "0",
         "fineGreediness": "0.1",
         "fineScaleMin": "1",
         "fineScaleMax": "1",
-        "shapeContourMode": "first",
+        "shapeContourMode": "all",
         "roiMarginPx": "12",
         "maxRoiHalfPx": "120",
         "fineEndScoreWeight": "0.8",
@@ -155,8 +156,8 @@
       "X": 610,
       "Y": 429,
       "Params": {
-        "offsetDistance": "-1",
-        "closed": "true",
+        "offsetDistance": "0",
+        "closed": "false",
         "halconMode": "gradient",
         "enable": "true",
         "disable": "false"

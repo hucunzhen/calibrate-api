@@ -378,6 +378,8 @@ namespace CalibOperatorCLI_Example
             PersistSelectedRecipe(name);
             UpdateRecipePathHint(name);
             LoadSelectedRecipeMainFlow(showErrors: true);
+            if (Window.GetWindow(this) is MainWindow main)
+                main.NotifyRecipeChangedForShapeCalibration();
         }
 
         private void BtnOpenRecipeMain_Click(object sender, RoutedEventArgs e) =>
@@ -529,6 +531,8 @@ namespace CalibOperatorCLI_Example
             UpdateRecipePathHint(recipeName);
             if (loadMainFlow)
                 LoadSelectedRecipeMainFlow(showErrors: true);
+            if (Window.GetWindow(this) is MainWindow mainWin)
+                mainWin.NotifyRecipeChangedForShapeCalibration();
         }
 
         private int CountOpenTabsUnderRecipeDirectory(string recipeDirectory)

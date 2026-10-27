@@ -22,6 +22,12 @@ namespace CalibOperatorCLI_Example
         [ThreadStatic]
         private static int _operatorGateDepth;
 
+        /// <summary>
+        /// 当前线程是否已在 <see cref="RunExclusive"/> 门闩内。
+        /// <see cref="HalconComputeRunner"/> 据此避免再 <c>Task.Run</c>+同步等待造成跨线程死锁。
+        /// </summary>
+        public static bool IsInsideOperatorGate => _operatorGateDepth > 0;
+
         /// <summary>最近一次 ParallelFind 作用域内实际使用的 thread_num（便于日志核对）。</summary>
         public static int LastParallelFindThreadNum { get; private set; }
 
@@ -261,6 +267,7 @@ namespace CalibOperatorCLI_Example
         public static int EffectiveThreadNum => 1;
         public static bool ParallelizeOperators => false;
         public static bool IsApplied => false;
+        public static bool IsInsideOperatorGate => false;
         public static bool IsTraceEnabled() => false;
         public static void EnsureApplied() { }
         public static T RunExclusive<T>(Func<T> work, HalconThreadPolicy policy = HalconThreadPolicy.Geometry) => work();

@@ -32,7 +32,7 @@ namespace CalibOperatorCLI_Example
 
 
 
-            ninePointPath = TxtNinePointCalibPath?.Text?.Trim() ?? "";
+            ninePointPath = _recipeNinePointCalibPath?.Trim() ?? "";
 
             var pixelSettings = new HalconShapeModelUiSettings();
 
@@ -456,15 +456,19 @@ namespace CalibOperatorCLI_Example
 
                     && !string.IsNullOrWhiteSpace(doc.NinePointCalibrationPath)
 
-                    && string.IsNullOrWhiteSpace(TxtNinePointCalibPath?.Text)
+                    && string.IsNullOrWhiteSpace(_recipeNinePointCalibPath)
 
                     && File.Exists(doc.NinePointCalibrationPath))
 
                 {
 
-                    TxtNinePointCalibPath.Text = doc.NinePointCalibrationPath;
+                    // ROI 文件自带路径时仅作回退；正常以配方 camera_correction.json 为准
+
+                    _recipeNinePointCalibPath = doc.NinePointCalibrationPath;
 
                     InvalidateNinePointAffineCache();
+
+                    RefreshRecipeCalibrationSummaryUi();
 
                 }
 

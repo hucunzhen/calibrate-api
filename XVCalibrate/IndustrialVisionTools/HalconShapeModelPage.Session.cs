@@ -29,6 +29,8 @@ namespace CalibOperatorCLI_Example
             }
 
             ApplySessionFromSettingsIfNeeded(forceReload: false);
+            // 进入页时再次对齐当前配方全局标定（切换配方后尤为重要）
+            ApplyRecipeGlobalCalibrationDefaults(forceCorrectionParams: false);
             if (_imgWidth > 0)
                 Dispatcher.BeginInvoke(FitImageToView, DispatcherPriority.Loaded);
         }
@@ -40,8 +42,8 @@ namespace CalibOperatorCLI_Example
             ApplyGlobalCalibrationPathDefaultsIfEmpty();
 
             ApplySessionFromSettingsIfNeeded(forceReload: true);
-            // 会话未写路径时，仍回落到当前配方全局配置
-            ApplyGlobalCalibrationPathDefaultsIfEmpty();
+            // 会话恢复后：路径回落到当前配方全局；未配置矫正时用 main.flow 默认
+            ApplyRecipeGlobalCalibrationDefaults(forceCorrectionParams: false);
 
             if (_imgWidth > 0)
                 FitImageToView();
@@ -83,26 +85,130 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>
-        /// 棋盘/九点标定文件为空时，使用当前配方 <c>models/</c> 下全局约定文件
-        /// （calibration_result.json、calibration_nine_point.json）。
+        /// 将本页标定/矫正状态同步为当前流程配方全局配置
+        /// （<c>models/camera_correction.json</c> + 约定标定文件）。
         /// </summary>
-        private void ApplyGlobalCalibrationPathDefaultsIfEmpty()
+        private void ApplyRecipeGlobalCalibrationDefaults(bool forceCorrectionParams = false)
         {
-            if (TxtCalibrationJsonPath != null && string.IsNullOrWhiteSpace(TxtCalibrationJsonPath.Text))
-            {
-                string? chess = CalibrationResultFileLoader.TryGuessDefaultChessboardCalibrationPath();
-                if (!string.IsNullOrWhiteSpace(chess))
-                    TxtCalibrationJsonPath.Text = chess;
-            }
+            RecipeCameraCorrectionDefaults defaults =
+                FlowRecipeCatalog.TryGetSelectedRecipeCameraCorrectionDefaults();
+
+            string? chess = defaults.ChessboardCalibrationJsonPath
+                            ?? CalibrationResultFileLoader.TryGuessDefaultChessboardCalibrationPath();
+            if (!string.IsNullOrWhiteSpace(chess)
+                && (forceCorrectionParams
+                    || ShouldReplaceCalibrationPath(_recipeChessboardCalibPath, chess, FlowRecipeCatalog.TryGetSelectedRecipeDirectory())))
+                _recipeChessboardCalibPath = chess;
 
 #if HALCON_ENABLED
-            if (TxtNinePointCalibPath != null && string.IsNullOrWhiteSpace(TxtNinePointCalibPath.Text))
+            string? nine = defaults.NinePointCalibrationJsonPath
+                           ?? CalibrationResultFileLoader.TryGuessDefaultPath();
+            if (!string.IsNullOrWhiteSpace(nine)
+                && (forceCorrectionParams
+                    || ShouldReplaceCalibrationPath(_recipeNinePointCalibPath, nine, FlowRecipeCatalog.TryGetSelectedRecipeDirectory())))
             {
-                string? nine = CalibrationResultFileLoader.TryGuessDefaultPath();
-                if (!string.IsNullOrWhiteSpace(nine))
-                    TxtNinePointCalibPath.Text = nine;
+                _recipeNinePointCalibPath = nine;
+                InvalidateNinePointAffineCache();
             }
 #endif
+
+            bool correctionUnset = !_recipeEnableUndistort && !_recipeEnablePerspective;
+            if (forceCorrectionParams || correctionUnset)
+                ApplyCameraCorrectionDefaultsFromRecipe(defaults);
+
+            RefreshRecipeCalibrationSummaryUi();
+        }
+
+        /// <summary>兼容旧调用名：同步配方全局标定。</summary>
+        private void ApplyGlobalCalibrationPathDefaultsIfEmpty() =>
+            ApplyRecipeGlobalCalibrationDefaults(forceCorrectionParams: false);
+
+        private static bool ShouldReplaceCalibrationPath(string? currentRaw, string recipePath, string? recipeDir)
+        {
+            string current = currentRaw?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(current))
+                return true;
+
+            string recipeFull;
+            try
+            {
+                recipeFull = IoPath.GetFullPath(recipePath);
+            }
+            catch
+            {
+                return false;
+            }
+
+            string currentFull;
+            try
+            {
+                currentFull = IoPath.GetFullPath(current);
+            }
+            catch
+            {
+                return true;
+            }
+
+            if (string.Equals(currentFull, recipeFull, StringComparison.OrdinalIgnoreCase))
+                return false;
+            if (!File.Exists(currentFull))
+                return true;
+            if (!string.IsNullOrWhiteSpace(recipeDir)
+                && !FlowRecipeCatalog.IsPathUnderRecipeDirectory(currentFull, recipeDir))
+                return true;
+
+            return false;
+        }
+
+        private void ApplyCameraCorrectionDefaultsFromRecipe(RecipeCameraCorrectionDefaults defaults)
+        {
+            _recipeEnableUndistort = defaults.EnableUndistort;
+            if (!string.IsNullOrWhiteSpace(defaults.UndistortAlpha))
+                _recipeUndistortAlpha = defaults.UndistortAlpha;
+            _recipeEnablePerspective = defaults.EnablePerspective;
+            _recipeCalibViewIndex = defaults.ViewIndex;
+            _recipeCalibBoardCols = defaults.BoardCols > 0
+                ? defaults.BoardCols
+                : ChessboardCalibrationDefaults.InnerCornerCols;
+            _recipeCalibBoardRows = defaults.BoardRows > 0
+                ? defaults.BoardRows
+                : ChessboardCalibrationDefaults.InnerCornerRows;
+            if (!string.IsNullOrWhiteSpace(defaults.SquareSizeMm))
+                _recipeCalibSquareSizeMm = defaults.SquareSizeMm;
+            if (!string.IsNullOrWhiteSpace(defaults.PxPerMm))
+                _recipeCalibPxPerMm = defaults.PxPerMm;
+            if (!string.IsNullOrWhiteSpace(defaults.PerspectiveOutputFrame))
+                _recipePerspectiveOutputFrame = defaults.PerspectiveOutputFrame;
+            if (!string.IsNullOrWhiteSpace(defaults.ChessboardCalibrationJsonPath))
+                _recipeChessboardCalibPath = defaults.ChessboardCalibrationJsonPath;
+            if (!string.IsNullOrWhiteSpace(defaults.NinePointCalibrationJsonPath))
+                _recipeNinePointCalibPath = defaults.NinePointCalibrationJsonPath;
+#if HALCON_ENABLED
+            InvalidateNinePointAffineCache();
+#endif
+            RefreshRecipeCalibrationSummaryUi();
+        }
+
+        /// <summary>流程配方切换后：强制用该配方全局标定/主流程矫正参数刷新本页。</summary>
+        internal void SyncRecipeGlobalCalibrationFromHost(bool forceCorrectionParams = true)
+        {
+            if (!IsLoaded)
+                return;
+
+            bool prev = _suppressSessionPersist;
+            _suppressSessionPersist = true;
+            try
+            {
+                ApplyRecipeGlobalCalibrationDefaults(forceCorrectionParams);
+                TryReapplyCameraCorrectionAfterSessionRestore();
+            }
+            finally
+            {
+                _suppressSessionPersist = prev;
+            }
+
+            if (_uiReady)
+                PersistSessionChange();
         }
 
         private void AttachSessionPersistHandlers()
@@ -129,38 +235,14 @@ namespace CalibOperatorCLI_Example
                 }
             }
 
-            TxtCalibrationJsonPath.LostFocus += (_, _) => ScheduleSessionPersist();
-            TxtUndistortAlpha.LostFocus += (_, _) => ScheduleSessionPersist();
-            TxtCalibViewIndex.LostFocus += (_, _) => ScheduleSessionPersist();
-            TxtCalibBoardCols.LostFocus += (_, _) => ScheduleSessionPersist();
-            TxtCalibBoardRows.LostFocus += (_, _) => ScheduleSessionPersist();
-            TxtCalibSquareSizeMm.LostFocus += (_, _) => ScheduleSessionPersist();
-            TxtCalibPxPerMm.LostFocus += (_, _) => ScheduleSessionPersist();
-            if (TxtNinePointCalibPath != null)
-            {
-                TxtNinePointCalibPath.LostFocus += (_, _) => ScheduleSessionPersist();
-                TxtNinePointCalibPath.TextChanged += (_, _) => ScheduleSessionPersist();
-            }
-
-            ChkEnableUndistort.Checked += OnCameraCorrectionSettingChanged;
-            ChkEnableUndistort.Unchecked += OnCameraCorrectionSettingChanged;
-            ChkEnablePerspective.Checked += OnCameraCorrectionSettingChanged;
-            ChkEnablePerspective.Unchecked += OnCameraCorrectionSettingChanged;
-            CmbPerspectiveOutputFrame.SelectionChanged += (_, _) => ScheduleSessionPersist();
             if (ChkRotateExpandCanvas != null)
             {
-                ChkRotateExpandCanvas.Checked += OnCameraCorrectionSettingChanged;
-                ChkRotateExpandCanvas.Unchecked += OnCameraCorrectionSettingChanged;
+                ChkRotateExpandCanvas.Checked += (_, _) => ScheduleSessionPersist();
+                ChkRotateExpandCanvas.Unchecked += (_, _) => ScheduleSessionPersist();
             }
 
             if (TxtPostCorrectRotateDeg != null)
                 TxtPostCorrectRotateDeg.LostFocus += (_, _) => ScheduleSessionPersist();
-        }
-
-        private void OnCameraCorrectionSettingChanged(object sender, RoutedEventArgs e)
-        {
-            UpdateOptionDependentPanelsVisibility();
-            ScheduleSessionPersist();
         }
 
         private void ScheduleSessionPersist()
@@ -205,8 +287,8 @@ namespace CalibOperatorCLI_Example
             var s = new HalconShapeModelUiSettings
             {
                 ImagePath = imagePath,
-                CalibrationJsonPath = TxtCalibrationJsonPath?.Text?.Trim() ?? "",
-                NinePointCalibrationPath = TxtNinePointCalibPath?.Text?.Trim() ?? "",
+                CalibrationJsonPath = _recipeChessboardCalibPath?.Trim() ?? "",
+                NinePointCalibrationPath = _recipeNinePointCalibPath?.Trim() ?? "",
             };
             CaptureRoiIntoSettings(s);
             CaptureCameraCorrectionIntoSettings(s);
@@ -219,48 +301,26 @@ namespace CalibOperatorCLI_Example
 
         private void CaptureCameraCorrectionIntoSettings(HalconShapeModelUiSettings s)
         {
-            s.EnableUndistort = ChkEnableUndistort?.IsChecked == true;
-            s.UndistortAlpha = TxtUndistortAlpha?.Text?.Trim() ?? "-1";
-            s.EnablePerspective = ChkEnablePerspective?.IsChecked == true;
-            if (int.TryParse(TxtCalibViewIndex?.Text?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int vi))
-                s.CalibViewIndex = vi;
-            if (int.TryParse(TxtCalibBoardCols?.Text?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int cols))
-                s.CalibBoardCols = cols;
-            if (int.TryParse(TxtCalibBoardRows?.Text?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int rows))
-                s.CalibBoardRows = rows;
-            s.CalibSquareSizeMm = TxtCalibSquareSizeMm?.Text?.Trim()
+            s.EnableUndistort = _recipeEnableUndistort;
+            s.UndistortAlpha = _recipeUndistortAlpha ?? "-1";
+            s.EnablePerspective = _recipeEnablePerspective;
+            s.CalibViewIndex = _recipeCalibViewIndex;
+            s.CalibBoardCols = _recipeCalibBoardCols;
+            s.CalibBoardRows = _recipeCalibBoardRows;
+            s.CalibSquareSizeMm = _recipeCalibSquareSizeMm
                 ?? ChessboardCalibrationDefaults.SquareSizeMm.ToString(CultureInfo.InvariantCulture);
-            s.CalibPxPerMm = TxtCalibPxPerMm?.Text?.Trim() ?? ChessboardCalibrationDefaults.PxPerMm.ToString(CultureInfo.InvariantCulture);
-            s.PerspectiveOutputFrame = GetPerspectiveOutputFrameTag();
+            s.CalibPxPerMm = _recipeCalibPxPerMm
+                ?? ChessboardCalibrationDefaults.PxPerMm.ToString(CultureInfo.InvariantCulture);
+            s.PerspectiveOutputFrame = string.IsNullOrWhiteSpace(_recipePerspectiveOutputFrame)
+                ? ChessboardCalibrationDefaults.PerspectiveOutputFrame
+                : _recipePerspectiveOutputFrame;
             s.PostCorrectRotateDeg = _postCorrectRotateDeg;
             s.RotateExpandCanvas = ChkRotateExpandCanvas?.IsChecked == true;
         }
 
-        private string GetPerspectiveOutputFrameTag()
-        {
-            if (CmbPerspectiveOutputFrame?.SelectedItem is System.Windows.Controls.ComboBoxItem item
-                && item.Tag is string tag
-                && !string.IsNullOrWhiteSpace(tag))
-                return tag.Trim();
-            return "board";
-        }
-
         private void ApplyCameraCorrectionFromSettings(HalconShapeModelUiSettings s)
         {
-            if (ChkEnableUndistort != null)
-                ChkEnableUndistort.IsChecked = s.EnableUndistort;
-            if (!string.IsNullOrWhiteSpace(s.UndistortAlpha))
-                TxtUndistortAlpha.Text = s.UndistortAlpha;
-            if (ChkEnablePerspective != null)
-                ChkEnablePerspective.IsChecked = s.EnablePerspective;
-            TxtCalibViewIndex.Text = s.CalibViewIndex.ToString(CultureInfo.InvariantCulture);
-            TxtCalibBoardCols.Text = (s.CalibBoardCols > 0 ? s.CalibBoardCols : ChessboardCalibrationDefaults.InnerCornerCols).ToString(CultureInfo.InvariantCulture);
-            TxtCalibBoardRows.Text = (s.CalibBoardRows > 0 ? s.CalibBoardRows : ChessboardCalibrationDefaults.InnerCornerRows).ToString(CultureInfo.InvariantCulture);
-            if (!string.IsNullOrWhiteSpace(s.CalibSquareSizeMm))
-                TxtCalibSquareSizeMm.Text = s.CalibSquareSizeMm;
-            if (!string.IsNullOrWhiteSpace(s.CalibPxPerMm))
-                TxtCalibPxPerMm.Text = s.CalibPxPerMm;
-            SelectPerspectiveOutputFrame(s.PerspectiveOutputFrame);
+            // 矫正参数以配方为准；会话只恢复本页显示用的旋转等
             _postCorrectRotateDeg = NormalizePostCorrectRotateDeg(s.PostCorrectRotateDeg);
             if (ChkRotateExpandCanvas != null)
                 ChkRotateExpandCanvas.IsChecked = s.RotateExpandCanvas;
@@ -275,27 +335,11 @@ namespace CalibOperatorCLI_Example
             UpdateOptionDependentPanelsVisibility();
         }
 
-        private void SelectPerspectiveOutputFrame(string? tag)
-        {
-            if (CmbPerspectiveOutputFrame == null || string.IsNullOrWhiteSpace(tag))
-                return;
-            string want = tag.Trim();
-            foreach (var item in CmbPerspectiveOutputFrame.Items)
-            {
-                if (item is System.Windows.Controls.ComboBoxItem cbi
-                    && string.Equals(cbi.Tag as string, want, StringComparison.OrdinalIgnoreCase))
-                {
-                    CmbPerspectiveOutputFrame.SelectedItem = cbi;
-                    return;
-                }
-            }
-        }
-
         private void TryReapplyCameraCorrectionAfterSessionRestore()
         {
             if (_rawCalibImage == null)
                 return;
-            if (ChkEnableUndistort?.IsChecked != true && ChkEnablePerspective?.IsChecked != true)
+            if (!_recipeEnableUndistort && !_recipeEnablePerspective)
                 return;
             try
             {
@@ -373,12 +417,8 @@ namespace CalibOperatorCLI_Example
             _suppressDrawModeClear = true;
             try
             {
-                if (!string.IsNullOrWhiteSpace(s.CalibrationJsonPath) && File.Exists(s.CalibrationJsonPath.Trim()))
-                    TxtCalibrationJsonPath.Text = s.CalibrationJsonPath.Trim();
-                if (!string.IsNullOrWhiteSpace(s.NinePointCalibrationPath) && File.Exists(s.NinePointCalibrationPath.Trim()))
-                    TxtNinePointCalibPath.Text = s.NinePointCalibrationPath.Trim();
-                ApplyGlobalCalibrationPathDefaultsIfEmpty();
                 ApplyCameraCorrectionFromSettings(s);
+                ApplyRecipeGlobalCalibrationDefaults(forceCorrectionParams: true);
 
                 LoadImage(imagePath, clearRoi: false);
                 ApplyRoiFromSettings(s);

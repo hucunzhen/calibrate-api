@@ -1,10 +1,10 @@
-﻿{
+{
   "Nodes": [
     {
       "Id": "b2000001-0001-4001-8001-000000000010",
       "TypeId": "halcon_coarse_shape_match",
-      "X": 268.8800000000001,
-      "Y": 19.014285714285677,
+      "X": 618,
+      "Y": 15.014285714285677,
       "Params": {
         "angleStart": "-2",
         "angleExtent": "4",
@@ -15,8 +15,8 @@
         "numLevels": "0",
         "greediness": "0.01",
         "allowRetry": "false",
-        "coarseScaleMin": "1",
-        "coarseScaleMax": "1",
+        "coarseScaleMin": "0.999",
+        "coarseScaleMax": "1.001",
         "endScoreWeight": "0",
         "endArcFraction": "0.7",
         "enable": "true",
@@ -31,7 +31,7 @@
       "Params": {
         "loopEmit": "true",
         "candidateIndex": "9",
-        "maskErosionPx": "10",
+        "maskErosionPx": "-3",
         "maskFillDilatePx": "0",
         "contourLevel": "1",
         "maxCandidates": "0",
@@ -63,8 +63,8 @@
     {
       "Id": "e300274f-4e3a-40b9-b52a-26d739c861a4",
       "TypeId": "composite_bind_in",
-      "X": 11,
-      "Y": 104,
+      "X": 0,
+      "Y": 156,
       "Params": {
         "externalPort": "In",
         "enable": "true",
@@ -74,7 +74,7 @@
     {
       "Id": "aed55a5c-a7ff-465f-99ef-132724859ec0",
       "TypeId": "halcon_chain_strip_bootstrap",
-      "X": 530.8800000000001,
+      "X": 920,
       "Y": 181,
       "Params": {
         "gridRows": "",
@@ -220,13 +220,13 @@
     {
       "Id": "cd4f2e2f-ebe2-4efa-aa0c-bc9e661fb5be",
       "TypeId": "halcon_coarse_shape_match",
-      "X": 233,
-      "Y": 317.3296,
+      "X": 240,
+      "Y": 366.3296,
       "Params": {
         "angleStart": "-180",
         "angleExtent": "360",
         "minScore": "0.25",
-        "numMatches": "0",
+        "numMatches": "1",
         "maxOverlap": "0.5",
         "subPixel": "none",
         "numLevels": "0",
@@ -241,13 +241,27 @@
       }
     },
     {
-      "Id": "1e9ee9a0-caa2-45f4-90ac-51c870d4af97",
-      "TypeId": "list_pick",
-      "X": 400,
-      "Y": 527,
+      "Id": "e1000001-0001-4001-8001-000000000021",
+      "TypeId": "halcon_coarse_shape_reduce_domain",
+      "X": 445,
+      "Y": 189,
       "Params": {
-        "itemPorts": "In",
-        "index": "0",
+        "loopEmit": "false",
+        "candidateIndex": "0",
+        "maskErosionPx": "0",
+        "maskFillDilatePx": "0",
+        "contourLevel": "1",
+        "maxCandidates": "1",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "e1000001-0001-4001-8001-000000000022",
+      "TypeId": "halcon_reduce_domain_by_mask",
+      "X": 315,
+      "Y": 37,
+      "Params": {
         "enable": "true",
         "disable": "false"
       }
@@ -255,8 +269,8 @@
     {
       "Id": "99ce69f7-d262-4468-bbbc-889844c5f1e1",
       "TypeId": "halcon_display_shape_match",
-      "X": 660,
-      "Y": 381,
+      "X": 742,
+      "Y": 371,
       "Params": {
         "contourLevel": "1",
         "crossHalf": "14",
@@ -307,24 +321,6 @@
       "FromPort": "ModelId",
       "ToNodeId": "e1000001-0001-4001-8001-000000000011",
       "ToPort": "ModelId"
-    },
-    {
-      "FromNodeId": "e300274f-4e3a-40b9-b52a-26d739c861a4",
-      "FromPort": "Out",
-      "ToNodeId": "e1000001-0001-4001-8001-000000000011",
-      "ToPort": "In"
-    },
-    {
-      "FromNodeId": "e300274f-4e3a-40b9-b52a-26d739c861a4",
-      "FromPort": "Out",
-      "ToNodeId": "e1000001-0001-4001-8001-000000000016",
-      "ToPort": "Image"
-    },
-    {
-      "FromNodeId": "e300274f-4e3a-40b9-b52a-26d739c861a4",
-      "FromPort": "Out",
-      "ToNodeId": "b2000001-0001-4001-8001-000000000010",
-      "ToPort": "In"
     },
     {
       "FromNodeId": "b2000001-0001-4001-8001-000000000010",
@@ -519,16 +515,70 @@
       "ToPort": "In"
     },
     {
-      "FromNodeId": "cd4f2e2f-ebe2-4efa-aa0c-bc9e661fb5be",
-      "FromPort": "Angle",
-      "ToNodeId": "1e9ee9a0-caa2-45f4-90ac-51c870d4af97",
-      "ToPort": "InList"
+      "FromNodeId": "a9cfad60-5ae8-431e-9872-29c4e72b825b",
+      "FromPort": "ModelId",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000021",
+      "ToPort": "ModelId"
     },
     {
       "FromNodeId": "e300274f-4e3a-40b9-b52a-26d739c861a4",
       "FromPort": "Out",
-      "ToNodeId": "99ce69f7-d262-4468-bbbc-889844c5f1e1",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000021",
       "ToPort": "In"
+    },
+    {
+      "FromNodeId": "cd4f2e2f-ebe2-4efa-aa0c-bc9e661fb5be",
+      "FromPort": "Row",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000021",
+      "ToPort": "CoarseRow"
+    },
+    {
+      "FromNodeId": "cd4f2e2f-ebe2-4efa-aa0c-bc9e661fb5be",
+      "FromPort": "Column",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000021",
+      "ToPort": "CoarseColumn"
+    },
+    {
+      "FromNodeId": "cd4f2e2f-ebe2-4efa-aa0c-bc9e661fb5be",
+      "FromPort": "Angle",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000021",
+      "ToPort": "CoarseAngle"
+    },
+    {
+      "FromNodeId": "cd4f2e2f-ebe2-4efa-aa0c-bc9e661fb5be",
+      "FromPort": "Scale",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000021",
+      "ToPort": "CoarseScale"
+    },
+    {
+      "FromNodeId": "cd4f2e2f-ebe2-4efa-aa0c-bc9e661fb5be",
+      "FromPort": "Score",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000021",
+      "ToPort": "CoarseScore"
+    },
+    {
+      "FromNodeId": "e1000001-0001-4001-8001-000000000021",
+      "FromPort": "Mask",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000022",
+      "ToPort": "Mask"
+    },
+    {
+      "FromNodeId": "e300274f-4e3a-40b9-b52a-26d739c861a4",
+      "FromPort": "Out",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000022",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "e1000001-0001-4001-8001-000000000022",
+      "FromPort": "Out",
+      "ToNodeId": "b2000001-0001-4001-8001-000000000010",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "e1000001-0001-4001-8001-000000000021",
+      "FromPort": "CoarseAngleOut",
+      "ToNodeId": "b2000001-0001-4001-8001-000000000010",
+      "ToPort": "CoarseAngle"
     },
     {
       "FromNodeId": "a9cfad60-5ae8-431e-9872-29c4e72b825b",
@@ -591,18 +641,30 @@
       "ToPort": "CoarseScale"
     },
     {
-      "FromNodeId": "1e9ee9a0-caa2-45f4-90ac-51c870d4af97",
-      "FromPort": "In",
-      "ToNodeId": "b2000001-0001-4001-8001-000000000010",
-      "ToPort": "CoarseAngle"
+      "FromNodeId": "e1000001-0001-4001-8001-000000000022",
+      "FromPort": "Out",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000011",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "e1000001-0001-4001-8001-000000000022",
+      "FromPort": "Out",
+      "ToNodeId": "e1000001-0001-4001-8001-000000000016",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "e300274f-4e3a-40b9-b52a-26d739c861a4",
+      "FromPort": "Out",
+      "ToNodeId": "99ce69f7-d262-4468-bbbc-889844c5f1e1",
+      "ToPort": "In"
     }
   ],
   "Meta": {
-    "standaloneDebugImagePath": "C:\\Users\\DYF\\Desktop\\preview.png",
+    "standaloneDebugImagePath": "shape_template_test_warp.bmp",
     "latticeGridRows": "10",
     "latticeGridCols": "2",
     "mode": "pipeline-A",
-    "note": "\u6A21\u5F0FA\u9010\u6761\u4E32\u884C\uFF1AMask\u6BCF\u8F6E \u7CBE\u5339\u914D\u2192XLD\u2192\u7B80\u5316\u2192\u6807\u5B9A\u2192send_plc\u2192D804L\u2192POU\u2192\u7B49D803\u710A\u5B8C\uFF1B\u65E0points_sink\u3002\u710A\u5B8C\u624D\u8FDB\u5165\u4E0B\u4E00\u8F6EMask\u3002",
+    "note": "\u5916\u6846(outline)\u5339\u914D\u2192\u586B\u5145Mask\u2192\u57DF\u5185\u56FE\u2192\u683C\u5B50\u7C97\u5339\u914D\uFF1B\u5176\u540E\u4ECD\u6309\u7C97\u5019\u9009\u5FAA\u73AF\u51FA Mask \u4F9B\u7CBE\u5339\u914D\u3002",
     "latticeOriginCorner": "top_left"
   }
 }

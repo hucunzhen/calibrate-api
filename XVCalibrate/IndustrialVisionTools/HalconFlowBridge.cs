@@ -2728,6 +2728,10 @@ namespace CalibOperatorCLI_Example
                             $"粗匹配缩放搜索失败：当前模型可能不是 ScaledShape（scaleMin={sMin:G4}, scaleMax={sMax:G4}）。请用 ScaledShape 重新建模或将 scale 设回 1。HALCON: {ex.Message}",
                             ex);
                     }
+
+                    // HALCON：ScaleMin/Max 仅在最高金字塔层检查，精修到低层后 Scale 可能越界。
+                    // 钳制到请求区间（保留候选）；过窄区间若改为丢弃会导致「全无结果」。
+                    ClampScaledShapeMatchScalesInRange(ref hv_Scale, sMin, sMax);
                 }
 
                 double[] rows = new double[hv_Row.Length];
@@ -2750,6 +2754,29 @@ namespace CalibOperatorCLI_Example
                 hImg.Dispose();
                 hoImage.Dispose();
             }
+        }
+
+        /// <summary>
+        /// 将 Scale 钳制到 [scaleMin, scaleMax]。
+        /// HALCON：区间仅在最高金字塔层检查，精修后常越界；丢弃会导致窄区间（如 0.999~1.001）全无结果。
+        /// </summary>
+        internal static void ClampScaledShapeMatchScalesInRange(ref HTuple scale, double scaleMin, double scaleMax)
+        {
+            if (scale == null || scale.Length == 0)
+                return;
+
+            double lo = Math.Min(scaleMin, scaleMax);
+            double hi = Math.Max(scaleMin, scaleMax);
+            var clamped = new HTuple();
+            for (int i = 0; i < scale.Length; i++)
+            {
+                double z = scale[i].D;
+                if (z < lo) z = lo;
+                else if (z > hi) z = hi;
+                clamped = clamped.TupleConcat(z);
+            }
+
+            scale = clamped;
         }
 
         /// <summary>查找形状模板；若无结果则用更低 MinScore / Greediness 再试一次。</summary>
@@ -2870,10 +2897,15 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>获取形状模型轮廓点（模型坐标系：X=列, Y=行），用于叠加显示。</summary>
-        public static Point2D[][] GetShapeModelContourPoints(long modelId, int level = 1) =>
-            HalconRuntimeSettings.RunGeometrySafe(() => GetShapeModelContourPointsCore(modelId, level));
+        /// <param name="forceClose">
+        /// true=首尾不重合也强制补闭合边（旧行为）；
+        /// false=仅当首尾已接近或间隙像采样缺口时才闭合，开放 U/直线不会被画上假连接线；
+        /// null=自动（同 false，推荐）。
+        /// </param>
+        public static Point2D[][] GetShapeModelContourPoints(long modelId, int level = 1, bool? forceClose = null) =>
+            HalconRuntimeSettings.RunGeometrySafe(() => GetShapeModelContourPointsCore(modelId, level, forceClose));
 
-        private static Point2D[][] GetShapeModelContourPointsCore(long modelId, int level = 1)
+        private static Point2D[][] GetShapeModelContourPointsCore(long modelId, int level = 1, bool? forceClose = null)
         {
             if (!HalconShapeModelRegistry.TryGet(modelId, out HShapeModel shapeModel))
                 return Array.Empty<Point2D[]>();
@@ -2889,8 +2921,12 @@ namespace CalibOperatorCLI_Example
                 try
                 {
                     Point2D[] pts = ContourXldToPointArray(one);
-                    if (pts.Length >= 2)
+                    if (pts.Length < 2)
+                        continue;
+                    if (forceClose == true)
                         list.Add(EnsureClosedContourPoints(pts, 0.5, forceClose: true));
+                    else
+                        list.Add(CloseShapeModelContourIfNeeded(pts));
                 }
                 finally
                 {
@@ -2899,6 +2935,41 @@ namespace CalibOperatorCLI_Example
             }
 
             return list.ToArray();
+        }
+
+        /// <summary>
+        /// 闭合轮廓：首尾已接近或间隙≈采样步长时补闭合点。
+        /// 开放轨迹（U 形开口、直线段）首尾间距远大于步长，不补边，避免多出假「连接线」。
+        /// </summary>
+        public static Point2D[] CloseShapeModelContourIfNeeded(Point2D[] pts, double nearTolPx = 2.0)
+        {
+            if (pts == null || pts.Length < 2)
+                return pts ?? Array.Empty<Point2D>();
+
+            // 仅两点的开放直线：绝不闭合成三角形
+            if (pts.Length < 3)
+                return pts;
+
+            double dx = pts[0].X - pts[^1].X;
+            double dy = pts[0].Y - pts[^1].Y;
+            double gap = Math.Sqrt(dx * dx + dy * dy);
+            if (gap <= nearTolPx)
+                return EnsureClosedContourPoints(pts, nearTolPx, forceClose: false);
+
+            double peri = 0;
+            for (int i = 1; i < pts.Length; i++)
+            {
+                double sx = pts[i].X - pts[i - 1].X;
+                double sy = pts[i].Y - pts[i - 1].Y;
+                peri += Math.Sqrt(sx * sx + sy * sy);
+            }
+
+            double avgSeg = peri / (pts.Length - 1);
+            // 采样闭合缺口通常 ≤ 数倍平均步长；开放 U 的开口远大于步长
+            if (gap <= Math.Max(nearTolPx, avgSeg * 2.5) && gap <= peri * 0.08)
+                return EnsureClosedContourPoints(pts, 0.5, forceClose: true);
+
+            return pts;
         }
 
         /// <summary>形状模型点（X=列,Y=行）按匹配位姿变换到图像坐标。</summary>

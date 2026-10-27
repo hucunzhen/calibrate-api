@@ -3,41 +3,10 @@
     {
       "Id": "a1000001-0001-4001-8001-000000000001",
       "TypeId": "load_image",
-      "X": 0,
-      "Y": 80,
+      "X": 450,
+      "Y": 32,
       "Params": {
-        "filePath": "flow_output.bmp",
-        "enable": "true",
-        "disable": "false"
-      }
-    },
-    {
-      "Id": "a1000001-0001-4001-8001-000000000002",
-      "TypeId": "intrinsics_undistort_image",
-      "X": 220,
-      "Y": 80,
-      "Params": {
-        "alpha": "-1",
-        "calibrationJsonFile": "models\\calibration_result.json",
-        "enable": "true",
-        "disable": "false"
-      }
-    },
-    {
-      "Id": "a1000001-0001-4001-8001-000000000003",
-      "TypeId": "chessboard_perspective_warp_image",
-      "X": 460,
-      "Y": 80,
-      "Params": {
-        "calibrationJsonFile": "models\\calibration_result.json",
-        "viewIndex": "1",
-        "cols": "11",
-        "rows": "8",
-        "squareSizeMm": "5",
-        "pxPerMm": "32",
-        "perspectiveOutputFrame": "plane",
-        "perspectiveOutputScale": "board_pixels",
-        "assumeUndistorted": "true",
+        "filePath": "models\\shape_template_test_input.bmp",
         "enable": "true",
         "disable": "false"
       }
@@ -114,7 +83,7 @@
       "Y": 40,
       "Params": {
         "pointPortCount": "2",
-        "dotRadius": "3",
+        "dotRadius": "1",
         "pointLineJoin": "auto",
         "enable": "true",
         "disable": "false"
@@ -141,50 +110,9 @@
         "enable": "true",
         "disable": "false"
       }
-    },
-    {
-      "Id": "64f84a7a-aa3b-4c6a-a697-4387d2803516",
-      "TypeId": "save_image",
-      "X": 460,
-      "Y": 280,
-      "Params": {
-        "filePath": "shape_template_test_warp.bmp",
-        "enable": "true",
-        "disable": "false"
-      }
     }
   ],
   "Connections": [
-    {
-      "FromNodeId": "a1000001-0001-4001-8001-000000000001",
-      "FromPort": "Image",
-      "ToNodeId": "a1000001-0001-4001-8001-000000000002",
-      "ToPort": "Image"
-    },
-    {
-      "FromNodeId": "a1000001-0001-4001-8001-000000000002",
-      "FromPort": "Out",
-      "ToNodeId": "a1000001-0001-4001-8001-000000000003",
-      "ToPort": "Image"
-    },
-    {
-      "FromNodeId": "a1000001-0001-4001-8001-000000000003",
-      "FromPort": "Out",
-      "ToNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
-      "ToPort": "In"
-    },
-    {
-      "FromNodeId": "a1000001-0001-4001-8001-000000000003",
-      "FromPort": "Out",
-      "ToNodeId": "64f84a7a-aa3b-4c6a-a697-4387d2803516",
-      "ToPort": "Image"
-    },
-    {
-      "FromNodeId": "a1000001-0001-4001-8001-000000000003",
-      "FromPort": "Out",
-      "ToNodeId": "2933e235-0d1d-4fa6-8a3e-59daadb1e292",
-      "ToPort": "Image"
-    },
     {
       "FromNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
       "FromPort": "Out",
@@ -286,6 +214,18 @@
       "FromPort": "World",
       "ToNodeId": "2933e235-0d1d-4fa6-8a3e-59daadb1e292",
       "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "a1000001-0001-4001-8001-000000000001",
+      "FromPort": "Image",
+      "ToNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "a1000001-0001-4001-8001-000000000001",
+      "FromPort": "Image",
+      "ToNodeId": "2933e235-0d1d-4fa6-8a3e-59daadb1e292",
+      "ToPort": "Img"
     }
   ],
   "Meta": {

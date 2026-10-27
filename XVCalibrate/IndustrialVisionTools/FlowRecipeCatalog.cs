@@ -5,6 +5,27 @@ using System.Linq;
 
 namespace CalibOperatorCLI_Example
 {
+    /// <summary>
+    /// 当前流程配方的全局标定/矫正默认值（来自 <c>models/camera_correction.json</c> + 约定标定文件）。
+    /// </summary>
+    internal sealed class RecipeCameraCorrectionDefaults
+    {
+        public string? ChessboardCalibrationJsonPath { get; init; }
+        public string? NinePointCalibrationJsonPath { get; init; }
+        public bool ProfileFound { get; init; }
+        public bool EnableUndistort { get; init; }
+        public bool EnablePerspective { get; init; }
+        public string UndistortAlpha { get; init; } = "-1";
+        public int ViewIndex { get; init; }
+        public int BoardCols { get; init; } = ChessboardCalibrationDefaults.InnerCornerCols;
+        public int BoardRows { get; init; } = ChessboardCalibrationDefaults.InnerCornerRows;
+        public string SquareSizeMm { get; init; } =
+            ChessboardCalibrationDefaults.SquareSizeMm.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        public string PxPerMm { get; init; } =
+            ChessboardCalibrationDefaults.PxPerMm.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        public string PerspectiveOutputFrame { get; init; } = ChessboardCalibrationDefaults.PerspectiveOutputFrame;
+    }
+
     public sealed class FlowRecipeInfo
     {
         public required string Name { get; init; }
@@ -215,8 +236,19 @@ namespace CalibOperatorCLI_Example
         public static string? TryGetSelectedChessboardCalibrationResultPath()
         {
             string? dir = TryGetSelectedRecipeDirectory();
-            if (dir == null)
+            return dir == null ? null : TryResolveChessboardCalibrationResultPath(dir);
+        }
+
+        public static string? TryResolveChessboardCalibrationResultPath(string recipeDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(recipeDirectory) || !Directory.Exists(recipeDirectory))
                 return null;
+
+            RecipeCameraCorrectionProfile? profile =
+                RecipeCameraCorrectionProfile.TryLoadFromRecipeDirectory(recipeDirectory);
+            string? fromProfile = profile?.TryResolveChessboardCalibrationPath(recipeDirectory);
+            if (fromProfile != null)
+                return fromProfile;
 
             foreach (string relative in new[]
                      {
@@ -225,7 +257,7 @@ namespace CalibOperatorCLI_Example
                          Path.Combine("chessboard", "calibration_full.json")
                      })
             {
-                string path = Path.Combine(dir, relative);
+                string path = Path.Combine(recipeDirectory, relative);
                 if (File.Exists(path))
                     return Path.GetFullPath(path);
             }
@@ -237,11 +269,53 @@ namespace CalibOperatorCLI_Example
         public static string? TryGetSelectedNinePointCalibrationResultPath()
         {
             string? dir = TryGetSelectedRecipeDirectory();
-            if (dir == null)
+            return dir == null ? null : TryResolveNinePointCalibrationResultPath(dir);
+        }
+
+        public static string? TryResolveNinePointCalibrationResultPath(string recipeDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(recipeDirectory) || !Directory.Exists(recipeDirectory))
                 return null;
 
-            string path = Path.Combine(dir, "models", "calibration_nine_point.json");
+            RecipeCameraCorrectionProfile? profile =
+                RecipeCameraCorrectionProfile.TryLoadFromRecipeDirectory(recipeDirectory);
+            string? fromProfile = profile?.TryResolveNinePointCalibrationPath(recipeDirectory);
+            if (fromProfile != null)
+                return fromProfile;
+
+            string path = Path.Combine(recipeDirectory, "models", "calibration_nine_point.json");
             return File.Exists(path) ? Path.GetFullPath(path) : null;
+        }
+
+        /// <summary>
+        /// 读取当前配方全局标定/矫正默认值（<c>models/camera_correction.json</c>；无文件则用内置默认 + 约定路径）。
+        /// </summary>
+        public static RecipeCameraCorrectionDefaults TryGetSelectedRecipeCameraCorrectionDefaults()
+        {
+            string? recipeDir = TryGetSelectedRecipeDirectory();
+            RecipeCameraCorrectionProfile? profile = recipeDir == null
+                ? null
+                : RecipeCameraCorrectionProfile.TryLoadFromRecipeDirectory(recipeDir);
+            RecipeCameraCorrectionProfile effective = profile ?? RecipeCameraCorrectionProfile.CreateBuiltInDefaults();
+
+            string? chess = recipeDir == null ? null : TryResolveChessboardCalibrationResultPath(recipeDir);
+            string? nine = recipeDir == null ? null : TryResolveNinePointCalibrationResultPath(recipeDir);
+
+            return new RecipeCameraCorrectionDefaults
+            {
+                ChessboardCalibrationJsonPath = chess,
+                NinePointCalibrationJsonPath = nine,
+                ProfileFound = profile != null,
+                EnableUndistort = effective.EnableUndistort,
+                EnablePerspective = effective.EnablePerspective,
+                UndistortAlpha = effective.UndistortAlpha,
+                ViewIndex = effective.ViewIndex,
+                BoardCols = effective.BoardCols,
+                BoardRows = effective.BoardRows,
+                SquareSizeMm = effective.SquareSizeMm,
+                PxPerMm = effective.PxPerMm,
+                PerspectiveOutputFrame = effective.PerspectiveOutputFrame
+            };
         }
 
         public static string? TryGetWeldFlowPath(string recipeName)
