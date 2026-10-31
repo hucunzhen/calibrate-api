@@ -17,6 +17,8 @@
 | **flows/** | [README_workflow_guide.md](README_workflow_guide.md) | 产线标定、模板、主流程部署顺序 |
 | [chessboard/](chessboard/) | [README.md](chessboard/README.md) | 棋盘格标定、去畸变、透视展开、`calibration_correct_image` |
 | [halcon/](halcon/) | [README_shape_model_match.md](halcon/README_shape_model_match.md) | HALCON 形状模板创建 / 查找 / 阵列过滤 |
+| [halcon/](halcon/) | [README_shape_model_roi.md](halcon/README_shape_model_roi.md) | 形状模板页 ROI 绘制、mm 保存/加载 |
+| [halcon/](halcon/) | [README_shape_model_page_test.md](halcon/README_shape_model_page_test.md) | ROI 编辑 → 生成模型 → 模板测试流程 检查清单 |
 | [halcon/](halcon/) | [README_coarse_fine_shape_match.md](halcon/README_coarse_fine_shape_match.md) | 粗定位 + 可变形精匹配 + Mask 循环 |
 | [sam/](sam/) | — | SAM / 文本检测分割示例 flow |
 | [xingzu/](xingzu/) | — | 项目定制流程示例 |

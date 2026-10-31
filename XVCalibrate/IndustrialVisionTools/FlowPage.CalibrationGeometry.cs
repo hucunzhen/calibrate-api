@@ -4,6 +4,7 @@ using System;
 using System.Diagnostics;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -46,8 +47,43 @@ namespace CalibOperatorCLI_Example
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             PropertyNameCaseInsensitive = true,
             WriteIndented = true,
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
         };
+
+        private static void WriteCalibrationResultFile(string path, CalibrationResultFileV1 dto)
+        {
+            string? dir = System.IO.Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(dir))
+                Directory.CreateDirectory(dir);
+            string outJson = JsonSerializer.Serialize(dto, CalibrationResultFileJsonOptions);
+            File.WriteAllText(path, outJson, Encoding.UTF8);
+        }
+
+        private static string ReadCalibrationFileText(string path)
+        {
+            string raw = File.ReadAllText(path, Encoding.UTF8);
+            if (raw.Length > 0 && raw[0] == '\uFEFF')
+                raw = raw[1..];
+            return raw;
+        }
+
+        private static CalibrationResultFileV1 DeserializeCalibrationResultFile(string raw, string label)
+        {
+            CalibrationResultFileV1? dto;
+            try
+            {
+                dto = JsonSerializer.Deserialize<CalibrationResultFileV1>(raw, CalibrationResultFileJsonOptions);
+            }
+            catch (JsonException ex)
+            {
+                throw new InvalidOperationException($"读取标定结果({label}): JSON 解析失败 — {ex.Message}");
+            }
+
+            if (dto == null || dto.SchemaVersion < 1)
+                throw new InvalidOperationException($"读取标定结果({label}): 无效的 schemaVersion（需要 >= 1）");
+            return dto;
+        }
 
         private sealed class CalibrationResultFileV1
         {

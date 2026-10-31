@@ -13,7 +13,18 @@ namespace CalibOperatorCLI_Example
             /// <summary>增加一条连接线（可含自动完成本条 + 从终点续画首点）。</summary>
             Connector,
             /// <summary>「完成本条」把草稿写入列表。</summary>
-            FinishEntry
+            FinishEntry,
+            /// <summary>段拖动/弹窗编辑/删段/删连接线/整体平移等场景级编辑。</summary>
+            SceneEdit
+        }
+
+        private sealed class OpenTrajSceneSnapshot
+        {
+            public List<(string Name, RoiContourPath Path)> Entries { get; init; } = new();
+            public RoiContourPath Draft { get; init; } = new();
+            public List<RoiConnectorSegment> Connectors { get; init; } = new();
+            public int? EditingIndex { get; init; }
+            public bool PreferPick { get; init; }
         }
 
         private sealed class OpenTrajHistoryItem
@@ -36,6 +47,10 @@ namespace CalibOperatorCLI_Example
             public OpenTrajectoryEntry? FinishedEntry { get; set; }
             public int? FinishReplacedEditIndex { get; set; }
             public RoiContourPath? FinishPreviousPath { get; set; }
+
+            public OpenTrajSceneSnapshot? SceneBefore { get; set; }
+            public OpenTrajSceneSnapshot? SceneAfter { get; set; }
+            public string? SceneEditLabel { get; set; }
         }
 
         private readonly List<OpenTrajHistoryItem> _openTrajUndo = new();
@@ -159,7 +174,60 @@ namespace CalibOperatorCLI_Example
             if (item.FinishPreviousPath != null)
                 dto.FinishPreviousPath = ExportRoiPath(item.FinishPreviousPath);
 
+            dto.SceneEditLabel = item.SceneEditLabel;
+            ExportSceneSnapshotToDto(item.SceneBefore, before: true, dto);
+            ExportSceneSnapshotToDto(item.SceneAfter, before: false, dto);
+
             return dto;
+        }
+
+        private static void ExportSceneSnapshotToDto(
+            OpenTrajSceneSnapshot? snap, bool before, OpenTrajHistoryItemDto dto)
+        {
+            if (snap == null)
+                return;
+
+            var names = new List<string>(snap.Entries.Count);
+            var paths = new List<HalconShapeModelRoiPathDto>(snap.Entries.Count);
+            foreach ((string name, RoiContourPath path) in snap.Entries)
+            {
+                names.Add(name);
+                if (ExportRoiPath(path) is HalconShapeModelRoiPathDto p)
+                    paths.Add(p);
+                else
+                    paths.Add(new HalconShapeModelRoiPathDto());
+            }
+
+            var connectors = new List<HalconShapeModelRoiConnectorDto>(snap.Connectors.Count);
+            foreach (RoiConnectorSegment seg in snap.Connectors)
+            {
+                connectors.Add(new HalconShapeModelRoiConnectorDto
+                {
+                    StartX = seg.StartX,
+                    StartY = seg.StartY,
+                    EndX = seg.EndX,
+                    EndY = seg.EndY
+                });
+            }
+
+            if (before)
+            {
+                dto.SceneBeforeNames = names;
+                dto.SceneBeforePaths = paths;
+                dto.SceneBeforeDraft = ExportRoiPath(snap.Draft);
+                dto.SceneBeforeConnectors = connectors;
+                dto.SceneBeforeEditingIndex = snap.EditingIndex;
+                dto.SceneBeforePreferPick = snap.PreferPick;
+            }
+            else
+            {
+                dto.SceneAfterNames = names;
+                dto.SceneAfterPaths = paths;
+                dto.SceneAfterDraft = ExportRoiPath(snap.Draft);
+                dto.SceneAfterConnectors = connectors;
+                dto.SceneAfterEditingIndex = snap.EditingIndex;
+                dto.SceneAfterPreferPick = snap.PreferPick;
+            }
         }
 
         private static OpenTrajHistoryItem? ImportOpenTrajHistoryItem(OpenTrajHistoryItemDto? dto)
@@ -242,7 +310,63 @@ namespace CalibOperatorCLI_Example
                 ResumeVertex = new Point(dto.ResumeVertexX, dto.ResumeVertexY),
                 FinishedEntry = finished,
                 FinishReplacedEditIndex = dto.FinishReplacedEditIndex,
-                FinishPreviousPath = finishPrev
+                FinishPreviousPath = finishPrev,
+                SceneEditLabel = dto.SceneEditLabel,
+                SceneBefore = ImportSceneSnapshotFromDto(
+                    dto.SceneBeforeNames, dto.SceneBeforePaths, dto.SceneBeforeDraft,
+                    dto.SceneBeforeConnectors, dto.SceneBeforeEditingIndex, dto.SceneBeforePreferPick),
+                SceneAfter = ImportSceneSnapshotFromDto(
+                    dto.SceneAfterNames, dto.SceneAfterPaths, dto.SceneAfterDraft,
+                    dto.SceneAfterConnectors, dto.SceneAfterEditingIndex, dto.SceneAfterPreferPick)
+            };
+        }
+
+        private static OpenTrajSceneSnapshot? ImportSceneSnapshotFromDto(
+            List<string>? names,
+            List<HalconShapeModelRoiPathDto>? paths,
+            HalconShapeModelRoiPathDto? draftDto,
+            List<HalconShapeModelRoiConnectorDto>? connectorsDto,
+            int? editingIndex,
+            bool? preferPick)
+        {
+            if (paths == null && draftDto == null && connectorsDto == null)
+                return null;
+
+            var entries = new List<(string Name, RoiContourPath Path)>();
+            int n = paths?.Count ?? 0;
+            for (int i = 0; i < n; i++)
+            {
+                var path = new RoiContourPath();
+                ImportRoiPath(path, paths![i]);
+                path.IsClosed = false;
+                string name = names != null && i < names.Count ? names[i] : $"轨迹{i + 1}";
+                entries.Add((name, path));
+            }
+
+            var draft = new RoiContourPath();
+            if (draftDto != null)
+            {
+                ImportRoiPath(draft, draftDto);
+                draft.IsClosed = false;
+            }
+
+            var connectors = new List<RoiConnectorSegment>();
+            if (connectorsDto != null)
+            {
+                foreach (HalconShapeModelRoiConnectorDto cdto in connectorsDto)
+                {
+                    connectors.Add(new RoiConnectorSegment(
+                        cdto.StartX, cdto.StartY, cdto.EndX, cdto.EndY));
+                }
+            }
+
+            return new OpenTrajSceneSnapshot
+            {
+                Entries = entries,
+                Draft = draft,
+                Connectors = connectors,
+                EditingIndex = editingIndex,
+                PreferPick = preferPick ?? true
             };
         }
 
@@ -301,6 +425,7 @@ namespace CalibOperatorCLI_Example
             ApplyOpenTrajUndo(item);
             _openTrajRedo.Add(item);
             RefreshOpenTrajectoryVisualAfterHistory();
+            UpdateRoiEditHint();
             PersistSessionChange();
             return true;
         }
@@ -315,6 +440,7 @@ namespace CalibOperatorCLI_Example
             ApplyOpenTrajRedo(item);
             _openTrajUndo.Add(item);
             RefreshOpenTrajectoryVisualAfterHistory();
+            UpdateRoiEditHint();
             PersistSessionChange();
             return true;
         }
@@ -336,7 +462,14 @@ namespace CalibOperatorCLI_Example
 
                 case OpenTrajHistoryKind.FinishEntry:
                     UndoFinishEntryAction(item);
-                    AppendLog("开放轨迹撤销: 完成本条");
+                    _openTrajectoryPreferPick = true;
+                    AppendLog("开放轨迹撤销: 完成本条 → 优先取点");
+                    break;
+
+                case OpenTrajHistoryKind.SceneEdit:
+                    if (item.SceneBefore != null)
+                        ApplyOpenTrajSceneSnapshot(item.SceneBefore);
+                    AppendLog($"开放轨迹撤销: {item.SceneEditLabel ?? "场景编辑"}");
                     break;
             }
         }
@@ -352,12 +485,22 @@ namespace CalibOperatorCLI_Example
 
                 case OpenTrajHistoryKind.Connector:
                     RedoConnectorAction(item);
+                    // 重做连接线后通常带 resume 顶点，保持取点
+                    if (item.AddedResumeVertex)
+                        _openTrajectoryPreferPick = true;
                     AppendLog($"开放轨迹重做: 连接线，共 {_trajectoryConnectors.Count} 条");
                     break;
 
                 case OpenTrajHistoryKind.FinishEntry:
                     RedoFinishEntryAction(item);
-                    AppendLog("开放轨迹重做: 完成本条");
+                    _openTrajectoryPreferPick = false;
+                    AppendLog("开放轨迹重做: 完成本条 → 优先选中");
+                    break;
+
+                case OpenTrajHistoryKind.SceneEdit:
+                    if (item.SceneAfter != null)
+                        ApplyOpenTrajSceneSnapshot(item.SceneAfter);
+                    AppendLog($"开放轨迹重做: {item.SceneEditLabel ?? "场景编辑"}");
                     break;
             }
         }
@@ -383,11 +526,16 @@ namespace CalibOperatorCLI_Example
                 _trajectoryConnectors.RemoveAt(_trajectoryConnectors.Count - 1);
 
             if (item.AutoFinishedEntry != null)
+            {
                 RestoreFinishedEntryToDraft(item.AutoFinishedEntry, item.AutoFinishedReplacedEditIndex, item.AutoFinishedPreviousPath);
+                // 撤销连接线自动完成后回到草稿，优先取点
+                _openTrajectoryPreferPick = true;
+            }
             else if (item.ClearedSingletonVertex is Point single)
             {
                 _roiPath.Clear();
                 _roiPath.AddFirstVertex(single);
+                _openTrajectoryPreferPick = true;
             }
         }
 
@@ -484,6 +632,124 @@ namespace CalibOperatorCLI_Example
                 _roiPath.AddArcSegment(item.Vertex, via);
             else
                 _roiPath.AddLineSegment(item.Vertex);
+        }
+
+        private OpenTrajSceneSnapshot CaptureOpenTrajSceneSnapshot()
+        {
+            var entries = new List<(string Name, RoiContourPath Path)>(_openTrajectoryEntries.Count);
+            foreach (OpenTrajectoryEntry entry in _openTrajectoryEntries)
+                entries.Add((entry.Name, CloneContourPath(entry.Path)));
+
+            var connectors = new List<RoiConnectorSegment>(_trajectoryConnectors.Count);
+            foreach (RoiConnectorSegment seg in _trajectoryConnectors)
+                connectors.Add(new RoiConnectorSegment(seg.Start, seg.End));
+
+            return new OpenTrajSceneSnapshot
+            {
+                Entries = entries,
+                Draft = CloneContourPath(_roiPath),
+                Connectors = connectors,
+                EditingIndex = _editingOpenTrajectoryIndex,
+                PreferPick = _openTrajectoryPreferPick
+            };
+        }
+
+        private void ApplyOpenTrajSceneSnapshot(OpenTrajSceneSnapshot snap)
+        {
+            _openTrajectoryEntries.Clear();
+            foreach ((string name, RoiContourPath path) in snap.Entries)
+            {
+                _openTrajectoryEntries.Add(new OpenTrajectoryEntry
+                {
+                    Name = name,
+                    Path = CloneContourPath(path)
+                });
+            }
+
+            _roiPath.Clear();
+            CopyContourPathContents(snap.Draft, _roiPath);
+            _roiPath.IsClosed = false;
+
+            _trajectoryConnectors.Clear();
+            foreach (RoiConnectorSegment seg in snap.Connectors)
+                _trajectoryConnectors.Add(new RoiConnectorSegment(seg.Start, seg.End));
+
+            _editingOpenTrajectoryIndex = snap.EditingIndex;
+            _openTrajectoryPreferPick = snap.PreferPick;
+            _hasOpenTrajectoriesRoi = _openTrajectoryEntries.Count > 0 || _roiPath.VertexCount >= 2;
+            _hasRoi = _hasOpenTrajectoriesRoi;
+            ClearSelectedRoiSegmentHighlight();
+        }
+
+        /// <summary>将 before→当前 写入撤销栈（无实质变化则跳过）。</summary>
+        private void CommitOpenTrajSceneEdit(OpenTrajSceneSnapshot before, string label)
+        {
+            OpenTrajSceneSnapshot after = CaptureOpenTrajSceneSnapshot();
+            if (OpenTrajScenesEqual(before, after))
+                return;
+
+            PushOpenTrajHistory(new OpenTrajHistoryItem
+            {
+                Kind = OpenTrajHistoryKind.SceneEdit,
+                SceneBefore = before,
+                SceneAfter = after,
+                SceneEditLabel = label
+            });
+        }
+
+        private static bool OpenTrajScenesEqual(OpenTrajSceneSnapshot a, OpenTrajSceneSnapshot b)
+        {
+            if (a.PreferPick != b.PreferPick || a.EditingIndex != b.EditingIndex)
+                return false;
+            if (a.Entries.Count != b.Entries.Count || a.Connectors.Count != b.Connectors.Count)
+                return false;
+            if (!RoiPathsGeometricallyEqual(a.Draft, b.Draft))
+                return false;
+            for (int i = 0; i < a.Entries.Count; i++)
+            {
+                if (!string.Equals(a.Entries[i].Name, b.Entries[i].Name, StringComparison.Ordinal))
+                    return false;
+                if (!RoiPathsGeometricallyEqual(a.Entries[i].Path, b.Entries[i].Path))
+                    return false;
+            }
+
+            for (int i = 0; i < a.Connectors.Count; i++)
+            {
+                if (Dist(a.Connectors[i].Start, b.Connectors[i].Start) > 1e-6
+                    || Dist(a.Connectors[i].End, b.Connectors[i].End) > 1e-6)
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static bool RoiPathsGeometricallyEqual(RoiContourPath a, RoiContourPath b)
+        {
+            if (a.VertexCount != b.VertexCount || a.IsClosed != b.IsClosed)
+                return false;
+            for (int i = 0; i < a.VertexCount; i++)
+            {
+                if (Dist(a.Vertices[i], b.Vertices[i]) > 1e-6)
+                    return false;
+            }
+
+            int edges = Math.Min(a.EdgeKinds.Count, b.EdgeKinds.Count);
+            for (int i = 0; i < edges; i++)
+            {
+                if (a.EdgeKinds[i] != b.EdgeKinds[i])
+                    return false;
+                Point? av = i < a.ArcVia.Count ? a.ArcVia[i] : null;
+                Point? bv = i < b.ArcVia.Count ? b.ArcVia[i] : null;
+                if (av is Point ap && bv is Point bp)
+                {
+                    if (Dist(ap, bp) > 1e-6)
+                        return false;
+                }
+                else if (av != null || bv != null)
+                    return false;
+            }
+
+            return true;
         }
 
         private void RefreshOpenTrajectoryVisualAfterHistory()

@@ -1,6 +1,9 @@
 using System;
+using System.IO;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using IoPath = System.IO.Path;
 
 namespace CalibOperatorCLI_Example
 {
@@ -103,7 +106,94 @@ namespace CalibOperatorCLI_Example
             PersistLastParamRecipeId(recipe.Id);
             ScheduleSessionPersist();
             if (log)
-                AppendLog($"[参数配方] 已应用「{recipe.Name}」。图像和 ROI 未改。");
+                AppendLog($"[参数配方] 已应用「{recipe.Name}」。");
+            TryLoadRoiForSelectedParamRecipe(log);
+        }
+
+        /// <summary>
+        /// 配方目录 <c>roi/outline|coarse|fine.xvroi.json</c>（自定义配方用名称）。
+        /// 仅当文件已保存过才加载；没有对应文件则保持当前 ROI。
+        /// </summary>
+        private void TryLoadRoiForSelectedParamRecipe(bool log)
+        {
+            if (_insideSessionRestore)
+                return;
+
+            HalconShapeModelParamRecipe? recipe = SelectedParamRecipe;
+            if (recipe == null)
+                return;
+
+            if (!TryGetParamRecipeRoiPath(recipe, out string path, out string relative))
+            {
+                if (log)
+                    AppendLog("[参数配方] 未选择流程配方目录，无法匹配 ROI。");
+                return;
+            }
+
+            if (!File.Exists(path))
+            {
+                if (log)
+                    AppendLog($"[参数配方] 未找到已保存 ROI（{relative}），保持当前 ROI。");
+                return;
+            }
+
+            try
+            {
+                RoiSnapshotDocument doc = RoiSnapshotFileIo.Load(path);
+                ApplyRoiSnapshotDocument(doc, path);
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"[参数配方] 加载 ROI 失败（{relative}）: {ex.Message}");
+            }
+        }
+
+        private bool TryGetParamRecipeRoiPath(
+            HalconShapeModelParamRecipe recipe,
+            out string fullPath,
+            out string relativePath)
+        {
+            fullPath = "";
+            relativePath = "";
+            string? recipeDir = FlowRecipeCatalog.TryGetSelectedRecipeDirectory();
+            if (string.IsNullOrWhiteSpace(recipeDir))
+                return false;
+
+            string stem = GetParamRecipeRoiFileStem(recipe);
+            relativePath = IoPath.Combine("roi", stem + ".xvroi.json");
+            fullPath = IoPath.Combine(recipeDir, relativePath);
+            return true;
+        }
+
+        private static string GetParamRecipeRoiFileStem(HalconShapeModelParamRecipe recipe)
+        {
+            string id = recipe.Id?.Trim() ?? "";
+            string name = recipe.Name?.Trim() ?? "";
+            if (IsOutlineParamRecipe(id, name))
+                return "outline";
+            if (IsCoarseParamRecipe(id, name))
+                return "coarse";
+            if (IsFineParamRecipe(id, name))
+                return "fine";
+
+            string raw = name;
+            if (string.IsNullOrWhiteSpace(raw))
+                raw = id.StartsWith("user:", StringComparison.OrdinalIgnoreCase) ? id[5..] : id;
+            return SanitizeRoiFileStem(raw);
+        }
+
+        private static string SanitizeRoiFileStem(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return "recipe";
+
+            var invalid = IoPath.GetInvalidFileNameChars();
+            var sb = new StringBuilder(raw.Length);
+            foreach (char c in raw.Trim())
+                sb.Append(Array.IndexOf(invalid, c) >= 0 || c is ':' or '/' or '\\' ? '_' : c);
+
+            string s = sb.ToString().Trim('_');
+            return string.IsNullOrWhiteSpace(s) ? "recipe" : s;
         }
 
         private void BtnSaveAsParamRecipe_Click(object sender, RoutedEventArgs e)

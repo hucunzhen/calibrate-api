@@ -2,6 +2,7 @@
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       Title="HALCON 形状模板"
+      KeepAlive="True"
       Background="{StaticResource Ui.WorkspaceBackground}"
       ToolTipService.InitialShowDelay="300"
       ToolTipService.ShowDuration="60000"
@@ -44,6 +45,7 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6">
                             <TextBlock Text="图像" Width="40" VerticalAlignment="Center" Foreground="#90A4AE" FontSize="11" Margin="0,0,8,0"/>
@@ -58,18 +60,18 @@
                             <RadioButton x:Name="RbRotatedRectMode" Content="矩形" GroupName="DrawMode" IsChecked="True"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
-                                         ToolTip="矩形 ROI，可带角度。角度填 0 即为轴对齐。选中后弹参数框填中心、宽高、角度；也可在画布拖绘后再点方向定角。"/>
+                                         ToolTip="矩形 ROI。无 ROI 时在图上按下拖到对角松开即可画出（与圆形相同）；已有 ROI 时点图或「参数…」改中心、宽高、角度。角度 0 为轴对齐。"/>
                             <RadioButton x:Name="RbCircleMode" Content="圆形" GroupName="DrawMode"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
-                                         ToolTip="圆孔/外圆 ROI。圆心与半径在对话框输入。用于圆模板或「几何图形 → 轮廓」里的圆。"/>
+                                         ToolTip="圆孔/外圆 ROI。无 ROI 时按下圆心拖半径松开即可画出；已有 ROI 时点图或「参数…」改圆心、半径。"/>
                             <Button x:Name="BtnPrimitiveRoiParams" Content="参数…" MinWidth="56" Height="32" Padding="8,4"
                                     Margin="0,0,6,4" Visibility="Collapsed" Click="BtnPrimitiveRoiParams_Click"
                                     ToolTip="编辑当前矩形/圆的 ROI 参数（中心、宽高、半径、角度）"/>
                             <RadioButton x:Name="RbPolygonMode" Content="多边形" GroupName="DrawMode"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
-                                         ToolTip="单击加点，路径可选直线或圆弧。回到起点容差内自动闭合。点击边线选中：拖动可平移该段，松手未拖动则弹窗编辑；右键菜单可删除该段。用于不规则外形、手绘边线模板。开放轨迹请改用「开放轨迹」。"/>
+                                         ToolTip="单击加点，路径可选直线或圆弧。回到起点容差内自动闭合。画线时普通单击是加点；要选已有边请 Alt+点。点边拖动平移该段，松手未拖则弹窗。已闭合时 Delete 在该边断开并保留顶点。"/>
                             <RadioButton x:Name="RbRingMode" Content="环形" GroupName="DrawMode"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
@@ -77,12 +79,16 @@
                             <RadioButton x:Name="RbOpenTrajectoriesMode" Content="开放轨迹" GroupName="DrawMode"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
-                                         ToolTip="不闭合的胶路/刻线。可画多条，「完成本条」加入列表。点选线段可拖动平移，右键菜单删除；松手未拖动则弹窗编辑。连接线只辅助显示，不进入模板。"/>
+                                         ToolTip="不闭合胶路/刻线。「新建本条」后单击取点；「完成本条」后点边选中/拖动或弹窗改参数。Alt+点强制选中；Ctrl+拖整体平移。Delete / 右键「只删此边」只去掉该段（中间边拆成两条）；Shift+Delete 才拼接缺口。"/>
+                            <Button x:Name="BtnRoiEditHelp" Content="编辑说明" MinWidth="72" Height="32" Padding="8,4" Margin="0,0,6,4"
+                                    Click="BtnRoiEditHelp_Click"
+                                    ToolTip="当前形状下如何画、如何改已有边、Alt/Ctrl/Delete 快捷键，以及删除时会发生什么。"/>
                             <Button x:Name="BtnFinishOpenTrajectory" Content="完成本条" MinWidth="72" Height="32" Padding="8,4" Margin="0,0,6,4"
                                     Visibility="Collapsed" Click="BtnFinishOpenTrajectory_Click"
-                                    ToolTip="当前轨迹≥2 点则加入列表"/>
+                                    ToolTip="保存当前轨迹后进入选中模式：点边选中/拖动，空白不再加点。取点时要选已有边请 Alt+点。整拖请 Ctrl。"/>
                             <Button x:Name="BtnNewOpenTrajectory" Content="新建本条" MinWidth="72" Height="32" Padding="8,4" Margin="0,0,6,4"
-                                    Visibility="Collapsed" Click="BtnNewOpenTrajectory_Click"/>
+                                    Visibility="Collapsed" Click="BtnNewOpenTrajectory_Click"
+                                    ToolTip="开始下一条：单击图像即本条起点（直线/圆弧保持当前选择；可贴已有顶点/边）。Alt+点仍可选中边；Ctrl+拖仍可整体平移。"/>
                         </WrapPanel>
                         <WrapPanel x:Name="PnlPathToolbar" Grid.Row="2" Visibility="Collapsed">
                             <TextBlock Text="路径" Width="40" VerticalAlignment="Center" Foreground="#90A4AE" FontSize="11" Margin="0,0,8,0"/>
@@ -100,11 +106,11 @@
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,0" Padding="8,4"
                                          MinHeight="32" Visibility="Collapsed"
                                          Checked="NextSegment_Changed" Unchecked="NextSegment_Changed"
-                                         ToolTip="仅开放轨迹：两条轨迹之间的辅助连线，不进入形状模板。"/>
+                                         ToolTip="辅助连线（不进模板）。选中后单击取起点/终点（可贴其它线）。选中边：切回直线/圆弧且「完成本条」后点边，或 Alt+点。"/>
                             <CheckBox x:Name="ChkTangentJoin" Content="相切" Foreground="#CCC" VerticalAlignment="Center"
                                       Margin="0,0,6,0" Padding="8,4" MinHeight="32" Visibility="Collapsed"
                                       Checked="TangentJoin_Changed" Unchecked="TangentJoin_Changed"
-                                      ToolTip="圆弧与上一段直线/弧相切。保证圆角光滑。相切有左右两解，不对就点「换向」或按 F。"/>
+                                      ToolTip="圆弧与上一段直线/弧相切；开放轨迹里上一段也可以是连接线。保证圆角光滑。相切有左右两解，不对就点「换向」或按 F。"/>
                             <Button x:Name="BtnTangentFlipSide" Content="换向" MinWidth="48" Height="32" Padding="8,4" Margin="0,0,6,0"
                                     Visibility="Collapsed" Click="BtnTangentFlipSide_Click" ToolTip="相切弧左右解 (F)"/>
                             <Button x:Name="BtnUndoPoint" Content="撤销" MinWidth="52" Height="32" Padding="8,4" Margin="0,0,6,0"
@@ -115,6 +121,10 @@
                                     Visibility="Collapsed"
                                     Click="BtnClosePolygon_Click" ToolTip="段终点落在起点容差内自动闭合"/>
                         </WrapPanel>
+                        <TextBlock x:Name="TxtRoiEditHint" Grid.Row="3"
+                                   Style="{StaticResource Ui.ParamHelp}"
+                                   Margin="48,6,0,0" Foreground="#80CBC4"
+                                   Text="矩形：无 ROI 时按下拖到对角松开。已有 ROI 时点图或「参数…」改中心、宽高、角度。"/>
                     </Grid>
                 </Border>
 
@@ -332,12 +342,12 @@
                                    FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,8"/>
                         <ComboBox x:Name="CmbParamRecipe" Height="26" Margin="0,0,0,4"
                                   SelectionChanged="CmbParamRecipe_SelectionChanged"
-                                  ToolTip="内置：IndustrialVisionTools/shape_model_recipes。自定义：%AppData%\IndustrialVisionTools\shape_model_recipes。"/>
+                                  ToolTip="切换时应用参数；若流程配方 roi/ 下已有 outline/coarse/fine.xvroi.json 则自动加载。内置：shape_model_recipes；自定义：AppData。"/>
                         <TextBlock x:Name="TxtParamRecipeHint" Text="" Style="{StaticResource Ui.ParamHelp}"/>
                         <WrapPanel Margin="0,2,0,0">
                             <Button x:Name="BtnApplyParamRecipe" Content="应用" Width="56" Height="26"
                                     Margin="0,0,6,4" Click="BtnApplyParamRecipe_Click"
-                                    ToolTip="把所选配方的参数写到下面各栏。不改图像和 ROI。"/>
+                                    ToolTip="把所选配方的参数写到下面各栏。若流程配方 roi/ 下已保存对应 .xvroi.json（外框/粗/精），会自动加载。"/>
                             <Button x:Name="BtnSaveAsParamRecipe" Content="另存为" Width="64" Height="26"
                                     Margin="0,0,6,4" Click="BtnSaveAsParamRecipe_Click"
                                     ToolTip="把当前参数存成新的自定义配方。"/>
@@ -406,11 +416,16 @@
                         Margin="0,0,0,8" CornerRadius="3">
                     <StackPanel>
                         <TextBlock FontWeight="Bold" Text="ROI 保存 / 加载" Margin="0,0,0,6"/>
-                        <TextBlock Text="保存为 .xvroi.json（mm 坐标）；加载时用配方九点标定反算像素。"
-                                   FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                        <TextBlock Text="有九点标定时 ROI 全程用 mm 保存/编辑，仅叠到图上和创建模板时换成像素。"
+                                   FontSize="10" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                        <TextBlock x:Name="TxtRoiEditHintManage"
+                                   Style="{StaticResource Ui.ParamHelp}"
+                                   Foreground="#80CBC4" Margin="0,0,0,8"
+                                   Text="顶部「编辑说明」可看当前形状怎么画、怎么改已有边。"/>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                             <Button x:Name="BtnSaveRoi" Content="保存 ROI" Width="88" Height="26"
-                                    Margin="0,0,6,0" Click="BtnSaveRoi_Click"/>
+                                    Margin="0,0,6,0" Click="BtnSaveRoi_Click"
+                                    ToolTip="保存到当前流程配方 roi/。外框→outline.xvroi.json，粗匹配→coarse，精匹配→fine。切换参数配方时会自动加载已保存的对应文件。"/>
                             <Button x:Name="BtnLoadRoi" Content="加载 ROI" Width="88" Height="26"
                                     Click="BtnLoadRoi_Click"/>
                         </StackPanel>
@@ -483,7 +498,7 @@
                         <Border x:Name="PnlRoiArcEdit" Visibility="Collapsed" Background="#1A2528" BorderBrush="#37474F"
                                 BorderThickness="1" Padding="8" Margin="0,8,0,0" CornerRadius="2">
                             <StackPanel>
-                                <TextBlock Text="圆弧弧度（闭合后可调；亦可在画布点击边线弹窗编辑）" FontSize="11" Foreground="#90A4AE" Margin="0,0,0,4"/>
+                                <TextBlock Text="改半径：保持圆心角与起点，终点随之移动并连锁关联段" FontSize="11" Foreground="#90A4AE" Margin="0,0,0,4"/>
                                 <ComboBox x:Name="CmbRoiArcSegment" Height="24" Margin="0,0,0,4"
                                           SelectionChanged="RoiArcSegment_SelectionChanged"/>
                                 <Grid Margin="0,0,0,6">
@@ -725,7 +740,7 @@
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="半径R" VerticalAlignment="Center" FontSize="10"
-                                               ToolTip="保持段起点/终点不变，仅改圆半径(鼓出侧不变)"/>
+                                               ToolTip="保持圆心角与起点，终点随半径移动"/>
                                     <TextBox x:Name="TxtGeomPathArcRadius" Grid.Column="1" Height="22" VerticalContentAlignment="Center"/>
                                 </Grid>
                                 <Grid x:Name="RowGeomPathVia" Margin="0,0,0,4" Visibility="Collapsed">
@@ -923,7 +938,7 @@
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Text="缩放步长" VerticalAlignment="Center"
-                                       ToolTip="0=HALCON 自动。要更密的尺寸采样可填 0.02~0.05，会变慢。"/>
+                                       ToolTip="创建时的缩放采样网格，不是最终尺寸只能精确到这一档。0=HALCON 自动（常给出约 0.009，模型半径上大约差 1 像素）。Find 的 SubPixel=none 时缩放停在格子上（0.009 大约差 0.45%～0.9%）；interpolation/least_squares 会拟合，精匹配用这个即可，不必把步长改到 0.001。"/>
                             <TextBox x:Name="TxtScaleStep" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
                         </Grid>
                         <TextBlock Text="步长 0=自动。范围越大匹配越慢、越容易误检。"
@@ -962,7 +977,7 @@
                             <TextBox x:Name="TxtNumLevels" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"
                                      ToolTip="0=自动。小目标/要细节→3~4；大目标要速度→5~6。"/>
                         </Grid>
-                        <TextBlock Text="层数 / 角度步长 / 缩放步长填 0 表示 HALCON 自动估算。"
+                        <TextBlock Text="层数 / 角度步长 / 缩放步长填 0 表示 HALCON 自动估算。步长是创建采样格，不是最终精度（见 Find 的 SubPixel）。"
                                    Style="{StaticResource Ui.ParamHelp}"/>
 
                         <Grid Margin="0,0,0,4">
@@ -991,7 +1006,7 @@
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Text="角度步长°" VerticalAlignment="Center"
-                                       ToolTip="0=自动。要更密的角度采样可填 0.5~1，更慢更准。角度不需要很精时保持 0。"/>
+                                       ToolTip="创建时的采样网格，不是最终角只能精确到这一档。0=HALCON 自动；流程创建默认 0.5°。Find 的 SubPixel=none 时角停在格子上（0.5° 大约差 0.25°～0.5°）；interpolation/least_squares 会在格子间拟合，精匹配用这个即可，不必把步长改到 0.1°。"/>
                             <TextBox x:Name="TxtAngleStep" Grid.Column="1" Text="0" Height="24" VerticalContentAlignment="Center"/>
                         </Grid>
 

@@ -239,6 +239,28 @@ namespace CalibOperatorCLI_Example
             return dir == null ? null : TryResolveChessboardCalibrationResultPath(dir);
         }
 
+        /// <summary>当前配方配置的棋盘标定保存路径（文件可不存在）。</summary>
+        public static string? TryGetSelectedConfiguredChessboardCalibrationPath()
+        {
+            string? dir = TryGetSelectedRecipeDirectory();
+            if (dir == null)
+                return null;
+            RecipeCameraCorrectionProfile profile =
+                RecipeCameraCorrectionProfile.LoadOrCreateDefaults(dir);
+            return profile.GetConfiguredChessboardCalibrationPath(dir);
+        }
+
+        /// <summary>当前配方配置的九点标定保存路径（文件可不存在）。</summary>
+        public static string? TryGetSelectedConfiguredNinePointCalibrationPath()
+        {
+            string? dir = TryGetSelectedRecipeDirectory();
+            if (dir == null)
+                return null;
+            RecipeCameraCorrectionProfile profile =
+                RecipeCameraCorrectionProfile.LoadOrCreateDefaults(dir);
+            return profile.GetConfiguredNinePointCalibrationPath(dir);
+        }
+
         public static string? TryResolveChessboardCalibrationResultPath(string recipeDirectory)
         {
             if (string.IsNullOrWhiteSpace(recipeDirectory) || !Directory.Exists(recipeDirectory))

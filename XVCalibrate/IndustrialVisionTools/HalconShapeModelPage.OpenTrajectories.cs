@@ -92,11 +92,13 @@ namespace CalibOperatorCLI_Example
             CopyContourPathContents(cloned, _roiPath);
             _roiPath.IsClosed = false;
             _editingOpenTrajectoryIndex = idx;
+            _openTrajectoryPreferPick = true;
 
             InvalidatePolygonFlatCache();
             UpdatePolygonPreview();
             RefreshOpenTrajectoryListUi();
-            AppendLog($"正在编辑: {_openTrajectoryEntries[idx].Name}（修改后点「完成本条」覆盖原轨迹）");
+            UpdateRoiEditHint();
+            AppendLog($"正在编辑: {_openTrajectoryEntries[idx].Name}（单击优先取点；修改后点「完成本条」覆盖原轨迹）");
         }
 
         private void BtnDeleteOpenTrajectory_Click(object sender, RoutedEventArgs e)

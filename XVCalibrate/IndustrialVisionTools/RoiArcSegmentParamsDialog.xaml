@@ -10,7 +10,7 @@
         ShowInTaskbar="False">
     <Border Padding="16" MinWidth="380">
         <StackPanel>
-            <TextBlock x:Name="TxtHint" Text="可修改弧上经过点与半径；确定后写回该段。"
+            <TextBlock x:Name="TxtHint" Text="改半径时保持圆心角与起点，终点随半径移动；确定后连锁更新关联段。"
                        TextWrapping="Wrap" Margin="0,0,0,10" Foreground="#B0BEC5" FontSize="12"/>
             <TextBlock x:Name="TxtChordHint" Text="" FontSize="10" Foreground="#888" TextWrapping="Wrap"
                        Margin="0,0,0,10"/>

@@ -1,7 +1,9 @@
 // 组合算子：运行后双击查看子流程内各节点端口变量。
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using CalibOperatorPInvoke;
@@ -521,73 +523,171 @@ namespace CalibOperatorCLI_Example
             return null;
         }
 
-        private static string FormatFlowPortValue(object? data)
+        private static string FormatFlowPortValue(object? data) => FormatFlowPortValue(data, 0);
+
+        private static string FormatFlowPortValue(object? data, int depth)
         {
             if (data == null)
                 return "(null)";
+            if (depth > 6)
+                return $"{DescribeClrType(data.GetType())} (嵌套过深)";
 
-            var sb = new StringBuilder();
             switch (data)
             {
                 case CalibImage img:
-                    sb.AppendLine($"图像: {img.Width}×{img.Height}, 通道={img.Channels}");
-                    break;
-                case int n:
-                    sb.AppendLine($"值: {n}");
-                    break;
+                    return $"图像: {img.Width}×{img.Height}, 通道={img.Channels}";
+                case bool b:
+                    return b ? "true" : "false";
+                case byte or sbyte or short or ushort or int or uint or long or ulong:
+                    return Convert.ToString(data, CultureInfo.InvariantCulture) ?? data.ToString() ?? "";
+                case float f:
+                    return f.ToString("G9", CultureInfo.InvariantCulture);
                 case double d:
-                    sb.AppendLine($"值: {d:G9}");
-                    break;
+                    return d.ToString("G9", CultureInfo.InvariantCulture);
+                case decimal m:
+                    return m.ToString(CultureInfo.InvariantCulture);
                 case string s:
-                    sb.AppendLine(s.Length > 2000 ? s[..2000] + "…" : s);
-                    break;
+                    return s.Length > 2000 ? s[..2000] + "…" : s;
                 case AffineTransform t:
-                    sb.AppendLine($"X = {t.A:F6}*x + {t.B:F6}*y + {t.C:F6}");
-                    sb.AppendLine($"Y = {t.D:F6}*x + {t.E:F6}*y + {t.F:F6}");
-                    break;
+                    return $"X = {t.A:F6}*x + {t.B:F6}*y + {t.C:F6}{Environment.NewLine}" +
+                           $"Y = {t.D:F6}*x + {t.E:F6}*y + {t.F:F6}";
                 case TrajectoryResult tr:
+                {
+                    var sb = new StringBuilder();
                     sb.AppendLine($"Success: {tr.Success}");
                     sb.AppendLine($"Count: {tr.Count}");
                     if (tr.Points != null && tr.Points.Length > 0)
-                        sb.AppendLine($"First Point: ({tr.Points[0].X:F2}, {tr.Points[0].Y:F2})");
-                    break;
+                        sb.Append($"First Point: ({tr.Points[0].X:F2}, {tr.Points[0].Y:F2})");
+                    return sb.ToString().TrimEnd();
+                }
                 case ValueTuple<int[], int[], int[], int> contours:
-                    sb.AppendLine($"Contours: {contours.Item4}");
-                    sb.AppendLine($"Total Points: {contours.Item1?.Length ?? 0}");
-                    break;
+                    return $"Contours: {contours.Item4}{Environment.NewLine}Total Points: {contours.Item1?.Length ?? 0}";
                 case ValueTuple<double[], double[], int[], int> cw:
-                    sb.AppendLine($"ContoursWorld (条数): {cw.Item4}");
-                    sb.AppendLine($"Total Points: {cw.Item1?.Length ?? 0}");
-                    break;
+                    return $"ContoursWorld (条数): {cw.Item4}{Environment.NewLine}Total Points: {cw.Item1?.Length ?? 0}";
                 case ValueTuple<double[], double[], double[], int[], int> c3:
-                    sb.AppendLine($"ContoursBase3D (条数): {c3.Item5}");
-                    sb.AppendLine($"Total Points: {c3.Item1?.Length ?? 0}");
-                    break;
+                    return $"ContoursBase3D (条数): {c3.Item5}{Environment.NewLine}Total Points: {c3.Item1?.Length ?? 0}";
                 case Point2D[] pp:
-                    sb.AppendLine($"点数: {pp.Length}");
-                    if (pp.Length > 0)
-                    {
-                        sb.AppendLine($"首点: ({pp[0].X:F4}, {pp[0].Y:F4})");
-                        if (pp.Length > 1)
-                            sb.AppendLine($"末点: ({pp[^1].X:F4}, {pp[^1].Y:F4})");
-                    }
-                    break;
+                    return FormatPoint2DArray(pp);
                 case CalibPoint3D[] p3:
-                    sb.AppendLine($"点数(基座3D): {p3.Length}");
-                    if (p3.Length > 0)
-                    {
-                        sb.AppendLine($"首点: ({p3[0].X:F4}, {p3[0].Y:F4}, {p3[0].Z:F4})");
-                        if (p3.Length > 1)
-                            sb.AppendLine($"末点: ({p3[^1].X:F4}, {p3[^1].Y:F4}, {p3[^1].Z:F4})");
-                    }
-                    break;
+                    return FormatPoint3DArray(p3);
                 default:
+                    if (TryFormatSequence(data, depth, out string seq))
+                        return seq;
                     var text = data.ToString() ?? "(无可显示内容)";
-                    sb.AppendLine(text.Length > 4000 ? text[..4000] + "…" : text);
-                    break;
+                    return text.Length > 4000 ? text[..4000] + "…" : text;
+            }
+        }
+
+        private static string FormatPoint2DArray(Point2D[] pp)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"点数: {pp.Length}");
+            if (pp.Length > 0)
+            {
+                sb.AppendLine($"首点: ({pp[0].X:F4}, {pp[0].Y:F4})");
+                if (pp.Length > 1)
+                    sb.AppendLine($"末点: ({pp[^1].X:F4}, {pp[^1].Y:F4})");
+                int show = Math.Min(pp.Length, 80);
+                for (int i = 0; i < show; i++)
+                    sb.AppendLine($"[{i}] ({pp[i].X:F4}, {pp[i].Y:F4})");
+                if (pp.Length > show)
+                    sb.Append($"…其余 {pp.Length - show} 点未显示");
+            }
+            return sb.ToString().TrimEnd();
+        }
+
+        private static string FormatPoint3DArray(CalibPoint3D[] p3)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"点数(基座3D): {p3.Length}");
+            if (p3.Length > 0)
+            {
+                sb.AppendLine($"首点: ({p3[0].X:F4}, {p3[0].Y:F4}, {p3[0].Z:F4})");
+                if (p3.Length > 1)
+                    sb.AppendLine($"末点: ({p3[^1].X:F4}, {p3[^1].Y:F4}, {p3[^1].Z:F4})");
+                int show = Math.Min(p3.Length, 80);
+                for (int i = 0; i < show; i++)
+                    sb.AppendLine($"[{i}] ({p3[i].X:F4}, {p3[i].Y:F4}, {p3[i].Z:F4})");
+                if (p3.Length > show)
+                    sb.Append($"…其余 {p3.Length - show} 点未显示");
+            }
+            return sb.ToString().TrimEnd();
+        }
+
+        private static bool TryFormatSequence(object data, int depth, out string text)
+        {
+            text = "";
+            if (data is string or byte[] or char[] or Point2D[] or CalibPoint3D[])
+                return false;
+
+            IList? list = data as IList;
+            if (list == null)
+            {
+                if (data is IDictionary)
+                    return false;
+                if (data is not IEnumerable enumerable)
+                    return false;
+                var copy = new ArrayList();
+                foreach (object? item in enumerable)
+                {
+                    copy.Add(item);
+                    if (copy.Count >= 2000)
+                        break;
+                }
+                list = copy;
             }
 
-            return sb.ToString().TrimEnd();
+            const int maxItems = 500;
+            const int maxChars = 100_000;
+            int n = list.Count;
+            string elemType = "?";
+            for (int i = 0; i < n; i++)
+            {
+                if (list[i] != null)
+                {
+                    elemType = DescribeClrType(list[i]!.GetType());
+                    break;
+                }
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"列表: {n} 项  (元素 {elemType}，类型 {DescribeClrType(data.GetType())})");
+            int show = Math.Min(n, maxItems);
+            for (int i = 0; i < show; i++)
+            {
+                string item = FormatFlowPortValue(list[i], depth + 1);
+                item = item.Replace("\r\n", "\n").TrimEnd();
+                if (item.Contains('\n'))
+                {
+                    sb.AppendLine($"[{i}]");
+                    foreach (string line in item.Split('\n'))
+                        sb.AppendLine("    " + line);
+                }
+                else
+                    sb.AppendLine($"[{i}] {item}");
+                if (sb.Length >= maxChars)
+                {
+                    sb.AppendLine("…(过长截断)");
+                    break;
+                }
+            }
+
+            if (n > show)
+                sb.Append($"…其余 {n - show} 项未显示");
+            text = sb.ToString().TrimEnd();
+            return true;
+        }
+
+        private static string DescribeClrType(Type t)
+        {
+            if (!t.IsGenericType)
+                return t.Name;
+            string name = t.Name;
+            int tick = name.IndexOf('`');
+            if (tick >= 0)
+                name = name[..tick];
+            string args = string.Join(", ", t.GetGenericArguments().Select(DescribeClrType));
+            return $"{name}<{args}>";
         }
     }
 }

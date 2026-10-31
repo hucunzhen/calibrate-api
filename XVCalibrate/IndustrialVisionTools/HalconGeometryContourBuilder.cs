@@ -253,11 +253,24 @@ namespace CalibOperatorCLI_Example
         }
 
         public static Point2D ImagePixelToWorldMm(double col, double row, in AffineTransform t) =>
-            CalibAPI.ImageToWorld(new Point2D(col, row), t);
+            ImagePixelToWorldMm(col, row, t, preserveAngle: false);
+
+        public static Point2D ImagePixelToWorldMm(
+            double col, double row, in AffineTransform t, bool preserveAngle) =>
+            preserveAngle
+                ? RoiWorldPixelConvert.PixelToMmPreserveAngle(col, row, t)
+                : CalibAPI.ImageToWorld(new Point2D(col, row), t);
 
         /// <summary>世界坐标(mm) 反算图像像素 (col,row)。</summary>
-        public static Point2D WorldMmToImagePixel(double worldX, double worldY, in AffineTransform t)
+        public static Point2D WorldMmToImagePixel(double worldX, double worldY, in AffineTransform t) =>
+            WorldMmToImagePixel(worldX, worldY, t, preserveAngle: false);
+
+        public static Point2D WorldMmToImagePixel(
+            double worldX, double worldY, in AffineTransform t, bool preserveAngle)
         {
+            if (preserveAngle)
+                return RoiWorldPixelConvert.MmToPixelPreserveAngle(worldX, worldY, t);
+
             double det = t.A * t.E - t.B * t.D;
             if (Math.Abs(det) < 1e-12)
                 throw new InvalidOperationException("九点仿射矩阵不可逆，无法将 mm 换算为像素");
@@ -270,8 +283,11 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>世界系长度(mm) 反算沿图像列方向的像素宽度（与 <see cref="PixelSizeToWorldMm"/> 的宽分量互逆）。</summary>
-        public static double WorldMmWidthToPixelWidth(double widthMm, double anchorCol, double anchorRow, in AffineTransform t)
+        public static double WorldMmWidthToPixelWidth(
+            double widthMm, double anchorCol, double anchorRow, in AffineTransform t, bool preserveAngle = false)
         {
+            if (preserveAngle)
+                return RoiWorldPixelConvert.MmLengthToPixels(widthMm, t);
             if (widthMm <= 0)
                 return 0;
 
@@ -291,8 +307,11 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>世界系长度(mm) 反算沿图像行方向的像素高度。</summary>
-        public static double WorldMmHeightToPixelHeight(double heightMm, double anchorCol, double anchorRow, in AffineTransform t)
+        public static double WorldMmHeightToPixelHeight(
+            double heightMm, double anchorCol, double anchorRow, in AffineTransform t, bool preserveAngle = false)
         {
+            if (preserveAngle)
+                return RoiWorldPixelConvert.MmLengthToPixels(heightMm, t);
             if (heightMm <= 0)
                 return 0;
 
@@ -312,8 +331,11 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>世界系半径(mm) 反算像素半径。</summary>
-        public static double WorldMmRadiusToPixelRadius(double radiusMm, double centerCol, double centerRow, in AffineTransform t)
+        public static double WorldMmRadiusToPixelRadius(
+            double radiusMm, double centerCol, double centerRow, in AffineTransform t, bool preserveAngle = false)
         {
+            if (preserveAngle)
+                return RoiWorldPixelConvert.MmLengthToPixels(radiusMm, t);
             if (radiusMm <= 0)
                 return 0;
 
@@ -333,8 +355,11 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>在 (centerCol,centerRow) 处沿 +X 偏移 radiusPx 像素，求世界系半径长度(mm)。</summary>
-        public static double PixelRadiusToWorldMm(double radiusPx, double centerCol, double centerRow, in AffineTransform t)
+        public static double PixelRadiusToWorldMm(
+            double radiusPx, double centerCol, double centerRow, in AffineTransform t, bool preserveAngle = false)
         {
+            if (preserveAngle)
+                return RoiWorldPixelConvert.PixelLengthToMm(radiusPx, t);
             if (radiusPx <= 0)
                 return 0;
             var c = ImagePixelToWorldMm(centerCol, centerRow, t);
@@ -350,8 +375,16 @@ namespace CalibOperatorCLI_Example
             double heightPx,
             double anchorCol,
             double anchorRow,
-            in AffineTransform t)
+            in AffineTransform t,
+            bool preserveAngle = false)
         {
+            if (preserveAngle)
+            {
+                return (
+                    RoiWorldPixelConvert.PixelLengthToMm(widthPx, t),
+                    RoiWorldPixelConvert.PixelLengthToMm(heightPx, t));
+            }
+
             var o = ImagePixelToWorldMm(anchorCol, anchorRow, t);
             var wx = ImagePixelToWorldMm(anchorCol + widthPx, anchorRow, t);
             var hy = ImagePixelToWorldMm(anchorCol, anchorRow + heightPx, t);

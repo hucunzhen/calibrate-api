@@ -843,6 +843,9 @@ namespace CalibOperatorCLI_Example
             if (allContours.Count == 0)
                 throw new InvalidOperationException("没有有效的开放轨迹可生成模板");
 
+            // 两侧采成相同点数，避免 HALCON 只靠点更多/更密的一边定位
+            allContours = EqualizeOpenTrajectorySampleCounts(allContours);
+
             var bundle = new HalconXldContourBundle
             {
                 Width = imageWidth,
@@ -904,6 +907,72 @@ namespace CalibOperatorCLI_Example
 
             return inside;
         }
+
+        private static List<Point2D[]> EqualizeOpenTrajectorySampleCounts(List<Point2D[]> contours)
+        {
+            if (contours.Count < 2)
+                return contours;
+
+            int target = 32;
+            foreach (Point2D[] c in contours)
+            {
+                double len = 0;
+                for (int i = 1; i < c.Length; i++)
+                {
+                    double dx = c[i].X - c[i - 1].X;
+                    double dy = c[i].Y - c[i - 1].Y;
+                    len += Math.Sqrt(dx * dx + dy * dy);
+                }
+
+                target = Math.Max(target, Math.Max(c.Length, (int)Math.Ceiling(len / 2.0)));
+            }
+
+            target = Math.Min(400, Math.Max(32, target));
+            var equalized = new List<Point2D[]>(contours.Count);
+            foreach (Point2D[] c in contours)
+                equalized.Add(ResampleOpenPolylineByCount(c, target));
+            return equalized;
+        }
+
+        private static Point2D[] ResampleOpenPolylineByCount(Point2D[] pts, int count)
+        {
+            if (pts == null || pts.Length < 2 || count < 2)
+                return pts ?? Array.Empty<Point2D>();
+            if (pts.Length == count)
+                return pts;
+
+            var cum = new double[pts.Length];
+            for (int i = 1; i < pts.Length; i++)
+            {
+                double dx = pts[i].X - pts[i - 1].X;
+                double dy = pts[i].Y - pts[i - 1].Y;
+                cum[i] = cum[i - 1] + Math.Sqrt(dx * dx + dy * dy);
+            }
+
+            double total = cum[^1];
+            if (total < 1e-6)
+                return pts;
+
+            var dst = new Point2D[count];
+            dst[0] = pts[0];
+            dst[count - 1] = pts[^1];
+            int seg = 1;
+            for (int k = 1; k < count - 1; k++)
+            {
+                double t = total * k / (count - 1);
+                while (seg < pts.Length - 1 && cum[seg] < t)
+                    seg++;
+                double a = cum[seg - 1];
+                double b = cum[seg];
+                double u = b - a < 1e-9 ? 0 : (t - a) / (b - a);
+                dst[k] = new Point2D(
+                    pts[seg - 1].X + u * (pts[seg].X - pts[seg - 1].X),
+                    pts[seg - 1].Y + u * (pts[seg].Y - pts[seg - 1].Y));
+            }
+
+            return dst;
+        }
+
         public static long CreateShapeModel(
             CalibImage? image,
             HalconXldContourBundle? xldBundle,
@@ -1918,35 +1987,6 @@ namespace CalibOperatorCLI_Example
             return idx;
         }
 
-        private static (double[] rows, double[] cols, double[] angles, double[] scales, double[] scores) ReorderMatchResultsByScore(
-            double[] rows,
-            double[] cols,
-            double[] angles,
-            double[] scales,
-            double[] scores)
-        {
-            if (scores.Length <= 1)
-                return (rows, cols, angles, scales, scores);
-
-            int[] order = SortIndicesByScoreDescending(scores);
-            var rows2 = new double[order.Length];
-            var cols2 = new double[order.Length];
-            var angles2 = new double[order.Length];
-            var scales2 = new double[order.Length];
-            var scores2 = new double[order.Length];
-            for (int k = 0; k < order.Length; k++)
-            {
-                int i = order[k];
-                rows2[k] = rows[i];
-                cols2[k] = cols[i];
-                angles2[k] = angles[i];
-                scales2[k] = scales.Length > i ? scales[i] : 1.0;
-                scores2[k] = scores[i];
-            }
-
-            return (rows2, cols2, angles2, scales2, scores2);
-        }
-
         private static Point2D[] OffsetContourToFullImage(Point2D[] contour, double rowOffset, double colOffset)
         {
             var shifted = new Point2D[contour.Length];
@@ -1956,7 +1996,8 @@ namespace CalibOperatorCLI_Example
         }
 
         private const int DefaultShapeMatchContourLevel = 1;
-        public const double DefaultEndScoreWeight = 0.8;
+        /// <summary>0=输出 HALCON 原始分，不做端部修正。大于 0 时才用端部边缘比压低分数。</summary>
+        public const double DefaultEndScoreWeight = 0;
         public const double DefaultEndArcFraction = 0.12;
 
         /// <summary>
@@ -2322,7 +2363,7 @@ namespace CalibOperatorCLI_Example
                         endScoreWeight, endArcFraction, contourLevel);
                 }
 
-                return ReorderMatchResultsByScore(rows, cols, angles, scales, adjusted);
+                return (rows, cols, angles, scales, adjusted);
             }
             finally
             {

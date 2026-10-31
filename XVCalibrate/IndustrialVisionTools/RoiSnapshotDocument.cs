@@ -20,6 +20,12 @@ namespace CalibOperatorCLI_Example
         /// <summary>保存时使用的九点标定 JSON 路径（仅供参考）。</summary>
         public string? NinePointCalibrationPath { get; set; }
 
+        /// <summary>
+        /// true：mm↔像素去掉仿射平面旋转，平行 ROI 在图像中仍平行。
+        /// null：旧文件，按 false（完整九点仿射）加载。
+        /// </summary>
+        public bool? PreserveRoiAngle { get; set; }
+
         public string? ImagePath { get; set; }
 
         public int ImageWidth { get; set; }
@@ -159,6 +165,9 @@ namespace CalibOperatorCLI_Example
         {
             return new HalconShapeModelUiSettings
             {
+                RoiCoordinateUnit = string.IsNullOrWhiteSpace(doc.CoordinateUnit)
+                    ? RoiSnapshotCoordinateTransform.UnitMillimeter
+                    : doc.CoordinateUnit,
                 RoiMode = doc.RoiMode ?? "none",
                 RoiRectX = doc.RoiRectX,
                 RoiRectY = doc.RoiRectY,
@@ -289,7 +298,56 @@ namespace CalibOperatorCLI_Example
                 FinishedName = src.FinishedName,
                 FinishedPath = ClonePathDto(src.FinishedPath),
                 FinishReplacedEditIndex = src.FinishReplacedEditIndex,
-                FinishPreviousPath = ClonePathDto(src.FinishPreviousPath)
+                FinishPreviousPath = ClonePathDto(src.FinishPreviousPath),
+                SceneEditLabel = src.SceneEditLabel,
+                SceneBeforeNames = src.SceneBeforeNames == null ? null : new List<string>(src.SceneBeforeNames),
+                SceneBeforePaths = ClonePathDtoList(src.SceneBeforePaths),
+                SceneBeforeDraft = ClonePathDto(src.SceneBeforeDraft),
+                SceneBeforeConnectors = CloneConnectorDtoList(src.SceneBeforeConnectors),
+                SceneBeforeEditingIndex = src.SceneBeforeEditingIndex,
+                SceneBeforePreferPick = src.SceneBeforePreferPick,
+                SceneAfterNames = src.SceneAfterNames == null ? null : new List<string>(src.SceneAfterNames),
+                SceneAfterPaths = ClonePathDtoList(src.SceneAfterPaths),
+                SceneAfterDraft = ClonePathDto(src.SceneAfterDraft),
+                SceneAfterConnectors = CloneConnectorDtoList(src.SceneAfterConnectors),
+                SceneAfterEditingIndex = src.SceneAfterEditingIndex,
+                SceneAfterPreferPick = src.SceneAfterPreferPick
             };
+
+        private static List<HalconShapeModelRoiPathDto>? ClonePathDtoList(List<HalconShapeModelRoiPathDto>? src)
+        {
+            if (src == null)
+                return null;
+            var list = new List<HalconShapeModelRoiPathDto>(src.Count);
+            foreach (HalconShapeModelRoiPathDto? p in src)
+            {
+                if (ClonePathDto(p) is HalconShapeModelRoiPathDto c)
+                    list.Add(c);
+            }
+
+            return list;
+        }
+
+        private static List<HalconShapeModelRoiConnectorDto>? CloneConnectorDtoList(
+            List<HalconShapeModelRoiConnectorDto>? src)
+        {
+            if (src == null)
+                return null;
+            var list = new List<HalconShapeModelRoiConnectorDto>(src.Count);
+            foreach (HalconShapeModelRoiConnectorDto? c in src)
+            {
+                if (c == null)
+                    continue;
+                list.Add(new HalconShapeModelRoiConnectorDto
+                {
+                    StartX = c.StartX,
+                    StartY = c.StartY,
+                    EndX = c.EndX,
+                    EndY = c.EndY
+                });
+            }
+
+            return list;
+        }
     }
 }

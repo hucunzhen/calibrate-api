@@ -26,7 +26,7 @@ namespace CalibOperatorCLI_Example
     /// <summary>开放轨迹撤销/重做一步（随会话与 ROI 文件持久化）。</summary>
     internal sealed class OpenTrajHistoryItemDto
     {
-        /// <summary>PathVertex | Connector | FinishEntry</summary>
+        /// <summary>PathVertex | Connector | FinishEntry | SceneEdit</summary>
         public string Kind { get; set; } = "";
 
         public bool IsFirstVertex { get; set; }
@@ -51,6 +51,20 @@ namespace CalibOperatorCLI_Example
         public HalconShapeModelRoiPathDto? FinishedPath { get; set; }
         public int? FinishReplacedEditIndex { get; set; }
         public HalconShapeModelRoiPathDto? FinishPreviousPath { get; set; }
+
+        public string? SceneEditLabel { get; set; }
+        public List<string>? SceneBeforeNames { get; set; }
+        public List<HalconShapeModelRoiPathDto>? SceneBeforePaths { get; set; }
+        public HalconShapeModelRoiPathDto? SceneBeforeDraft { get; set; }
+        public List<HalconShapeModelRoiConnectorDto>? SceneBeforeConnectors { get; set; }
+        public int? SceneBeforeEditingIndex { get; set; }
+        public bool? SceneBeforePreferPick { get; set; }
+        public List<string>? SceneAfterNames { get; set; }
+        public List<HalconShapeModelRoiPathDto>? SceneAfterPaths { get; set; }
+        public HalconShapeModelRoiPathDto? SceneAfterDraft { get; set; }
+        public List<HalconShapeModelRoiConnectorDto>? SceneAfterConnectors { get; set; }
+        public int? SceneAfterEditingIndex { get; set; }
+        public bool? SceneAfterPreferPick { get; set; }
     }
 
     internal sealed class HalconShapeModelUiSettings
@@ -62,6 +76,9 @@ namespace CalibOperatorCLI_Example
         public string NinePointCalibrationPath { get; set; } = "";
         /// <summary>none | rect | rotatedrect | circle | polygon | ring</summary>
         public string RoiMode { get; set; } = "none";
+
+        /// <summary>mm：会话内 ROI 为世界坐标；px 或空：旧会话像素。</summary>
+        public string RoiCoordinateUnit { get; set; } = "";
 
         public double RoiRectX { get; set; }
         public double RoiRectY { get; set; }
@@ -141,6 +158,12 @@ namespace CalibOperatorCLI_Example
 
         /// <summary>上次选用的形状参数配方 Id（内置 builtin:… 或用户文件名）。</summary>
         public string LastParamRecipeId { get; set; } = "";
+
+        /// <summary>本页上次创建/导入后缓存的模板路径，切回页面时自动加载。</summary>
+        public string LastModelPath { get; set; } = "";
+
+        /// <summary>true=.dfm，false=.shm。</summary>
+        public bool LastModelDeformable { get; set; }
 
         private static readonly string[] PersistControlNames =
         {

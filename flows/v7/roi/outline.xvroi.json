@@ -1,0 +1,342 @@
+{
+  "Version": 2,
+  "CoordinateUnit": "mm",
+  "NinePointCalibrationPath": "D:\\work\\calibrate-api\\flows\\v7\\models\\calibration_nine_point.json",
+  "ImagePath": "D:\\work\\calibrate-api\\flows\\v7\\flow_output.bmp",
+  "ImageWidth": 2592,
+  "ImageHeight": 1944,
+  "RoiMode": "opentrajectories",
+  "RoiRectX": 364.3864809097365,
+  "RoiRectY": 182.4379048993087,
+  "RoiRectW": 0,
+  "RoiRectH": 0,
+  "RotRectCenterX": 364.3864809097365,
+  "RotRectCenterY": 182.4379048993087,
+  "RotRectWidth": 0,
+  "RotRectHeight": 0,
+  "RotRectAngleDeg": 0,
+  "CircleCenterX": 364.3864809097365,
+  "CircleCenterY": 182.4379048993087,
+  "CircleRadius": 0,
+  "OpenTrajectoryPaths": [
+    {
+      "VertexXs": [
+        438.2179026209006,
+        430.02783326887766
+      ],
+      "VertexYs": [
+        138.74576208559816,
+        131.6431199600914
+      ],
+      "EdgeKinds": [
+        "Arc"
+      ],
+      "ArcViaXs": [
+        432.47813804712627
+      ],
+      "ArcViaYs": [
+        136.62825600746007
+      ],
+      "IsClosed": false
+    },
+    {
+      "VertexXs": [
+        520.1453773361787,
+        529.4392052756467
+      ],
+      "VertexYs": [
+        138.5002654819962,
+        129.1826498984144
+      ],
+      "EdgeKinds": [
+        "Arc"
+      ],
+      "ArcViaXs": [
+        527.1627169003226
+      ],
+      "ArcViaYs": [
+        135.7585639151859
+      ],
+      "IsClosed": false
+    },
+    {
+      "VertexXs": [
+        429.93168605479366,
+        439.07864993505996
+      ],
+      "VertexYs": [
+        68.35658312943373,
+        59.9869672355011
+      ],
+      "EdgeKinds": [
+        "Arc"
+      ],
+      "ArcViaXs": [
+        431.52081399951055
+      ],
+      "ArcViaYs": [
+        63.20959689449579
+      ],
+      "IsClosed": false
+    },
+    {
+      "VertexXs": [
+        520.3403080844707,
+        529.5318363136723
+      ],
+      "VertexYs": [
+        59.21786675412214,
+        68.39697449003741
+      ],
+      "EdgeKinds": [
+        "Arc"
+      ],
+      "ArcViaXs": [
+        526.2202492969527
+      ],
+      "ArcViaYs": [
+        61.32028451883838
+      ],
+      "IsClosed": false
+    }
+  ],
+  "OpenTrajectoryNames": [
+    "\u8F68\u8FF9 1",
+    "\u8F68\u8FF9 2",
+    "\u8F68\u8FF9 3",
+    "\u8F68\u8FF9 4"
+  ],
+  "OpenTrajectoryConnectors": [],
+  "OpenTrajectoryUndo": [
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": true,
+      "VertexX": 438.258586346733,
+      "VertexY": 138.6197596213039,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 364.3864809097365,
+      "ResumeVertexY": 182.4379048993087
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 430.0685169947101,
+      "VertexY": 131.51711749579715,
+      "EdgeKind": "Arc",
+      "ArcViaX": 432.5188217729587,
+      "ArcViaY": 136.5022535431658,
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 364.3864809097365,
+      "ResumeVertexY": 182.4379048993087
+    },
+    {
+      "Kind": "FinishEntry",
+      "IsFirstVertex": false,
+      "VertexX": 364.3864809097365,
+      "VertexY": 182.4379048993087,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 364.3864809097365,
+      "ResumeVertexY": 182.4379048993087,
+      "FinishedName": "\u8F68\u8FF9 1",
+      "FinishedPath": {
+        "VertexXs": [
+          438.258586346733,
+          430.0685169947101
+        ],
+        "VertexYs": [
+          138.6197596213039,
+          131.51711749579715
+        ],
+        "EdgeKinds": [
+          "Arc"
+        ],
+        "ArcViaXs": [
+          432.5188217729587
+        ],
+        "ArcViaYs": [
+          136.5022535431658
+        ],
+        "IsClosed": false
+      }
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": true,
+      "VertexX": 520.256965888452,
+      "VertexY": 138.4220632502939,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 364.3864809097365,
+      "ResumeVertexY": 182.4379048993087
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 529.55079382792,
+      "VertexY": 129.1044476667121,
+      "EdgeKind": "Arc",
+      "ArcViaX": 527.2743054525959,
+      "ArcViaY": 135.68036168348357,
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 364.3864809097365,
+      "ResumeVertexY": 182.4379048993087
+    },
+    {
+      "Kind": "FinishEntry",
+      "IsFirstVertex": false,
+      "VertexX": 364.3864809097365,
+      "VertexY": 182.4379048993087,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 364.3864809097365,
+      "ResumeVertexY": 182.4379048993087,
+      "FinishedName": "\u8F68\u8FF9 2",
+      "FinishedPath": {
+        "VertexXs": [
+          520.256965888452,
+          529.55079382792
+        ],
+        "VertexYs": [
+          138.4220632502939,
+          129.1044476667121
+        ],
+        "EdgeKinds": [
+          "Arc"
+        ],
+        "ArcViaXs": [
+          527.2743054525959
+        ],
+        "ArcViaYs": [
+          135.68036168348357
+        ],
+        "IsClosed": false
+      }
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": true,
+      "VertexX": 429.7901836621017,
+      "VertexY": 68.37955425380694,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 364.3864809097365,
+      "ResumeVertexY": 182.4379048993087
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 438.93714754236794,
+      "VertexY": 60.00993835987431,
+      "EdgeKind": "Arc",
+      "ArcViaX": 431.37931160681853,
+      "ArcViaY": 63.23256801886899,
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 364.3864809097365,
+      "ResumeVertexY": 182.4379048993087
+    },
+    {
+      "Kind": "FinishEntry",
+      "IsFirstVertex": false,
+      "VertexX": 364.3864809097365,
+      "VertexY": 182.4379048993087,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 364.3864809097365,
+      "ResumeVertexY": 182.4379048993087,
+      "FinishedName": "\u8F68\u8FF9 3",
+      "FinishedPath": {
+        "VertexXs": [
+          429.7901836621017,
+          438.93714754236794
+        ],
+        "VertexYs": [
+          68.37955425380694,
+          60.00993835987431
+        ],
+        "EdgeKinds": [
+          "Arc"
+        ],
+        "ArcViaXs": [
+          431.37931160681853
+        ],
+        "ArcViaYs": [
+          63.23256801886899
+        ],
+        "IsClosed": false
+      }
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": true,
+      "VertexX": 520.3813468850766,
+      "VertexY": 59.228887508897785,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 364.3864809097365,
+      "ResumeVertexY": 182.4379048993087
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 529.5728751142781,
+      "VertexY": 68.40799524481302,
+      "EdgeKind": "Arc",
+      "ArcViaX": 526.2612880975586,
+      "ArcViaY": 61.33130527361399,
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 364.3864809097365,
+      "ResumeVertexY": 182.4379048993087
+    },
+    {
+      "Kind": "FinishEntry",
+      "IsFirstVertex": false,
+      "VertexX": 364.3864809097365,
+      "VertexY": 182.4379048993087,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 364.3864809097365,
+      "ResumeVertexY": 182.4379048993087,
+      "FinishedName": "\u8F68\u8FF9 4",
+      "FinishedPath": {
+        "VertexXs": [
+          520.3813468850766,
+          529.5728751142781
+        ],
+        "VertexYs": [
+          59.228887508897785,
+          68.40799524481302
+        ],
+        "EdgeKinds": [
+          "Arc"
+        ],
+        "ArcViaXs": [
+          526.2612880975586
+        ],
+        "ArcViaYs": [
+          61.33130527361399
+        ],
+        "IsClosed": false
+      }
+    }
+  ],
+  "OpenTrajectoryRedo": [
+    {
+      "Kind": "Connector",
+      "IsFirstVertex": false,
+      "VertexX": 364.3864809097365,
+      "VertexY": 182.4379048993087,
+      "EdgeKind": "Line",
+      "Connector": {
+        "StartX": 529.5728751142781,
+        "StartY": 68.40799524481302,
+        "EndX": 489.346958435517,
+        "EndY": 106.55603071574667
+      },
+      "AddedResumeVertex": true,
+      "ResumeVertexX": 489.346958435517,
+      "ResumeVertexY": 106.55603071574667
+    }
+  ]
+}

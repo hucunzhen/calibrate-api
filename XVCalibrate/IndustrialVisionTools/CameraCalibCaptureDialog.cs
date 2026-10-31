@@ -75,6 +75,8 @@ namespace CalibOperatorCLI_Example
                 throw new InvalidOperationException($"相机连接失败，deviceIndex={deviceIndex}");
 
             Directory.CreateDirectory(_saveDirectory);
+            // 每次开采集先清空目录，避免上次残留图混入棋盘内参标定。
+            ClearExistingCaptureImages(_saveDirectory);
 
             var root = new Grid();
             root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(280) });
@@ -99,7 +101,7 @@ namespace CalibOperatorCLI_Example
 
             var hint = new TextBlock
             {
-                Text = "调整标定板位姿与对焦，单击「确定」保存当前预览帧。建议覆盖画面四角与中心，达到最少采集张数后单击「完成」。",
+                Text = "打开本窗口时已清空保存目录中的旧图。调整标定板位姿与对焦，单击「确定」保存当前预览帧。建议覆盖画面四角与中心，达到最少采集张数后单击「完成」。",
                 Foreground = Brushes.Silver,
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(10, 0, 10, 8),
@@ -326,7 +328,30 @@ namespace CalibOperatorCLI_Example
         }
 
         private string BuildStatusText() =>
-            $"已采集 {_savedPaths.Count} / 至少 {_minFrames} 张\n保存目录:\n{_saveDirectory}";
+            $"已采集 {_savedPaths.Count} / 至少 {_minFrames} 张\n保存目录（已清空旧图）:\n{_saveDirectory}";
+
+        /// <summary>删除保存目录顶层常见图像文件（不清子目录）。</summary>
+        private static void ClearExistingCaptureImages(string directory)
+        {
+            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+                return;
+
+            string[] patterns = { "*.bmp", "*.png", "*.jpg", "*.jpeg", "*.tif", "*.tiff" };
+            foreach (string pattern in patterns)
+            {
+                foreach (string path in Directory.GetFiles(directory, pattern, SearchOption.TopDirectoryOnly))
+                {
+                    try
+                    {
+                        File.Delete(path);
+                    }
+                    catch
+                    {
+                        // 个别文件占用时跳过，不阻断采集
+                    }
+                }
+            }
+        }
 
         private static string NormalizeExtension(string ext)
         {

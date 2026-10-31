@@ -281,7 +281,34 @@ namespace CalibOperatorCLI_Example
             return radiusPx > 1e-6;
         }
 
-        /// <summary>固定起点、终点，按圆半径求弧上点（sideHint 决定鼓出侧）。</summary>
+        /// <summary>
+        /// 固定起点和圆心角，按新半径绕起点均匀缩放：终点与弧上点随之移动，弦长 = 2 R sin(θ/2)。
+        /// </summary>
+        public static bool TryResizeArcKeepSweepFromStart(
+            Point start,
+            Point via,
+            Point end,
+            double radius,
+            out Point newVia,
+            out Point newEnd)
+        {
+            newVia = via;
+            newEnd = end;
+            if (radius < 1e-3)
+                return false;
+            if (!TryCircleFromThreePoints(start, via, end, out _, out double r0) || r0 < 1e-6)
+                return false;
+
+            double k = radius / r0;
+            newVia = ScaleAbout(start, via, k);
+            newEnd = ScaleAbout(start, end, k);
+            return Dist(start, newEnd) >= 1e-6 && IsValidArcVia(start, newVia, newEnd);
+        }
+
+        /// <summary>
+        /// 固定起点、终点，按圆半径求弧上点（sideHint 决定鼓出侧）。
+        /// 弧上点取劣弧顶点（矢高 R−√(R²−(c/2)²)），不是圆心；半径必须大于半弦，否则三点会几乎共线、圆变得极大。
+        /// </summary>
         public static bool TryViaFromChordAndRadius(
             Point start,
             Point end,
@@ -296,20 +323,27 @@ namespace CalibOperatorCLI_Example
             if (chord < 1e-6)
                 return false;
 
-            double minR = chord * 0.5 + 1e-3;
-            if (radiusPx < minR)
-                radiusPx = minR;
+            double half = chord * 0.5;
+            if (radiusPx < half + 1e-3)
+                return false;
 
             double mx = (start.X + end.X) * 0.5;
             double my = (start.Y + end.Y) * 0.5;
             double nx = -dy / chord;
             double ny = dx / chord;
-            double h = Math.Sqrt(Math.Max(0, radiusPx * radiusPx - (chord * 0.5) * (chord * 0.5)));
-            var viaPlus = new Point(mx + nx * h, my + ny * h);
-            var viaMinus = new Point(mx - nx * h, my - ny * h);
+            double centerOff = Math.Sqrt(Math.Max(0, radiusPx * radiusPx - half * half));
+            double sagitta = radiusPx - centerOff;
+            if (sagitta < 1e-6)
+                return false;
+
+            var viaPlus = new Point(mx + nx * sagitta, my + ny * sagitta);
+            var viaMinus = new Point(mx - nx * sagitta, my - ny * sagitta);
             via = Dist(viaPlus, sideHint) <= Dist(viaMinus, sideHint) ? viaPlus : viaMinus;
             return IsValidArcVia(start, via, end);
         }
+
+        private static Point ScaleAbout(Point origin, Point p, double k) =>
+            new Point(origin.X + k * (p.X - origin.X), origin.Y + k * (p.Y - origin.Y));
 
         internal static bool TryCircleFromThreePoints(Point a, Point b, Point c, out Point center, out double radius)
         {
@@ -474,6 +508,39 @@ namespace CalibOperatorCLI_Example
             return true;
         }
 
+        /// <summary>改写圆弧边终点与弧上点，保持圆弧类型（起点不动）。</summary>
+        public static bool TryWriteArcEdge(RoiContourPath path, int edgeIndex, Point newEnd, Point via, out string error)
+        {
+            error = "";
+            int edges = GetEdgeCount(path);
+            if (edgeIndex < 0 || edgeIndex >= edges)
+            {
+                error = "段序号无效";
+                return false;
+            }
+
+            GetEdgeEndpoints(path, edgeIndex, out Point start, out _);
+            if (Dist(start, newEnd) < 1e-6)
+            {
+                error = "终点与起点过近";
+                return false;
+            }
+
+            if (!IsValidArcVia(start, via, newEnd))
+            {
+                error = "弧上点与两端共线，无法构成圆弧";
+                return false;
+            }
+
+            int n = path.VertexCount;
+            int endIdx = path.IsClosed ? (edgeIndex + 1) % n : edgeIndex + 1;
+            path.Vertices[endIdx] = newEnd;
+            EnsureEdgeLists(path, path.IsClosed ? n : Math.Max(n - 1, 0));
+            path.EdgeKinds[edgeIndex] = RoiEdgeKind.Arc;
+            path.ArcVia[edgeIndex] = via;
+            return true;
+        }
+
         /// <summary>采样该边折线点（含起终点），用于高亮绘制。</summary>
         public static List<Point> SampleEdgePoints(RoiContourPath path, int edgeIndex, int arcSegments = 24)
         {
@@ -630,6 +697,91 @@ namespace CalibOperatorCLI_Example
             }
 
             return true;
+        }
+
+        /// <summary>开放路径上删中间边时，若要不拼接就必须拆成两条。</summary>
+        public static bool RemovingOpenEdgeWouldSplit(RoiContourPath path, int edgeIndex)
+        {
+            if (path == null || path.IsClosed)
+                return false;
+            int edges = GetEdgeCount(path);
+            return edgeIndex > 0 && edgeIndex < edges - 1;
+        }
+
+        /// <summary>
+        /// 只去掉该边，其余边的顶点与圆弧经由点不变。
+        /// 闭合：与 <see cref="TryRemoveEdge"/> 相同（在该边断开，保留全部顶点）。
+        /// 开放：删首/末边只去掉仅属于该边的端点；删中间边则拆成两条，后缀写入 <paramref name="splitOff"/>。
+        /// </summary>
+        public static bool TryRemoveEdgeKeepNeighbors(
+            RoiContourPath path,
+            int edgeIndex,
+            out RoiContourPath? splitOff,
+            out string error)
+        {
+            splitOff = null;
+            error = "";
+            int edges = GetEdgeCount(path);
+            if (path == null || edgeIndex < 0 || edgeIndex >= edges)
+            {
+                error = "段序号无效";
+                return false;
+            }
+
+            if (path.IsClosed && path.VertexCount >= 3)
+                return TryRemoveEdge(path, edgeIndex, out error);
+
+            EnsureEdgeLists(path, edges);
+
+            if (edges == 1)
+                return TryRemoveEdge(path, edgeIndex, out error);
+
+            if (edgeIndex == 0)
+            {
+                path.Vertices.RemoveAt(0);
+                path.EdgeKinds.RemoveAt(0);
+                if (path.ArcVia.Count > 0)
+                    path.ArcVia.RemoveAt(0);
+                TrimOpenEdgeLists(path);
+                return true;
+            }
+
+            if (edgeIndex == edges - 1)
+                return TryRemoveEdge(path, edgeIndex, out error);
+
+            splitOff = new RoiContourPath { IsClosed = false };
+            for (int v = edgeIndex + 1; v < path.Vertices.Count; v++)
+                splitOff.Vertices.Add(path.Vertices[v]);
+            for (int e = edgeIndex + 1; e < edges; e++)
+            {
+                splitOff.EdgeKinds.Add(path.EdgeKinds[e]);
+                splitOff.ArcVia.Add(e < path.ArcVia.Count ? path.ArcVia[e] : null);
+            }
+
+            path.Vertices.RemoveRange(edgeIndex + 1, path.Vertices.Count - (edgeIndex + 1));
+            while (path.EdgeKinds.Count > edgeIndex)
+                path.EdgeKinds.RemoveAt(path.EdgeKinds.Count - 1);
+            TrimOpenEdgeLists(path);
+            path.IsClosed = false;
+
+            if (GetEdgeCount(splitOff) <= 0)
+                splitOff = null;
+
+            return true;
+        }
+
+        private static void TrimOpenEdgeLists(RoiContourPath path)
+        {
+            int maxEdges = Math.Max(path.Vertices.Count - 1, 0);
+            while (path.EdgeKinds.Count > maxEdges)
+                path.EdgeKinds.RemoveAt(path.EdgeKinds.Count - 1);
+            while (path.ArcVia.Count > path.EdgeKinds.Count)
+                path.ArcVia.RemoveAt(path.ArcVia.Count - 1);
+            if (path.Vertices.Count < 2)
+            {
+                path.EdgeKinds.Clear();
+                path.ArcVia.Clear();
+            }
         }
 
         private static void EnsureEdgeLists(RoiContourPath path, int edgeCount)

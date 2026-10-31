@@ -42,7 +42,7 @@
     {
       "Id": "e1000001-0001-4001-8001-000000000016",
       "TypeId": "halcon_reduce_domain_by_mask",
-      "X": 1273.1045918367345,
+      "X": 1287.1045918367345,
       "Y": 0,
       "Params": {
         "enable": "true",
@@ -223,8 +223,8 @@
       "X": 240,
       "Y": 366.3296,
       "Params": {
-        "angleStart": "-180",
-        "angleExtent": "360",
+        "angleStart": "-90",
+        "angleExtent": "182",
         "minScore": "0.25",
         "numMatches": "1",
         "maxOverlap": "0.5",
@@ -232,8 +232,8 @@
         "numLevels": "0",
         "greediness": "0.75",
         "allowRetry": "false",
-        "coarseScaleMin": "1",
-        "coarseScaleMax": "1",
+        "coarseScaleMin": "0.95",
+        "coarseScaleMax": "1.05",
         "endScoreWeight": "0",
         "endArcFraction": "0.7",
         "enable": "true",

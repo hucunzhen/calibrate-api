@@ -29,7 +29,7 @@
 | `models/` | 九点标定 JSON、标定图、world_pos.txt |
 | `chessboard/` | 棋盘标定 JSON（阶段 1 输出） |
 | `captured_chessboard/` | 棋盘采图目录（阶段 1 默认） |
-| `roi/` | 粗/精/外框 ROI（`.xvroi.json`） |
+| `roi/` | 粗/精/外框 ROI（`.xvroi.json`，mm 坐标；操作见 [../halcon/README_shape_model_roi.md](../halcon/README_shape_model_roi.md)） |
 
 ## 加载方式
 

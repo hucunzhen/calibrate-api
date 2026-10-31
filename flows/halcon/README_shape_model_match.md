@@ -57,9 +57,19 @@ FindShapeModel → halcon_pick_shape_match_lattice（阵列格点筛选，输出
 | 节点 | 参数 | 说明 |
 |------|------|------|
 | halcon_create_shape_model | metric | 阈值/XLD 轮廓用 `ignore_local_polarity` |
+| halcon_create_shape_model | angleStart/Extent | **写入模型**：预存哪些旋转。0°=训练图朝向。须覆盖现场全部可能转角 |
+| halcon_create_shape_model | angleStep | 创建采样网格。流程默认 **0.5°**；**0=自动**。不是最终角精度 |
+| 创建 ScaledShape | scaleMin / scaleMax | **写入模型**的尺寸范围。定位搜索须 ⊆ 此区间。Min=Max=1 为刚性，无缩放格 |
+| 创建 ScaledShape | scaleStep | 缩放采样网格。页上 **0=自动**（HALCON 常给出约 **0.009～0.01**）。不是最终尺寸精度 |
 | halcon_find_shape_model | numMatches | `0` = 全部匹配 |
 | halcon_find_shape_model | minScore | 漏检降低、误检提高 |
-| halcon_find_shape_model | angleStart/Extent | 覆盖目标实际旋转范围 |
+| halcon_find_shape_model | angleStart/Extent | **本次搜索窗**，须 ⊆ 创建范围。粗搜相对图像 0°；精搜相对 CoarseAngle |
+| 粗/精 Find | scaleMin / scaleMax | **本次缩放窗**，须 ⊆ 创建范围。均为 1 则不缩放搜索 |
+| halcon_find_shape_model | subPixel | **角和缩放精度主要看这里**。`none`：角停在 `angleStep` 格子上（0.5° 约差 0.25°～0.5°），缩放停在 `scaleStep` 格子上（0.009 约差 0.45%～0.9%）。`interpolation` / `least_squares`：格子间拟合，精匹配建议用这个，不必改密创建步长 |
+
+形状模板页创建步长默认 **0（自动）**。已有 `.shm` 的实际步长见加载后的参数摘要。
+
+ROI 绘制、`.xvroi.json` 的 mm 保存/加载见 [README_shape_model_roi.md](README_shape_model_roi.md)。页上联调检查清单见 [README_shape_model_page_test.md](README_shape_model_page_test.md)。
 
 ## 使用已导出的 .shm（可选）
 

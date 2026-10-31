@@ -415,18 +415,18 @@ namespace CalibOperatorCLI_Example
                 && ArcDepartureAlignsTangent(junction, via, end, tangentX, tangentY);
         }
 
-        /// <summary>固定段端点，按半径重算弧上点（优先保持与上一段直线相切）。</summary>
+        /// <summary>固定起点与圆心角，按半径缩放圆弧（终点与弧上点绕起点移动）。</summary>
         public static bool TrySetArcEdgeRadius(RoiContourPath path, int edgeIndex, double radiusPx, out string error)
         {
             error = "";
-            int n = path.VertexCount;
-            if (!path.IsClosed || n < 3)
+            int edges = RoiContourPath.GetEdgeCount(path);
+            if (path.VertexCount < 2 || edges <= 0)
             {
-                error = "路径须为闭合多边形";
+                error = "路径段数不足";
                 return false;
             }
 
-            if (edgeIndex < 0 || edgeIndex >= n
+            if (edgeIndex < 0 || edgeIndex >= edges
                 || edgeIndex >= path.EdgeKinds.Count
                 || path.EdgeKinds[edgeIndex] != RoiEdgeKind.Arc)
             {
@@ -434,32 +434,20 @@ namespace CalibOperatorCLI_Example
                 return false;
             }
 
-            Point start = path.Vertices[edgeIndex];
-            Point end = path.Vertices[(edgeIndex + 1) % n];
-            Point hint = edgeIndex < path.ArcVia.Count && path.ArcVia[edgeIndex] is Point v
-                ? v
-                : new Point((start.X + end.X) * 0.5, (start.Y + end.Y) * 0.5);
-
-            if (TryGetIncomingTravelTangentAtVertex(path, edgeIndex, out double tx, out double ty)
-                && TryGetLineAnchorBeforeVertex(path, edgeIndex, out Point anchor)
-                && TryAdjustTangentArcByRadius(start, tx, ty, end, radiusPx, null, anchor, hint, out Point viaTan))
+            if (edgeIndex >= path.ArcVia.Count || path.ArcVia[edgeIndex] is not Point via)
             {
-                while (path.ArcVia.Count < path.EdgeKinds.Count)
-                    path.ArcVia.Add(null);
-                path.ArcVia[edgeIndex] = viaTan;
-                return true;
+                error = "该圆弧段缺少弧上点";
+                return false;
             }
 
-            if (RoiContourPath.TryViaFromChordAndRadius(start, end, radiusPx, hint, out Point via))
+            RoiContourPath.GetEdgeEndpoints(path, edgeIndex, out Point start, out Point end);
+            if (!RoiContourPath.TryResizeArcKeepSweepFromStart(start, via, end, radiusPx, out Point newVia, out Point newEnd))
             {
-                while (path.ArcVia.Count < path.EdgeKinds.Count)
-                    path.ArcVia.Add(null);
-                path.ArcVia[edgeIndex] = via;
-                return true;
+                error = "无法按原圆心角重算圆弧，请检查半径";
+                return false;
             }
 
-            error = "半径过小或与相切约束冲突";
-            return false;
+            return RoiContourPath.TryWriteArcEdge(path, edgeIndex, newEnd, newVia, out error);
         }
 
         /// <summary>从路径末点（直线→圆弧相切）根据当前鼠标生成整段圆弧。</summary>

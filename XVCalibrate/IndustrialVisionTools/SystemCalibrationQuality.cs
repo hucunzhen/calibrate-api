@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using CalibOperatorPInvoke;
 
 namespace CalibOperatorCLI_Example
@@ -171,20 +172,30 @@ namespace CalibOperatorCLI_Example
                     Passed = r.Passed,
                     VerdictLine = r.VerdictLine,
                     SummaryLine = BuildBriefSummary(r),
-                    ChessboardRmsPx = r.ChessboardRmsPx,
+                    // JSON 默认不能写 NaN/Infinity；缺内参 RMS 时写 0
+                    ChessboardRmsPx = FiniteOrZero(r.ChessboardRmsPx),
                     ChessboardGrade = r.ChessboardGrade,
-                    NinePointAvgMm = r.NinePointAvgMm,
-                    NinePointMaxMm = r.NinePointMaxMm,
+                    NinePointAvgMm = FiniteOrZero(r.NinePointAvgMm),
+                    NinePointMaxMm = FiniteOrZero(r.NinePointMaxMm),
                     NinePointGrade = r.NinePointGrade,
-                    MmPerPixel = r.MmPerPixel,
-                    ChessboardContributionAvgMm = r.ChessboardContributionAvgMm,
-                    SystemAvgMm = r.SystemAvgMm,
-                    SystemMaxMm = r.SystemMaxMm
+                    MmPerPixel = FiniteOrZero(r.MmPerPixel),
+                    ChessboardContributionAvgMm = FiniteOrZero(r.ChessboardContributionAvgMm),
+                    SystemAvgMm = FiniteOrZero(r.SystemAvgMm),
+                    SystemMaxMm = FiniteOrZero(r.SystemMaxMm)
                 };
         }
 
+        private static readonly JsonSerializerOptions SystemErrorJsonOptions = new()
+        {
+            WriteIndented = true,
+            NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
+        };
+
         public static string SerializeDocument(SystemQualityReport report) =>
-            JsonSerializer.Serialize(SystemErrorDocument.From(report), new JsonSerializerOptions { WriteIndented = true });
+            JsonSerializer.Serialize(SystemErrorDocument.From(report), SystemErrorJsonOptions);
+
+        private static double FiniteOrZero(double v) =>
+            double.IsFinite(v) ? v : 0;
 
         public static SystemErrorDocument? TryParseDocument(string? json)
         {
@@ -205,6 +216,10 @@ namespace CalibOperatorCLI_Example
         {
             double sx = Math.Sqrt(t.A * t.A + t.D * t.D);
             double sy = Math.Sqrt(t.B * t.B + t.E * t.E);
+            if (!double.IsFinite(sx))
+                sx = 0;
+            if (!double.IsFinite(sy))
+                sy = 0;
             if (sx <= 0 && sy <= 0)
                 return 0;
             if (sx <= 0)

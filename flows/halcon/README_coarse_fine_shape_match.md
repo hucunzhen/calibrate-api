@@ -72,6 +72,16 @@ flowchart LR
 | `points_sink` | `groupIdMode=round`（每个 Mask/粗候选一条轨迹；勿用 preserve，XLD 采样 BarIds 常为全 0 会合并成一条） |
 | `polyline_simplify_dp` | `epsilon=2`～`5`；`closed=true`；**必须**接 `MergedGroupBarIds`→`GroupBarIds` |
 
+## 角度 / 缩放范围与步长（创建 vs 定位）
+
+- **创建** `angleStart`/`angleExtent`/`angleStep` 以及 ScaledShape 的 `scaleMin`/`scaleMax`/`scaleStep` 写进 `.shm`：预存哪些旋转和尺寸、采样格子多密。角度 0°=训练图朝向。
+- **定位** 的角度窗、缩放窗是这一次搜哪一段，必须 ⊆ 创建范围。粗搜相对图像 0°；精搜相对粗匹配角 `CoarseAngle`。
+- `angleStep`（流程默认 **0.5°**，0=自动）和 `scaleStep`（页上 0=自动，摘要里常见 **0.009**）都是**采样网格**，不是最终角/尺寸只能精确到这一档。
+- 粗匹配常用 `subPixel=none`：角停在 0.5° 格子上（约差 0.25°～0.5°）；缩放停在 0.009 格子上（约 0.45%～0.9%，40 mm 条远端约 0.18～0.36 mm）。
+- 精匹配请用 `least_squares`（或至少 `interpolation`）在格子间拟合角和缩放；**不必**把角度步长改到 0.1°、缩放步长改到 0.001。精匹配也用 `none` 时，才是这些步长在限制精度。
+
+更完整对照见 `README_shape_model_match.md` 与 `flows/README_workflow_guide.md` §3.6。
+
 ## 模型路径
 
 示例中默认：

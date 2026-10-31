@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -85,6 +85,7 @@ namespace CalibOperatorCLI_Example
         {
             SaveCurrentPageSession();
             SaveNavigationTab();
+            try { _halconShapeModelPage?.ReleaseRuntimeResources(); } catch { /* ignored */ }
             base.OnClosed(e);
             try { CameraService.FinalizeSDK(); } catch { /* ignored */ }
         }

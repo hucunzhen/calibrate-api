@@ -53,7 +53,8 @@ namespace CalibOperatorCLI_Example
             double lengthPx,
             AffineTransform? affine,
             bool alongTangent,
-            bool allowEditStart = false)
+            bool allowEditStart = false,
+            bool endSnappedToLandmark = false)
         {
             _allowEditStart = allowEditStart;
             _anchorCol = anchorCol;
@@ -81,11 +82,18 @@ namespace CalibOperatorCLI_Example
             BtnPickStart.Visibility = allowEditStart ? Visibility.Visible : Visibility.Collapsed;
             BtnPickStart.IsEnabled = allowEditStart;
 
-            TxtDirectionHint.Text = alongTangent
-                ? "初始方向沿上一段圆弧切线；可修改角度、段长或起终点坐标。"
-                : allowEditStart
-                    ? "可修改起点、角度、段长或终点；也可用「图上选」在画布点选（空白取点，靠近顶点则吸附）。"
-                    : "初始方向来自鼠标；可修改角度、段长或终点坐标。";
+            if (endSnappedToLandmark)
+            {
+                TxtDirectionHint.Text = "已吸附附近顶点作为终点；可改长度/角度，或改终点坐标后确定。";
+            }
+            else
+            {
+                TxtDirectionHint.Text = alongTangent
+                    ? "初始方向沿上一段圆弧切线；可修改角度、段长或起终点坐标。"
+                    : allowEditStart
+                        ? "可修改起点、角度、段长或终点；也可用「图上选」在画布点选（空白取点，靠近顶点则吸附）。"
+                        : "初始方向来自鼠标；靠近已有顶点会吸附为终点；可修改角度、段长或终点坐标。";
+            }
 
             RefreshAnchorHint();
 

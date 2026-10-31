@@ -1,0 +1,13 @@
+{
+  "enableUndistort": true,
+  "undistortAlpha": "-1",
+  "enablePerspective": true,
+  "viewIndex": 0,
+  "boardCols": 11,
+  "boardRows": 8,
+  "squareSizeMm": "5",
+  "pxPerMm": "32",
+  "perspectiveOutputFrame": "plane",
+  "chessboardCalibrationFile": "models\\calibration_result.json",
+  "ninePointCalibrationFile": "models\\calibration_nine_point.json"
+}

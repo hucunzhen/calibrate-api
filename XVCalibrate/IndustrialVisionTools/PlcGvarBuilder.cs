@@ -36,8 +36,124 @@ namespace CalibOperatorCLI_Example
         private static bool ShouldAddClosingSegment(bool closePolyline, int pointCount, bool alreadyClosed)
             => closePolyline && pointCount >= 3 && !alreadyClosed;
 
-        /// <summary>折线点列 → 线段 GVAR（n 点 → n-1 段；closePolyline 时再补末点→首点闭合段）。</summary>
-        public static GVAR[] BuildSegmentGvarsFromPolyline(CalibPoint3D[] pts3, short gvarType, bool closePolyline = true, double closeTolMm = DefaultCloseTolMm)
+        /// <summary>
+        /// 闭合到起点后，沿闭合方向再延伸 overrunDist（属焊接轨迹）。
+        /// 仅当 closePolyline 且（补了闭合段或首尾已重合）时追加一条 GVAR。
+        /// </summary>
+        private static void TryAppendOverrunAfterClose3D(
+            List<GVAR> items,
+            CalibPoint3D[] pts3,
+            short gvarType,
+            bool closePolyline,
+            bool alreadyClosed,
+            bool addedClose,
+            double overrunDist,
+            double closeTolMm)
+        {
+            if (!closePolyline || overrunDist <= 1e-12 || pts3 == null || pts3.Length < 2)
+                return;
+            if (!addedClose && !alreadyClosed)
+                return;
+
+            var start = pts3[0];
+            CalibPoint3D? before = null;
+            if (alreadyClosed)
+            {
+                var end = pts3[^1];
+                for (int i = pts3.Length - 2; i >= 0; i--)
+                {
+                    double dxb = pts3[i].X - end.X, dyb = pts3[i].Y - end.Y, dzb = pts3[i].Z - end.Z;
+                    if (dxb * dxb + dyb * dyb + dzb * dzb > closeTolMm * closeTolMm)
+                    {
+                        before = pts3[i];
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                before = pts3[^1];
+            }
+
+            if (before == null)
+                return;
+
+            double dx = start.X - before.Value.X;
+            double dy = start.Y - before.Value.Y;
+            double dz = start.Z - before.Value.Z;
+            double len = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+            if (len < 1e-12)
+                return;
+
+            dx = dx / len * overrunDist;
+            dy = dy / len * overrunDist;
+            dz = dz / len * overrunDist;
+            items.Add(MakeLineGvar(
+                gvarType,
+                (float)start.X, (float)start.Y, (float)start.Z,
+                (float)(start.X + dx), (float)(start.Y + dy), (float)(start.Z + dz)));
+        }
+
+        private static void TryAppendOverrunAfterClose2D(
+            List<GVAR> items,
+            Point2D[] pts2,
+            short gvarType,
+            float z,
+            bool closePolyline,
+            bool alreadyClosed,
+            bool addedClose,
+            double overrunDist,
+            double closeTolMm)
+        {
+            if (!closePolyline || overrunDist <= 1e-12 || pts2 == null || pts2.Length < 2)
+                return;
+            if (!addedClose && !alreadyClosed)
+                return;
+
+            var start = pts2[0];
+            Point2D? before = null;
+            if (alreadyClosed)
+            {
+                var end = pts2[^1];
+                for (int i = pts2.Length - 2; i >= 0; i--)
+                {
+                    double dxb = pts2[i].X - end.X, dyb = pts2[i].Y - end.Y;
+                    if (dxb * dxb + dyb * dyb > closeTolMm * closeTolMm)
+                    {
+                        before = pts2[i];
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                before = pts2[^1];
+            }
+
+            if (before == null)
+                return;
+
+            double dx = start.X - before.Value.X;
+            double dy = start.Y - before.Value.Y;
+            double len = Math.Sqrt(dx * dx + dy * dy);
+            if (len < 1e-12)
+                return;
+
+            dx = dx / len * overrunDist;
+            dy = dy / len * overrunDist;
+            items.Add(MakeLineGvar(
+                gvarType,
+                (float)start.X, (float)start.Y, z,
+                (float)(start.X + dx), (float)(start.Y + dy), z));
+        }
+
+        /// <summary>折线点列 → 线段 GVAR（n 点 → n-1 段；closePolyline 时再补末点→首点闭合段；闭合后可按 overrunDist 超程）。</summary>
+        public static GVAR[] BuildSegmentGvarsFromPolyline(
+            CalibPoint3D[] pts3,
+            short gvarType,
+            bool closePolyline = true,
+            double closeTolMm = DefaultCloseTolMm,
+            double overrunDist = 0)
         {
             if (pts3 == null || pts3.Length == 0)
                 return Array.Empty<GVAR>();
@@ -49,7 +165,7 @@ namespace CalibOperatorCLI_Example
 
             bool closed = PolylineAlreadyClosed3D(pts3, closeTolMm);
             bool addClose = ShouldAddClosingSegment(closePolyline, pts3.Length, closed);
-            var items = new List<GVAR>(pts3.Length - 1 + (addClose ? 1 : 0));
+            var items = new List<GVAR>(pts3.Length - 1 + (addClose ? 1 : 0) + (overrunDist > 1e-12 ? 1 : 0));
             for (int i = 0; i < pts3.Length - 1; i++)
             {
                 float x0 = (float)pts3[i].X, y0 = (float)pts3[i].Y, z0 = (float)pts3[i].Z;
@@ -65,10 +181,17 @@ namespace CalibOperatorCLI_Example
                 items.Add(MakeLineGvar(gvarType, x0, y0, z0, x1, y1, z1));
             }
 
+            TryAppendOverrunAfterClose3D(items, pts3, gvarType, closePolyline, closed, addClose, overrunDist, closeTolMm);
             return items.ToArray();
         }
 
-        public static GVAR[] BuildSegmentGvarsFromPolyline(Point2D[] pts2, short gvarType, float zDefault = 0f, bool closePolyline = true, double closeTolMm = DefaultCloseTolMm)
+        public static GVAR[] BuildSegmentGvarsFromPolyline(
+            Point2D[] pts2,
+            short gvarType,
+            float zDefault = 0f,
+            bool closePolyline = true,
+            double closeTolMm = DefaultCloseTolMm,
+            double overrunDist = 0)
         {
             if (pts2 == null || pts2.Length == 0)
                 return Array.Empty<GVAR>();
@@ -81,7 +204,7 @@ namespace CalibOperatorCLI_Example
 
             bool closed = PolylineAlreadyClosed2D(pts2, closeTolMm);
             bool addClose = ShouldAddClosingSegment(closePolyline, pts2.Length, closed);
-            var items = new List<GVAR>(pts2.Length - 1 + (addClose ? 1 : 0));
+            var items = new List<GVAR>(pts2.Length - 1 + (addClose ? 1 : 0) + (overrunDist > 1e-12 ? 1 : 0));
             for (int i = 0; i < pts2.Length - 1; i++)
             {
                 float x0 = (float)pts2[i].X, y0 = (float)pts2[i].Y;
@@ -97,6 +220,7 @@ namespace CalibOperatorCLI_Example
                 items.Add(MakeLineGvar(gvarType, x0, y0, z, x1, y1, z));
             }
 
+            TryAppendOverrunAfterClose2D(items, pts2, gvarType, z, closePolyline, closed, addClose, overrunDist, closeTolMm);
             return items.ToArray();
         }
 
@@ -151,12 +275,13 @@ namespace CalibOperatorCLI_Example
             int[]? barIds,
             short gvarType,
             bool closePolyline = true,
-            double closeTolMm = DefaultCloseTolMm)
+            double closeTolMm = DefaultCloseTolMm,
+            double overrunDist = 0)
         {
             if (pts3 == null || pts3.Length == 0)
                 return Array.Empty<GVAR>();
             if (barIds == null || barIds.Length != pts3.Length)
-                return BuildSegmentGvarsFromPolyline(pts3, gvarType, closePolyline, closeTolMm);
+                return BuildSegmentGvarsFromPolyline(pts3, gvarType, closePolyline, closeTolMm, overrunDist);
 
             if (pts3.Length == 1)
             {
@@ -175,7 +300,8 @@ namespace CalibOperatorCLI_Example
             }
 
             bool closed = PolylineAlreadyClosed3D(pts3, closeTolMm);
-            if (ShouldAddClosingSegment(closePolyline, pts3.Length, closed) && barIds[0] == barIds[^1])
+            bool addClose = ShouldAddClosingSegment(closePolyline, pts3.Length, closed) && barIds[0] == barIds[^1];
+            if (addClose)
             {
                 int last = pts3.Length - 1;
                 float x0 = (float)pts3[last].X, y0 = (float)pts3[last].Y, z0 = (float)pts3[last].Z;
@@ -183,6 +309,8 @@ namespace CalibOperatorCLI_Example
                 items.Add(MakeLineGvar(gvarType, x0, y0, z0, x1, y1, z1));
             }
 
+            if (barIds[0] == barIds[^1])
+                TryAppendOverrunAfterClose3D(items, pts3, gvarType, closePolyline, closed, addClose, overrunDist, closeTolMm);
             return items.ToArray();
         }
 
@@ -196,10 +324,11 @@ namespace CalibOperatorCLI_Example
             PlcGvarSegmentMode mode,
             string pointAt,
             bool closePolyline,
-            double closeTolMm)
+            double closeTolMm,
+            double overrunDist = 0)
             => mode == PlcGvarSegmentMode.PointDegenerate
                 ? BuildPointGvarsFromPolyline(run, gvarType, pointAt)
-                : BuildSegmentGvarsFromPolyline(run, gvarType, closePolyline, closeTolMm);
+                : BuildSegmentGvarsFromPolyline(run, gvarType, closePolyline, closeTolMm, overrunDist);
 
         /// <summary>
         /// separate_batch：每个不同的逐点 BarId（= GroupBarIds / 焊道条号）写一批 PLC。
@@ -211,8 +340,9 @@ namespace CalibOperatorCLI_Example
             int[] barIds,
             short gvarType,
             bool closePolyline = true,
-            double closeTolMm = DefaultCloseTolMm)
-            => BuildGvarBatchesByBarId(pts3, barIds, gvarType, PlcGvarSegmentMode.Line, "mid", closePolyline, closeTolMm);
+            double closeTolMm = DefaultCloseTolMm,
+            double overrunDist = 0)
+            => BuildGvarBatchesByBarId(pts3, barIds, gvarType, PlcGvarSegmentMode.Line, "mid", closePolyline, closeTolMm, overrunDist);
 
         public static List<(int BarId, GVAR[] Gvars)> BuildPointGvarBatchesByBarId(
             CalibPoint3D[] pts3,
@@ -228,7 +358,8 @@ namespace CalibOperatorCLI_Example
             PlcGvarSegmentMode mode,
             string pointAt,
             bool closePolyline,
-            double closeTolMm)
+            double closeTolMm,
+            double overrunDist = 0)
         {
             var batches = new List<(int BarId, GVAR[] Gvars)>();
             if (pts3 == null || pts3.Length == 0 || barIds == null || barIds.Length != pts3.Length)
@@ -254,7 +385,8 @@ namespace CalibOperatorCLI_Example
                             int len = i - start;
                             var run = new CalibPoint3D[len];
                             Array.Copy(pts3, start, run, 0, len);
-                            gvars.AddRange(BuildGvarsFromPolylineRun(run, gvarType, mode, pointAt, closePolyline, closeTolMm));
+                            gvars.AddRange(BuildGvarsFromPolylineRun(
+                                run, gvarType, mode, pointAt, closePolyline, closeTolMm, overrunDist));
                         }
 
                         start = i;
@@ -293,12 +425,16 @@ namespace CalibOperatorCLI_Example
             string? pointAt = "mid",
             double zDefault = 0.0,
             bool closePolyline = true,
-            double closeTolMm = DefaultCloseTolMm)
+            double closeTolMm = DefaultCloseTolMm,
+            double overrunDist = 0)
         {
             float zDef = (float)zDefault;
             bool asPoint = segmentMode == PlcGvarSegmentMode.PointDegenerate;
             string ptAt = pointAt ?? "mid";
-            string segLabel = asPoint ? "点GVAR(p0=p1)" : (closePolyline ? "段GVAR+闭合" : "段GVAR");
+            string overrunTag = !asPoint && closePolyline && overrunDist > 1e-12 ? $"+超程{overrunDist:G}" : "";
+            string segLabel = asPoint
+                ? "点GVAR(p0=p1)"
+                : (closePolyline ? $"段GVAR+闭合{overrunTag}" : "段GVAR");
             barBatches = null;
             gvarItems = Array.Empty<GVAR>();
             sourceTag = "";
@@ -349,7 +485,7 @@ namespace CalibOperatorCLI_Example
 
                     barBatches = asPoint
                         ? BuildPointGvarBatchesByBarId(pts3, barIds, defaultGvarType, ptAt)
-                        : BuildSegmentGvarBatchesByBarId(pts3, barIds, defaultGvarType, closePolyline, closeTolMm);
+                        : BuildSegmentGvarBatchesByBarId(pts3, barIds, defaultGvarType, closePolyline, closeTolMm, overrunDist);
                     int total = barBatches.Sum(b => b.Gvars.Length);
                     int uniqBar = barIds.Distinct().Count();
                     gvarItems = Array.Empty<GVAR>();
@@ -361,11 +497,11 @@ namespace CalibOperatorCLI_Example
                 if (split == "break_segment" && barIds != null && barIds.Length == pts3.Length)
                     gvarItems = asPoint
                         ? BuildPointGvarsRespectingBarIds(pts3, barIds, defaultGvarType, ptAt)
-                        : BuildSegmentGvarsRespectingBarIds(pts3, barIds, defaultGvarType, closePolyline, closeTolMm);
+                        : BuildSegmentGvarsRespectingBarIds(pts3, barIds, defaultGvarType, closePolyline, closeTolMm, overrunDist);
                 else
                     gvarItems = asPoint
                         ? BuildPointGvarsFromPolyline(pts3, defaultGvarType, ptAt)
-                        : BuildSegmentGvarsFromPolyline(pts3, defaultGvarType, closePolyline, closeTolMm);
+                        : BuildSegmentGvarsFromPolyline(pts3, defaultGvarType, closePolyline, closeTolMm, overrunDist);
                 sourceTag = $"Points3D×{pts3.Length}→{gvarItems.Length}{segLabel}";
                 return true;
             }
@@ -393,7 +529,7 @@ namespace CalibOperatorCLI_Example
                     var pts3from2 = pts2.Select(p => new CalibPoint3D(p.X, p.Y, zDef)).ToArray();
                     barBatches = asPoint
                         ? BuildPointGvarBatchesByBarId(pts3from2, barIds, defaultGvarType, ptAt)
-                        : BuildSegmentGvarBatchesByBarId(pts3from2, barIds, defaultGvarType, closePolyline, closeTolMm);
+                        : BuildSegmentGvarBatchesByBarId(pts3from2, barIds, defaultGvarType, closePolyline, closeTolMm, overrunDist);
                     int total = barBatches.Sum(b => b.Gvars.Length);
                     gvarItems = Array.Empty<GVAR>();
                     sourceTag = FormatPoints2DSourceTag(pts2.Length, barBatches.Count, total, segLabel, zDef);
@@ -405,12 +541,12 @@ namespace CalibOperatorCLI_Example
                     var pts3from2 = pts2.Select(p => new CalibPoint3D(p.X, p.Y, zDef)).ToArray();
                     gvarItems = asPoint
                         ? BuildPointGvarsRespectingBarIds(pts3from2, barIds, defaultGvarType, ptAt)
-                        : BuildSegmentGvarsRespectingBarIds(pts3from2, barIds, defaultGvarType, closePolyline, closeTolMm);
+                        : BuildSegmentGvarsRespectingBarIds(pts3from2, barIds, defaultGvarType, closePolyline, closeTolMm, overrunDist);
                 }
                 else
                     gvarItems = asPoint
                         ? BuildPointGvarsFromPolyline(pts2, defaultGvarType, ptAt, zDef)
-                        : BuildSegmentGvarsFromPolyline(pts2, defaultGvarType, zDef, closePolyline, closeTolMm);
+                        : BuildSegmentGvarsFromPolyline(pts2, defaultGvarType, zDef, closePolyline, closeTolMm, overrunDist);
                 sourceTag = FormatPoints2DSourceTag(pts2.Length, gvarItems.Length, segLabel, zDef);
                 return true;
             }

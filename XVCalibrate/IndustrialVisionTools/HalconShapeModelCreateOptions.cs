@@ -56,7 +56,7 @@ namespace CalibOperatorCLI_Example
         public int NumLevels { get; set; } = 4;
         public double AngleStartDeg { get; set; } = -30;
         public double AngleExtentDeg { get; set; } = 60;
-        /// <summary>角度步长(度)；0 表示 auto。</summary>
+        /// <summary>创建采样网格(度)；0 表示 auto。不是 Find 最终角精度（见 SubPixel）。</summary>
         public double AngleStepDeg { get; set; } = 0.5;
         public string Optimization { get; set; } = "auto";
         public string Metric { get; set; } = "ignore_local_polarity";
@@ -64,7 +64,7 @@ namespace CalibOperatorCLI_Example
         public string? Contrast { get; set; } = "auto";
         public int MinContrast { get; set; } = 10;
 
-        /// <summary>仅 scaled 模型：比例范围与步长（步长 0=auto）。</summary>
+        /// <summary>仅 scaled 模型：比例范围与步长（步长 0=auto）。步长是创建采样格，最终缩放精度看 Find SubPixel。</summary>
         public double ScaleMin { get; set; } = 0.9;
         public double ScaleMax { get; set; } = 1.1;
         public double ScaleStep { get; set; } = 0;

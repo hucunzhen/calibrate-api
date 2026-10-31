@@ -1,0 +1,141 @@
+{
+  "Nodes": [
+    {
+      "Id": "a3f04eb6-3ffc-4a02-a29d-17fd48620176",
+      "TypeId": "load_calibration_result",
+      "X": 80,
+      "Y": 160,
+      "Params": {
+        "filePath": "models\\calibration_nine_point.json",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "7d2c1a90-4b55-4e11-9e70-1a2b3c4d5e6f",
+      "TypeId": "load_image",
+      "X": 83,
+      "Y": 364,
+      "Params": {
+        "filePath": "models\\calibration_nine_point.bmp",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "8e3d2b01-5c66-4f22-ae81-2b3c4d5e6f70",
+      "TypeId": "world_coords",
+      "X": 80,
+      "Y": 39,
+      "Params": {
+        "points": "426.6,48.853;473.1,48.853;519.6,48.853;426.6,82.853;473.1,82.853;519.6,82.853;426.6,116.853;473.1,116.853;519.6,116.853",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "a9b9bb2f-b007-429c-bab7-998ae1f224c4",
+      "TypeId": "adjust_affine_calibration",
+      "X": 567,
+      "Y": 112,
+      "Params": {
+        "interactiveAdjust": "true",
+        "offsetWorldX": "0",
+        "offsetWorldY": "0",
+        "nudgePreset": "none",
+        "nudgeStepMm": "0.5",
+        "scaleStepPercent": "0.1",
+        "scaleX": "1",
+        "scaleY": "1",
+        "pivotWorldX": "auto",
+        "pivotWorldY": "auto",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "18927501-9a18-4a9f-b61c-5fe844e19e41",
+      "TypeId": "save_calibration_result",
+      "X": 1097,
+      "Y": 119,
+      "Params": {
+        "filePath": "models\\calibration_nine_point.json",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "1588c361-656f-426b-8ed3-27b57a6a3475",
+      "TypeId": "intrinsics_undistort_image",
+      "X": 198,
+      "Y": 482,
+      "Params": {
+        "alpha": "-1",
+        "calibrationJsonFile": "models\\calibration_result.json",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "844dfda6-8690-40d7-b787-5bc57762199b",
+      "TypeId": "chessboard_perspective_warp_image",
+      "X": 469,
+      "Y": 389,
+      "Params": {
+        "calibrationJsonFile": "models\\calibration_result.json",
+        "viewIndex": "1",
+        "cols": "11",
+        "rows": "8",
+        "squareSizeMm": "5",
+        "pxPerMm": "32",
+        "perspectiveOutputFrame": "plane",
+        "perspectiveOutputScale": "board_pixels",
+        "assumeUndistorted": "true",
+        "enable": "true",
+        "disable": "false"
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "FromNodeId": "a3f04eb6-3ffc-4a02-a29d-17fd48620176",
+      "FromPort": "Transform",
+      "ToNodeId": "a9b9bb2f-b007-429c-bab7-998ae1f224c4",
+      "ToPort": "Transform"
+    },
+    {
+      "FromNodeId": "8e3d2b01-5c66-4f22-ae81-2b3c4d5e6f70",
+      "FromPort": "Points",
+      "ToNodeId": "a9b9bb2f-b007-429c-bab7-998ae1f224c4",
+      "ToPort": "WorldPts"
+    },
+    {
+      "FromNodeId": "a9b9bb2f-b007-429c-bab7-998ae1f224c4",
+      "FromPort": "Transform",
+      "ToNodeId": "18927501-9a18-4a9f-b61c-5fe844e19e41",
+      "ToPort": "Transform"
+    },
+    {
+      "FromNodeId": "7d2c1a90-4b55-4e11-9e70-1a2b3c4d5e6f",
+      "FromPort": "Image",
+      "ToNodeId": "1588c361-656f-426b-8ed3-27b57a6a3475",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "1588c361-656f-426b-8ed3-27b57a6a3475",
+      "FromPort": "Out",
+      "ToNodeId": "844dfda6-8690-40d7-b787-5bc57762199b",
+      "ToPort": "Image"
+    },
+    {
+      "FromNodeId": "844dfda6-8690-40d7-b787-5bc57762199b",
+      "FromPort": "Out",
+      "ToNodeId": "a9b9bb2f-b007-429c-bab7-998ae1f224c4",
+      "ToPort": "Image"
+    }
+  ],
+  "Meta": {
+    "latticeGridRows": "8",
+    "latticeGridCols": "2"
+  }
+}

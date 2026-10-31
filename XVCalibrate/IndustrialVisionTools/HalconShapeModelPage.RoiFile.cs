@@ -20,6 +20,8 @@ namespace CalibOperatorCLI_Example
 
         private string? _lastRoiFilePath;
 
+        private static bool IsPreserveRoiAngleEnabled() => true;
+
 
 
         private RoiSnapshotDocument CaptureRoiSnapshotFromUiInMillimeters(out string ninePointPath)
@@ -38,13 +40,14 @@ namespace CalibOperatorCLI_Example
 
             CaptureRoiIntoSettings(pixelSettings);
 
-            HalconShapeModelUiSettings mmSettings =
+            HalconShapeModelUiSettings mmSettings = RoiUsesMillimeters()
+                ? pixelSettings
+                : RoiSnapshotCoordinateTransform.ConvertPixelSettingsToMillimeters(
+                    pixelSettings, affine, IsPreserveRoiAngleEnabled());
 
-                RoiSnapshotCoordinateTransform.ConvertPixelSettingsToMillimeters(pixelSettings, affine);
 
 
-
-            return RoiSnapshotFileIo.FromSettings(
+            RoiSnapshotDocument doc = RoiSnapshotFileIo.FromSettings(
 
                 mmSettings,
 
@@ -57,6 +60,8 @@ namespace CalibOperatorCLI_Example
                 RoiSnapshotCoordinateTransform.UnitMillimeter,
 
                 ninePointPath);
+            doc.PreserveRoiAngle = true;
+            return doc;
 
         }
 
@@ -69,10 +74,12 @@ namespace CalibOperatorCLI_Example
             HalconShapeModelUiSettings stored = RoiSnapshotFileIo.ToSettings(doc);
 
             if (!RoiSnapshotCoordinateTransform.IsMillimeterDocument(doc))
-
+            {
+                stored.RoiCoordinateUnit = RoiSnapshotCoordinateTransform.UnitPixel;
                 return stored;
+            }
 
-
+            stored.RoiCoordinateUnit = RoiSnapshotCoordinateTransform.UnitMillimeter;
 
             if (!TryGetNinePointAffine(out AffineTransform affine, out string affineError))
 
@@ -80,7 +87,13 @@ namespace CalibOperatorCLI_Example
 
 
 
-            return RoiSnapshotCoordinateTransform.ConvertMillimeterSettingsToPixels(stored, affine);
+            // 内存保持 mm；叠图/HALCON 再换成像素。切勿把 mm 当像素再转一次。
+            if (RoiUsesMillimeters())
+                return stored;
+
+            stored.RoiCoordinateUnit = RoiSnapshotCoordinateTransform.UnitPixel;
+            return RoiSnapshotCoordinateTransform.ConvertMillimeterSettingsToPixels(
+                stored, affine, preserveAngle: true);
 
         }
 
@@ -124,7 +137,9 @@ namespace CalibOperatorCLI_Example
 
 
 
-            string unitLabel = RoiSnapshotCoordinateTransform.IsMillimeterDocument(doc) ? "mm→px" : "px";
+            string unitLabel = RoiSnapshotCoordinateTransform.IsMillimeterDocument(doc)
+                ? (RoiUsesMillimeters() ? "mm，叠图像素" : "mm→px")
+                : "px";
 
             string modeLabel = DescribeRoiMode(doc.RoiMode);
 
@@ -344,35 +359,35 @@ namespace CalibOperatorCLI_Example
 
 
 
-            var dlg = new SaveFileDialog
-
+            string defaultName = "roi_snapshot.xvroi.json";
+            string? initialDir = null;
+            if (SelectedParamRecipe != null
+                && TryGetParamRecipeRoiPath(SelectedParamRecipe, out string canonicalPath, out _))
             {
-
-                Filter = RoiSnapshotFileIo.FileFilter,
-
-                Title = "保存 ROI（mm 坐标）",
-
-                FileName = string.IsNullOrWhiteSpace(_lastRoiFilePath)
-
-                    ? "roi_snapshot.xvroi.json"
-
-                    : IoPath.GetFileName(_lastRoiFilePath)
-
-            };
-
-
-
-            if (!string.IsNullOrWhiteSpace(_lastRoiFilePath))
-
-            {
-
-                string? dir = IoPath.GetDirectoryName(_lastRoiFilePath);
-
-                if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
-
-                    dlg.InitialDirectory = dir;
-
+                defaultName = IoPath.GetFileName(canonicalPath);
+                string? dir = IoPath.GetDirectoryName(canonicalPath);
+                if (!string.IsNullOrEmpty(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                    initialDir = dir;
+                }
             }
+            else if (!string.IsNullOrWhiteSpace(_lastRoiFilePath))
+            {
+                defaultName = IoPath.GetFileName(_lastRoiFilePath);
+                string? dir = IoPath.GetDirectoryName(_lastRoiFilePath);
+                if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+                    initialDir = dir;
+            }
+
+            var dlg = new SaveFileDialog
+            {
+                Filter = RoiSnapshotFileIo.FileFilter,
+                Title = "保存 ROI（mm 坐标）",
+                FileName = defaultName
+            };
+            if (!string.IsNullOrEmpty(initialDir))
+                dlg.InitialDirectory = initialDir;
 
 
 

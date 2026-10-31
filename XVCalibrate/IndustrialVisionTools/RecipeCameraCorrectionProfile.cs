@@ -131,20 +131,32 @@ namespace CalibOperatorCLI_Example
 
         /// <summary>仅解析本配置中的相对路径；不存在则返回 null（由调用方回退约定搜索）。</summary>
         public string? TryResolveChessboardCalibrationPath(string recipeDirectory) =>
-            ResolveRelativeFile(recipeDirectory, ChessboardCalibrationFile);
+            ResolveRelativeFile(recipeDirectory, ChessboardCalibrationFile, requireExists: true);
 
         /// <summary>仅解析本配置中的相对路径；不存在则返回 null（由调用方回退约定搜索）。</summary>
         public string? TryResolveNinePointCalibrationPath(string recipeDirectory) =>
-            ResolveRelativeFile(recipeDirectory, NinePointCalibrationFile);
+            ResolveRelativeFile(recipeDirectory, NinePointCalibrationFile, requireExists: true);
 
-        private static string? ResolveRelativeFile(string recipeDirectory, string? relative)
+        /// <summary>配置中的棋盘标定绝对路径（文件可不存在，供保存）。</summary>
+        public string GetConfiguredChessboardCalibrationPath(string recipeDirectory) =>
+            ResolveRelativeFile(recipeDirectory, ChessboardCalibrationFile, requireExists: false)
+            ?? Path.GetFullPath(Path.Combine(recipeDirectory, "models", "calibration_result.json"));
+
+        /// <summary>配置中的九点标定绝对路径（文件可不存在，供保存）。</summary>
+        public string GetConfiguredNinePointCalibrationPath(string recipeDirectory) =>
+            ResolveRelativeFile(recipeDirectory, NinePointCalibrationFile, requireExists: false)
+            ?? Path.GetFullPath(Path.Combine(recipeDirectory, "models", "calibration_nine_point.json"));
+
+        private static string? ResolveRelativeFile(string recipeDirectory, string? relative, bool requireExists)
         {
             if (string.IsNullOrWhiteSpace(relative))
                 return null;
             string path = Path.GetFullPath(Path.Combine(
                 recipeDirectory,
                 relative.Trim().Replace('/', Path.DirectorySeparatorChar)));
-            return File.Exists(path) ? path : null;
+            if (requireExists && !File.Exists(path))
+                return null;
+            return path;
         }
     }
 }

@@ -6,7 +6,7 @@ using CalibOperatorPInvoke;
 
 namespace CalibOperatorCLI_Example
 {
-    /// <summary>编辑已有圆弧段：弧上点 + 半径（改半径时按弦固定起终点重算弧上点）。</summary>
+    /// <summary>编辑已有圆弧段：改半径时保持圆心角与起点，终点与弧上点绕起点缩放。</summary>
     public partial class RoiArcSegmentParamsDialog : Window
     {
         private bool _syncing;
@@ -20,6 +20,8 @@ namespace CalibOperatorCLI_Example
 
         public double ViaColumnPx { get; private set; }
         public double ViaRowPx { get; private set; }
+        public double EndColumnPx { get; private set; }
+        public double EndRowPx { get; private set; }
         public double RadiusPx { get; private set; }
 
         public RoiArcSegmentParamsDialog()
@@ -49,6 +51,8 @@ namespace CalibOperatorCLI_Example
             _viaRow = viaRow;
             ViaColumnPx = viaCol;
             ViaRowPx = viaRow;
+            EndColumnPx = endCol;
+            EndRowPx = endRow;
 
             var start = new Point(startCol, startRow);
             var end = new Point(endCol, endRow);
@@ -64,20 +68,13 @@ namespace CalibOperatorCLI_Example
             TxtRadiusMm.Text = FormatRadiusMm(RadiusPx);
             _syncing = false;
 
-            if (affine is AffineTransform t)
-            {
-                var ws = CalibAPI.ImageToWorld(new Point2D(startCol, startRow), t);
-                var we = CalibAPI.ImageToWorld(new Point2D(endCol, endRow), t);
-                TxtChordHint.Text = $"弦：({ws.X:F2},{ws.Y:F2}) → ({we.X:F2},{we.Y:F2}) mm";
-            }
-            else
-                TxtChordHint.Text = $"弦：({startCol:F1},{startRow:F1}) → ({endCol:F1},{endRow:F1}) px";
+            RefreshChordHint();
 
             bool hasAffine = affine is AffineTransform;
             TxtRadiusMm.IsReadOnly = !hasAffine;
             TxtMmStatus.Text = hasAffine
-                ? "半径按九点标定换算 mm；改半径时保持弦端点，重算弧上点鼓出侧。"
-                : "未加载九点标定文件，仅可编辑像素；mm 显示为 —。";
+                ? "半径按九点标定换算 mm；改半径时保持圆心角与起点，终点随半径移动。"
+                : "未加载九点标定文件，仅可编辑像素；mm 显示为 —。改半径时起点与圆心角不变。";
         }
 
         private void OnViaChanged()
@@ -147,16 +144,36 @@ namespace CalibOperatorCLI_Example
         {
             var start = new Point(_startCol, _startRow);
             var end = new Point(_endCol, _endRow);
-            var hint = new Point(_viaCol, _viaRow);
-            if (!RoiContourPath.TryViaFromChordAndRadius(start, end, radiusPx, hint, out Point via))
+            var via = new Point(_viaCol, _viaRow);
+            if (!RoiContourPath.TryResizeArcKeepSweepFromStart(start, via, end, radiusPx, out Point newVia, out Point newEnd))
                 return false;
 
             RadiusPx = radiusPx;
-            _viaCol = via.X;
-            _viaRow = via.Y;
-            ViaColumnPx = via.X;
-            ViaRowPx = via.Y;
+            _viaCol = newVia.X;
+            _viaRow = newVia.Y;
+            ViaColumnPx = newVia.X;
+            ViaRowPx = newVia.Y;
+            _endCol = newEnd.X;
+            _endRow = newEnd.Y;
+            EndColumnPx = newEnd.X;
+            EndRowPx = newEnd.Y;
+            RefreshChordHint();
             return true;
+        }
+
+        private void RefreshChordHint()
+        {
+            if (_affine is AffineTransform t)
+            {
+                var ws = CalibAPI.ImageToWorld(new Point2D(_startCol, _startRow), t);
+                var we = CalibAPI.ImageToWorld(new Point2D(_endCol, _endRow), t);
+                TxtChordHint.Text = $"弦：({ws.X:F2},{ws.Y:F2}) → ({we.X:F2},{we.Y:F2}) mm（改半径时终点会动）";
+            }
+            else
+            {
+                TxtChordHint.Text =
+                    $"弦：({_startCol:F1},{_startRow:F1}) → ({_endCol:F1},{_endRow:F1}) px（改半径时终点会动）";
+            }
         }
 
         private void BtnOk_Click(object sender, RoutedEventArgs e)
@@ -184,6 +201,8 @@ namespace CalibOperatorCLI_Example
 
             ViaColumnPx = col;
             ViaRowPx = row;
+            EndColumnPx = _endCol;
+            EndRowPx = _endRow;
             RadiusPx = r;
             DialogResult = true;
         }

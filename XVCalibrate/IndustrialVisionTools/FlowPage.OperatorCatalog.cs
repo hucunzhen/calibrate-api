@@ -213,7 +213,7 @@ namespace CalibOperatorCLI_Example
                 {
                     new OperatorParam { Name = "deviceIndex", DisplayName = "设备索引", DefaultValue = "0", Description = "相机枚举索引，从0开始" },
                     new OperatorParam { Name = "minFrames", DisplayName = "最少张数", DefaultValue = "10", Description = "单击「完成」前至少采集的张数（标定至少需3张成功检出棋盘的视图）" },
-                    new OperatorParam { Name = "saveDirectory", DisplayName = "保存目录", DefaultValue = "captured_chessboard", Description = "相对当前 .flow.json 目录；采集图像保存为 Image_001.bmp 等" },
+                    new OperatorParam { Name = "saveDirectory", DisplayName = "保存目录", DefaultValue = "captured_chessboard", Description = "相对当前 .flow.json 目录；打开采集前会清空该目录顶层旧图，再保存为 Image_001.bmp 等" },
                     new OperatorParam { Name = "namePrefix", DisplayName = "文件名前缀", DefaultValue = "Image_", Description = "保存文件名前缀，如 Image_001.bmp" },
                     new OperatorParam { Name = "fileExtension", DisplayName = "扩展名", DefaultValue = ".bmp", Description = "保存格式扩展名，如 .bmp 或 .png" }
                 },
@@ -1479,7 +1479,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "calibrate",
                 DisplayName = "网格标定",
-                Description = "仿射标定（像素→世界）。支持 3×3～6×6 方阵、带扰动网格与散点布局；SVD 超定最小二乘。散点/强扰动时选「散点」启用近邻配对。ProbeWorldPts 不参与标定，仅反算图像位置。",
+                Description = "仿射标定（像素→世界）。支持 3×3～6×6 方阵、带扰动网格与散点布局；SVD 超定最小二乘。散点/强扰动时选「散点」启用近邻配对。系统整体误差自动读配方全局棋盘标定文件（可再接 CalibrationJson 端口覆盖）。",
                 Category = "标定",
                 Params =
                 {
@@ -1565,13 +1565,6 @@ namespace CalibOperatorCLI_Example
                         DisplayName = "探针世界坐标点",
                         DefaultValue = "",
                         Description = "可选；未填 probeWorldPointsFile 时使用。格式 x,y 每行或 x,y;...；可连接 ProbeWorldPts 端口覆盖"
-                    },
-                    new OperatorParam
-                    {
-                        Name = "calibrationJsonFile",
-                        DisplayName = "棋盘标定文件",
-                        DefaultValue = "",
-                        Description = "可选；填写后九点质检对话框与 SystemErrorJson 输出将包含「棋盘格+九点」系统整体误差。相对路径相对当前 .flow.json"
                     }
                 },
                 Ports =
@@ -1969,12 +1962,9 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "save_calibration_result",
                 DisplayName = "保存标定结果",
-                Description = "将 CalibrationJson（棋盘多视图）、Affine / Homography / Poly2D、Intrinsics、SystemErrorJson 以 JSON 落盘（可同时写入多项）。至少连接一路输入。",
+                Description = "将标定结果写入当前配方全局路径（camera_correction.json）：棋盘→models/calibration_result.json，九点仿射→models/calibration_nine_point.json。至少连接一路输入。",
                 Category = "标定",
-                Params =
-                {
-                    new OperatorParam { Name = "filePath", DisplayName = "保存路径", DefaultValue = "calibration_result.json", Description = "UTF-8 JSON；目录不存在时自动创建" }
-                },
+                Params = { },
                 Ports =
                 {
                     new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
@@ -1989,12 +1979,9 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "load_calibration_result",
                 DisplayName = "读取标定结果",
-                Description = "从 JSON 恢复标定（由「保存标定结果」生成）。上游算子 Out → After 可排在任意算子之后读取；Out 透传 After 供下游继续。同一次运行中若存在「保存标定结果」，会先落盘再读取。坐标转换也可直连「标定」的 Transform。仅连接需要的输出端口。",
+                Description = "从当前配方全局标定文件读取：棋盘 CalibrationJson/Intrinsics←calibration_result.json，九点 Transform←calibration_nine_point.json（路径见 camera_correction.json）。上游 Out→After 可排序；同一次运行中若有「保存标定结果」会先落盘再读。仅连接需要的输出端口。",
                 Category = "标定",
-                Params =
-                {
-                    new OperatorParam { Name = "filePath", DisplayName = "文件路径", DefaultValue = "", Description = "可选；填写后自动读取（相对路径相对当前 .flow.json 目录）；留空则打开文件对话框" }
-                },
+                Params = { },
                 Ports =
                 {
                     new PortDef { Name = "After", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#607D8B", IsOptional = true },
@@ -2280,7 +2267,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "send_plc",
                 DisplayName = "发送PLC",
-                Description = "与 PLC 页 Write All 相同：须先 PLC连接；优先 GvarList；否则 Points3D/Points 生成 GVAR（相邻点→线段，closePolyline 默认补末点→首点闭合）。separate_batch=按条分批写 D800+GVAR；下发完成通知请使用「PLC通知轨迹已下发」。",
+                Description = "与 PLC 页 Write All 相同：须先 PLC连接；优先 GvarList；否则 Points3D/Points 生成 GVAR（相邻点→线段，closePolyline 默认补末点→首点闭合；overrunDist>0 时闭合后再沿闭合方向延伸一段，属焊接轨迹）。separate_batch=按条分批写 D800+GVAR；下发完成通知请使用「PLC通知轨迹已下发」。",
                 Category = "输出",
                 Params =
                 {
@@ -2326,6 +2313,13 @@ namespace CalibOperatorCLI_Example
                         DefaultValue = "true",
                         Description = "true=相邻点连成线段，并补最后一点→第一点闭合段（n 点闭合轮廓得 n 段）；false=开折线仅 n-1 段。首尾已重合(≤0.01mm)时不重复补段",
                         Options = new List<string> { "true", "false" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "overrunDist",
+                        DisplayName = "闭合后超程",
+                        DefaultValue = "0",
+                        Description = "仅 closePolyline=true 且实际闭合后：从起点沿闭合段方向再延伸一段 GVAR（与点列同单位，属焊接轨迹）；0=不超程，不影响原有点列与拓扑"
                     },
                     new OperatorParam { Name = "maxSegmentCount", DisplayName = "最大线段数", DefaultValue = "1024", Description = "超过则中止，防止越界写 PLC" },
                     new OperatorParam
@@ -2411,6 +2405,13 @@ namespace CalibOperatorCLI_Example
                         DefaultValue = "true",
                         Description = "仅 asPolylineSegments=true 时有效：补末点→首点闭合段",
                         Options = new List<string> { "true", "false" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "overrunDist",
+                        DisplayName = "闭合后超程",
+                        DefaultValue = "0",
+                        Description = "仅 asPolylineSegments=true 且 closePolyline 实际闭合后：从起点沿闭合方向再延伸一段（与点列同单位）；0=不超程"
                     },
                     new OperatorParam { Name = "maxSegmentCount", DisplayName = "最大线段数", DefaultValue = "1024", Description = "超过则中止" },
                     new OperatorParam
@@ -2745,16 +2746,13 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "chessboard_pixels_to_world",
                 DisplayName = "棋盘像素→世界(mm)",
-                Description = "将像素轨迹投影到标定棋盘平面 Z=0：先 undistort，再按选定视图外参求射线与平面交点，输出 XY 与 squareSizeMm 同单位。CalibrationJson 来自「棋盘格内参标定」；viewIndex 对应 extrinsicsPerView 顺序（与成功标定图像顺序一致）。轨迹须与该视图成像几何一致（如同机位、或静止场景下同 pose）。0 个点时跳过（空 World）。",
+                Description = "将像素轨迹投影到标定棋盘平面 Z=0。CalibrationJson 端口优先，否则用配方全局棋盘标定；外参视图号取自配方「标定与矫正」。0 个点时跳过（空 World）。",
                 Category = "标定",
-                Params =
-                {
-                    new OperatorParam { Name = "viewIndex", DisplayName = "外参视图序号", DefaultValue = "0", Description = "0..n-1=extrinsicsPerView；axis/-1=光轴对称（多视图平均外参）" },
-                },
+                Params = { },
                 Ports =
                 {
                     new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
-                    new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B" },
+                    new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
                     new PortDef { Name = "World", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
                 }
             },
@@ -2762,9 +2760,9 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "calibration_correct_image",
                 DisplayName = "标定图像矫正",
-                Description = "对输入图像按参数做内参去畸变与/或棋盘透视展开（原 load_image / camera_snap 内置选项已拆出）。须连接 CalibrationJson 或填写 calibrationJsonFile。帮助：flows/chessboard/README.md",
+                Description = "按配方全局「标定与矫正」对图像做内参去畸变与/或棋盘透视展开。CalibrationJson 端口优先，否则用全局棋盘标定文件。",
                 Category = "标定",
-                Params = FlowCameraCorrectionOperatorParams.CoreOnly(),
+                Params = { },
                 Ports =
                 {
                     new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
@@ -2776,13 +2774,9 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "intrinsics_undistort_image",
                 DisplayName = "内参畸变矫正",
-                Description = "使用棋盘格标定得到的针孔内参 fx/fy/cx/cy 与畸变系数 k1..k3/p1/p2，对输入图像做 OpenCV cv::undistort 去畸变。连接 Intrinsics 或 CalibrationJson（来自「棋盘格内参标定」）。",
+                Description = "对图像做 cv::undistort。Intrinsics/CalibrationJson 端口优先，否则用全局棋盘标定；裁剪α取自配方「标定与矫正」。",
                 Category = "标定",
-                Params =
-                {
-                    new OperatorParam { Name = "alpha", DisplayName = "裁剪系数", DefaultValue = "-1", Description = "-1=保持原分辨率与 K；0..1= getOptimalNewCameraMatrix 裁剪黑边（0 裁最多，1 保留全部像素）" },
-                    new OperatorParam { Name = "calibrationJsonFile", DisplayName = "标定文件", DefaultValue = "", Description = "可选；未接 CalibrationJson 端口时从文件读取（完整包，含 extrinsicsPerView）" }
-                },
+                Params = { },
                 Ports =
                 {
                     new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
@@ -2795,45 +2789,13 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "chessboard_perspective_warp_image",
                 DisplayName = "棋盘透视展开",
-                Description = "整图透视展开到标定棋盘平面（鸟瞰）：内参 + 外参（指定 viewIndex 或 axis 光轴对称）。不检测图中棋盘角点。",
+                Description = "整图透视展开到标定棋盘平面（鸟瞰）。视图号/棋盘尺寸/输出范围等取自配方「标定与矫正」；CalibrationJson 端口优先，否则用全局棋盘标定文件。",
                 Category = "标定",
-                Params =
-                {
-                    new OperatorParam { Name = "calibrationJsonFile", DisplayName = "标定文件", DefaultValue = "", Description = "可选；未接端口时读取完整标定文件（须含 extrinsicsPerView，如 chessboard_calibration_from_dir.json）" },
-                    new OperatorParam { Name = "viewIndex", DisplayName = "外参视图序号", DefaultValue = "0", Description = "0..n-1=extrinsicsPerView 下标；axis/-1=光轴对称（多视图平均旋转，棋盘中心对齐主点 cx,cy，无需手动指定视图）" },
-                    new OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "11", Description = "与棋盘格标定一致" },
-                    new OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "8", Description = "与棋盘格标定一致" },
-                    new OperatorParam { Name = "squareSizeMm", DisplayName = "方格边长(mm)", DefaultValue = "5", Description = "与标定 squareSizeMm 一致" },
-                    new OperatorParam { Name = "pxPerMm", DisplayName = "mm/像素", DefaultValue = "32", Description = "透视输出缩放（像素/毫米），默认 32；metric 下输出约 (cols-1)×squareSizeMm×32 像素" },
-                    new OperatorParam
-                    {
-                        Name = "perspectiveOutputFrame",
-                        DisplayName = "透视输出范围",
-                        DefaultValue = "plane",
-                        Description = "board=仅标定板；local=原图仅板内；plane=整图平面透视(共面，产线默认)",
-                        Options = new List<string> { "board", "local", "plane" }
-                    },
-                    new OperatorParam
-                    {
-                        Name = "perspectiveOutputScale",
-                        DisplayName = "输出尺度",
-                        DefaultValue = "board_pixels",
-                        Description = "board_pixels=按外参投影棋盘边长（产线默认）；metric=固定 (cols-1)×squareSizeMm×pxPerMm",
-                        Options = new List<string> { "metric", "board_pixels" }
-                    },
-                    new OperatorParam
-                    {
-                        Name = "assumeUndistorted",
-                        DisplayName = "输入已去畸变",
-                        DefaultValue = "true",
-                        Description = "上游已 undistort 时选 true（默认）；未先去畸变时选 false",
-                        Options = new List<string> { "true", "false" }
-                    }
-                },
+                Params = { },
                 Ports =
                 {
                     new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
-                    new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B" },
+                    new PortDef { Name = "CalibrationJson", Direction = PortDirection.Input, DataType = typeof(string), ColorHex = "#607D8B", IsOptional = true },
                     new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#4CAF50" }
                 }
             },
@@ -3472,9 +3434,9 @@ namespace CalibOperatorCLI_Example
                 Params =
                 {
                     new OperatorParam { Name = "numLevels", DisplayName = "NumLevels", DefaultValue = "4", Description = "金字塔层数，0=自动" },
-                    new OperatorParam { Name = "angleStart", DisplayName = "AngleStart(°)", DefaultValue = "-30", Description = "起始角度(度)" },
-                    new OperatorParam { Name = "angleExtent", DisplayName = "AngleExtent(°)", DefaultValue = "60", Description = "角度范围(度)" },
-                    new OperatorParam { Name = "angleStep", DisplayName = "AngleStep(°)", DefaultValue = "0.5", Description = "角度步长(度)" },
+                    new OperatorParam { Name = "angleStart", DisplayName = "AngleStart(°)", DefaultValue = "-30", Description = "写入模型的起始角(度)。0°=训练图朝向；定位搜索不能超出此范围" },
+                    new OperatorParam { Name = "angleExtent", DisplayName = "AngleExtent(°)", DefaultValue = "60", Description = "写入模型的角度跨度(度)。Start=-30 Extent=60 → 约 -30°～+30°" },
+                    new OperatorParam { Name = "angleStep", DisplayName = "AngleStep(°)", DefaultValue = "0.5", Description = "创建采样网格(度)，0=自动。不是最终角精度；Find 的 SubPixel=none 时角停在格子上，interpolation/least_squares 在格子间拟合" },
                     new OperatorParam { Name = "optimization", DisplayName = "Optimization", DefaultValue = "auto", Description = "优化方式：auto / no_pregeneration / no_recurse" },
                     new OperatorParam { Name = "metric", DisplayName = "Metric", DefaultValue = "ignore_local_polarity", Description = "XLD 匹配度量；阈值轮廓请用 ignore_local_polarity（use_polarity 需 edge_direction）" },
                     new OperatorParam { Name = "contrast", DisplayName = "Contrast", DefaultValue = "30", Description = "已弃用(XLD 无 Contrast)，未设 MinContrast 时作回退" },
@@ -3494,15 +3456,15 @@ namespace CalibOperatorCLI_Example
                 Category = "HALCON",
                 Params =
                 {
-                    new OperatorParam { Name = "angleStart", DisplayName = "AngleStart(°)", DefaultValue = "-30", Description = "起始角度(度)" },
-                    new OperatorParam { Name = "angleExtent", DisplayName = "AngleExtent(°)", DefaultValue = "60", Description = "角度范围(度)" },
+                    new OperatorParam { Name = "angleStart", DisplayName = "AngleStart(°)", DefaultValue = "-30", Description = "本次搜索起始角(度)，须落在创建范围之内。相对图像 0°（精匹配相对 CoarseAngle 见各算子说明）" },
+                    new OperatorParam { Name = "angleExtent", DisplayName = "AngleExtent(°)", DefaultValue = "60", Description = "本次搜索跨度(度)，须 ⊆ 创建 AngleExtent" },
                     new OperatorParam { Name = "minScore", DisplayName = "MinScore", DefaultValue = "0.4", Description = "最小匹配得分；漏检降低、误检提高" },
                     new OperatorParam { Name = "numMatches", DisplayName = "NumMatches", DefaultValue = "0", Description = NumMatchesLatticeHint },
                     new OperatorParam { Name = "maxOverlap", DisplayName = "MaxOverlap", DefaultValue = "0.5", Description = "最大重叠度" },
-                    new OperatorParam { Name = "subPixel", DisplayName = "SubPixel", DefaultValue = "interpolation", Description = "亚像素：none / interpolation / least_squares / least_squares_high" },
+                    new OperatorParam { Name = "subPixel", DisplayName = "SubPixel", DefaultValue = "interpolation", Description = "角/位置/缩放精度主要看此项。none=停在创建 angleStep/scaleStep 格子上（0.5° 或自动约 0.009）；interpolation/least_squares=格子间拟合。精匹配勿用 none 指望改密步长出亚格子量" },
                     new OperatorParam { Name = "numLevels", DisplayName = "NumLevels", DefaultValue = "0", Description = "金字塔层数，0=创建模型时使用" },
                     new OperatorParam { Name = "greediness", DisplayName = "Greediness", DefaultValue = "0.75", Description = "贪心系数 0-1；漏检时降到 0.65~0.7" },
-                    new OperatorParam { Name = "endScoreWeight", DisplayName = "端部得分权重", DefaultValue = "0.8", Description = "端部边缘对齐在分数中的权重，0=不修正" },
+                    new OperatorParam { Name = "endScoreWeight", DisplayName = "端部得分权重", DefaultValue = "0", Description = "0=输出 HALCON 原始分。大于 0 时用端部边缘比压低分数：score×(1-w+w×端部因子)" },
                     new OperatorParam { Name = "endArcFraction", DisplayName = "端部弧长占比", DefaultValue = "0.12", Description = "轮廓端部分段占比" }
                 },
                 Ports =
@@ -3540,14 +3502,14 @@ namespace CalibOperatorCLI_Example
                 {
                     new OperatorParam { Name = "deformableKind", DisplayName = "可变形类型", DefaultValue = "planar", Description = "planar/透视=CreatePlanarUncalib；local=CreateLocal" },
                     new OperatorParam { Name = "numLevels", DisplayName = "NumLevels", DefaultValue = "4", Description = "金字塔层数，0=自动" },
-                    new OperatorParam { Name = "angleStart", DisplayName = "AngleStart(°)", DefaultValue = "-30", Description = "起始角度(度)" },
-                    new OperatorParam { Name = "angleExtent", DisplayName = "AngleExtent(°)", DefaultValue = "60", Description = "角度范围(度)" },
-                    new OperatorParam { Name = "angleStep", DisplayName = "AngleStep(°)", DefaultValue = "0.5", Description = "角度步长(度)" },
+                    new OperatorParam { Name = "angleStart", DisplayName = "AngleStart(°)", DefaultValue = "-30", Description = "写入 .dfm 的起始角(度)" },
+                    new OperatorParam { Name = "angleExtent", DisplayName = "AngleExtent(°)", DefaultValue = "60", Description = "写入 .dfm 的角度跨度(度)" },
+                    new OperatorParam { Name = "angleStep", DisplayName = "AngleStep(°)", DefaultValue = "0.5", Description = "创建采样网格(度)，0=自动。最终角精度看精匹配 SubPixel，不必为精度把步长改到 0.1" },
                     new OperatorParam { Name = "optimization", DisplayName = "Optimization", DefaultValue = "auto", Description = "auto / none / point_reduction_*" },
                     new OperatorParam { Name = "metric", DisplayName = "Metric", DefaultValue = "ignore_local_polarity", Description = "匹配度量" },
                     new OperatorParam { Name = "minContrast", DisplayName = "MinContrast", DefaultValue = "5", Description = "搜索图最小边缘对比度" },
-                    new OperatorParam { Name = "scaleMin", DisplayName = "ScaleMin", DefaultValue = "0.97", Description = "可变形缩放下限" },
-                    new OperatorParam { Name = "scaleMax", DisplayName = "ScaleMax", DefaultValue = "1.03", Description = "可变形缩放上限" }
+                    new OperatorParam { Name = "scaleMin", DisplayName = "ScaleMin", DefaultValue = "0.97", Description = "写入 .dfm 的缩放下限。定位缩放窗须 ⊆ 创建范围" },
+                    new OperatorParam { Name = "scaleMax", DisplayName = "ScaleMax", DefaultValue = "1.03", Description = "写入 .dfm 的缩放上限" }
                 },
                 Ports =
                 {
@@ -3583,13 +3545,13 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "minScore", DisplayName = "MinScore", DefaultValue = "0.4", Description = "最低匹配分" },
                     new OperatorParam { Name = "numMatches", DisplayName = "NumMatches", DefaultValue = "0", Description = NumMatchesLatticeHint },
                     new OperatorParam { Name = "maxOverlap", DisplayName = "MaxOverlap", DefaultValue = "0.5", Description = "最大重叠度" },
-                    new OperatorParam { Name = "subPixel", DisplayName = "SubPixel", DefaultValue = "none", Description = "none 最快；interpolation 更准" },
+                    new OperatorParam { Name = "subPixel", DisplayName = "SubPixel", DefaultValue = "none", Description = "粗定位：none 最快（角约停在创建步长格子上，0.5° 时约差 0.25°～0.5°）；interpolation 更准。精匹配请改用 least_squares，不要只靠把创建步长改密" },
                     new OperatorParam { Name = "numLevels", DisplayName = "NumLevels", DefaultValue = "0", Description = "金字塔层数，0=模型默认" },
                     new OperatorParam { Name = "greediness", DisplayName = "Greediness", DefaultValue = "0.85", Description = "贪心系数" },
                     new OperatorParam { Name = "allowRetry", DisplayName = "失败重试", DefaultValue = "false", Description = "无结果时降分再搜" },
-                    new OperatorParam { Name = "coarseScaleMin", DisplayName = "粗 ScaleMin", DefaultValue = "1.0", Description = "粗匹配缩放下限；与 Max 均为 1 时不缩放搜索。非 1 时需 ScaledShape；HALCON 精修越界的 Scale 会钳制到本区间" },
+                    new OperatorParam { Name = "coarseScaleMin", DisplayName = "粗 ScaleMin", DefaultValue = "1.0", Description = "粗匹配缩放下限；与 Max 均为 1 时不缩放搜索。非 1 时需 ScaledShape。创建 scaleStep（自动常约 0.009）是格子；SubPixel=none 时缩放停在格子上，interpolation 会拟合" },
                     new OperatorParam { Name = "coarseScaleMax", DisplayName = "粗 ScaleMax", DefaultValue = "1.0", Description = "粗匹配缩放上限；与 Min 均为 1 时不缩放搜索。非 1 时需 ScaledShape；HALCON 精修越界的 Scale 会钳制到本区间" },
-                    new OperatorParam { Name = "endScoreWeight", DisplayName = "端部得分权重", DefaultValue = "0.8", Description = "端部边缘对齐在分数中的权重，0=不修正；1=完全由端部决定。修正公式：score×(1-w+w×端部因子)" },
+                    new OperatorParam { Name = "endScoreWeight", DisplayName = "端部得分权重", DefaultValue = "0", Description = "0=输出 HALCON 原始分（推荐）。大于 0 时压低分数：score×(1-w+w×端部因子)；1=完全由端部决定" },
                     new OperatorParam { Name = "endArcFraction", DisplayName = "端部弧长占比", DefaultValue = "0.12", Description = "轮廓总长中两端各取的比例，用于端部边缘采样" }
                 },
                 Ports =
@@ -3665,8 +3627,8 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "fineMinScore", DisplayName = "精 MinScore", DefaultValue = "0.45", Description = "可变形最低分" },
                     new OperatorParam { Name = "fineNumLevels", DisplayName = "精 NumLevels", DefaultValue = "0", Description = "可变形金字塔层数，0=与建模一致" },
                     new OperatorParam { Name = "fineGreediness", DisplayName = "精 Greediness", DefaultValue = "0.75", Description = "可变形贪心系数" },
-                    new OperatorParam { Name = "fineScaleMin", DisplayName = "精 ScaleMin", DefaultValue = "0.97", Description = "精匹配缩放下限" },
-                    new OperatorParam { Name = "fineScaleMax", DisplayName = "精 ScaleMax", DefaultValue = "1.03", Description = "精匹配缩放上限" },
+                    new OperatorParam { Name = "fineScaleMin", DisplayName = "精 ScaleMin", DefaultValue = "0.97", Description = "本次精匹配缩放下限，须 ⊆ 创建范围。最终缩放精度看 SubPixel，不是创建 scaleStep（自动常约 0.009）" },
+                    new OperatorParam { Name = "fineScaleMax", DisplayName = "精 ScaleMax", DefaultValue = "1.03", Description = "本次精匹配缩放上限，须 ⊆ 创建范围" },
                     new OperatorParam { Name = "deformedContourMode", DisplayName = "变形轮廓", DefaultValue = "first", Description = "none=不输出(最快)；first=输出变形轮廓" },
                     new OperatorParam { Name = "deformedContourSelect", DisplayName = "变形轮廓选择", DefaultValue = "outer", Description = "双轮廓建模时 HALCON 返回多条变形轮廓：outer=外圈(默认)；inner=内圈；all=全部；first=HALCON首条" },
                     new OperatorParam { Name = "fineAllowFallback", DisplayName = "精失败放宽重试", DefaultValue = "false", Description = "精匹配失败时降分/扩角再搜" },
@@ -3745,12 +3707,12 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "coarseMinScore", DisplayName = "粗 MinScore", DefaultValue = "0.4", Description = "粗匹配最低分" },
                     new OperatorParam { Name = "coarseNumMatches", DisplayName = "粗 NumMatches", DefaultValue = "0", Description = NumMatchesLatticeHint },
                     new OperatorParam { Name = "coarseGreediness", DisplayName = "粗 Greediness", DefaultValue = "0.85", Description = "粗定位贪心系数，略高可加速" },
-                    new OperatorParam { Name = "coarseSubPixel", DisplayName = "粗 SubPixel", DefaultValue = "none", Description = "粗定位亚像素：none 最快，interpolation 更准" },
+                    new OperatorParam { Name = "coarseSubPixel", DisplayName = "粗 SubPixel", DefaultValue = "none", Description = "粗定位亚像素：none 最快（角停在 angleStep 格子、缩放停在 scaleStep 格子，自动常约 0.009）；interpolation 更准。精匹配请用 least_squares，不要只靠把创建步长改密" },
                     new OperatorParam { Name = "coarseNumLevels", DisplayName = "粗 NumLevels", DefaultValue = "0", Description = "粗金字塔层数，0=用模型默认" },
                     new OperatorParam { Name = "coarseAllowRetry", DisplayName = "粗失败重试", DefaultValue = "false", Description = "无结果时是否降分再搜一次（将增加耗时）" },
-                    new OperatorParam { Name = "coarseScaleMin", DisplayName = "粗 ScaleMin", DefaultValue = "1.0", Description = "粗匹配缩放下限；=1 时不缩放搜索（需 ScaledShape 模型）" },
-                    new OperatorParam { Name = "coarseScaleMax", DisplayName = "粗 ScaleMax", DefaultValue = "1.0", Description = "粗匹配缩放上限；=1 时不缩放搜索（需 ScaledShape 模型）" },
-                    new OperatorParam { Name = "endScoreWeight", DisplayName = "粗端部得分权重", DefaultValue = "0.8", Description = "粗定位 CoarseScore 端部修正权重，0=不修正" },
+                    new OperatorParam { Name = "coarseScaleMin", DisplayName = "粗 ScaleMin", DefaultValue = "1.0", Description = "本次粗搜缩放下限，须 ⊆ 创建范围；=1 时不缩放搜索。创建 scaleStep（自动常约 0.009）是格子；SubPixel=none 时缩放停在格子上" },
+                    new OperatorParam { Name = "coarseScaleMax", DisplayName = "粗 ScaleMax", DefaultValue = "1.0", Description = "本次粗搜缩放上限，须 ⊆ 创建范围；=1 时不缩放搜索（需 ScaledShape）" },
+                    new OperatorParam { Name = "endScoreWeight", DisplayName = "粗端部得分权重", DefaultValue = "0", Description = "0=粗定位输出 HALCON 原始分。大于 0 才做端部修正" },
                     new OperatorParam { Name = "endArcFraction", DisplayName = "粗端部弧长占比", DefaultValue = "0.12", Description = "粗定位轮廓端部分段占比" },
                     new OperatorParam { Name = "fineEndScoreWeight", DisplayName = "精端部得分权重", DefaultValue = "0.8", Description = "精匹配 Score 端部修正权重，0=不修正；留空则与粗相同" },
                     new OperatorParam { Name = "fineEndArcFraction", DisplayName = "精端部弧长占比", DefaultValue = "0.12", Description = "精匹配端部分段占比；留空则与粗相同" },
@@ -3760,8 +3722,8 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "fineMinScore", DisplayName = "精 MinScore", DefaultValue = "0.45", Description = "可变形最低分" },
                     new OperatorParam { Name = "fineNumLevels", DisplayName = "精 NumLevels", DefaultValue = "0", Description = "可变形金字塔层数，0=与建模一致" },
                     new OperatorParam { Name = "fineGreediness", DisplayName = "精 Greediness", DefaultValue = "0.75", Description = "可变形贪心系数" },
-                    new OperatorParam { Name = "fineScaleMin", DisplayName = "精 ScaleMin", DefaultValue = "0.97", Description = "精匹配缩放下限" },
-                    new OperatorParam { Name = "fineScaleMax", DisplayName = "精 ScaleMax", DefaultValue = "1.03", Description = "精匹配缩放上限" },
+                    new OperatorParam { Name = "fineScaleMin", DisplayName = "精 ScaleMin", DefaultValue = "0.97", Description = "本次精搜缩放下限，须 ⊆ 创建范围。精度看精匹配亚像素，不是创建 scaleStep" },
+                    new OperatorParam { Name = "fineScaleMax", DisplayName = "精 ScaleMax", DefaultValue = "1.03", Description = "本次精搜缩放上限，须 ⊆ 创建范围" },
                     new OperatorParam { Name = "roiMarginPx", DisplayName = "ROI边距(px)", DefaultValue = "12", Description = "粗结果周围可变形搜索矩形额外边距" },
                     new OperatorParam { Name = "maxRoiHalfPx", DisplayName = "ROI半长上限(px)", DefaultValue = "120", Description = "限制精匹配裁剪区，0=不限制" },
                     new OperatorParam { Name = "maxFineMatches", DisplayName = "最多精匹配数", DefaultValue = "2", Description = "对分数最高的前 N 个粗候选做精匹配" },
@@ -3848,7 +3810,7 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam
                     {
                         Name = "connectOrder",
-                        DisplayName = "焊接顺序",
+                        DisplayName = "焊接/轨迹顺序",
                         DefaultValue = "col_major",
                         Description = $"落格实例拼接顺序。{LatticeWeldOrderMetaHint}",
                         Options = new List<string> { "col_major", "row_major", "snake_col", "snake_row" }
@@ -3916,7 +3878,7 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam
                     {
                         Name = "weldOrder",
-                        DisplayName = "焊接顺序",
+                        DisplayName = "焊接/轨迹顺序",
                         DefaultValue = "col_major",
                         Description = LatticeWeldOrderMetaHint,
                         Options = new List<string> { "col_major", "row_major", "snake_col", "snake_row" }
@@ -3990,7 +3952,7 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam
                     {
                         Name = "weldOrder",
-                        DisplayName = "焊接顺序",
+                        DisplayName = "焊接/轨迹顺序",
                         DefaultValue = "col_major",
                         Description = LatticeWeldOrderMetaHint,
                         Options = new List<string> { "col_major", "row_major", "snake_col", "snake_row" }
@@ -4084,7 +4046,7 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam
                     {
                         Name = "weldOrder",
-                        DisplayName = "焊接顺序",
+                        DisplayName = "焊接/轨迹顺序",
                         DefaultValue = "col_major",
                         Description = LatticeWeldOrderMetaHint,
                         Options = new List<string> { "col_major", "row_major", "snake_col", "snake_row" }
@@ -4187,7 +4149,7 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam
                     {
                         Name = "weldOrder",
-                        DisplayName = "焊接顺序",
+                        DisplayName = "焊接/轨迹顺序",
                         DefaultValue = "col_major",
                         Description = LatticeWeldOrderMetaHint,
                         Options = new List<string> { "col_major", "row_major", "snake_col", "snake_row" }
@@ -4560,74 +4522,17 @@ namespace CalibOperatorCLI_Example
         };
     }
 
-    /// <summary>内参+透视矫正参数，用于「标定图像矫正」算子。</summary>
+    /// <summary>
+    /// 历史占位：矫正参数已迁至配方全局 <c>models/camera_correction.json</c>，
+    /// 算子不再暴露 viewIndex/cols/α 等字段。
+    /// </summary>
     internal static class FlowCameraCorrectionOperatorParams
     {
-        public static readonly FlowPage.OperatorParam[] Core =
-        {
-            new FlowPage.OperatorParam
-            {
-                Name = "enableUndistort",
-                DisplayName = "内参畸变矫正",
-                DefaultValue = "false",
-                Description = "对 Image 做 cv::undistort；需 CalibrationJson 端口或 calibrationJsonFile 参数",
-                Options = new List<string> { "false", "true" }
-            },
-            new FlowPage.OperatorParam
-            {
-                Name = "enablePerspective",
-                DisplayName = "透视展开",
-                DefaultValue = "false",
-                Description = "图像采集后执行棋盘平面透视展开（鸟瞰）；须完整标定文件（含 extrinsicsPerView）",
-                Options = new List<string> { "false", "true" }
-            },
-            new FlowPage.OperatorParam
-            {
-                Name = "calibrationJsonFile",
-                DisplayName = "标定文件",
-                DefaultValue = "",
-                Description = "可选；未接 CalibrationJson 端口时使用；须为完整 CalibrationJson"
-            },
-            new FlowPage.OperatorParam { Name = "undistortAlpha", DisplayName = "去畸变裁剪α", DefaultValue = "-1", Description = "-1=保持原尺寸；0..1 裁剪黑边" },
-            new FlowPage.OperatorParam { Name = "viewIndex", DisplayName = "外参视图序号", DefaultValue = "0", Description = "0..n-1=extrinsicsPerView；axis/-1=光轴对称" },
-            new FlowPage.OperatorParam { Name = "cols", DisplayName = "内侧列角点数", DefaultValue = "11", Description = "与棋盘标定一致" },
-            new FlowPage.OperatorParam { Name = "rows", DisplayName = "内侧行角点数", DefaultValue = "8", Description = "与棋盘标定一致" },
-            new FlowPage.OperatorParam { Name = "squareSizeMm", DisplayName = "方格边长(mm)", DefaultValue = "5", Description = "与标定一致" },
-            new FlowPage.OperatorParam { Name = "pxPerMm", DisplayName = "mm/像素", DefaultValue = "32", Description = "透视输出缩放（像素/毫米），默认 32" },
-            new FlowPage.OperatorParam
-            {
-                Name = "perspectiveOutputFrame",
-                DisplayName = "透视输出范围",
-                DefaultValue = "plane",
-                Description = "board=仅标定板；local=原图仅板内；plane=整图共面鸟瞰(原图尺寸、均匀缩放，产线默认)",
-                Options = new List<string> { "board", "local", "plane" }
-            },
-            new FlowPage.OperatorParam
-            {
-                Name = "perspectiveOutputScale",
-                DisplayName = "输出尺度",
-                DefaultValue = "board_pixels",
-                Description = "board_pixels=按外参投影棋盘边长（产线默认）；metric=固定物理尺寸，各角度一致",
-                Options = new List<string> { "metric", "board_pixels" }
-            },
-            new FlowPage.OperatorParam
-            {
-                Name = "assumeUndistorted",
-                DisplayName = "输入已去畸变",
-                DefaultValue = "true",
-                Description = "透视角点投影：true=输入已去畸变（默认）；auto=与同节点「内参畸变矫正」一致；false=未去畸变",
-                Options = new List<string> { "auto", "true", "false" }
-            }
-        };
+        public static readonly FlowPage.OperatorParam[] Core = Array.Empty<FlowPage.OperatorParam>();
 
-        public static List<FlowPage.OperatorParam> With(params FlowPage.OperatorParam[] leading)
-        {
-            var list = new List<FlowPage.OperatorParam>(leading.Length + Core.Length);
-            list.AddRange(leading);
-            list.AddRange(Core);
-            return list;
-        }
+        public static List<FlowPage.OperatorParam> With(params FlowPage.OperatorParam[] leading) =>
+            new List<FlowPage.OperatorParam>(leading);
 
-        public static List<FlowPage.OperatorParam> CoreOnly() => new List<FlowPage.OperatorParam>(Core);
+        public static List<FlowPage.OperatorParam> CoreOnly() => new List<FlowPage.OperatorParam>();
     }
 }

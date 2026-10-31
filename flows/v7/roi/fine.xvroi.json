@@ -1,0 +1,703 @@
+{
+  "Version": 2,
+  "CoordinateUnit": "mm",
+  "NinePointCalibrationPath": "D:\\work\\calibrate-api\\flows\\v7\\models\\calibration_nine_point.json",
+  "ImagePath": "D:\\work\\calibrate-api\\flows\\v7\\flow_output.bmp",
+  "ImageWidth": 2592,
+  "ImageHeight": 1944,
+  "RoiMode": "opentrajectories",
+  "RoiRectX": 362.4683144225876,
+  "RoiRectY": 189.9089489382131,
+  "RoiRectW": 0,
+  "RoiRectH": 0,
+  "RotRectCenterX": 362.4683144225876,
+  "RotRectCenterY": 189.9089489382131,
+  "RotRectWidth": 0,
+  "RotRectHeight": 0,
+  "RotRectAngleDeg": 0,
+  "CircleCenterX": 362.4683144225876,
+  "CircleCenterY": 189.9089489382131,
+  "CircleRadius": 0,
+  "OpenTrajectoryPaths": [
+    {
+      "VertexXs": [
+        439.1361639309231,
+        435.13641653238716,
+        435.12093483915874,
+        439.12068223769467,
+        461.8672538875065,
+        474.9199237498809,
+        474.93540544310935,
+        470.9356580445734,
+        439.13525344892935
+      ],
+      "VertexYs": [
+        136.10756962729204,
+        136.12420002610799,
+        130.14982053686856,
+        130.13319013805264,
+        130.03861302591557,
+        129.98434182231324,
+        135.95872131155264,
+        135.97535171036856,
+        136.10757341295079
+      ],
+      "EdgeKinds": [
+        "Line",
+        "Arc",
+        "Line",
+        "Line",
+        "Line",
+        "Arc",
+        "Line",
+        "Line"
+      ],
+      "ArcViaXs": [
+        null,
+        432.1286375163726,
+        null,
+        null,
+        null,
+        477.92770276589556,
+        null,
+        null
+      ],
+      "ArcViaYs": [
+        null,
+        133.1494840270149,
+        null,
+        null,
+        null,
+        132.9590578214063,
+        null,
+        null
+      ],
+      "IsClosed": false
+    }
+  ],
+  "OpenTrajectoryNames": [
+    "轨迹 4"
+  ],
+  "OpenTrajectoryConnectors": [],
+  "OpenTrajectoryUndo": [
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": true,
+      "VertexX": 437.21799744377415,
+      "VertexY": 143.57861366619645,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 433.2182500452382,
+      "VertexY": 143.59524406501237,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 433.2027683520098,
+      "VertexY": 137.62086457577297,
+      "EdgeKind": "Arc",
+      "ArcViaX": 430.2104710292236,
+      "ArcViaY": 140.6205280659193,
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 437.2025157505457,
+      "VertexY": 137.60423417695705,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "Connector",
+      "IsFirstVertex": false,
+      "VertexX": 362.4683144225876,
+      "VertexY": 189.9089489382131,
+      "EdgeKind": "Line",
+      "Connector": {
+        "StartX": 437.2025157505457,
+        "StartY": 137.60423417695705,
+        "EndX": 437.2040709676803,
+        "EndY": 138.20439187375166
+      },
+      "AutoFinishedName": "轨迹 1",
+      "AutoFinishedPath": {
+        "VertexXs": [
+          437.21799744377415,
+          433.2182500452382,
+          433.2027683520098,
+          437.2025157505457
+        ],
+        "VertexYs": [
+          143.57861366619645,
+          143.59524406501237,
+          137.62086457577297,
+          137.60423417695705
+        ],
+        "EdgeKinds": [
+          "Line",
+          "Arc",
+          "Line"
+        ],
+        "ArcViaXs": [
+          null,
+          430.2104710292236,
+          null
+        ],
+        "ArcViaYs": [
+          null,
+          140.6205280659193,
+          null
+        ],
+        "IsClosed": false
+      },
+      "AddedResumeVertex": true,
+      "ResumeVertexX": 435.28590448053137,
+      "ResumeVertexY": 145.67543591265604
+    },
+    {
+      "Kind": "Connector",
+      "IsFirstVertex": false,
+      "VertexX": 362.4683144225876,
+      "VertexY": 189.9089489382131,
+      "EdgeKind": "Line",
+      "Connector": {
+        "StartX": 437.2040709676803,
+        "StartY": 138.20439187375166,
+        "EndX": 434.20403279827997,
+        "EndY": 138.21686561927828
+      },
+      "ClearedSingletonX": 437.2040709676803,
+      "ClearedSingletonY": 138.20439187375166,
+      "AddedResumeVertex": true,
+      "ResumeVertexX": 432.28586631113103,
+      "ResumeVertexY": 145.68790965818266
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 433.20432356914444,
+      "VertexY": 138.22102227256758,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 433.21670892372714,
+      "VertexY": 143.0005258639591,
+      "EdgeKind": "Arc",
+      "ArcViaX": 430.8104857109155,
+      "ArcViaY": 140.62075306468466,
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 434.21641815286273,
+      "VertexY": 142.9963692106698,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "Connector",
+      "IsFirstVertex": false,
+      "VertexX": 362.4683144225876,
+      "VertexY": 189.9089489382131,
+      "EdgeKind": "Line",
+      "Connector": {
+        "StartX": 434.21641815286273,
+        "StartY": 142.9963692106698,
+        "EndX": 472.0159886053138,
+        "EndY": 142.83920380269305
+      },
+      "AutoFinishedName": "轨迹 2",
+      "AutoFinishedPath": {
+        "VertexXs": [
+          434.20403279827997,
+          433.20432356914444,
+          433.21670892372714,
+          434.21641815286273
+        ],
+        "VertexYs": [
+          138.21686561927828,
+          138.22102227256758,
+          143.0005258639591,
+          142.9963692106698
+        ],
+        "EdgeKinds": [
+          "Line",
+          "Arc",
+          "Line"
+        ],
+        "ArcViaXs": [
+          null,
+          430.8104857109155,
+          null
+        ],
+        "ArcViaYs": [
+          null,
+          140.62075306468466,
+          null
+        ],
+        "IsClosed": false
+      },
+      "AddedResumeVertex": true,
+      "ResumeVertexX": 470.09782211816486,
+      "ResumeVertexY": 150.31024784159743
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 473.0156978344494,
+      "VertexY": 142.83504714940375,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 473.0033124798666,
+      "VertexY": 138.05554355801223,
+      "EdgeKind": "Arc",
+      "ArcViaX": 475.4095356926783,
+      "ArcViaY": 140.4353163572867,
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 472.0036032507311,
+      "VertexY": 138.05970021130153,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "Connector",
+      "IsFirstVertex": false,
+      "VertexX": 362.4683144225876,
+      "VertexY": 189.9089489382131,
+      "EdgeKind": "Line",
+      "Connector": {
+        "StartX": 472.0036032507311,
+        "StartY": 138.05970021130153,
+        "EndX": 469.0035650813307,
+        "EndY": 138.07217395682818
+      },
+      "AutoFinishedName": "轨迹 3",
+      "AutoFinishedPath": {
+        "VertexXs": [
+          472.0159886053138,
+          473.0156978344494,
+          473.0033124798666,
+          472.0036032507311
+        ],
+        "VertexYs": [
+          142.83920380269305,
+          142.83504714940375,
+          138.05554355801223,
+          138.05970021130153
+        ],
+        "EdgeKinds": [
+          "Line",
+          "Arc",
+          "Line"
+        ],
+        "ArcViaXs": [
+          null,
+          475.4095356926783,
+          null
+        ],
+        "ArcViaYs": [
+          null,
+          140.4353163572867,
+          null
+        ],
+        "IsClosed": false
+      },
+      "AddedResumeVertex": true,
+      "ResumeVertexX": 467.08539859418175,
+      "ResumeVertexY": 145.54321799573256
+    },
+    {
+      "Kind": "Connector",
+      "IsFirstVertex": false,
+      "VertexX": 362.4683144225876,
+      "VertexY": 189.9089489382131,
+      "EdgeKind": "Line",
+      "Connector": {
+        "StartX": 469.0035650813307,
+        "StartY": 138.07217395682818,
+        "EndX": 469.00200986419605,
+        "EndY": 137.47201626003357
+      },
+      "ClearedSingletonX": 469.0035650813307,
+      "ClearedSingletonY": 138.07217395682818,
+      "AddedResumeVertex": true,
+      "ResumeVertexX": 467.0838433770471,
+      "ResumeVertexY": 144.94306029893795
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 473.001757262732,
+      "VertexY": 137.45538586121762,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 473.0172389559604,
+      "VertexY": 143.42976535045705,
+      "EdgeKind": "Arc",
+      "ArcViaX": 476.0095362787466,
+      "ArcViaY": 140.4301018603107,
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 469.0174915574245,
+      "VertexY": 143.44639574927294,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "FinishEntry",
+      "IsFirstVertex": false,
+      "VertexX": 362.4683144225876,
+      "VertexY": 189.9089489382131,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747,
+      "FinishedName": "轨迹 4",
+      "FinishedPath": {
+        "VertexXs": [
+          470.920176351345,
+          474.9199237498809,
+          474.93540544310935,
+          470.9356580445734
+        ],
+        "VertexYs": [
+          130.0009722211292,
+          129.98434182231324,
+          135.95872131155267,
+          135.97535171036856
+        ],
+        "EdgeKinds": [
+          "Line",
+          "Arc",
+          "Line"
+        ],
+        "ArcViaXs": [
+          null,
+          477.92770276589556,
+          null
+        ],
+        "ArcViaYs": [
+          null,
+          132.95905782140633,
+          null
+        ],
+        "IsClosed": false
+      }
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": true,
+      "VertexX": 469.00200986419605,
+      "VertexY": 137.47201626003357,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 438.40947996355817,
+      "VertexY": 137.82133092190668,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "FinishEntry",
+      "IsFirstVertex": false,
+      "VertexX": 362.4683144225876,
+      "VertexY": 189.9089489382131,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747,
+      "FinishedName": "轨迹 3",
+      "FinishedPath": {
+        "VertexXs": [
+          470.920176351345,
+          440.3276464507071
+        ],
+        "VertexYs": [
+          130.0009722211292,
+          130.3502868830023
+        ],
+        "EdgeKinds": [
+          "Line"
+        ],
+        "ArcViaXs": [
+          null
+        ],
+        "ArcViaYs": [
+          null
+        ],
+        "IsClosed": false
+      }
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": true,
+      "VertexX": 469.00200986419605,
+      "VertexY": 137.47201626003357,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 449.5019166588341,
+      "VertexY": 133.57224777084323,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "FinishEntry",
+      "IsFirstVertex": false,
+      "VertexX": 362.4683144225876,
+      "VertexY": 189.9089489382131,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747,
+      "FinishedName": "轨迹 4",
+      "FinishedPath": {
+        "VertexXs": [
+          470.920176351345,
+          451.420083145983
+        ],
+        "VertexYs": [
+          130.0009722211292,
+          126.10120373193885
+        ],
+        "EdgeKinds": [
+          "Line"
+        ],
+        "ArcViaXs": [
+          null
+        ],
+        "ArcViaYs": [
+          null
+        ],
+        "IsClosed": false
+      }
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": true,
+      "VertexX": 439.1361639309231,
+      "VertexY": 136.10756962729204,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 435.13641653238716,
+      "VertexY": 136.12420002610799,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 435.12093483915874,
+      "VertexY": 130.14982053686856,
+      "EdgeKind": "Arc",
+      "ArcViaX": 432.1286375163726,
+      "ArcViaY": 133.1494840270149,
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 439.12068223769467,
+      "VertexY": 130.13319013805264,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 461.8672538875065,
+      "VertexY": 130.03861302591557,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 474.9199237498809,
+      "VertexY": 129.98434182231324,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 474.93540544310935,
+      "VertexY": 135.95872131155264,
+      "EdgeKind": "Arc",
+      "ArcViaX": 477.92770276589556,
+      "ArcViaY": 132.9590578214063,
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 470.9356580445734,
+      "VertexY": 135.97535171036856,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "PathVertex",
+      "IsFirstVertex": false,
+      "VertexX": 439.13525344892935,
+      "VertexY": 136.10757341295079,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747
+    },
+    {
+      "Kind": "FinishEntry",
+      "IsFirstVertex": false,
+      "VertexX": 362.4683144225876,
+      "VertexY": 189.9089489382131,
+      "EdgeKind": "Line",
+      "AddedResumeVertex": false,
+      "ResumeVertexX": 360.55014793543864,
+      "ResumeVertexY": 197.37999297711747,
+      "FinishedName": "轨迹 4",
+      "FinishedPath": {
+        "VertexXs": [
+          441.054330418072,
+          437.0545830195361,
+          437.0391013263077,
+          441.0388487248436,
+          463.7854203746554,
+          476.83809023702986,
+          476.8535719302583,
+          472.85382453172235,
+          441.0534199360783
+        ],
+        "VertexYs": [
+          128.63652558838766,
+          128.6531559872036,
+          122.6787764979642,
+          122.66214609914826,
+          122.56756898701119,
+          122.51329778340886,
+          128.48767727264826,
+          128.50430767146418,
+          128.6365293740464
+        ],
+        "EdgeKinds": [
+          "Line",
+          "Arc",
+          "Line",
+          "Line",
+          "Line",
+          "Arc",
+          "Line",
+          "Line"
+        ],
+        "ArcViaXs": [
+          null,
+          434.0468040035215,
+          null,
+          null,
+          null,
+          479.8458692530445,
+          null,
+          null
+        ],
+        "ArcViaYs": [
+          null,
+          125.67843998811051,
+          null,
+          null,
+          null,
+          125.48801378250192,
+          null,
+          null
+        ],
+        "IsClosed": false
+      }
+    }
+  ],
+  "OpenTrajectoryRedo": []
+}

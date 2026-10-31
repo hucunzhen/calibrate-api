@@ -10,10 +10,13 @@ namespace CalibOperatorCLI_Example
             double fromRow,
             double dirX,
             double dirY,
-            in AffineTransform t)
+            in AffineTransform t,
+            bool preserveAngle = false)
         {
             if (lengthPx <= 0)
                 return 0;
+            if (preserveAngle)
+                return RoiWorldPixelConvert.PixelLengthToMm(lengthPx, t);
             var a = CalibAPI.ImageToWorld(new Point2D(fromCol, fromRow), t);
             var b = CalibAPI.ImageToWorld(new Point2D(fromCol + dirX * lengthPx, fromRow + dirY * lengthPx), t);
             double dx = b.X - a.X;
@@ -27,10 +30,13 @@ namespace CalibOperatorCLI_Example
             double fromRow,
             double dirX,
             double dirY,
-            in AffineTransform t)
+            in AffineTransform t,
+            bool preserveAngle = false)
         {
             if (lengthMm <= 0)
                 return 0;
+            if (preserveAngle)
+                return RoiWorldPixelConvert.MmLengthToPixels(lengthMm, t);
             double px = lengthMm;
             for (int i = 0; i < 24; i++)
             {

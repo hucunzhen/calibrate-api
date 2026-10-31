@@ -10,6 +10,8 @@ namespace CalibOperatorCLI_Example
     {
         private RoiPrimitiveKind _kind;
         private AffineTransform _affine;
+        private bool _preserveRoiAngle = true;
+        private bool _emitWorldMm;
 
         private int _imgWidth;
         private int _imgHeight;
@@ -41,10 +43,14 @@ namespace CalibOperatorCLI_Example
             double circleRadiusPx,
             AffineTransform affine,
             int imgWidth = 0,
-            int imgHeight = 0)
+            int imgHeight = 0,
+            bool preserveRoiAngle = true,
+            bool emitWorldMm = false)
         {
             _kind = kind;
             _affine = affine;
+            _preserveRoiAngle = preserveRoiAngle;
+            _emitWorldMm = emitWorldMm;
             _imgWidth = imgWidth;
             _imgHeight = imgHeight;
 
@@ -54,26 +60,28 @@ namespace CalibOperatorCLI_Example
             Title = kind == RoiPrimitiveKind.RotatedRectangle ? "矩形 ROI 参数 (mm)" : "圆形 ROI 参数 (mm)";
 
             TxtHint.Text = kind == RoiPrimitiveKind.RotatedRectangle
-                ? "中心 X/Y、宽、高（mm）与长边方向角（0°=图像 +X，逆时针为正；0° 即为轴对齐）。"
+                ? "中心 X/Y、宽、高（mm）与长边方向角（0°=毫米 X=图像 +X）。"
                 : "圆心 X/Y 与半径（mm）。";
 
-            var rotCenterMm = HalconGeometryContourBuilder.ImagePixelToWorldMm(rotCenterXPx, rotCenterYPx, _affine);
+            var rotCenterMm = HalconGeometryContourBuilder.ImagePixelToWorldMm(
+                rotCenterXPx, rotCenterYPx, _affine, _preserveRoiAngle);
             double rad = rotAngleDeg * Math.PI / 180.0;
             double dirX = Math.Cos(rad);
             double dirY = Math.Sin(rad);
             double rotWMm = RoiSegmentMeasure.PixelLengthToWorldMm(
-                rotWidthPx, rotCenterXPx, rotCenterYPx, dirX, dirY, _affine);
+                rotWidthPx, rotCenterXPx, rotCenterYPx, dirX, dirY, _affine, _preserveRoiAngle);
             double rotHMm = RoiSegmentMeasure.PixelLengthToWorldMm(
-                rotHeightPx, rotCenterXPx, rotCenterYPx, -dirY, dirX, _affine);
+                rotHeightPx, rotCenterXPx, rotCenterYPx, -dirY, dirX, _affine, _preserveRoiAngle);
             TxtRotCenterX.Text = rotCenterMm.X.ToString("F3", CultureInfo.InvariantCulture);
             TxtRotCenterY.Text = rotCenterMm.Y.ToString("F3", CultureInfo.InvariantCulture);
             TxtRotWidth.Text = rotWMm.ToString("F3", CultureInfo.InvariantCulture);
             TxtRotHeight.Text = rotHMm.ToString("F3", CultureInfo.InvariantCulture);
             TxtRotAngleDeg.Text = rotAngleDeg.ToString("F1", CultureInfo.InvariantCulture);
 
-            var circleCenterMm = HalconGeometryContourBuilder.ImagePixelToWorldMm(circleCenterXPx, circleCenterYPx, _affine);
+            var circleCenterMm = HalconGeometryContourBuilder.ImagePixelToWorldMm(
+                circleCenterXPx, circleCenterYPx, _affine, _preserveRoiAngle);
             double circleRMm = HalconGeometryContourBuilder.PixelRadiusToWorldMm(
-                circleRadiusPx, circleCenterXPx, circleCenterYPx, _affine);
+                circleRadiusPx, circleCenterXPx, circleCenterYPx, _affine, _preserveRoiAngle);
             TxtCircleCenterX.Text = circleCenterMm.X.ToString("F3", CultureInfo.InvariantCulture);
             TxtCircleCenterY.Text = circleCenterMm.Y.ToString("F3", CultureInfo.InvariantCulture);
             TxtCircleRadius.Text = circleRMm.ToString("F3", CultureInfo.InvariantCulture);
@@ -102,24 +110,35 @@ namespace CalibOperatorCLI_Example
                         return;
                     }
 
-                    var centerPx = HalconGeometryContourBuilder.WorldMmToImagePixel(cxMm, cyMm, _affine);
+                    var centerPx = HalconGeometryContourBuilder.WorldMmToImagePixel(
+                        cxMm, cyMm, _affine, _preserveRoiAngle);
                     double angleRad = angle * Math.PI / 180.0;
                     double wDirX = Math.Cos(angleRad);
                     double wDirY = Math.Sin(angleRad);
                     double rwPx = RoiSegmentMeasure.MmLengthToPixels(
-                        rwMm, centerPx.X, centerPx.Y, wDirX, wDirY, _affine);
+                        rwMm, centerPx.X, centerPx.Y, wDirX, wDirY, _affine, _preserveRoiAngle);
                     double rhPx = RoiSegmentMeasure.MmLengthToPixels(
-                        rhMm, centerPx.X, centerPx.Y, -wDirY, wDirX, _affine);
-                    if (rwPx <= 5 || rhPx <= 5)
+                        rhMm, centerPx.X, centerPx.Y, -wDirY, wDirX, _affine, _preserveRoiAngle);
+                    if (!_emitWorldMm && (rwPx <= 5 || rhPx <= 5))
                     {
                         ShowInvalid("换算后的宽、高过小（< 5 px），请增大 mm 尺寸。");
                         return;
                     }
 
-                    RotCenterX = centerPx.X;
-                    RotCenterY = centerPx.Y;
-                    RotWidth = rwPx;
-                    RotHeight = rhPx;
+                    if (_emitWorldMm)
+                    {
+                        RotCenterX = cxMm;
+                        RotCenterY = cyMm;
+                        RotWidth = rwMm;
+                        RotHeight = rhMm;
+                    }
+                    else
+                    {
+                        RotCenterX = centerPx.X;
+                        RotCenterY = centerPx.Y;
+                        RotWidth = rwPx;
+                        RotHeight = rhPx;
+                    }
                     RotAngleDeg = angle;
                     break;
 
@@ -138,18 +157,28 @@ namespace CalibOperatorCLI_Example
                         return;
                     }
 
-                    var circleCenterPx = HalconGeometryContourBuilder.WorldMmToImagePixel(ccxMm, ccyMm, _affine);
+                    var circleCenterPx = HalconGeometryContourBuilder.WorldMmToImagePixel(
+                        ccxMm, ccyMm, _affine, _preserveRoiAngle);
                     double rPx = HalconGeometryContourBuilder.WorldMmRadiusToPixelRadius(
-                        radiusMm, circleCenterPx.X, circleCenterPx.Y, _affine);
+                        radiusMm, circleCenterPx.X, circleCenterPx.Y, _affine, _preserveRoiAngle);
                     if (!TryValidateCircleInImage(circleCenterPx.X, circleCenterPx.Y, rPx, out string circleErr))
                     {
                         ShowInvalid(circleErr);
                         return;
                     }
 
-                    CircleCenterX = circleCenterPx.X;
-                    CircleCenterY = circleCenterPx.Y;
-                    CircleRadius = rPx;
+                    if (_emitWorldMm)
+                    {
+                        CircleCenterX = ccxMm;
+                        CircleCenterY = ccyMm;
+                        CircleRadius = radiusMm;
+                    }
+                    else
+                    {
+                        CircleCenterX = circleCenterPx.X;
+                        CircleCenterY = circleCenterPx.Y;
+                        CircleRadius = rPx;
+                    }
                     break;
             }
 

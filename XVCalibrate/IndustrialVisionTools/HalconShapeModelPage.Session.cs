@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.IO;
 using System.Windows;
+using CalibOperatorPInvoke;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -15,57 +16,21 @@ namespace CalibOperatorCLI_Example
         private bool _suppressDrawModeClear;
         private bool _sessionHooksAttached;
         private bool _uiReady;
+        private bool _sessionRestoreScheduled;
+        private int _sessionRestoreEpoch;
+        private bool _insideSessionRestore;
 
         /// <summary>离开页或关程序前写入 %AppData%/IndustrialVisionTools/halcon_shape_model_ui.json。</summary>
         internal void SaveSession() => PersistSessionFromUi();
 
-        /// <summary>进入形状模板页时恢复上次图像与 ROI。</summary>
-        internal void RestoreSessionOnShow()
+        /// <summary>进入形状模板页：先让页面显示，再在空闲时恢复图像/ROI。</summary>
+        internal void RestoreSessionOnShow() => ScheduleSessionRestoreAfterShow();
+
+        /// <summary>关窗时释放本页原生资源（KeepAlive 切走时不卸载）。</summary>
+        internal void ReleaseRuntimeResources()
         {
-            if (!IsLoaded)
-            {
-                Dispatcher.BeginInvoke(RestoreSessionOnShow, DispatcherPriority.Loaded);
-                return;
-            }
-
-            ApplySessionFromSettingsIfNeeded(forceReload: false);
-            // 进入页时再次对齐当前配方全局标定（切换配方后尤为重要）
-            ApplyRecipeGlobalCalibrationDefaults(forceCorrectionParams: false);
-            if (_imgWidth > 0)
-                Dispatcher.BeginInvoke(FitImageToView, DispatcherPriority.Loaded);
-        }
-
-        private void HalconShapeModelPage_Loaded(object sender, RoutedEventArgs e)
-        {
-            _suppressSessionPersist = true;
-            UpdateCreatePanelsVisibility();
-            ApplyGlobalCalibrationPathDefaultsIfEmpty();
-
-            ApplySessionFromSettingsIfNeeded(forceReload: true);
-            // 会话恢复后：路径回落到当前配方全局；未配置矫正时用 main.flow 默认
-            ApplyRecipeGlobalCalibrationDefaults(forceCorrectionParams: false);
-
-            if (_imgWidth > 0)
-                FitImageToView();
-
-            if (!_sessionHooksAttached)
-            {
-                _sessionHooksAttached = true;
-                AttachSessionPersistHandlers();
-            }
-
-            RefreshParamRecipeCombo(
-                HalconShapeModelUiSettings.Load().LastParamRecipeId,
-                apply: false);
-            _uiReady = true;
-            _suppressSessionPersist = false;
-            UpdateTangentFlipButtonVisibility();
-            UpdateRoiManagePanelVisibility();
-            UpdateOptionDependentPanelsVisibility();
-        }
-
-        private void HalconShapeModelPage_Unloaded(object sender, RoutedEventArgs e)
-        {
+            _sessionRestoreEpoch++;
+            _sessionRestoreScheduled = false;
             SaveSession();
             DisposeNativeXldForCreate();
             DisposeCurrentModel();
@@ -76,6 +41,84 @@ namespace CalibOperatorCLI_Example
             _grayPixels = null;
             if (DisplayImage != null)
                 DisplayImage.Source = null;
+        }
+
+        private void ScheduleSessionRestoreAfterShow()
+        {
+            if (_sessionRestoreScheduled)
+                return;
+            _sessionRestoreScheduled = true;
+            int epoch = _sessionRestoreEpoch;
+            // Render 后再 Background：先完成切页绘制，再读图/矫正。
+            Dispatcher.BeginInvoke(() =>
+            {
+                Dispatcher.BeginInvoke(() =>
+                {
+                    _sessionRestoreScheduled = false;
+                    if (epoch != _sessionRestoreEpoch)
+                        return;
+                    RestoreSessionDeferred();
+                }, DispatcherPriority.Background);
+            }, DispatcherPriority.Render);
+        }
+
+        private void RestoreSessionDeferred()
+        {
+            if (!IsLoaded)
+            {
+                ScheduleSessionRestoreAfterShow();
+                return;
+            }
+
+            _suppressSessionPersist = true;
+            _insideSessionRestore = true;
+            try
+            {
+                ApplyGlobalCalibrationPathDefaultsIfEmpty();
+                bool displayReady = _imgWidth > 0 && _grayPixels != null && DisplayImage?.Source != null;
+                ApplySessionFromSettingsIfNeeded(forceReload: !displayReady);
+                ApplyRecipeGlobalCalibrationDefaults(forceCorrectionParams: false);
+                if (_imgWidth > 0)
+                    FitImageToView();
+
+                RefreshParamRecipeCombo(
+                    HalconShapeModelUiSettings.Load().LastParamRecipeId,
+                    apply: false);
+                TryRestoreCachedModelIfMissing();
+            }
+            finally
+            {
+                _insideSessionRestore = false;
+                _uiReady = true;
+                _suppressSessionPersist = false;
+                UpdateTangentFlipButtonVisibility();
+                UpdateRoiManagePanelVisibility();
+                UpdateOptionDependentPanelsVisibility();
+            }
+        }
+
+        private void HalconShapeModelPage_Loaded(object sender, RoutedEventArgs e)
+        {
+            _suppressSessionPersist = true;
+            UpdateCreatePanelsVisibility();
+            UpdateTangentFlipButtonVisibility();
+            UpdateRoiManagePanelVisibility();
+            UpdateOptionDependentPanelsVisibility();
+
+            if (!_sessionHooksAttached)
+            {
+                _sessionHooksAttached = true;
+                AttachSessionPersistHandlers();
+            }
+
+            // 切页先出界面；图像、ROI、配方标定放到空闲时再做。
+            ScheduleSessionRestoreAfterShow();
+        }
+
+        private void HalconShapeModelPage_Unloaded(object sender, RoutedEventArgs e)
+        {
+            // Frame 切走仍会 Unloaded。模型/图像留在本页实例里，关窗才 ReleaseRuntimeResources。
+            SaveSession();
         }
 
         private void FlushSessionPersist()
@@ -279,6 +322,8 @@ namespace CalibOperatorCLI_Example
                     existing.LastParamRecipeId = (CmbParamRecipe?.SelectedItem as ShapeParamRecipeListItem)?.Recipe.Id
                         ?? _lastParamRecipeId
                         ?? "";
+                    existing.LastModelPath = _sessionModelPath ?? "";
+                    existing.LastModelDeformable = _sessionModelDeformable;
                     existing.Save();
                     return;
                 }
@@ -296,6 +341,8 @@ namespace CalibOperatorCLI_Example
             s.LastParamRecipeId = (CmbParamRecipe?.SelectedItem as ShapeParamRecipeListItem)?.Recipe.Id
                 ?? _lastParamRecipeId
                 ?? "";
+            s.LastModelPath = _sessionModelPath ?? "";
+            s.LastModelDeformable = _sessionModelDeformable;
             s.Save();
         }
 
@@ -355,6 +402,11 @@ namespace CalibOperatorCLI_Example
         private void ApplySessionFromSettingsIfNeeded(bool forceReload)
         {
             var s = HalconShapeModelUiSettings.Load();
+            if (!string.IsNullOrWhiteSpace(s.LastModelPath))
+            {
+                _sessionModelPath = s.LastModelPath;
+                _sessionModelDeformable = s.LastModelDeformable;
+            }
             if (string.IsNullOrWhiteSpace(s.ImagePath))
             {
                 if (!TryRefreshDisplayFromMemory())
@@ -477,6 +529,9 @@ namespace CalibOperatorCLI_Example
 
         private void CaptureRoiIntoSettings(HalconShapeModelUiSettings s)
         {
+            s.RoiCoordinateUnit = RoiUsesMillimeters()
+                ? RoiSnapshotCoordinateTransform.UnitMillimeter
+                : RoiSnapshotCoordinateTransform.UnitPixel;
             s.RoiMode = CaptureCurrentRoiMode();
             s.RoiRectX = _rotRectCenterX - _rotRectWidth * 0.5;
             s.RoiRectY = _rotRectCenterY - _rotRectHeight * 0.5;
@@ -547,6 +602,21 @@ namespace CalibOperatorCLI_Example
 
         private void ApplyRoiFromSettings(HalconShapeModelUiSettings s)
         {
+            bool sourceMm = string.Equals(
+                s.RoiCoordinateUnit, RoiSnapshotCoordinateTransform.UnitMillimeter, StringComparison.OrdinalIgnoreCase);
+            if (RoiUsesMillimeters() && !sourceMm
+                && TryGetNinePointAffine(out AffineTransform toMm, out _))
+            {
+                s = RoiSnapshotCoordinateTransform.ConvertPixelSettingsToMillimeters(
+                    s, toMm, IsPreserveRoiAngleEnabled());
+            }
+            else if (!RoiUsesMillimeters() && sourceMm
+                && TryGetNinePointAffine(out AffineTransform toPx, out _))
+            {
+                s = RoiSnapshotCoordinateTransform.ConvertMillimeterSettingsToPixels(
+                    s, toPx, IsPreserveRoiAngleEnabled());
+            }
+
             SetRoiModeRadio(s.RoiMode);
 
             _hasRoi = false;
@@ -567,14 +637,14 @@ namespace CalibOperatorCLI_Example
             switch (s.RoiMode)
             {
                 case "rect":
-                    if (s.RoiRectW > 5 && s.RoiRectH > 5)
+                    if (s.RoiRectW > RoiMinExtent() && s.RoiRectH > RoiMinExtent())
                     {
                         ApplyAxisAlignedRectAsRotatedRoi(s.RoiRectX, s.RoiRectY, s.RoiRectW, s.RoiRectH);
                         _hasRoi = true;
                     }
                     break;
                 case "rotatedrect":
-                    if (s.RotRectWidth > 5 && s.RotRectHeight > 5)
+                    if (s.RotRectWidth > RoiMinExtent() && s.RotRectHeight > RoiMinExtent())
                     {
                         _rotRectCenterX = s.RotRectCenterX;
                         _rotRectCenterY = s.RotRectCenterY;
@@ -585,12 +655,12 @@ namespace CalibOperatorCLI_Example
                     }
                     break;
                 case "circle":
-                    if (s.CircleRadius > 5)
+                    if (s.CircleRadius > RoiMinExtent())
                     {
                         _circleCenterImage = new Point(s.CircleCenterX, s.CircleCenterY);
                         _circleRadiusImage = s.CircleRadius;
                         ClampCircleRadiusToImage();
-                        _hasRoi = _circleRadiusImage > 5;
+                        _hasRoi = _circleRadiusImage > RoiMinExtent();
                     }
                     break;
                 case "polygon":
@@ -743,6 +813,98 @@ namespace CalibOperatorCLI_Example
                 path.ArcVia.Add(null);
 
             path.IsClosed = dto.IsClosed;
+        }
+
+        private static string SessionCachedModelPath(bool deformable)
+        {
+            string dir = IoPath.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                AppProduct.AppDataFolderName);
+            return IoPath.Combine(dir, deformable ? "halcon_shape_model_session.dfm" : "halcon_shape_model_session.shm");
+        }
+
+        private void RememberAndCacheCurrentModel()
+        {
+#if HALCON_ENABLED
+            if (_modelId < 0)
+                return;
+            try
+            {
+                bool deformable = _modelKind == HalconFlowModelKind.Deformable;
+                string path = SessionCachedModelPath(deformable);
+                string? dir = IoPath.GetDirectoryName(path);
+                if (!string.IsNullOrWhiteSpace(dir))
+                    Directory.CreateDirectory(dir);
+                if (deformable)
+                    HalconFlowBridge.WriteDeformableModelToFile(_modelId, path);
+                else
+                    HalconFlowBridge.WriteShapeModelToFile(_modelId, path);
+                _sessionModelPath = path;
+                _sessionModelDeformable = deformable;
+                PersistSessionChange();
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"[会话] 未能缓存当前模板: {ex.Message}");
+            }
+#endif
+        }
+
+        private void TryRestoreCachedModelIfMissing()
+        {
+#if HALCON_ENABLED
+            if (BtnTestFind != null)
+                BtnTestFind.IsEnabled = _modelId >= 0 && HalconFlowBridge.TryGetRegisteredModelKind(_modelId, out _);
+
+            if (_modelId >= 0 && HalconFlowBridge.TryGetRegisteredModelKind(_modelId, out _))
+                return;
+
+            string path = _sessionModelPath;
+            bool deformable = _sessionModelDeformable;
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                HalconShapeModelUiSettings s = HalconShapeModelUiSettings.Load();
+                path = s.LastModelPath ?? "";
+                deformable = s.LastModelDeformable;
+            }
+
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                return;
+
+            try
+            {
+                if (_modelId >= 0)
+                {
+                    try { HalconFlowBridge.ClearModel(_modelId); } catch { /* ignored */ }
+                    _modelId = -1;
+                }
+
+                string ext = IoPath.GetExtension(path);
+                if (deformable || string.Equals(ext, ".dfm", StringComparison.OrdinalIgnoreCase))
+                {
+                    _modelId = HalconFlowBridge.LoadDeformableModelFromFile(path);
+                    _modelKind = HalconFlowModelKind.Deformable;
+                    _sessionModelDeformable = true;
+                }
+                else
+                {
+                    _modelId = HalconFlowBridge.LoadShapeModelFromFile(path);
+                    _modelKind = HalconFlowModelKind.Shape;
+                    _sessionModelDeformable = false;
+                }
+
+                _sessionModelPath = path;
+                if (BtnTestFind != null)
+                    BtnTestFind.IsEnabled = _modelId >= 0;
+                if (TxtModelInfo != null && string.IsNullOrWhiteSpace(TxtModelInfo.Text))
+                    TxtModelInfo.Text = $"已恢复上次模板\n文件: {path}\nModelID: {_modelId}";
+                AppendLog($"已恢复上次模板: {IoPath.GetFileName(path)} (ModelID={_modelId})");
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"[会话] 恢复模板失败: {ex.Message}");
+            }
+#endif
         }
     }
 }
