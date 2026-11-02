@@ -157,5 +157,146 @@ namespace CalibOperatorCLI_Example
                 return;
             SyncOpenTrajectoryNameTextFromSelection();
         }
+
+        private bool TryGetEditableOpenTrajectory(out int listIndex, out RoiContourPath path, out string name)
+        {
+            listIndex = -1;
+            path = _roiPath;
+            name = "";
+            if (!IsOpenTrajectoriesModeActive())
+                return false;
+
+            int idx = LstOpenTrajectories?.SelectedIndex ?? -1;
+            if (idx >= 0 && idx < _openTrajectoryEntries.Count)
+            {
+                listIndex = idx;
+                name = _openTrajectoryEntries[idx].Name;
+                path = _editingOpenTrajectoryIndex == idx
+                    ? _roiPath
+                    : _openTrajectoryEntries[idx].Path;
+                return path.VertexCount >= 1;
+            }
+
+            if (_roiPath.VertexCount >= 1)
+            {
+                name = "当前草稿";
+                path = _roiPath;
+                return true;
+            }
+
+            return false;
+        }
+
+        private string UniqueTrajectoryCopyName(string sourceName)
+        {
+            string root = string.IsNullOrWhiteSpace(sourceName) ? "轨迹" : sourceName.Trim();
+            string candidate = root + " 副本";
+            int n = 2;
+            while (_openTrajectoryEntries.Exists(e =>
+                       string.Equals(e.Name, candidate, System.StringComparison.Ordinal)))
+                candidate = $"{root} 副本{n++}";
+            return candidate;
+        }
+
+        private void BtnCopyOpenTrajectory_Click(object sender, RoutedEventArgs e)
+        {
+            if (!TryGetEditableOpenTrajectory(out _, out RoiContourPath src, out string srcName)
+                || src.VertexCount < 2)
+            {
+                MessageBox.Show("请先选择一条至少有两个点的轨迹。", "复制轨迹",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (IsBusyWithPointerEdit())
+                return;
+
+            OpenTrajSceneSnapshot before = CaptureOpenTrajSceneSnapshot();
+            RoiContourPath clone = CloneContourPath(src);
+            double d = RoiUsesMillimeters() ? 2.0 : ImageLengthToRoi(12);
+            TranslateContourPath(clone, d, d);
+            var entry = new OpenTrajectoryEntry
+            {
+                Name = UniqueTrajectoryCopyName(srcName == "当前草稿" ? DefaultTrajectoryName(_openTrajectoryEntries.Count) : srcName),
+                Path = clone
+            };
+            _openTrajectoryEntries.Add(entry);
+            _hasOpenTrajectoriesRoi = true;
+            _hasRoi = true;
+            CommitOpenTrajSceneEdit(before, $"复制轨迹 {entry.Name}");
+            RefreshAllOpenTrajectoryVisuals();
+            RefreshOpenTrajectoryListUi();
+            if (LstOpenTrajectories != null)
+                LstOpenTrajectories.SelectedIndex = _openTrajectoryEntries.Count - 1;
+            PersistSessionChange();
+            AppendLog($"已复制轨迹: {entry.Name}");
+        }
+
+        private void BtnMirrorOpenTrajectoryX_Click(object sender, RoutedEventArgs e) =>
+            MirrorSelectedOpenTrajectory(flipX: true, flipY: false);
+
+        private void BtnMirrorOpenTrajectoryY_Click(object sender, RoutedEventArgs e) =>
+            MirrorSelectedOpenTrajectory(flipX: false, flipY: true);
+
+        private void MirrorSelectedOpenTrajectory(bool flipX, bool flipY)
+        {
+            if (!TryGetEditableOpenTrajectory(out _, out RoiContourPath path, out string name)
+                || path.VertexCount < 1)
+            {
+                MessageBox.Show("请先选择要镜像的轨迹。", "镜像轨迹",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (IsBusyWithPointerEdit())
+                return;
+
+            OpenTrajSceneSnapshot before = CaptureOpenTrajSceneSnapshot();
+            Point origin = RoiContourPath.Centroid(path);
+            RoiContourPath.Mirror(path, origin, flipX, flipY);
+            string axis = flipX ? "左右" : "上下";
+            CommitOpenTrajSceneEdit(before, $"镜像{axis} {name}");
+            RefreshAllOpenTrajectoryVisuals();
+            RefreshOpenTrajectoryListUi();
+            PersistSessionChange();
+            AppendLog($"已镜像{axis}: {name}");
+        }
+
+        private void BtnOffsetOpenTrajectory_Click(object sender, RoutedEventArgs e)
+        {
+            if (!TryGetEditableOpenTrajectory(out _, out RoiContourPath path, out string name)
+                || path.VertexCount < 2)
+            {
+                MessageBox.Show("请先选择一条至少有两个点的轨迹。", "偏移轨迹",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (IsBusyWithPointerEdit())
+                return;
+
+            var dlg = new RoiOffsetDialog { Owner = Window.GetWindow(this) };
+            dlg.Initialize(_lastRoiOffsetDistance, RoiUsesMillimeters());
+            if (dlg.ShowDialog() != true)
+                return;
+
+            double signed = dlg.OffsetLeft ? dlg.Distance : -dlg.Distance;
+            RoiContourPath trial = CloneContourPath(path);
+            if (!RoiContourPath.TryOffset(trial, signed, out string error))
+            {
+                MessageBox.Show(error, "偏移轨迹", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            OpenTrajSceneSnapshot before = CaptureOpenTrajSceneSnapshot();
+            CopyContourPathContents(trial, path);
+            _lastRoiOffsetDistance = dlg.Distance;
+            string side = dlg.OffsetLeft ? "左侧" : "右侧";
+            CommitOpenTrajSceneEdit(before, $"偏移{side} {dlg.Distance:G6} {name}");
+            RefreshAllOpenTrajectoryVisuals();
+            RefreshOpenTrajectoryListUi();
+            PersistSessionChange();
+            AppendLog($"已偏移{side} {dlg.Distance:G6}: {name}");
+        }
     }
 }

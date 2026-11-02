@@ -4,6 +4,7 @@
       Title="HALCON 形状模板"
       KeepAlive="True"
       Background="{StaticResource Ui.WorkspaceBackground}"
+      PreviewKeyDown="Page_PreviewKeyDown"
       ToolTipService.InitialShowDelay="300"
       ToolTipService.ShowDuration="60000"
       ToolTipService.BetweenShowDelay="100">
@@ -53,9 +54,12 @@
                             <Button x:Name="BtnCameraGrab" Content="相机单帧采集" MinWidth="96" Height="32" Padding="10,4" Margin="0,0,6,0"
                                     Click="BtnCameraGrab_Click" ToolTip="海康相机单帧采集（设备索引见左侧「标定与矫正」）"/>
                             <Button x:Name="BtnClearRoi" Content="清除 ROI" MinWidth="72" Height="32" Padding="10,4" Margin="0,0,6,0" Click="BtnClearRoi_Click"/>
-                            <Button x:Name="BtnResetView" Content="重置视图" MinWidth="72" Height="32" Padding="10,4" Margin="0,0,8,0"
+                            <Button x:Name="BtnResetView" Content="重置视图" MinWidth="72" Height="32" Padding="10,4" Margin="0,0,6,0"
                                     Click="BtnResetView_Click"
                                     ToolTip="整图适应窗口（空格 / Ctrl+R）。只改显示，不改 ROI。"/>
+                            <Button x:Name="BtnRefreshDisplay" Content="刷新" MinWidth="56" Height="32" Padding="10,4" Margin="0,0,8,0"
+                                    Click="BtnRefreshDisplay_Click"
+                                    ToolTip="重新渲染图像与 ROI 叠图（F5）。去掉残影，不改 ROI、不改缩放。"/>
                             <Button x:Name="BtnViewZoomOut" Content="－" MinWidth="32" Height="32" Padding="4,4" Margin="0,0,0,0"
                                     Click="BtnViewZoomOut_Click"
                                     ToolTip="缩小整图。滚轮也可，以光标为中心。不改 ROI。"/>
@@ -182,6 +186,7 @@
                         <Polyline x:Name="ConnectorRubberLine" Stroke="#88AAAAAA" StrokeThickness="1.5"
                                   StrokeDashArray="6 4" Visibility="Collapsed" IsHitTestVisible="False" Points=""/>
                         <Canvas x:Name="ConnectorsLayer" IsHitTestVisible="False"/>
+                        <Canvas x:Name="DimensionOverlay" IsHitTestVisible="False"/>
                         <Canvas x:Name="FindResultOverlay" IsHitTestVisible="False"/>
                     </Canvas>
                 </Border>
@@ -464,12 +469,24 @@
                                          VerticalContentAlignment="Center" Margin="4,0,4,0"/>
                                 <Button Grid.Column="2" Content="重命名" Height="24" Click="BtnApplyOpenTrajectoryName_Click"/>
                             </Grid>
-                            <StackPanel Orientation="Horizontal">
+                            <WrapPanel Margin="0,0,0,0">
                                 <Button x:Name="BtnEditOpenTrajectory" Content="编辑选中" Width="88" Height="26"
-                                        Margin="0,0,6,0" Click="BtnEditOpenTrajectory_Click"/>
+                                        Margin="0,0,6,6" Click="BtnEditOpenTrajectory_Click"/>
                                 <Button x:Name="BtnDeleteOpenTrajectory" Content="删除选中" Width="88" Height="26"
-                                        Click="BtnDeleteOpenTrajectory_Click"/>
-                            </StackPanel>
+                                        Margin="0,0,6,6" Click="BtnDeleteOpenTrajectory_Click"/>
+                                <Button x:Name="BtnCopyOpenTrajectory" Content="复制" Width="64" Height="26"
+                                        Margin="0,0,6,6" Click="BtnCopyOpenTrajectory_Click"
+                                        ToolTip="复制选中的一条轨迹，略微错开以免重叠。"/>
+                                <Button x:Name="BtnMirrorOpenTrajectoryX" Content="镜像左右" Width="80" Height="26"
+                                        Margin="0,0,6,6" Click="BtnMirrorOpenTrajectoryX_Click"
+                                        ToolTip="绕该轨迹自身中心左右翻转。"/>
+                                <Button x:Name="BtnMirrorOpenTrajectoryY" Content="镜像上下" Width="80" Height="26"
+                                        Margin="0,0,6,6" Click="BtnMirrorOpenTrajectoryY_Click"
+                                        ToolTip="绕该轨迹自身中心上下翻转。"/>
+                                <Button x:Name="BtnOffsetOpenTrajectory" Content="偏移…" Width="64" Height="26"
+                                        Margin="0,0,0,6" Click="BtnOffsetOpenTrajectory_Click"
+                                        ToolTip="沿前进方向左侧或右侧等距偏移。有九点标定时距离为 mm。"/>
+                            </WrapPanel>
                         </StackPanel>
                     </StackPanel>
                 </Border>

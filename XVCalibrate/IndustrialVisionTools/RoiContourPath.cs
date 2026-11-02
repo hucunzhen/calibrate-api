@@ -830,5 +830,249 @@ namespace CalibOperatorCLI_Example
             best = Math.Min(best, Dist(p, end));
             return best;
         }
+
+        internal static Point Centroid(RoiContourPath path)
+        {
+            if (path.VertexCount == 0)
+                return new Point(0, 0);
+            double sx = 0, sy = 0;
+            foreach (Point p in path.Vertices)
+            {
+                sx += p.X;
+                sy += p.Y;
+            }
+
+            return new Point(sx / path.VertexCount, sy / path.VertexCount);
+        }
+
+        internal static void Mirror(RoiContourPath path, Point origin, bool flipX, bool flipY)
+        {
+            if (!flipX && !flipY)
+                return;
+            for (int i = 0; i < path.Vertices.Count; i++)
+                path.Vertices[i] = MirrorPoint(path.Vertices[i], origin, flipX, flipY);
+            for (int i = 0; i < path.ArcVia.Count; i++)
+            {
+                if (path.ArcVia[i] is Point via)
+                    path.ArcVia[i] = MirrorPoint(via, origin, flipX, flipY);
+            }
+        }
+
+        private static Point MirrorPoint(Point p, Point origin, bool flipX, bool flipY)
+        {
+            double x = flipX ? 2 * origin.X - p.X : p.X;
+            double y = flipY ? 2 * origin.Y - p.Y : p.Y;
+            return new Point(x, y);
+        }
+
+        /// <summary>
+        /// 沿前进方向左侧偏移 dist（右侧为负）。直线顶点用斜接，圆弧途经点沿该处左法线移动。
+        /// </summary>
+        internal static bool TryOffset(RoiContourPath path, double dist, out string error)
+        {
+            error = "";
+            int n = path.VertexCount;
+            if (n < 2)
+            {
+                error = "至少需要两个顶点。";
+                return false;
+            }
+
+            int edges = GetEdgeCount(path);
+            var newVerts = new Point[n];
+            for (int i = 0; i < n; i++)
+            {
+                if (!TryVertexOffset(path, i, dist, out Point moved, out error))
+                    return false;
+                newVerts[i] = moved;
+            }
+
+            var newVias = new List<Point?>(path.ArcVia.Count);
+            for (int e = 0; e < path.ArcVia.Count; e++)
+            {
+                if (e >= edges || GetEdgeKind(path, e) != RoiEdgeKind.Arc || path.ArcVia[e] is not Point via)
+                {
+                    newVias.Add(e < path.ArcVia.Count ? path.ArcVia[e] : null);
+                    continue;
+                }
+
+                GetEdgeEndpoints(path, e, out Point start, out Point end);
+                if (!TryLeftNormalAtArcPoint(start, via, end, via, out double nx, out double ny))
+                {
+                    error = $"第 {e + 1} 段圆弧无法计算偏移。";
+                    return false;
+                }
+
+                newVias.Add(new Point(via.X + nx * dist, via.Y + ny * dist));
+            }
+
+            for (int i = 0; i < n; i++)
+                path.Vertices[i] = newVerts[i];
+            for (int i = 0; i < newVias.Count && i < path.ArcVia.Count; i++)
+                path.ArcVia[i] = newVias[i];
+
+            for (int e = 0; e < edges; e++)
+            {
+                if (GetEdgeKind(path, e) != RoiEdgeKind.Arc)
+                    continue;
+                GetEdgeEndpoints(path, e, out Point start, out Point end);
+                if (path.ArcVia[e] is not Point via)
+                    continue;
+                if (!TryCircleFromThreePoints(start, via, end, out _, out double r) || r < 1e-6)
+                {
+                    error = "偏移后圆弧半径过小，请减小距离或改向另一侧。";
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool TryVertexOffset(RoiContourPath path, int vertexIndex, double dist, out Point moved, out string error)
+        {
+            error = "";
+            Point v = path.Vertices[vertexIndex];
+            int n = path.VertexCount;
+            int edges = GetEdgeCount(path);
+            bool closed = path.IsClosed && n >= 3;
+
+            bool hasIn = closed || vertexIndex > 0;
+            bool hasOut = closed || vertexIndex < n - 1;
+            int inEdge = hasIn ? (vertexIndex == 0 ? edges - 1 : vertexIndex - 1) : -1;
+            int outEdge = hasOut ? vertexIndex : -1;
+            if (hasOut && (outEdge < 0 || outEdge >= edges))
+                hasOut = false;
+
+            double inX = 0, inY = 0, outX = 0, outY = 0;
+            if (hasIn && inEdge >= 0 && inEdge < edges)
+            {
+                if (!TryLeftNormalAtEdgeEnd(path, inEdge, atStart: false, out inX, out inY))
+                    hasIn = false;
+            }
+            else
+                hasIn = false;
+
+            if (hasOut && outEdge >= 0 && outEdge < edges)
+            {
+                if (!TryLeftNormalAtEdgeEnd(path, outEdge, atStart: true, out outX, out outY))
+                    hasOut = false;
+            }
+            else
+                hasOut = false;
+
+            if (!hasIn && !hasOut)
+            {
+                moved = v;
+                return true;
+            }
+
+            double nx, ny;
+            if (!hasIn)
+            {
+                nx = outX;
+                ny = outY;
+            }
+            else if (!hasOut)
+            {
+                nx = inX;
+                ny = inY;
+            }
+            else
+            {
+                nx = inX + outX;
+                ny = inY + outY;
+                double mag = Math.Sqrt(nx * nx + ny * ny);
+                if (mag < 1e-8)
+                {
+                    nx = outX;
+                    ny = outY;
+                }
+                else
+                {
+                    nx /= mag;
+                    ny /= mag;
+                    double cos = nx * outX + ny * outY;
+                    if (cos < 0.2)
+                        cos = 0.2;
+                    nx /= cos;
+                    ny /= cos;
+                }
+            }
+
+            moved = new Point(v.X + nx * dist, v.Y + ny * dist);
+            return true;
+        }
+
+        private static bool TryLeftNormalAtEdgeEnd(RoiContourPath path, int edgeIndex, bool atStart, out double nx, out double ny)
+        {
+            nx = ny = 0;
+            GetEdgeEndpoints(path, edgeIndex, out Point start, out Point end);
+            if (GetEdgeKind(path, edgeIndex) == RoiEdgeKind.Arc
+                && edgeIndex < path.ArcVia.Count
+                && path.ArcVia[edgeIndex] is Point via)
+            {
+                Point at = atStart ? start : end;
+                return TryLeftNormalAtArcPoint(start, via, end, at, out nx, out ny);
+            }
+
+            return TryLeftNormalOfSegment(start, end, out nx, out ny);
+        }
+
+        private static bool TryLeftNormalOfSegment(Point a, Point b, out double nx, out double ny)
+        {
+            double dx = b.X - a.X;
+            double dy = b.Y - a.Y;
+            double len = Math.Sqrt(dx * dx + dy * dy);
+            if (len < 1e-9)
+            {
+                nx = ny = 0;
+                return false;
+            }
+
+            nx = -dy / len;
+            ny = dx / len;
+            return true;
+        }
+
+        private static bool TryLeftNormalAtArcPoint(Point start, Point via, Point end, Point at, out double nx, out double ny)
+        {
+            nx = ny = 0;
+            if (!TryCircleFromThreePoints(start, via, end, out Point c, out double r) || r < 1e-9)
+                return false;
+
+            double rx = at.X - c.X;
+            double ry = at.Y - c.Y;
+            double rl = Math.Sqrt(rx * rx + ry * ry);
+            if (rl < 1e-9)
+                return false;
+            rx /= rl;
+            ry /= rl;
+
+            bool ccw = ArcGoesCcw(start, via, end, c);
+            double tx = ccw ? -ry : ry;
+            double ty = ccw ? rx : -rx;
+            nx = -ty;
+            ny = tx;
+            return true;
+        }
+
+        private static bool ArcGoesCcw(Point start, Point via, Point end, Point center)
+        {
+            double a0 = Math.Atan2(start.Y - center.Y, start.X - center.X);
+            double aV = Math.Atan2(via.Y - center.Y, via.X - center.X);
+            double a1 = Math.Atan2(end.Y - center.Y, end.X - center.X);
+            double sweepVia = NormalizeAngleSigned(aV - a0);
+            double sweepEnd = NormalizeAngleSigned(a1 - a0);
+            if (Math.Abs(sweepVia) < 1e-9)
+                return sweepEnd > 0;
+            return sweepVia > 0;
+        }
+
+        private static double NormalizeAngleSigned(double a)
+        {
+            while (a <= -Math.PI) a += 2 * Math.PI;
+            while (a > Math.PI) a -= 2 * Math.PI;
+            return a;
+        }
     }
 }

@@ -128,6 +128,16 @@ namespace CalibOperatorCLI_Example
         private bool _pendingRoiSegmentClickEdit;
         private bool _isDraggingRoiSegment;
         private bool _draggingConnector;
+        /// <summary>按下顶点后：拖过阈值则只移动该点（不连锁刚体）。</summary>
+        private bool _pendingVertexDrag;
+        private bool _draggingVertex;
+        private RoiVertexHit _vertexDragHit;
+        private Point _vertexDragOrigin;
+        private RoiContourPath? _selectedVertexPath;
+        private int _selectedVertexIndex = -1;
+        private bool _selectedVertexIsVia;
+        private int _selectedVertexConnector = -1;
+        private RoiVertexHitKind _selectedVertexKind = RoiVertexHitKind.Vertex;
         private Point _roiSegmentDragStartMouse;
         private Point _roiSegmentDragOriginStart;
         private Point _roiSegmentDragOriginEnd;
@@ -135,6 +145,22 @@ namespace CalibOperatorCLI_Example
         /// <summary>拖动/编辑一段时，连通的路径与连接线在按下时的快照，按该段刚体变换（平移+旋转）连锁。</summary>
         private RoiLinkedEditOrigin? _linkedEditOrigin;
         private const double RoiSegmentDragThresholdPx = 3.0;
+
+        private enum RoiVertexHitKind
+        {
+            Vertex,
+            Via,
+            ConnectorStart,
+            ConnectorEnd
+        }
+
+        private readonly struct RoiVertexHit
+        {
+            public RoiVertexHitKind Kind { get; init; }
+            public RoiContourPath? Path { get; init; }
+            public int Index { get; init; }
+            public Point Origin { get; init; }
+        }
 
         private sealed class RoiLinkedEditOrigin
         {
@@ -235,6 +261,7 @@ namespace CalibOperatorCLI_Example
         private const double MaxScale = 10.0;
         private const double ViewZoomStep = 1.15;
         private double _lastRoiScaleFactor = 1;
+        private double _lastRoiOffsetDistance;
         private bool _viewHostLayoutFitted;
 
         private static readonly Brush[] FindMatchBrushes =
@@ -1248,6 +1275,7 @@ namespace CalibOperatorCLI_Example
             _viewTranslate.X = _offsetX;
             _viewTranslate.Y = _offsetY;
             UpdateViewZoomLabel();
+            RebuildDimensionLabels();
         }
 
         private void UpdateViewZoomLabel()
@@ -1259,7 +1287,8 @@ namespace CalibOperatorCLI_Example
 
         private bool IsBusyWithPointerEdit() =>
             _isPanning || _isMovingRoi || _isDraggingRoiSegment || _isDrawing
-            || _rotRectSettingAngle || _pendingRoiSegmentClickEdit;
+            || _rotRectSettingAngle || _pendingRoiSegmentClickEdit
+            || _pendingVertexDrag || _draggingVertex;
 
         /// <summary>只改变显示缩放，不改 ROI。绕 ViewHost 上一点（通常是光标或窗口中心）。</summary>
         private void ZoomViewAroundHost(Point hostPt, double factor)
@@ -1392,6 +1421,7 @@ namespace CalibOperatorCLI_Example
             {
                 RoiRotatedRectLine.Visibility = Visibility.Collapsed;
                 RoiRotatedRectLine.Points.Clear();
+                RebuildDimensionLabels();
                 return;
             }
 
@@ -1400,11 +1430,13 @@ namespace CalibOperatorCLI_Example
             if (corners.Count < 2)
             {
                 RoiRotatedRectLine.Visibility = Visibility.Collapsed;
+                RebuildDimensionLabels();
                 return;
             }
 
             RoiRotatedRectLine.Visibility = Visibility.Visible;
             RoiRotatedRectLine.Points = ToCanvasPoints(corners);
+            RebuildDimensionLabels();
         }
 
         private bool IsPointInRotatedRectRoi(double x, double y)
@@ -1464,12 +1496,14 @@ namespace CalibOperatorCLI_Example
             if (!IsCircleModeActive())
             {
                 RoiCircle.Visibility = Visibility.Collapsed;
+                RebuildDimensionLabels();
                 return;
             }
 
             if (!HasUsableCircleRoi() && !(_isDrawing && _circleRadiusImage > 0))
             {
                 RoiCircle.Visibility = Visibility.Collapsed;
+                RebuildDimensionLabels();
                 return;
             }
 
@@ -1481,6 +1515,7 @@ namespace CalibOperatorCLI_Example
             RoiCircle.Width = d;
             RoiCircle.Height = d;
             RoiCircle.Visibility = Visibility.Visible;
+            RebuildDimensionLabels();
         }
 
         private bool IsRingModeActive() => RbRingMode?.IsChecked == true;
@@ -1501,6 +1536,315 @@ namespace CalibOperatorCLI_Example
             double dx = a.X - b.X;
             double dy = a.Y - b.Y;
             return Math.Sqrt(dx * dx + dy * dy);
+        }
+
+        /// <summary>在图上标段长/半径（有九点为 mm）。字号随缩放保持屏幕大小。</summary>
+        private void RebuildDimensionLabels()
+        {
+            if (DimensionOverlay == null)
+                return;
+
+            DimensionOverlay.Children.Clear();
+            if (_imgWidth <= 0 || _imgHeight <= 0)
+                return;
+
+            if (IsCircleModeActive() && (HasUsableCircleRoi() || (_isDrawing && _circleRadiusImage > 0)))
+                AddCircleDimensionLabels();
+
+            if (IsRotatedRectModeActive()
+                && (HasUsableRotatedRectRoi() || _rotRectSettingAngle
+                    || (_isDrawing && (_rotRectWidth > 0 || _rotRectHeight > 0))))
+                AddRotatedRectDimensionLabels();
+
+            if (IsRingModeActive())
+            {
+                AddPathDimensionLabels(_ringOuterPath);
+                AddPathDimensionLabels(_ringInnerPath);
+                AddActivePathDraftDimension(GetActiveRingPath());
+            }
+            else if (IsOpenTrajectoriesModeActive())
+            {
+                AddPathDimensionLabels(_roiPath);
+                for (int i = 0; i < _openTrajectoryEntries.Count; i++)
+                {
+                    if (_editingOpenTrajectoryIndex == i)
+                        continue;
+                    AddPathDimensionLabels(_openTrajectoryEntries[i].Path);
+                }
+
+                for (int i = 0; i < _trajectoryConnectors.Count; i++)
+                {
+                    RoiConnectorSegment seg = _trajectoryConnectors[i];
+                    AddLineDimensionLabel(
+                        seg.Start, seg.End, connector: true, selected: i == _selectedConnectorIndex);
+                }
+
+                AddActivePathDraftDimension(_roiPath);
+                AddConnectorDraftDimension();
+            }
+            else if (RbPolygonMode?.IsChecked == true)
+            {
+                AddPathDimensionLabels(_roiPath);
+                AddActivePathDraftDimension(_roiPath);
+            }
+
+            AddVertexHandles();
+        }
+
+        private void AddPathDimensionLabels(RoiContourPath path)
+        {
+            int edges = RoiContourPath.GetEdgeCount(path);
+            for (int i = 0; i < edges; i++)
+            {
+                RoiContourPath.GetEdgeEndpoints(path, i, out Point start, out Point end);
+                bool selected = ReferenceEquals(path, _selectedRoiSegmentPath) && i == _selectedRoiSegmentEdge;
+                if (RoiContourPath.GetEdgeKind(path, i) == RoiEdgeKind.Arc
+                    && i < path.ArcVia.Count
+                    && path.ArcVia[i] is Point via
+                    && RoiContourPath.TryGetArcGeometricRadius(start, via, end, out double radius)
+                    && radius > 1e-6)
+                {
+                    AddArcDimensionLabel(start, via, end, radius, selected);
+                }
+                else
+                    AddLineDimensionLabel(start, end, connector: false, selected);
+            }
+        }
+
+        private void AddActivePathDraftDimension(RoiContourPath path)
+        {
+            if (path.VertexCount < 1 || _polygonCursorImage is not Point cursor)
+                return;
+            if (IsNextSegmentArc() || _arcDraftEnd != null)
+                return;
+
+            Point start = path.Vertices[^1];
+            Point aim = ResolveLineSegmentAim(path, cursor, out _);
+            if (Dist(start, aim) < 1e-6)
+                return;
+            AddLineDimensionLabel(start, aim, connector: false, selected: true);
+        }
+
+        private void AddConnectorDraftDimension()
+        {
+            if (!IsOpenTrajectoriesModeActive()
+                || (!IsNextSegmentConnector() && _connectorDraftStart == null))
+                return;
+            if (!TryGetConnectorAnchorStart(out Point start) || _polygonCursorImage is not Point cursor)
+                return;
+            if (Dist(start, cursor) < 1e-6)
+                return;
+            AddLineDimensionLabel(start, cursor, connector: true, selected: true);
+        }
+
+        private void AddCircleDimensionLabels()
+        {
+            Point c = _circleCenterImage;
+            double r = _circleRadiusImage;
+            if (r <= 0)
+                return;
+            AddDimensionChip(
+                new Point(c.X, c.Y - r),
+                new Point(c.X - r, c.Y),
+                new Point(c.X + r, c.Y),
+                FormatRadiusLabel(r),
+                selected: true);
+            AddDimensionChip(
+                c,
+                new Point(c.X - r, c.Y),
+                new Point(c.X + r, c.Y),
+                FormatDiameterLabel(r * 2),
+                selected: true);
+        }
+
+        private void AddRotatedRectDimensionLabels()
+        {
+            Point c = new Point(_rotRectCenterX, _rotRectCenterY);
+            AddDimensionChip(
+                c,
+                new Point(c.X - _rotRectWidth * 0.5, c.Y),
+                new Point(c.X + _rotRectWidth * 0.5, c.Y),
+                FormatSizeLabel(_rotRectWidth, _rotRectHeight),
+                selected: true);
+        }
+
+        private void AddLineDimensionLabel(Point start, Point end, bool connector, bool selected)
+        {
+            double len = Dist(start, end);
+            if (len < 1e-6)
+                return;
+            AddDimensionChip(
+                new Point((start.X + end.X) * 0.5, (start.Y + end.Y) * 0.5),
+                start,
+                end,
+                FormatLengthLabel(len),
+                selected,
+                connector);
+        }
+
+        private void AddArcDimensionLabel(Point start, Point via, Point end, double radius, bool selected)
+        {
+            AddDimensionChip(via, start, end, FormatRadiusLabel(radius), selected);
+        }
+
+        private string FormatLengthLabel(double lengthRoi) =>
+            RoiUsesMillimeters() ? $"L={lengthRoi:F3} mm" : $"L={lengthRoi:F1} px";
+
+        private string FormatRadiusLabel(double radiusRoi) =>
+            RoiUsesMillimeters() ? $"R={radiusRoi:F3} mm" : $"R={radiusRoi:F1} px";
+
+        private string FormatDiameterLabel(double diameterRoi) =>
+            RoiUsesMillimeters() ? $"Ø={diameterRoi:F3} mm" : $"Ø={diameterRoi:F1} px";
+
+        private string FormatSizeLabel(double widthRoi, double heightRoi) =>
+            RoiUsesMillimeters()
+                ? $"{widthRoi:F3}×{heightRoi:F3} mm"
+                : $"{widthRoi:F1}×{heightRoi:F1} px";
+
+        private void AddDimensionChip(
+            Point anchorRoi,
+            Point fromRoi,
+            Point toRoi,
+            string text,
+            bool selected,
+            bool connector = false)
+        {
+            if (DimensionOverlay == null || string.IsNullOrWhiteSpace(text))
+                return;
+
+            Point a = RoiToImagePx(fromRoi);
+            Point b = RoiToImagePx(toRoi);
+            Point p = RoiToImagePx(anchorRoi);
+            double dx = b.X - a.X;
+            double dy = b.Y - a.Y;
+            double n = Math.Sqrt(dx * dx + dy * dy);
+            double pad = 14.0 / Math.Max(_scale, 1e-6);
+            double ox;
+            double oy;
+            if (n < 1e-6)
+            {
+                ox = 0;
+                oy = -pad;
+            }
+            else
+            {
+                ox = -dy / n * pad;
+                oy = dx / n * pad;
+            }
+
+            double inv = 1.0 / Math.Max(_scale, 1e-6);
+            var fg = connector
+                ? (selected ? Brushes.LightGray : new SolidColorBrush(Color.FromRgb(176, 190, 197)))
+                : (selected ? Brushes.Cyan : new SolidColorBrush(Color.FromRgb(255, 236, 153)));
+            var chip = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(selected ? (byte)210 : (byte)170, 18, 18, 18)),
+                CornerRadius = new CornerRadius(2),
+                Padding = new Thickness(3, 1, 3, 1),
+                IsHitTestVisible = false,
+                Child = new TextBlock
+                {
+                    Text = text,
+                    Foreground = fg,
+                    FontSize = selected ? 13 : 11,
+                    FontFamily = new FontFamily("Consolas"),
+                    FontWeight = selected ? FontWeights.SemiBold : FontWeights.Normal
+                },
+                RenderTransform = new ScaleTransform(inv, inv)
+            };
+            chip.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            double w = chip.DesiredSize.Width * inv;
+            double h = chip.DesiredSize.Height * inv;
+            Canvas.SetLeft(chip, p.X + ox - w * 0.5);
+            Canvas.SetTop(chip, p.Y + oy - h * 0.5);
+            DimensionOverlay.Children.Add(chip);
+        }
+
+        private void AddVertexHandles()
+        {
+            if (DimensionOverlay == null)
+                return;
+
+            void AddPath(RoiContourPath? path)
+            {
+                if (path == null || path.VertexCount == 0)
+                    return;
+                for (int i = 0; i < path.Vertices.Count; i++)
+                {
+                    bool selected = !_selectedVertexIsVia
+                        && _selectedVertexConnector < 0
+                        && ReferenceEquals(path, _selectedVertexPath)
+                        && i == _selectedVertexIndex;
+                    AddVertexHandle(path.Vertices[i], selected);
+                }
+
+                int edges = RoiContourPath.GetEdgeCount(path);
+                for (int i = 0; i < edges && i < path.ArcVia.Count; i++)
+                {
+                    if (RoiContourPath.GetEdgeKind(path, i) != RoiEdgeKind.Arc
+                        || path.ArcVia[i] is not Point via)
+                        continue;
+                    bool selected = _selectedVertexIsVia
+                        && ReferenceEquals(path, _selectedVertexPath)
+                        && i == _selectedVertexIndex;
+                    AddVertexHandle(via, selected, viaMark: true);
+                }
+            }
+
+            if (IsOpenTrajectoriesModeActive())
+            {
+                AddPath(_roiPath);
+                for (int i = 0; i < _openTrajectoryEntries.Count; i++)
+                {
+                    if (_editingOpenTrajectoryIndex == i)
+                        continue;
+                    AddPath(_openTrajectoryEntries[i].Path);
+                }
+
+                for (int i = 0; i < _trajectoryConnectors.Count; i++)
+                {
+                    RoiConnectorSegment seg = _trajectoryConnectors[i];
+                    bool selStart = _selectedVertexConnector == i
+                        && _selectedVertexKind == RoiVertexHitKind.ConnectorStart;
+                    bool selEnd = _selectedVertexConnector == i
+                        && _selectedVertexKind == RoiVertexHitKind.ConnectorEnd;
+                    AddVertexHandle(seg.Start, selStart);
+                    AddVertexHandle(seg.End, selEnd);
+                }
+            }
+            else if (RbPolygonMode?.IsChecked == true)
+                AddPath(_roiPath);
+            else if (IsRingModeActive())
+            {
+                AddPath(_ringOuterPath);
+                AddPath(_ringInnerPath);
+            }
+        }
+
+        private void AddVertexHandle(Point roi, bool selected, bool viaMark = false)
+        {
+            if (DimensionOverlay == null)
+                return;
+            Point p = RoiToImagePx(roi);
+            double inv = 1.0 / Math.Max(_scale, 1e-6);
+            double size = (selected ? 9.0 : 6.0) * inv;
+            Brush fill = selected
+                ? Brushes.Cyan
+                : viaMark
+                    ? new SolidColorBrush(Color.FromRgb(255, 204, 128))
+                    : Brushes.White;
+            var mark = new Ellipse
+            {
+                Width = size,
+                Height = size,
+                Fill = fill,
+                Stroke = selected ? Brushes.DarkCyan : new SolidColorBrush(Color.FromRgb(33, 33, 33)),
+                StrokeThickness = Math.Max(0.6 * inv, 0.4 * inv),
+                IsHitTestVisible = false
+            };
+            Canvas.SetLeft(mark, p.X - size * 0.5);
+            Canvas.SetTop(mark, p.Y - size * 0.5);
+            DimensionOverlay.Children.Add(mark);
         }
 
         private bool IsPointInRingRoi(double x, double y)
@@ -1749,6 +2093,8 @@ namespace CalibOperatorCLI_Example
                 };
                 ConnectorsLayer.Children.Add(poly);
             }
+
+            RebuildDimensionLabels();
         }
 
         private void UpdateConnectorRubberVisual()
@@ -1773,6 +2119,7 @@ namespace CalibOperatorCLI_Example
 
             ConnectorRubberLine.Visibility = Visibility.Visible;
             ConnectorRubberLine.Points = ToCanvasPoints(new[] { start, cursor });
+            RebuildDimensionLabels();
         }
 
         private bool TryCommitConnectorLineAtMouse(Point anchorStart, Point directionMouse, string logPrefix)
@@ -1887,6 +2234,8 @@ namespace CalibOperatorCLI_Example
                 };
                 OpenTrajectoriesLayer.Children.Add(poly);
             }
+
+            RebuildDimensionLabels();
         }
 
         private List<Point2D> GetOpenTrajectoryDensePoints(RoiContourPath path) =>
@@ -2206,6 +2555,7 @@ namespace CalibOperatorCLI_Example
             {
                 if (RingOuterLine != null) RingOuterLine.Visibility = Visibility.Collapsed;
                 if (RingInnerLine != null) RingInnerLine.Visibility = Visibility.Collapsed;
+                RebuildDimensionLabels();
                 return;
             }
 
@@ -2217,6 +2567,8 @@ namespace CalibOperatorCLI_Example
                 RingInnerLine.Visibility = Visibility.Collapsed;
                 RingInnerLine.Points.Clear();
             }
+
+            RebuildDimensionLabels();
         }
 
         private void UpdateRingRubberVisual()
@@ -2264,12 +2616,14 @@ namespace CalibOperatorCLI_Example
                 PolygonRubberLine.Points.Clear();
                 HideRubberAltLine();
                 UpdateTangentFlipButtonVisibility();
+                RebuildDimensionLabels();
                 return;
             }
 
             PolygonRubberLine.Visibility = Visibility.Visible;
             PolygonRubberLine.Points = ToCanvasPoints(rubber);
             UpdateTangentFlipButtonVisibility();
+            RebuildDimensionLabels();
         }
 
 #if HALCON_ENABLED
@@ -2295,6 +2649,54 @@ namespace CalibOperatorCLI_Example
         {
             ResetView();
             AppendLog("视图已重置");
+        }
+
+        private void BtnRefreshDisplay_Click(object sender, RoutedEventArgs e) =>
+            RefreshPageDisplay();
+
+        private void Page_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.F5)
+                return;
+            RefreshPageDisplay();
+            e.Handled = true;
+        }
+
+        /// <summary>重绘图像位图与全部 ROI 叠图；不改 ROI 数据，也不重置缩放。</summary>
+        private void RefreshPageDisplay()
+        {
+            RebuildDisplayBitmapFromMemory();
+            RefreshAllOpenTrajectoryVisuals();
+            RefreshRoiVisuals();
+            RefreshOpenTrajectoryListUi();
+            RefreshRoiArcEditUi();
+            if (_hasRoi || _hasRingRoi || IsOpenTrajectoriesModeActive())
+                UpdateThresholdPreview();
+
+            DisplayImage?.InvalidateVisual();
+            ImageCanvas?.InvalidateVisual();
+            ViewHost?.InvalidateVisual();
+            InvalidateVisual();
+            UpdateLayout();
+            AppendLog("已刷新显示（图像与 ROI 叠图已重绘，数据未改）");
+        }
+
+        private void RebuildDisplayBitmapFromMemory()
+        {
+            if (DisplayImage == null || _grayPixels == null || _imgWidth <= 0 || _imgHeight <= 0)
+                return;
+
+            var bmp = BitmapSource.Create(
+                _imgWidth, _imgHeight, 96, 96, PixelFormats.Gray8, null, _grayPixels, _imgWidth);
+            bmp.Freeze();
+            DisplayImage.Source = bmp;
+            DisplayImage.Width = _imgWidth;
+            DisplayImage.Height = _imgHeight;
+            if (ImageCanvas != null)
+            {
+                ImageCanvas.Width = _imgWidth;
+                ImageCanvas.Height = _imgHeight;
+            }
         }
 
         /// <summary>起点吸附/闭合判定的半径（图像像素，由屏幕容差随缩放换算）。</summary>
@@ -3192,6 +3594,7 @@ namespace CalibOperatorCLI_Example
             if (_roiPath.VertexCount < 1 && _arcDraftEnd == null)
             {
                 HidePolyline(PolygonLine);
+                RebuildDimensionLabels();
                 return;
             }
 
@@ -3199,6 +3602,7 @@ namespace CalibOperatorCLI_Example
             if (pts.Count < 2)
             {
                 HidePolyline(PolygonLine);
+                RebuildDimensionLabels();
                 return;
             }
 
@@ -3207,6 +3611,7 @@ namespace CalibOperatorCLI_Example
 
             if (_roiPath.IsClosed && pts.Count > 0 && Dist(pts[0], pts[^1]) > 1e-6)
                 PolygonLine.Points.Add(RoiToImagePx(pts[0]));
+            RebuildDimensionLabels();
         }
 
         private static void HidePolyline(Polyline? line)
@@ -3278,12 +3683,14 @@ namespace CalibOperatorCLI_Example
                 PolygonRubberLine.Points.Clear();
                 HideRubberAltLine();
                 UpdateTangentFlipButtonVisibility();
+                RebuildDimensionLabels();
                 return;
             }
 
             PolygonRubberLine.Visibility = Visibility.Visible;
             PolygonRubberLine.Points = ToCanvasPoints(rubber);
             UpdateTangentFlipButtonVisibility();
+            RebuildDimensionLabels();
         }
 
         private static bool PointsNear(Point a, Point b, double eps = 1e-6) => Dist(a, b) < eps;
@@ -3571,19 +3978,19 @@ namespace CalibOperatorCLI_Example
                 if (PreferOpenTrajectoryPick())
                 {
                     return "开放轨迹 · 取点：单击图像落下一段（第一点即本条起点）。靠近已有端点会吸附为起点，不会选中那条边；点在线中段不会贴上去。"
-                           + " 要改已有边：按住 Alt 再点该边（强制选中/拖动），或先点「完成本条」再点边。"
-                           + " Delete / 右键「只删此边」只去掉该段（中间边拆成两条）。Shift+Delete 拼接。Ctrl+拖整体平移。「缩放ROI…」输入倍率。Ctrl+Z 撤销。滚轮缩放整图。";
+                           + " 要改已有边或顶点：按住 Alt 再点（强制选中/拖动），或先点「完成本条」。"
+                           + " 列表可复制、镜像、偏移选中轨迹。Delete 只删该边。Ctrl+拖整体平移。「缩放ROI…」输入倍率。Ctrl+Z 撤销。滚轮缩放整图。";
                 }
 
-                return "开放轨迹 · 选中：单击边选中后拖动，或松手弹窗改长度/半径/终点。顶点真正重合才连锁；贴得近但没连上的可单独拖。"
-                       + " 只改长度时 B 端一侧整体平移。Delete 只删该边、其余不动；中间断开会拆成两条轨迹。Shift+Delete 才拼接。"
-                       + " 「新建本条」后改回取点（此时要选边请 Alt+点）。Ctrl+拖整体平移。「缩放ROI…」输入倍率。滚轮缩放整图。";
+                return "开放轨迹 · 选中：单击顶点可直接拖动（只改该点）。单击边拖动则平移该段或弹窗。顶点真正重合才连锁。"
+                       + " 列表可复制、镜像左右/上下、等距偏移一条轨迹。"
+                       + " Delete 只删该边。Shift+Delete 才拼接。「新建本条」后改回取点（此时要选点/边请 Alt+点）。Ctrl+拖整体平移。滚轮缩放整图。";
             }
 
             if (RbPolygonMode?.IsChecked == true)
             {
-                return "多边形：单击加点，终点落在起点容差内自动闭合。点边拖动平移该段，松手未拖则弹窗。"
-                       + " 画线过程中普通单击是加点；要选已有边请 Alt+点。已闭合时 Delete 在该边断开并保留顶点。"
+                return "多边形：单击加点，终点落在起点容差内自动闭合。点顶点可直接拖动（只改该点）；点边拖动平移该段，松手未拖则弹窗。"
+                       + " 画线过程中普通单击是加点；要选已有顶点/边请 Alt+点。已闭合时 Delete 在该边断开并保留顶点。"
                        + " 改一段会连锁邻段。Ctrl+拖整体平移。「缩放ROI…」输入倍率。滚轮缩放整图。";
             }
 
@@ -3606,11 +4013,12 @@ namespace CalibOperatorCLI_Example
             {
                 return "开放轨迹用于不闭合的胶路/刻线，可画多条。\n\n"
                        + "画：点「新建本条」→ 单击图像即本条起点（不弹落点框）→ 再点画直线或圆弧 →「完成本条」。\n"
-                       + "改：完成本条后单击边选中。拖动平移该段；松手未拖则弹窗改长度、角度、半径、终点。只有顶点真正重合（吸附到同一点）或经连接线相接的邻段才会连锁平移+旋转；贴得近但没连上的轨迹可单独拖。只改长度时，B 端一侧整体平移。\n"
-                       + "Alt+点：强制选中/拖边。取点模式（新建本条后、尚未完成本条）时普通单击是加点，不会选中已有边，必须按住 Alt 再点才能选边或拖边。完成本条后单击即可选边，Alt 仍可用。\n"
+                       + "改：完成本条后单击顶点可直接拖动（只改该点，邻段跟着变形，不做刚体连锁）。单击边则拖动平移该段；松手未拖则弹窗改长度、角度、半径、终点。拖边时只有顶点真正重合或经连接线相接才会连锁。\n"
+                       + "Alt+点：强制选中/拖顶点或边。取点模式普通单击是加点，必须按住 Alt 再点才能拖顶点或边。完成本条后单击即可。\n"
+                       + "复制 / 镜像 / 偏移：在开放轨迹列表对选中的一条操作。复制会略微错开以免重叠；镜像绕自身中心；偏移按前进方向左侧或右侧等距。\n"
                        + "Ctrl+拖：整体平移全部开放轨迹（开放轨迹只有 Ctrl，不要只按住左键空白处拖）。\n"
                        + "「缩放ROI…」：输入精确倍率（1.02 或 102%），绕中心均匀缩放全部开放轨迹。Ctrl+Z 可撤销。\n"
-                       + "滚轮 / 工具栏 －＋：缩放整图（不改 ROI）。空白处右键拖：平移视图。空格或「重置视图」适应窗口。\n"
+                       + "滚轮 / 工具栏 －＋：缩放整图（不改 ROI）。空白处右键拖：平移视图。空格或「重置视图」适应窗口。「刷新」/ F5：重绘图像与叠图（去掉残影，不改 ROI、不改缩放）。\n"
                        + "只删边（Delete / 右键「只删此边」）：去掉该段，其余边的位置和圆弧不变。删首/末边只去掉多余端点；删中间边会拆成两条轨迹。\n"
                        + "删除并拼接（Shift+Delete）：后续边接到缺口上，邻接圆弧可能被拉斜。\n"
                        + "要改某一边的长度/半径：选中后拖或弹窗，邻段会连锁。删错了用 Ctrl+Z。\n"
@@ -3620,9 +4028,9 @@ namespace CalibOperatorCLI_Example
             if (RbPolygonMode?.IsChecked == true)
             {
                 return "多边形：单击加点，路径可选直线或圆弧。终点落在起点容差内自动闭合。\n\n"
-                       + "Alt+点：强制选中/拖边。画线过程中普通单击是加点；要改已有边请按住 Alt 再点该边。\n"
-                       + "Ctrl+拖：整体平移。「缩放ROI…」输入精确倍率。滚轮 / －＋：缩放整图（不改 ROI）。空白处右键拖：平移视图。\n"
-                       + "改已有边：点边拖动平移该段；松手未拖则弹窗。改一段会连锁邻段（平移+旋转，不缩放）。\n"
+                       + "Alt+点：强制选中/拖顶点或边。画线过程中普通单击是加点；要改已有点/边请按住 Alt 再点。\n"
+                       + "Ctrl+拖：整体平移。「缩放ROI…」输入精确倍率。滚轮 / －＋：缩放整图（不改 ROI）。空白处右键拖：平移视图。「刷新」/ F5 重绘叠图。\n"
+                       + "改已有边：点顶点直接拖该点；点边拖动平移该段；松手未拖则弹窗。拖边会连锁邻段（平移+旋转，不缩放）。\n"
                        + "删段：已闭合时在该边断开并保留全部顶点。未闭合时 Delete 只删端点边不拼接；中间边需改用开放轨迹，或 Shift+Delete 拼接。\n";
             }
 
@@ -4138,7 +4546,8 @@ namespace CalibOperatorCLI_Example
         private bool CanClickEditRoiSegments()
         {
             if (_isPanning || _isMovingRoi || _isDraggingRoiSegment || _isDrawing
-                || _rotRectSettingAngle || _arcDraftEnd != null)
+                || _rotRectSettingAngle || _arcDraftEnd != null
+                || _pendingVertexDrag || _draggingVertex)
                 return false;
             if (RbPolygonMode?.IsChecked == true)
                 return RoiContourPath.GetEdgeCount(_roiPath) > 0;
@@ -4223,11 +4632,43 @@ namespace CalibOperatorCLI_Example
             _selectedRoiSegmentPath = null;
             _selectedRoiSegmentEdge = -1;
             _selectedConnectorIndex = -1;
+            ClearSelectedVertexHighlight(rebuild: false);
             HidePolyline(SelectedRoiSegmentLine);
+            RebuildDimensionLabels();
+        }
+
+        private void ClearSelectedVertexHighlight(bool rebuild = true)
+        {
+            _selectedVertexPath = null;
+            _selectedVertexIndex = -1;
+            _selectedVertexIsVia = false;
+            _selectedVertexConnector = -1;
+            _selectedVertexKind = RoiVertexHitKind.Vertex;
+            if (rebuild)
+                RebuildDimensionLabels();
+        }
+
+        private void SetSelectedVertexHighlight(RoiVertexHit hit)
+        {
+            _selectedRoiSegmentPath = null;
+            _selectedRoiSegmentEdge = -1;
+            _selectedConnectorIndex = -1;
+            HidePolyline(SelectedRoiSegmentLine);
+            _selectedVertexKind = hit.Kind;
+            _selectedVertexPath = hit.Path;
+            _selectedVertexIndex = hit.Kind is RoiVertexHitKind.Vertex or RoiVertexHitKind.Via
+                ? hit.Index
+                : -1;
+            _selectedVertexIsVia = hit.Kind == RoiVertexHitKind.Via;
+            _selectedVertexConnector = hit.Kind is RoiVertexHitKind.ConnectorStart or RoiVertexHitKind.ConnectorEnd
+                ? hit.Index
+                : -1;
+            RebuildDimensionLabels();
         }
 
         private void SetSelectedRoiSegmentHighlight(RoiContourPath path, int edgeIndex)
         {
+            ClearSelectedVertexHighlight(rebuild: false);
             _selectedConnectorIndex = -1;
             _selectedRoiSegmentPath = path;
             _selectedRoiSegmentEdge = edgeIndex;
@@ -4243,6 +4684,7 @@ namespace CalibOperatorCLI_Example
 
             SelectedRoiSegmentLine.Points = ToCanvasPoints(pts);
             SelectedRoiSegmentLine.Visibility = Visibility.Visible;
+            RebuildDimensionLabels();
         }
 
         private void SetSelectedConnectorHighlight(int connectorIndex)
@@ -4253,6 +4695,7 @@ namespace CalibOperatorCLI_Example
                 return;
             }
 
+            ClearSelectedVertexHighlight(rebuild: false);
             _selectedRoiSegmentPath = null;
             _selectedRoiSegmentEdge = -1;
             _selectedConnectorIndex = connectorIndex;
@@ -4261,6 +4704,7 @@ namespace CalibOperatorCLI_Example
                 return;
             SelectedRoiSegmentLine.Points = ToCanvasPoints(new[] { seg.Start, seg.End });
             SelectedRoiSegmentLine.Visibility = Visibility.Visible;
+            RebuildDimensionLabels();
         }
 
         private static double DistancePointToSegment(Point p, Point a, Point b)
@@ -4337,10 +4781,237 @@ namespace CalibOperatorCLI_Example
             return index >= 0 && best < double.MaxValue;
         }
 
+        private bool TryHitRoiVertex(Point imgPt, out RoiVertexHit hit)
+        {
+            hit = default;
+            double tol = GetRoiSegmentHitTolerancePx();
+            double best = tol;
+            bool found = false;
+            RoiVertexHitKind bestKind = RoiVertexHitKind.Vertex;
+            RoiContourPath? bestPath = null;
+            int bestIndex = -1;
+            Point bestOrigin = imgPt;
+
+            void Consider(Point p, RoiVertexHitKind kind, RoiContourPath? path, int index)
+            {
+                double d = Dist(imgPt, p);
+                if (d >= best)
+                    return;
+                best = d;
+                found = true;
+                bestKind = kind;
+                bestPath = path;
+                bestIndex = index;
+                bestOrigin = p;
+            }
+
+            void ConsiderPath(RoiContourPath? path)
+            {
+                if (path == null || path.VertexCount == 0)
+                    return;
+                for (int i = 0; i < path.Vertices.Count; i++)
+                    Consider(path.Vertices[i], RoiVertexHitKind.Vertex, path, i);
+
+                int edges = RoiContourPath.GetEdgeCount(path);
+                for (int i = 0; i < edges && i < path.ArcVia.Count; i++)
+                {
+                    if (RoiContourPath.GetEdgeKind(path, i) != RoiEdgeKind.Arc
+                        || path.ArcVia[i] is not Point via)
+                        continue;
+                    RoiContourPath.GetEdgeEndpoints(path, i, out Point start, out Point end);
+                    if (Dist(via, start) < 1e-6 || Dist(via, end) < 1e-6)
+                        continue;
+                    Consider(via, RoiVertexHitKind.Via, path, i);
+                }
+            }
+
+            if (IsOpenTrajectoriesModeActive())
+            {
+                ConsiderPath(_roiPath);
+                for (int i = 0; i < _openTrajectoryEntries.Count; i++)
+                {
+                    if (_editingOpenTrajectoryIndex == i)
+                        continue;
+                    ConsiderPath(_openTrajectoryEntries[i].Path);
+                }
+
+                for (int i = 0; i < _trajectoryConnectors.Count; i++)
+                {
+                    RoiConnectorSegment seg = _trajectoryConnectors[i];
+                    Consider(seg.Start, RoiVertexHitKind.ConnectorStart, null, i);
+                    Consider(seg.End, RoiVertexHitKind.ConnectorEnd, null, i);
+                }
+            }
+            else if (RbPolygonMode?.IsChecked == true)
+                ConsiderPath(_roiPath);
+            else if (IsRingModeActive())
+            {
+                ConsiderPath(_ringOuterPath);
+                ConsiderPath(_ringInnerPath);
+            }
+
+            if (!found)
+                return false;
+
+            hit = new RoiVertexHit
+            {
+                Kind = bestKind,
+                Path = bestPath,
+                Index = bestIndex,
+                Origin = bestOrigin
+            };
+            return true;
+        }
+
+        private bool TryBeginRoiVertexPointer(Point imgPt)
+        {
+            if (!CanClickEditRoiSegments())
+                return false;
+            if (!TryHitRoiVertex(imgPt, out RoiVertexHit hit))
+                return false;
+
+            if (IsOpenTrajectoriesModeActive())
+                _openTrajSceneEditBefore = CaptureOpenTrajSceneSnapshot();
+
+            SetSelectedVertexHighlight(hit);
+            _vertexDragHit = hit;
+            _vertexDragOrigin = hit.Origin;
+            _roiSegmentDragStartMouse = imgPt;
+            _pendingVertexDrag = true;
+            _draggingVertex = false;
+            _pendingRoiSegmentClickEdit = false;
+            _isDraggingRoiSegment = false;
+            _draggingConnector = false;
+            _linkedEditOrigin = null;
+            ViewHost.CaptureMouse();
+            ViewHost.Cursor = Cursors.SizeAll;
+            return true;
+        }
+
+        private Point SnapVertexDragAim(Point imgPt, RoiVertexHit skip)
+        {
+            double tol = GetRoiSegmentHitTolerancePx();
+            double best = tol;
+            Point bestPt = imgPt;
+            bool found = false;
+
+            void Consider(Point p, RoiContourPath? path, int vertexIndex, bool isVia, int connectorIndex, RoiVertexHitKind kind)
+            {
+                if (kind == skip.Kind && connectorIndex == skip.Index && ReferenceEquals(path, skip.Path)
+                    && vertexIndex == skip.Index)
+                    return;
+                if (skip.Kind == RoiVertexHitKind.Vertex
+                    && kind == RoiVertexHitKind.Vertex
+                    && ReferenceEquals(path, skip.Path)
+                    && vertexIndex == skip.Index)
+                    return;
+                if (skip.Kind == RoiVertexHitKind.Via
+                    && isVia
+                    && ReferenceEquals(path, skip.Path)
+                    && vertexIndex == skip.Index)
+                    return;
+                if ((skip.Kind == RoiVertexHitKind.ConnectorStart || skip.Kind == RoiVertexHitKind.ConnectorEnd)
+                    && kind == skip.Kind
+                    && connectorIndex == skip.Index)
+                    return;
+
+                double d = Dist(imgPt, p);
+                if (d < best)
+                {
+                    best = d;
+                    bestPt = p;
+                    found = true;
+                }
+            }
+
+            void ConsiderPath(RoiContourPath? path)
+            {
+                if (path == null || path.VertexCount == 0)
+                    return;
+                for (int i = 0; i < path.Vertices.Count; i++)
+                    Consider(path.Vertices[i], path, i, false, -1, RoiVertexHitKind.Vertex);
+            }
+
+            ConsiderPath(_roiPath);
+            ConsiderPath(_ringOuterPath);
+            ConsiderPath(_ringInnerPath);
+            for (int i = 0; i < _openTrajectoryEntries.Count; i++)
+            {
+                if (_editingOpenTrajectoryIndex == i)
+                    continue;
+                ConsiderPath(_openTrajectoryEntries[i].Path);
+            }
+
+            for (int i = 0; i < _trajectoryConnectors.Count; i++)
+            {
+                RoiConnectorSegment seg = _trajectoryConnectors[i];
+                Consider(seg.Start, null, -1, false, i, RoiVertexHitKind.ConnectorStart);
+                Consider(seg.End, null, -1, false, i, RoiVertexHitKind.ConnectorEnd);
+            }
+
+            return found ? bestPt : imgPt;
+        }
+
+        private void ApplyRoiVertexDragToMouse(Point imgPt)
+        {
+            Point aim = imgPt;
+            if (!RoiUsesMillimeters())
+                aim = ClampImagePoint(aim);
+            aim = SnapVertexDragAim(aim, _vertexDragHit);
+
+            RoiVertexHit hit = _vertexDragHit;
+            if (hit.Kind == RoiVertexHitKind.Vertex && hit.Path != null
+                && hit.Index >= 0 && hit.Index < hit.Path.Vertices.Count)
+            {
+                Point old = hit.Path.Vertices[hit.Index];
+                hit.Path.Vertices[hit.Index] = aim;
+                NudgeCoincidentConnectorEnds(old, aim);
+                RefreshRoiSegmentGeometryVisuals(hit.Path);
+                RebuildConnectorsVisual();
+                SetSelectedVertexHighlight(hit);
+                return;
+            }
+
+            if (hit.Kind == RoiVertexHitKind.Via && hit.Path != null
+                && hit.Index >= 0 && hit.Index < hit.Path.ArcVia.Count)
+            {
+                hit.Path.ArcVia[hit.Index] = aim;
+                RefreshRoiSegmentGeometryVisuals(hit.Path);
+                SetSelectedVertexHighlight(hit);
+                return;
+            }
+
+            if ((hit.Kind == RoiVertexHitKind.ConnectorStart || hit.Kind == RoiVertexHitKind.ConnectorEnd)
+                && hit.Index >= 0 && hit.Index < _trajectoryConnectors.Count)
+            {
+                RoiConnectorSegment seg = _trajectoryConnectors[hit.Index];
+                Point start = hit.Kind == RoiVertexHitKind.ConnectorStart ? aim : seg.Start;
+                Point end = hit.Kind == RoiVertexHitKind.ConnectorEnd ? aim : seg.End;
+                _trajectoryConnectors[hit.Index] = new RoiConnectorSegment(start, end);
+                RebuildConnectorsVisual();
+                SetSelectedVertexHighlight(hit);
+            }
+        }
+
+        private void NudgeCoincidentConnectorEnds(Point from, Point to)
+        {
+            double tol = GetRoiLinkCoincidenceTol();
+            for (int i = 0; i < _trajectoryConnectors.Count; i++)
+            {
+                RoiConnectorSegment seg = _trajectoryConnectors[i];
+                Point s = Dist(seg.Start, from) <= tol ? to : seg.Start;
+                Point e = Dist(seg.End, from) <= tol ? to : seg.End;
+                if (s != seg.Start || e != seg.End)
+                    _trajectoryConnectors[i] = new RoiConnectorSegment(s, e);
+            }
+        }
+
         private bool TryBeginRoiSegmentPointer(Point imgPt)
         {
             if (!CanClickEditRoiSegments())
                 return false;
+            if (TryBeginRoiVertexPointer(imgPt))
+                return true;
             if (!TryHitSelectableLine(imgPt, out bool isConnector, out RoiContourPath? path, out int index))
                 return false;
 
@@ -4713,6 +5384,9 @@ namespace CalibOperatorCLI_Example
 
         private void FinishRoiSegmentPointer(bool openEditDialogIfPending)
         {
+            bool wasVertexDrag = _draggingVertex;
+            bool pendingVertex = _pendingVertexDrag;
+            RoiVertexHit vertexHit = _vertexDragHit;
             bool wasDragging = _isDraggingRoiSegment;
             bool pendingEdit = _pendingRoiSegmentClickEdit;
             bool wasConnector = _draggingConnector;
@@ -4720,11 +5394,45 @@ namespace CalibOperatorCLI_Example
             int edge = _selectedRoiSegmentEdge;
             int connectorIdx = _selectedConnectorIndex;
 
+            _pendingVertexDrag = false;
+            _draggingVertex = false;
             _pendingRoiSegmentClickEdit = false;
             _isDraggingRoiSegment = false;
             _draggingConnector = false;
             _linkedEditOrigin = null;
             ViewHost.Cursor = Cursors.Arrow;
+
+            if (wasVertexDrag)
+            {
+                string label = vertexHit.Kind switch
+                {
+                    RoiVertexHitKind.Via => $"圆弧途经点 #{vertexHit.Index + 1} 已移动",
+                    RoiVertexHitKind.ConnectorStart => $"辅助线 #{vertexHit.Index + 1} 起点已移动",
+                    RoiVertexHitKind.ConnectorEnd => $"辅助线 #{vertexHit.Index + 1} 终点已移动",
+                    _ => $"顶点 #{vertexHit.Index + 1} 已移动"
+                };
+                if (IsOpenTrajectoriesModeActive() && _openTrajSceneEditBefore != null)
+                    CommitOpenTrajSceneEdit(_openTrajSceneEditBefore, label);
+                _openTrajSceneEditBefore = null;
+                if (vertexHit.Path != null)
+                    AfterRoiSegmentEdited(vertexHit.Path, -1, label);
+                else
+                {
+                    RebuildConnectorsVisual();
+                    PersistSessionChange();
+                    AppendLog(label);
+                }
+
+                SetSelectedVertexHighlight(vertexHit);
+                return;
+            }
+
+            if (pendingVertex)
+            {
+                _openTrajSceneEditBefore = null;
+                SetSelectedVertexHighlight(vertexHit);
+                return;
+            }
 
             if (wasDragging && wasConnector && connectorIdx >= 0)
             {
@@ -4767,7 +5475,8 @@ namespace CalibOperatorCLI_Example
         {
             if (_selectedConnectorIndex < 0 || _selectedConnectorIndex >= _trajectoryConnectors.Count)
                 return false;
-            if (_isDraggingRoiSegment || _pendingRoiSegmentClickEdit || _isMovingRoi || _isDrawing)
+            if (_isDraggingRoiSegment || _pendingRoiSegmentClickEdit || _isMovingRoi || _isDrawing
+                || _pendingVertexDrag || _draggingVertex)
                 return false;
 
             int idx = _selectedConnectorIndex;
@@ -4792,7 +5501,8 @@ namespace CalibOperatorCLI_Example
 
             if (_selectedRoiSegmentPath == null || _selectedRoiSegmentEdge < 0)
                 return false;
-            if (_isDraggingRoiSegment || _pendingRoiSegmentClickEdit || _isMovingRoi || _isDrawing)
+            if (_isDraggingRoiSegment || _pendingRoiSegmentClickEdit || _isMovingRoi || _isDrawing
+                || _pendingVertexDrag || _draggingVertex)
                 return false;
 
             RoiContourPath path = _selectedRoiSegmentPath;
@@ -6120,6 +6830,23 @@ namespace CalibOperatorCLI_Example
                 return;
             }
 
+            if (_pendingVertexDrag || _draggingVertex)
+            {
+                var vtxPt = GetImagePointFromMouse(e);
+                if (!_draggingVertex)
+                {
+                    double moved = (vtxPt - _roiSegmentDragStartMouse).Length;
+                    if (moved < RoiSegmentDragThresholdPx)
+                        return;
+                    _draggingVertex = true;
+                    _pendingVertexDrag = false;
+                    CancelFindShapeRun("已取消进行中的匹配（正在拖动顶点）");
+                }
+
+                ApplyRoiVertexDragToMouse(vtxPt);
+                return;
+            }
+
             if (_pendingRoiSegmentClickEdit || _isDraggingRoiSegment || _draggingConnector)
             {
                 var segPt = GetImagePointFromMouse(e);
@@ -6182,10 +6909,16 @@ namespace CalibOperatorCLI_Example
                 ViewHost.Cursor = Cursors.Cross;
             }
             else if (!_isMovingRoi && !_isPanning && !_isDrawing
-                && !_pendingRoiSegmentClickEdit && !_isDraggingRoiSegment && !_draggingConnector)
+                && !_pendingRoiSegmentClickEdit && !_isDraggingRoiSegment && !_draggingConnector
+                && !_pendingVertexDrag && !_draggingVertex)
             {
                 var hoverPt = GetImagePointFromMouse(e);
-                if (PreferOpenTrajectoryPick() && _roiPath.VertexCount == 0)
+                bool altHover = (Keyboard.Modifiers & ModifierKeys.Alt) != 0;
+                bool canGrabVertex = CanClickEditRoiSegments()
+                    && (!PreferOpenTrajectoryPick() || altHover);
+                if (canGrabVertex && TryHitRoiVertex(hoverPt, out _))
+                    ViewHost.Cursor = Cursors.SizeAll;
+                else if (PreferOpenTrajectoryPick() && _roiPath.VertexCount == 0)
                 {
                     SnapToNearbyLandmark(hoverPt, out bool hoverSnap, GetOpenTrajectoryStartEndpointSnapTol());
                     ViewHost.Cursor = hoverSnap ? Cursors.Cross : Cursors.Arrow;
@@ -6317,7 +7050,8 @@ namespace CalibOperatorCLI_Example
                 return;
             }
 
-            if (_pendingRoiSegmentClickEdit || _isDraggingRoiSegment || _draggingConnector)
+            if (_pendingVertexDrag || _draggingVertex
+                || _pendingRoiSegmentClickEdit || _isDraggingRoiSegment || _draggingConnector)
             {
                 FinishRoiSegmentPointer(openEditDialogIfPending: true);
                 ViewHost.ReleaseMouseCapture();
@@ -6400,7 +7134,8 @@ namespace CalibOperatorCLI_Example
         {
             if (_imgWidth <= 0 || _imgHeight <= 0) return;
 
-            if (_pendingRoiSegmentClickEdit || _isDraggingRoiSegment || _draggingConnector)
+            if (_pendingVertexDrag || _draggingVertex
+                || _pendingRoiSegmentClickEdit || _isDraggingRoiSegment || _draggingConnector)
                 FinishRoiSegmentPointer(openEditDialogIfPending: false);
 
             var imgPt = GetImagePointFromMouse(e);
