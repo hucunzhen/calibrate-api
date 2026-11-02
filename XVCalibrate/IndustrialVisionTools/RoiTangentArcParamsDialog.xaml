@@ -10,7 +10,8 @@
         ShowInTaskbar="False">
     <Border Padding="16" MinWidth="360">
         <StackPanel>
-            <TextBlock Text="已用鼠标选定圆弧走向；请输入半径与张角。" TextWrapping="Wrap" Margin="0,0,0,12"
+            <TextBlock Text="以切点为原点、进线为轴：一象限 90°、二象限 180°、三象限 270°、四象限另一侧 90°。其它角度在此修改。"
+                       TextWrapping="Wrap" Margin="0,0,0,12"
                        Foreground="#B0BEC5" FontSize="12"/>
             <TextBlock Text="半径 R" FontWeight="SemiBold" Margin="0,0,0,4"/>
             <Grid Margin="0,0,0,10">

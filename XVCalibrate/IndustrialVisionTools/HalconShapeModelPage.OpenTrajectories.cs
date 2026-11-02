@@ -95,7 +95,7 @@ namespace CalibOperatorCLI_Example
             _openTrajectoryPreferPick = true;
 
             InvalidatePolygonFlatCache();
-            UpdatePolygonPreview();
+            RefreshAllOpenTrajectoryVisuals();
             RefreshOpenTrajectoryListUi();
             UpdateRoiEditHint();
             AppendLog($"正在编辑: {_openTrajectoryEntries[idx].Name}（单击优先取点；修改后点「完成本条」覆盖原轨迹）");
@@ -127,9 +127,8 @@ namespace CalibOperatorCLI_Example
             _hasOpenTrajectoriesRoi = _openTrajectoryEntries.Count > 0;
             _hasRoi = _hasOpenTrajectoriesRoi || _roiPath.VertexCount >= 2;
 
-            RebuildOpenTrajectoriesVisual();
+            RefreshAllOpenTrajectoryVisuals();
             RefreshOpenTrajectoryListUi();
-            UpdatePolygonPreview();
             PersistSessionChange();
             AppendLog($"已删除轨迹: {name}，剩余 {_openTrajectoryEntries.Count} 条");
         }

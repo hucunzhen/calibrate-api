@@ -15,7 +15,7 @@
             <TextBlock x:Name="TxtChordHint" Text="" FontSize="10" Foreground="#888" TextWrapping="Wrap"
                        Margin="0,0,0,10"/>
 
-            <TextBlock Text="弧上经过点（图像像素）" FontWeight="SemiBold" Margin="0,0,0,4"/>
+            <TextBlock Text="弧上经过点（与 ROI 相同：有九点为 mm）" FontWeight="SemiBold" Margin="0,0,0,4"/>
             <Grid Margin="0,0,0,10">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="56"/>

@@ -742,6 +742,7 @@ namespace CalibOperatorCLI_Example
             UpdateRingPreview();
             RefreshOpenTrajectoryListUi();
             UpdateRoiManagePanelVisibility();
+            UpdateDrawToolbarForMode();
             if (_hasRoi || _hasRingRoi)
                 UpdateThresholdPreview();
         }
@@ -767,7 +768,7 @@ namespace CalibOperatorCLI_Example
                     break;
                 case "rect":
                 default:
-                    RbRotatedRectMode.IsChecked = true;
+                    RbOpenTrajectoriesMode.IsChecked = true;
                     break;
             }
         }

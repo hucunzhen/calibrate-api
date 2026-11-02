@@ -45,7 +45,8 @@ namespace CalibOperatorCLI_Example
             int imgWidth = 0,
             int imgHeight = 0,
             bool preserveRoiAngle = true,
-            bool emitWorldMm = false)
+            bool emitWorldMm = false,
+            bool valuesAreWorldMm = false)
         {
             _kind = kind;
             _affine = affine;
@@ -63,30 +64,57 @@ namespace CalibOperatorCLI_Example
                 ? "中心 X/Y、宽、高（mm）与长边方向角（0°=毫米 X=图像 +X）。"
                 : "圆心 X/Y 与半径（mm）。";
 
-            var rotCenterMm = HalconGeometryContourBuilder.ImagePixelToWorldMm(
-                rotCenterXPx, rotCenterYPx, _affine, _preserveRoiAngle);
-            double rad = rotAngleDeg * Math.PI / 180.0;
-            double dirX = Math.Cos(rad);
-            double dirY = Math.Sin(rad);
-            double rotWMm = RoiSegmentMeasure.PixelLengthToWorldMm(
-                rotWidthPx, rotCenterXPx, rotCenterYPx, dirX, dirY, _affine, _preserveRoiAngle);
-            double rotHMm = RoiSegmentMeasure.PixelLengthToWorldMm(
-                rotHeightPx, rotCenterXPx, rotCenterYPx, -dirY, dirX, _affine, _preserveRoiAngle);
-            TxtRotCenterX.Text = rotCenterMm.X.ToString("F3", CultureInfo.InvariantCulture);
-            TxtRotCenterY.Text = rotCenterMm.Y.ToString("F3", CultureInfo.InvariantCulture);
-            TxtRotWidth.Text = rotWMm.ToString("F3", CultureInfo.InvariantCulture);
-            TxtRotHeight.Text = rotHMm.ToString("F3", CultureInfo.InvariantCulture);
+            double rotCxMm;
+            double rotCyMm;
+            double rotWMm;
+            double rotHMm;
+            double circleCxMm;
+            double circleCyMm;
+            double circleRMm;
+            if (valuesAreWorldMm)
+            {
+                rotCxMm = rotCenterXPx;
+                rotCyMm = rotCenterYPx;
+                rotWMm = rotWidthPx;
+                rotHMm = rotHeightPx;
+                circleCxMm = circleCenterXPx;
+                circleCyMm = circleCenterYPx;
+                circleRMm = circleRadiusPx;
+            }
+            else
+            {
+                var rotCenterMm = HalconGeometryContourBuilder.ImagePixelToWorldMm(
+                    rotCenterXPx, rotCenterYPx, _affine, _preserveRoiAngle);
+                double rad = rotAngleDeg * Math.PI / 180.0;
+                double dirX = Math.Cos(rad);
+                double dirY = Math.Sin(rad);
+                rotCxMm = rotCenterMm.X;
+                rotCyMm = rotCenterMm.Y;
+                rotWMm = RoiSegmentMeasure.PixelLengthToWorldMm(
+                    rotWidthPx, rotCenterXPx, rotCenterYPx, dirX, dirY, _affine, _preserveRoiAngle);
+                rotHMm = RoiSegmentMeasure.PixelLengthToWorldMm(
+                    rotHeightPx, rotCenterXPx, rotCenterYPx, -dirY, dirX, _affine, _preserveRoiAngle);
+                var circleCenterMm = HalconGeometryContourBuilder.ImagePixelToWorldMm(
+                    circleCenterXPx, circleCenterYPx, _affine, _preserveRoiAngle);
+                circleCxMm = circleCenterMm.X;
+                circleCyMm = circleCenterMm.Y;
+                circleRMm = HalconGeometryContourBuilder.PixelRadiusToWorldMm(
+                    circleRadiusPx, circleCenterXPx, circleCenterYPx, _affine, _preserveRoiAngle);
+            }
+
+            TxtRotCenterX.Text = rotCxMm.ToString("F4", CultureInfo.InvariantCulture);
+            TxtRotCenterY.Text = rotCyMm.ToString("F4", CultureInfo.InvariantCulture);
+            TxtRotWidth.Text = rotWMm.ToString("F4", CultureInfo.InvariantCulture);
+            TxtRotHeight.Text = rotHMm.ToString("F4", CultureInfo.InvariantCulture);
             TxtRotAngleDeg.Text = rotAngleDeg.ToString("F1", CultureInfo.InvariantCulture);
 
-            var circleCenterMm = HalconGeometryContourBuilder.ImagePixelToWorldMm(
-                circleCenterXPx, circleCenterYPx, _affine, _preserveRoiAngle);
-            double circleRMm = HalconGeometryContourBuilder.PixelRadiusToWorldMm(
-                circleRadiusPx, circleCenterXPx, circleCenterYPx, _affine, _preserveRoiAngle);
-            TxtCircleCenterX.Text = circleCenterMm.X.ToString("F3", CultureInfo.InvariantCulture);
-            TxtCircleCenterY.Text = circleCenterMm.Y.ToString("F3", CultureInfo.InvariantCulture);
-            TxtCircleRadius.Text = circleRMm.ToString("F3", CultureInfo.InvariantCulture);
+            TxtCircleCenterX.Text = circleCxMm.ToString("F4", CultureInfo.InvariantCulture);
+            TxtCircleCenterY.Text = circleCyMm.ToString("F4", CultureInfo.InvariantCulture);
+            TxtCircleRadius.Text = circleRMm.ToString("F4", CultureInfo.InvariantCulture);
 
-            TxtWorldHint.Text = "坐标与尺寸均为世界坐标 mm；确定后自动换算为图像像素用于显示与模板。";
+            TxtWorldHint.Text = valuesAreWorldMm
+                ? "坐标与尺寸都在 mm 里计算；像素只用于叠图与模板，确定时不从像素反算。"
+                : "坐标与尺寸均为世界坐标 mm；确定后写入 ROI（mm），叠图再换成像素。";
         }
 
         private void BtnOk_Click(object sender, RoutedEventArgs e)

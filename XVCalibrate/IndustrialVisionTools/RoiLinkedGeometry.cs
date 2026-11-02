@@ -5,8 +5,8 @@ using System.Windows;
 namespace CalibOperatorCLI_Example
 {
     /// <summary>
-    /// 选中一段后，把同一连通分量上的路径/连接线按该段做刚体变换（平移+旋转，不缩放），
-    /// 使关联线的相对位置与方向保持不变。
+    /// 选中一段后，把顶点几乎重合（或经连接线相接）的路径/连接线按该段做刚体变换（平移+旋转，不缩放）。
+    /// 贴得近但未重合的独立轨迹不纳入连通分量。
     /// </summary>
     internal static class RoiLinkedGeometry
     {
@@ -65,6 +65,19 @@ namespace CalibOperatorCLI_Example
                     Scale = 1
                 };
             }
+
+            /// <summary>绕原点均匀缩放，不旋转、不平移中心。</summary>
+            public static Similarity2D FromUniformScale(Point origin, double scale) =>
+                new Similarity2D
+                {
+                    OriginX = origin.X,
+                    OriginY = origin.Y,
+                    NewOriginX = origin.X,
+                    NewOriginY = origin.Y,
+                    Cos = 1,
+                    Sin = 0,
+                    Scale = scale
+                };
         }
 
         public static void TransformPathInPlace(RoiContourPath path, Similarity2D t)

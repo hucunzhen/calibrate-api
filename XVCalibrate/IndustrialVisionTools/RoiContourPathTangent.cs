@@ -7,7 +7,7 @@ namespace CalibOperatorCLI_Example
 {
     /// <summary>
     /// ROI 路径直线/圆弧相切衔接。
-    /// 直线→圆：圆心在切点法线上，圆心到直线的垂足 = 切点；弧上点由鼠标到弦的矢高(鼓出量)控制弧度。
+    /// 直线→圆：以切点为原点、进线为轴分象限（Q1=90°，Q2=180°，Q3=270°，Q4=另一侧90°）。
     /// 圆→直线：直线过弧端切点，圆心到直线的垂足 = 切点；直线端点 = 鼠标在切线上的投影。
     /// </summary>
     public static class RoiContourPathTangent
@@ -22,31 +22,48 @@ namespace CalibOperatorCLI_Example
         public static bool TryGetOutgoingTravelTangent(RoiContourPath path, out double tx, out double ty) =>
             TryGetLastEdgeTravelTangent(path, atEndVertex: true, out tx, out ty);
 
-        /// <summary>圆弧→直线：将 pick 投影到过弧端切点的切线上，保证圆心垂足为切点。</summary>
-        public static bool TryProjectTangentLineEndAfterArc(
+        /// <summary>直线/圆弧/连接线之后接下一段直线：将 pick 投影到进线切向射线上。</summary>
+        public static bool TryProjectTangentLineEnd(
             RoiContourPath path,
             Point pick,
             double minStepPx,
             out Point lineEnd)
         {
             lineEnd = pick;
-            if (!TryGetLastArcEdge(path, out Point arcStart, out Point via, out Point junction))
+            if (path == null || path.VertexCount < 1)
                 return false;
 
-            if (!TryGetArcOutgoingTangentFromCircle(arcStart, via, junction, out double tx, out double ty, out Point center))
-                return false;
-
-            if (!CenterFootOnLineIsJunction(junction, junction, tx, ty, center))
+            if (TryGetLastArcEdge(path, out Point arcStart, out Point via, out Point junction))
             {
-                tx = -tx;
-                ty = -ty;
+                if (!TryGetArcOutgoingTangentFromCircle(arcStart, via, junction, out double atx, out double aty, out Point center))
+                    return false;
+
+                if (!CenterFootOnLineIsJunction(junction, junction, atx, aty, center))
+                {
+                    atx = -atx;
+                    aty = -aty;
+                }
+
+                if (!CenterFootOnLineIsJunction(junction, junction, atx, aty, center))
+                    return false;
+
+                return TryProjectPointOntoTangentRay(junction, atx, aty, pick, minStepPx, out lineEnd);
             }
 
-            if (!CenterFootOnLineIsJunction(junction, junction, tx, ty, center))
+            if (!TryGetIncomingTravelTangent(path, out double tx, out double ty))
                 return false;
 
-            return TryProjectPointOntoTangentRay(junction, tx, ty, pick, minStepPx, out lineEnd);
+            Point start = path.Vertices[^1];
+            return TryProjectPointOntoTangentRay(start, tx, ty, pick, minStepPx, out lineEnd);
         }
+
+        /// <summary>圆弧→直线：将 pick 投影到过弧端切点的切线上，保证圆心垂足为切点。</summary>
+        public static bool TryProjectTangentLineEndAfterArc(
+            RoiContourPath path,
+            Point pick,
+            double minStepPx,
+            out Point lineEnd) =>
+            TryProjectTangentLineEnd(path, pick, minStepPx, out lineEnd);
 
         /// <summary>直线→圆弧时，上一顶点（直线段起点）。</summary>
         public static bool TryGetIncomingLineAnchor(RoiContourPath path, out Point anchor)
@@ -268,7 +285,8 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>
-        /// 绘制过程中：用鼠标到切点的法向距离作半径，鼠标方向定弧终点，矢高定弧上点。
+        /// 绘制过程中：以切点为原点、进线为 +X、进线左侧为 +Y。
+        /// 一象限 90°、二象限 180°、三象限 270°、四象限另一侧 90°。半径为到切线的距离。
         /// </summary>
         public static bool TryComputeTangentArcWithLiveRadius(
             Point junction,
@@ -283,38 +301,80 @@ namespace CalibOperatorCLI_Example
         {
             end = via = default;
             radiusPx = 0;
-            if (!Normalize(ref tangentX, ref tangentY))
+            if (!Normalize(ref tangentX, ref tangentY) || Dist(junction, mouse) < 1.0)
                 return false;
 
-            double nlx = -tangentY;
-            double nly = tangentX;
-            double nrx = tangentY;
-            double nry = -tangentX;
-            if (!Normalize(ref nlx, ref nly) || !Normalize(ref nrx, ref nry))
+            double along = Dot(mouse.X - junction.X, mouse.Y - junction.Y, tangentX, tangentY);
+            double left = TangentSideSign(tangentX, tangentY, junction, mouse);
+            bool mirror = forceLeft == false;
+            if (mirror)
+                left = -left;
+
+            ResolveTangentQuadrant(along, left, out double sweepDeg, out bool bulgePositiveY);
+            bool pickLeft = mirror ? !bulgePositiveY : bulgePositiveY;
+
+            double nx = pickLeft ? -tangentY : tangentY;
+            double ny = pickLeft ? tangentX : -tangentX;
+            if (!Normalize(ref nx, ref ny))
                 return false;
 
-            bool pickLeft = forceLeft == true || (forceLeft != false && TangentSideSign(tangentX, tangentY, junction, mouse) >= 0);
-            double nx = pickLeft ? nlx : nrx;
-            double ny = pickLeft ? nly : nry;
+            radiusPx = Math.Abs(left);
+            if (radiusPx < 1e-6)
+                return false;
 
-            radiusPx = Math.Abs(Dot(mouse.X - junction.X, mouse.Y - junction.Y, nx, ny));
-            if (radiusPx < 2.0)
-                radiusPx = 2.0;
-
+            double sweepRad = sweepDeg * Math.PI / 180.0;
             var center = new Point(junction.X + nx * radiusPx, junction.Y + ny * radiusPx);
-
             if (lineAnchor is Point anchor
                 && !CenterFootOnLineIsJunction(anchor, junction, tangentX, tangentY, center))
                 return false;
 
-            if (!TryPickArcEndOnTangentCircle(junction, center, radiusPx, tangentX, tangentY, mouse, out end))
-                return false;
+            double a0 = Math.Atan2(junction.Y - center.Y, junction.X - center.X);
+            double signed = pickLeft ? sweepRad : -sweepRad;
+            end = new Point(
+                center.X + radiusPx * Math.Cos(a0 + signed),
+                center.Y + radiusPx * Math.Sin(a0 + signed));
+            via = new Point(
+                center.X + radiusPx * Math.Cos(a0 + signed * 0.5),
+                center.Y + radiusPx * Math.Sin(a0 + signed * 0.5));
 
-            if (!TryPickViaByChordSagitta(junction, end, center, radiusPx, tangentX, tangentY, mouse, out via))
+            if (Dist(junction, end) < 1e-3)
                 return false;
 
             return RoiContourPath.IsValidArcVia(junction, via, end)
                 && ArcDepartureAlignsTangent(junction, via, end, tangentX, tangentY);
+        }
+
+        /// <summary>
+        /// 切点为原点、进线为 +X、左侧为 +Y：Q1→90°，Q2→180°，Q3→270°，Q4→另一侧 90°。
+        /// </summary>
+        public static void ResolveTangentQuadrant(
+            double alongTangent,
+            double leftOfTangent,
+            out double sweepDeg,
+            out bool bulgePositiveY)
+        {
+            bool forward = alongTangent >= 0;
+            bool left = leftOfTangent >= 0;
+            if (forward && left)
+            {
+                sweepDeg = 90;
+                bulgePositiveY = true;
+            }
+            else if (!forward && left)
+            {
+                sweepDeg = 180;
+                bulgePositiveY = true;
+            }
+            else if (!forward && !left)
+            {
+                sweepDeg = 270;
+                bulgePositiveY = true;
+            }
+            else
+            {
+                sweepDeg = 90;
+                bulgePositiveY = false;
+            }
         }
 
         /// <summary>顶点处的进线方向（闭合路径取上一段；开放路径仅 index&gt;0）。</summary>
@@ -407,8 +467,7 @@ namespace CalibOperatorCLI_Example
                 && !CenterFootOnLineIsJunction(anchor, junction, tangentX, tangentY, center))
                 return false;
 
-            if (!TryPickViaByChordSagitta(
-                    junction, end, center, radiusPx, tangentX, tangentY, viaSideHint, out via))
+            if (!TryPickViaAtMidSweep(junction, end, center, radiusPx, tangentX, tangentY, out via))
                 return false;
 
             return RoiContourPath.IsValidArcVia(junction, via, end)
@@ -535,12 +594,17 @@ namespace CalibOperatorCLI_Example
             if (!Normalize(ref nlx, ref nly) || !Normalize(ref nrx, ref nry))
                 return false;
 
-            bool pickLeft = forceLeft == true
-                || (forceLeft != false && TangentSideSign(tangentX, tangentY, junction, directionHint) >= 0);
+            double along = Dot(directionHint.X - junction.X, directionHint.Y - junction.Y, tangentX, tangentY);
+            double left = TangentSideSign(tangentX, tangentY, junction, directionHint);
+            bool mirror = forceLeft == false;
+            if (mirror)
+                left = -left;
+            ResolveTangentQuadrant(along, left, out _, out bool bulgePositiveY);
+            bool pickLeft = mirror ? !bulgePositiveY : bulgePositiveY;
             double nx = pickLeft ? nlx : nrx;
             double ny = pickLeft ? nly : nry;
 
-            radiusPx = Math.Max(2.0, radiusPx);
+            radiusPx = Math.Max(1e-3, radiusPx);
             var center = new Point(junction.X + nx * radiusPx, junction.Y + ny * radiusPx);
 
             if (lineAnchor is Point anchor
@@ -548,22 +612,21 @@ namespace CalibOperatorCLI_Example
                 return false;
 
             double aJunction = Math.Atan2(junction.Y - center.Y, junction.X - center.X);
-            double aHint = Math.Atan2(directionHint.Y - center.Y, directionHint.X - center.X);
-            double sweepSign = Math.Sign(NormalizeSweepRad(aJunction, aHint, ccw: true));
-            if (Math.Abs(sweepSign) < 1e-9)
-                sweepSign = 1;
-
-            double sweepRad = sweepSign * Math.Abs(sweepDeg) * Math.PI / 180.0;
+            double sweepRad = Math.Abs(sweepDeg) * Math.PI / 180.0;
             const double minSweep = 0.08;
-            if (Math.Abs(sweepRad) < minSweep)
-                sweepRad = sweepSign * minSweep;
+            if (sweepRad < minSweep)
+                sweepRad = minSweep;
+            if (pickLeft)
+                sweepRad = Math.Abs(sweepRad);
+            else
+                sweepRad = -Math.Abs(sweepRad);
 
             double aEnd = aJunction + sweepRad;
             end = new Point(
                 center.X + radiusPx * Math.Cos(aEnd),
                 center.Y + radiusPx * Math.Sin(aEnd));
 
-            if (Dist(junction, end) < 3.0)
+            if (Dist(junction, end) < 1e-3)
                 return false;
 
             double aMid = aJunction + sweepRad * 0.5;
@@ -619,42 +682,6 @@ namespace CalibOperatorCLI_Example
             return a;
         }
 
-        private static bool TryPickArcEndOnTangentCircle(
-            Point junction,
-            Point center,
-            double radius,
-            double tangentX,
-            double tangentY,
-            Point mouse,
-            out Point end)
-        {
-            end = default;
-            double aJunction = Math.Atan2(junction.Y - center.Y, junction.X - center.X);
-            double aMouse = Math.Atan2(mouse.Y - center.Y, mouse.X - center.X);
-            if (!TryPickSweepWithTangentDeparture(
-                    junction, new Point(
-                        center.X + radius * Math.Cos(aMouse),
-                        center.Y + radius * Math.Sin(aMouse)),
-                    center, radius, tangentX, tangentY, out double sweep))
-            {
-                double sweepToMouse = NormalizeSweepRad(aJunction, aMouse, ccw: true);
-                if (Math.Abs(sweepToMouse) < 0.05)
-                    sweepToMouse = sweepToMouse >= 0 ? 0.12 : -0.12;
-                sweep = sweepToMouse;
-            }
-
-            const double minSweep = 0.08;
-            if (Math.Abs(sweep) < minSweep)
-                sweep = sweep >= 0 ? minSweep : -minSweep;
-
-            double aEnd = aJunction + sweep;
-            end = new Point(
-                center.X + radius * Math.Cos(aEnd),
-                center.Y + radius * Math.Sin(aEnd));
-
-            return Dist(junction, end) >= 3.0;
-        }
-
         public static bool TryProjectPointOntoTangentRay(
             Point origin,
             double tangentX,
@@ -704,7 +731,10 @@ namespace CalibOperatorCLI_Example
 
             double rx = start.X - center.X;
             double ry = start.Y - center.Y;
-            return Math.Abs(Dot(rx, ry, tangentX, tangentY)) < 0.05;
+            double rlen = Math.Sqrt(rx * rx + ry * ry);
+            if (rlen < 1e-9)
+                return false;
+            return Math.Abs(Dot(rx, ry, tangentX, tangentY)) <= 0.05 * rlen;
         }
 
         private static bool TryFinalizeVia(
@@ -749,8 +779,7 @@ namespace CalibOperatorCLI_Example
                 && !CenterFootOnLineIsJunction(anchor, junction, tangentX, tangentY, center))
                 return false;
 
-            if (!TryPickViaByChordSagitta(
-                    junction, end, center, radius, tangentX, tangentY, mouseOnArc, out via))
+            if (!TryPickViaAtMidSweep(junction, end, center, radius, tangentX, tangentY, out via))
                 return false;
 
             if (!RoiContourPath.IsValidArcVia(junction, via, end))
@@ -760,59 +789,28 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>
-        /// 在已定切圆上按矢高选弧上点：鼠标越靠近弦中垂方向外侧，弧鼓得越大。
+        /// 在已定切圆上取弧中点作 via。via 贴在起点附近时，SampleArc 会把劣弧判成 270° 优弧。
         /// </summary>
-        private static bool TryPickViaByChordSagitta(
+        private static bool TryPickViaAtMidSweep(
             Point junction,
             Point end,
             Point center,
             double radius,
             double tangentX,
             double tangentY,
-            Point mouse,
             out Point via)
         {
             via = default;
-            double chordX = end.X - junction.X;
-            double chordY = end.Y - junction.Y;
-            double chordLen = Math.Sqrt(chordX * chordX + chordY * chordY);
-            if (chordLen < 1e-3)
-                return false;
-
-            double halfC = chordLen * 0.5;
-            if (halfC >= radius - 1e-6)
-                return false;
-
-            double maxSag = radius - Math.Sqrt(radius * radius - halfC * halfC);
-            if (maxSag < 1e-6)
-                return false;
-
-            double mx = (junction.X + end.X) * 0.5;
-            double my = (junction.Y + end.Y) * 0.5;
-            double perpX = -chordY / chordLen;
-            double perpY = chordX / chordLen;
-            if (Dot(center.X - mx, center.Y - my, perpX, perpY) < 0)
-            {
-                perpX = -perpX;
-                perpY = -perpY;
-            }
-
-            double mouseSag = Dot(mouse.X - mx, mouse.Y - my, perpX, perpY);
-            mouseSag = Math.Clamp(mouseSag, maxSag * 0.02, maxSag * 0.98);
-            double t = mouseSag / maxSag;
-
-            double a0 = Math.Atan2(junction.Y - center.Y, junction.X - center.X);
-            double a1 = Math.Atan2(end.Y - center.Y, end.X - center.X);
             if (!TryPickSweepWithTangentDeparture(
                     junction, end, center, radius, tangentX, tangentY, out double sweep))
                 return false;
 
-            double frac = 0.03 + 0.47 * (1.0 - Math.Cos(Math.PI * t * 0.5));
-            double viaAng = a0 + sweep * frac;
+            double a0 = Math.Atan2(junction.Y - center.Y, junction.X - center.X);
+            double viaAng = a0 + sweep * 0.5;
             via = new Point(
                 center.X + radius * Math.Cos(viaAng),
                 center.Y + radius * Math.Sin(viaAng));
-            return true;
+            return Dist(junction, via) > 1e-6 && Dist(via, end) > 1e-6;
         }
 
         private static bool TryPickSweepWithTangentDeparture(
@@ -826,28 +824,37 @@ namespace CalibOperatorCLI_Example
         {
             sweep = 0;
             double a0 = Math.Atan2(junction.Y - center.Y, junction.X - center.X);
-            double a1 = Math.Atan2(end.Y - center.Y, end.X - center.X);
-            double sweepCcw = NormalizeSweepRad(a0, a1, ccw: true);
-            double sweepCw = NormalizeSweepRad(a0, a1, ccw: false);
+            double sweepCcw = NormalizeSweepRad(a0, Math.Atan2(end.Y - center.Y, end.X - center.X), ccw: true);
+            double sweepCw = NormalizeSweepRad(a0, Math.Atan2(end.Y - center.Y, end.X - center.X), ccw: false);
 
+            double best = 0;
+            bool found = false;
             foreach (double candidate in new[] { sweepCcw, sweepCw })
             {
                 if (Math.Abs(candidate) < 1e-9)
                     continue;
 
-                double testAng = a0 + candidate * 0.08;
+                // 先在弧中点试走向，避免 via 靠近起点时误判成优弧
+                double testAng = a0 + candidate * 0.5;
                 var testVia = new Point(
                     center.X + radius * Math.Cos(testAng),
                     center.Y + radius * Math.Sin(testAng));
 
-                if (ArcDepartureAlignsTangent(junction, testVia, end, tangentX, tangentY))
+                if (!ArcDepartureAlignsTangent(junction, testVia, end, tangentX, tangentY))
+                    continue;
+
+                if (!found || Math.Abs(candidate) < Math.Abs(best) - 1e-9)
                 {
-                    sweep = candidate;
-                    return true;
+                    best = candidate;
+                    found = true;
                 }
             }
 
-            return false;
+            if (!found)
+                return false;
+
+            sweep = best;
+            return true;
         }
 
         private static bool TryGetArcTravelTangentFromSamples(

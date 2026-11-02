@@ -757,10 +757,7 @@ namespace CalibOperatorCLI_Example
             CancelArcDraft();
             _connectorDraftStart = null;
             InvalidatePolygonFlatCache();
-            RebuildOpenTrajectoriesVisual();
-            RebuildConnectorsVisual();
-            UpdatePolygonPreview();
-            UpdateConnectorRubberVisual();
+            RefreshAllOpenTrajectoryVisuals();
             RefreshOpenTrajectoryListUi();
         }
 

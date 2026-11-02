@@ -1399,16 +1399,23 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "world_coords",
                 DisplayName = "世界坐标",
-                Description = "通过参数配置九点标定的世界坐标",
+                Description = "九点标定世界坐标：可从 txt 读取（点列转文本），或填坐标点列表。",
                 Category = "标定",
                 Params =
                 {
                     new OperatorParam
                     {
+                        Name = "pointsFile",
+                        DisplayName = "坐标文件",
+                        DefaultValue = "",
+                        Description = "可选；「点列转文本」+「保存文本」生成的 txt（每行 x,y）。填写后优先于下方坐标点列表；相对路径相对当前 .flow.json 目录。"
+                    },
+                    new OperatorParam
+                    {
                         Name = "points",
                         DisplayName = "坐标点列表",
                         DefaultValue = "100,100;400,100;700,100;100,300;400,300;700,300;100,500;400,500;700,500",
-                        Description = "格式: x,y;x,y;...（建议9点）"
+                        Description = "未填坐标文件时使用。格式: x,y;x,y;... 或每行 x,y（建议9点）"
                     }
                 },
                 Ports =

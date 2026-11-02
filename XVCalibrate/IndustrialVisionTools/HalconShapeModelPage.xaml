@@ -53,30 +53,50 @@
                             <Button x:Name="BtnCameraGrab" Content="相机单帧采集" MinWidth="96" Height="32" Padding="10,4" Margin="0,0,6,0"
                                     Click="BtnCameraGrab_Click" ToolTip="海康相机单帧采集（设备索引见左侧「标定与矫正」）"/>
                             <Button x:Name="BtnClearRoi" Content="清除 ROI" MinWidth="72" Height="32" Padding="10,4" Margin="0,0,6,0" Click="BtnClearRoi_Click"/>
-                            <Button x:Name="BtnResetView" Content="重置视图" MinWidth="72" Height="32" Padding="10,4" Click="BtnResetView_Click"/>
+                            <Button x:Name="BtnResetView" Content="重置视图" MinWidth="72" Height="32" Padding="10,4" Margin="0,0,8,0"
+                                    Click="BtnResetView_Click"
+                                    ToolTip="整图适应窗口（空格 / Ctrl+R）。只改显示，不改 ROI。"/>
+                            <Button x:Name="BtnViewZoomOut" Content="－" MinWidth="32" Height="32" Padding="4,4" Margin="0,0,0,0"
+                                    Click="BtnViewZoomOut_Click"
+                                    ToolTip="缩小整图。滚轮也可，以光标为中心。不改 ROI。"/>
+                            <Button x:Name="BtnViewZoomFit" MinWidth="56" Height="32" Padding="6,4" Margin="4,0"
+                                    Click="BtnResetView_Click"
+                                    ToolTip="当前显示缩放。单击恢复适应窗口。">
+                                <TextBlock x:Name="TxtViewZoom" Text="—" Foreground="#EEE"/>
+                            </Button>
+                            <Button x:Name="BtnViewZoomIn" Content="＋" MinWidth="32" Height="32" Padding="4,4"
+                                    Click="BtnViewZoomIn_Click"
+                                    ToolTip="放大整图。滚轮也可，以光标为中心。不改 ROI。"/>
                         </StackPanel>
                         <WrapPanel Grid.Row="1" Margin="0,0,0,6">
                             <TextBlock Text="形状" Width="40" VerticalAlignment="Center" Foreground="#90A4AE" FontSize="11" Margin="0,0,8,4"/>
-                            <RadioButton x:Name="RbRotatedRectMode" Content="矩形" GroupName="DrawMode" IsChecked="True"
+                            <RadioButton x:Name="RbRotatedRectMode" Content="矩形" GroupName="DrawMode"
+                                         Visibility="Collapsed"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
                                          ToolTip="矩形 ROI。无 ROI 时在图上按下拖到对角松开即可画出（与圆形相同）；已有 ROI 时点图或「参数…」改中心、宽高、角度。角度 0 为轴对齐。"/>
                             <RadioButton x:Name="RbCircleMode" Content="圆形" GroupName="DrawMode"
+                                         Visibility="Collapsed"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
                                          ToolTip="圆孔/外圆 ROI。无 ROI 时按下圆心拖半径松开即可画出；已有 ROI 时点图或「参数…」改圆心、半径。"/>
                             <Button x:Name="BtnPrimitiveRoiParams" Content="参数…" MinWidth="56" Height="32" Padding="8,4"
                                     Margin="0,0,6,4" Visibility="Collapsed" Click="BtnPrimitiveRoiParams_Click"
                                     ToolTip="编辑当前矩形/圆的 ROI 参数（中心、宽高、半径、角度）"/>
+                            <Button x:Name="BtnScaleRoi" Content="缩放ROI…" MinWidth="80" Height="32" Padding="8,4"
+                                    Margin="0,0,6,4" Click="BtnScaleRoi_Click"
+                                    ToolTip="输入精确倍率，绕中心均匀缩放当前 ROI。1.02=放大 2%，0.98=缩小 2%，也可填 102%。不占用点边 / Alt / Ctrl+拖；滚轮仍是整图显示。"/>
                             <RadioButton x:Name="RbPolygonMode" Content="多边形" GroupName="DrawMode"
+                                         Visibility="Collapsed"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
                                          ToolTip="单击加点，路径可选直线或圆弧。回到起点容差内自动闭合。画线时普通单击是加点；要选已有边请 Alt+点。点边拖动平移该段，松手未拖则弹窗。已闭合时 Delete 在该边断开并保留顶点。"/>
                             <RadioButton x:Name="RbRingMode" Content="环形" GroupName="DrawMode"
+                                         Visibility="Collapsed"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
                                          ToolTip="先画外圈再画内圈并闭合，得到环带。垫圈、密封圈用。内外圈都要设梯度（通常相反）。"/>
-                            <RadioButton x:Name="RbOpenTrajectoriesMode" Content="开放轨迹" GroupName="DrawMode"
+                            <RadioButton x:Name="RbOpenTrajectoriesMode" Content="开放轨迹" GroupName="DrawMode" IsChecked="True"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,4" Padding="8,4"
                                          MinHeight="32" Checked="DrawMode_Changed"
                                          ToolTip="不闭合胶路/刻线。「新建本条」后单击取点；「完成本条」后点边选中/拖动或弹窗改参数。Alt+点强制选中；Ctrl+拖整体平移。Delete / 右键「只删此边」只去掉该段（中间边拆成两条）；Shift+Delete 才拼接缺口。"/>
@@ -96,12 +116,12 @@
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,0" Padding="8,4"
                                          MinHeight="32" IsChecked="True"
                                          Checked="NextSegment_Changed" Unchecked="NextSegment_Changed"
-                                         ToolTip="下一段画直线。移动鼠标定方向，单击后输入段长/角度/终点。规则边、胶路直线段用这个。"/>
+                                         ToolTip="下一段画直线。勾「相切」时沿上一段直线/圆弧/连接线的切向延长；不勾则鼠标自由定向。单击后输入段长/角度/终点。"/>
                             <RadioButton x:Name="RbNextSegmentArc" Content="圆弧" GroupName="NextSeg"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,0" Padding="8,4"
                                          MinHeight="32"
                                          Checked="NextSegment_Changed" Unchecked="NextSegment_Changed"
-                                         ToolTip="下一段画圆弧。可勾选「相切」让弧与上一段直线相切；方向不对点「换向」。圆角、R 角用这个。"/>
+                                         ToolTip="下一段画圆弧。勾「相切」时与上一段直线/弧/连接线光滑衔接；张角按切点象限靠 90°/180°/270°。方向不对点「换向」。"/>
                             <RadioButton x:Name="RbNextSegmentConnector" Content="连接线" GroupName="NextSeg"
                                          Foreground="#CCC" VerticalAlignment="Center" Margin="0,0,6,0" Padding="8,4"
                                          MinHeight="32" Visibility="Collapsed"
@@ -110,7 +130,7 @@
                             <CheckBox x:Name="ChkTangentJoin" Content="相切" Foreground="#CCC" VerticalAlignment="Center"
                                       Margin="0,0,6,0" Padding="8,4" MinHeight="32" Visibility="Collapsed"
                                       Checked="TangentJoin_Changed" Unchecked="TangentJoin_Changed"
-                                      ToolTip="圆弧与上一段直线/弧相切；开放轨迹里上一段也可以是连接线。保证圆角光滑。相切有左右两解，不对就点「换向」或按 F。"/>
+                                      ToolTip="与上一段相切：直线接直线/接圆弧沿切向延长；圆弧接直线/接弧在切点光滑。开放轨迹上一段也可以是连接线。圆弧相切有左右两解，不对就点「换向」或按 F。"/>
                             <Button x:Name="BtnTangentFlipSide" Content="换向" MinWidth="48" Height="32" Padding="8,4" Margin="0,0,6,0"
                                     Visibility="Collapsed" Click="BtnTangentFlipSide_Click" ToolTip="相切弧左右解 (F)"/>
                             <Button x:Name="BtnUndoPoint" Content="撤销" MinWidth="52" Height="32" Padding="8,4" Margin="0,0,6,0"
@@ -124,7 +144,7 @@
                         <TextBlock x:Name="TxtRoiEditHint" Grid.Row="3"
                                    Style="{StaticResource Ui.ParamHelp}"
                                    Margin="48,6,0,0" Foreground="#80CBC4"
-                                   Text="矩形：无 ROI 时按下拖到对角松开。已有 ROI 时点图或「参数…」改中心、宽高、角度。"/>
+                                   Text="开放轨迹：点「新建本条」后单击图像落下一段。完成本条后点边选中/拖动。"/>
                     </Grid>
                 </Border>
 
@@ -132,7 +152,7 @@
                 <Border x:Name="ViewHost" Grid.Row="1" ClipToBounds="True" Background="#2A2A2A"
                         MouseLeftButtonDown="Canvas_MouseLeftButtonDown"
                         MouseMove="Canvas_MouseMove" MouseLeftButtonUp="Canvas_MouseLeftButtonUp"
-                        MouseWheel="Canvas_MouseWheel"
+                        PreviewMouseWheel="Canvas_MouseWheel"
                         PreviewMouseRightButtonDown="Canvas_PreviewMouseRightButtonDown"
                         PreviewMouseRightButtonUp="Canvas_PreviewMouseRightButtonUp"
                         KeyDown="Canvas_KeyDown" Focusable="True">

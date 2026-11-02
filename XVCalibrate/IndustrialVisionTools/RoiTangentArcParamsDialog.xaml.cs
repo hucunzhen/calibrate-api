@@ -11,8 +11,10 @@ namespace CalibOperatorCLI_Example
         private AffineTransform? _affine;
         private double _junctionCol;
         private double _junctionRow;
+        private const bool PreserveAngle = true;
 
         public double RadiusPx { get; private set; }
+        public double RadiusMm { get; private set; }
         public double SweepDegrees { get; private set; }
 
         public RoiTangentArcParamsDialog()
@@ -23,53 +25,82 @@ namespace CalibOperatorCLI_Example
             TxtSweepDeg.TextChanged += (_, _) => UpdateArcLengthHint();
         }
 
-        public void Initialize(double junctionCol, double junctionRow, double radiusPx, double sweepDeg, AffineTransform? affine)
+        /// <param name="radiusRoi">路径坐标下的半径：有九点时为 mm，否则为像素。不要先换成叠图像素。</param>
+        public void Initialize(double junctionCol, double junctionRow, double radiusRoi, double sweepDeg, AffineTransform? affine)
         {
             _junctionCol = junctionCol;
             _junctionRow = junctionRow;
             _affine = affine;
-            RadiusPx = Math.Max(0.5, radiusPx);
             SweepDegrees = Math.Clamp(sweepDeg, 0.1, 359.9);
+            if (affine is AffineTransform aff)
+            {
+                RadiusMm = Math.Max(1e-6, radiusRoi);
+                RadiusPx = Math.Max(0.5, RoiWorldPixelConvert.MmLengthToPixels(RadiusMm, aff));
+            }
+            else
+            {
+                RadiusPx = Math.Max(0.5, radiusRoi);
+                RadiusMm = 0;
+            }
 
             _syncing = true;
             TxtRadiusPx.Text = RadiusPx.ToString("F2", CultureInfo.InvariantCulture);
-            TxtRadiusMm.Text = FormatRadiusMm(RadiusPx);
+            TxtRadiusMm.Text = FormatRadiusMm(RadiusMm);
             TxtSweepDeg.Text = SweepDegrees.ToString("F2", CultureInfo.InvariantCulture);
             _syncing = false;
 
             bool hasAffine = affine is AffineTransform;
             TxtRadiusMm.IsReadOnly = !hasAffine;
+            TxtRadiusPx.IsReadOnly = hasAffine;
             TxtMmStatus.Text = hasAffine
-                ? "半径/弧长已按九点标定换算 mm。"
+                ? "半径在 mm 里计算；像素框只是叠图显示，确定时不用像素反算。"
                 : "未加载九点标定文件，仅可编辑像素；mm 显示为 —。";
             UpdateArcLengthHint();
         }
 
         private void OnRadiusPxChanged()
         {
-            if (_syncing)
+            if (_syncing || _affine is AffineTransform)
                 return;
             if (!TryParse(TxtRadiusPx, out double px) || px < 0.5)
                 return;
             RadiusPx = px;
+            SyncRadiusMmFromPx();
             _syncing = true;
-            TxtRadiusMm.Text = FormatRadiusMm(px);
+            TxtRadiusMm.Text = FormatRadiusMm(RadiusMm);
             _syncing = false;
             UpdateArcLengthHint();
         }
 
         private void OnRadiusMmChanged()
         {
-            if (_syncing || _affine is not AffineTransform aff)
+            if (_syncing || _affine is not AffineTransform)
                 return;
             if (!TryParse(TxtRadiusMm, out double mm) || mm <= 0)
                 return;
-            double px = MmRadiusToPixels(mm, _junctionCol, _junctionRow, aff);
-            RadiusPx = Math.Max(0.5, px);
+            ApplyRadiusMm(mm);
             _syncing = true;
             TxtRadiusPx.Text = RadiusPx.ToString("F2", CultureInfo.InvariantCulture);
             _syncing = false;
             UpdateArcLengthHint();
+        }
+
+        private void ApplyRadiusMm(double mm)
+        {
+            RadiusMm = mm;
+            if (_affine is AffineTransform aff)
+                RadiusPx = Math.Max(0.5, RoiWorldPixelConvert.MmLengthToPixels(mm, aff));
+        }
+
+        private void SyncRadiusMmFromPx()
+        {
+            if (_affine is not AffineTransform aff)
+            {
+                RadiusMm = 0;
+                return;
+            }
+
+            RadiusMm = RoiWorldPixelConvert.PixelLengthToMm(RadiusPx, aff);
         }
 
         private void UpdateArcLengthHint()
@@ -81,35 +112,36 @@ namespace CalibOperatorCLI_Example
             }
 
             SweepDegrees = Math.Min(359.9, deg);
-            if (!TryParse(TxtRadiusPx, out double radiusPx) || radiusPx < 0.5)
+            if (RadiusPx < 0.5)
             {
                 TxtArcLengthHint.Text = "弧长 —";
                 return;
             }
 
-            double arcLenPx = radiusPx * SweepDegrees * Math.PI / 180.0;
-            if (_affine is not AffineTransform affLen)
+            double arcLenPx = RadiusPx * SweepDegrees * Math.PI / 180.0;
+            if (RadiusMm <= 0)
             {
                 TxtArcLengthHint.Text = $"弧长 ≈ {arcLenPx:F1} px";
                 return;
             }
 
-            double rMm = PixelRadiusToWorldMm(radiusPx, _junctionCol, _junctionRow, affLen);
-            double arcLenMm = rMm * SweepDegrees * Math.PI / 180.0;
-            TxtArcLengthHint.Text = $"弧长 ≈ {arcLenPx:F1} px / {arcLenMm:F2} mm";
+            double arcLenMm = RadiusMm * SweepDegrees * Math.PI / 180.0;
+            TxtArcLengthHint.Text = $"弧长 ≈ {arcLenPx:F1} px / {arcLenMm:F4} mm";
         }
 
-        private string FormatRadiusMm(double radiusPx)
-        {
-            if (_affine is not AffineTransform aff)
-                return "—";
-            double mm = PixelRadiusToWorldMm(radiusPx, _junctionCol, _junctionRow, aff);
-            return mm.ToString("F3", CultureInfo.InvariantCulture);
-        }
+        private static string FormatRadiusMm(double radiusMm) =>
+            radiusMm <= 0 ? "—" : radiusMm.ToString("F4", CultureInfo.InvariantCulture);
 
         private void BtnOk_Click(object sender, RoutedEventArgs e)
         {
-            if (!TryParse(TxtRadiusPx, out double px) || px < 0.5)
+            if (_affine is AffineTransform && TryParse(TxtRadiusMm, out double mm) && mm > 0)
+                ApplyRadiusMm(mm);
+            else if (TryParse(TxtRadiusPx, out double px) && px >= 0.5)
+            {
+                RadiusPx = px;
+                SyncRadiusMmFromPx();
+            }
+            else
             {
                 MessageBox.Show(this, "请输入有效的半径（像素 ≥ 0.5）。", "相切圆弧", MessageBoxButton.OK,
                     MessageBoxImage.Warning);
@@ -123,37 +155,11 @@ namespace CalibOperatorCLI_Example
                 return;
             }
 
-            RadiusPx = px;
             SweepDegrees = deg;
             DialogResult = true;
         }
 
         private static bool TryParse(System.Windows.Controls.TextBox box, out double v) =>
             double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out v);
-
-        private static double PixelRadiusToWorldMm(double radiusPx, double centerCol, double centerRow, in AffineTransform t)
-        {
-            var c = CalibAPI.ImageToWorld(new Point2D(centerCol, centerRow), t);
-            var edge = CalibAPI.ImageToWorld(new Point2D(centerCol + radiusPx, centerRow), t);
-            double dx = edge.X - c.X;
-            double dy = edge.Y - c.Y;
-            return Math.Sqrt(dx * dx + dy * dy);
-        }
-
-        private static double MmRadiusToPixels(double radiusMm, double centerCol, double centerRow, in AffineTransform t)
-        {
-            if (radiusMm <= 0)
-                return 0;
-            double px = radiusMm;
-            for (int i = 0; i < 24; i++)
-            {
-                double mm = PixelRadiusToWorldMm(px, centerCol, centerRow, t);
-                if (mm < 1e-9)
-                    break;
-                px *= radiusMm / mm;
-            }
-
-            return px;
-        }
     }
 }

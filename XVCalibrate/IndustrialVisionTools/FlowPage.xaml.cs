@@ -6668,7 +6668,7 @@ namespace CalibOperatorCLI_Example
 
         private static bool IsFlowRelativePathParam(string paramName) =>
             paramName is "filePath" or "directory" or "imageDirectory" or "innerFlowPath"
-                or "calibrationJsonFile" or "worldPointsFile" or "probeWorldPointsFile" or "templatePath" or "debugDumpPrefix"
+                or "calibrationJsonFile" or "worldPointsFile" or "probeWorldPointsFile" or "pointsFile" or "templatePath" or "debugDumpPrefix"
                 or "uvProjectionSvg" or "encoderPath" or "decoderPath" or "owlv2OnnxPath" or "tokenizerPath"
                 or "scriptPath" or "launcherScript" or "checkpointPath" or "jitRepoRoot" or "weightsPath";
 
@@ -7598,6 +7598,44 @@ namespace CalibOperatorCLI_Example
                 points.Add(new Point2D(x, y));
             }
 
+            return points.ToArray();
+        }
+
+        /// <summary>世界坐标算子：pointsFile / worldPointsFile 优先，否则解析 points 参数。</summary>
+        private Point2D[] ResolveWorldCoordsOperatorPoints(FlowNode node, string? flowBaseDir = null)
+        {
+            string? fileParam = node.Params.GetValueOrDefault("pointsFile", "")?.Trim();
+            if (string.IsNullOrWhiteSpace(fileParam))
+                fileParam = node.Params.GetValueOrDefault("worldPointsFile", "")?.Trim();
+            if (!string.IsNullOrWhiteSpace(fileParam))
+            {
+                string path = ResolveCompositeFlowPath(fileParam, flowBaseDir);
+                if (!System.IO.File.Exists(path))
+                    throw new System.IO.FileNotFoundException($"世界坐标: 文件不存在: {path}");
+                return ParseWorldCoordsList(System.IO.File.ReadAllText(path, Encoding.UTF8));
+            }
+
+            string raw = node.Params.GetValueOrDefault("points", "") ?? "";
+            return ParseWorldCoordsList(raw);
+        }
+
+        private static Point2D[] ParseWorldCoordsList(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                throw new InvalidOperationException("世界坐标为空，请填写坐标文件 pointsFile 或坐标点列表 points");
+            var parts = raw.Split(new[] { ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+            var points = new List<Point2D>(parts.Length);
+            foreach (var p in parts)
+            {
+                var xy = p.Trim().Split(',', StringSplitOptions.RemoveEmptyEntries);
+                if (xy.Length != 2 ||
+                    !double.TryParse(xy[0].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var x) ||
+                    !double.TryParse(xy[1].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+                    throw new InvalidOperationException($"世界坐标格式错误: '{p}'，应为 x,y（与点列转文本输出一致）");
+                points.Add(new Point2D(x, y));
+            }
+            if (points.Count == 0)
+                throw new InvalidOperationException("世界坐标点数量为 0");
             return points.ToArray();
         }
 
@@ -9931,10 +9969,14 @@ namespace CalibOperatorCLI_Example
 
                     case "world_coords":
                     {
-                        string raw = node.Params.GetValueOrDefault("points", "") ?? "";
-                        var coords = ParseWorldPointsParam(raw);
+                        var coords = ResolveWorldCoordsOperatorPoints(node, compositeInnerFlowBaseDir);
                         node.Outputs["Points"] = coords;
-                        node.ResultSummary = $"Points: {coords.Length}";
+                        string? fileParam = node.Params.GetValueOrDefault("pointsFile", "")?.Trim();
+                        if (string.IsNullOrWhiteSpace(fileParam))
+                            fileParam = node.Params.GetValueOrDefault("worldPointsFile", "")?.Trim();
+                        node.ResultSummary = string.IsNullOrWhiteSpace(fileParam)
+                            ? $"Points: {coords.Length}"
+                            : $"Points: {coords.Length} ← {System.IO.Path.GetFileName(fileParam)}";
                         break;
                     }
 
@@ -15754,8 +15796,11 @@ namespace CalibOperatorCLI_Example
                     cb.SelectedItem = param.Options.Contains(currentValue) ? currentValue : param.DefaultValue;
                     input = cb;
                 }
-                else if ((param.Name == "worldPoints" || param.Name == "probeWorldPoints")
-                    && (NodeUsesCalibrateWorldPointParams(node) || (param.Name == "probeWorldPoints" && node.Def.TypeId == "calibrate")))
+                else if ((param.Name == "worldPoints" || param.Name == "probeWorldPoints"
+                          || (param.Name == "points" && node.Def.TypeId == "world_coords"))
+                    && (NodeUsesCalibrateWorldPointParams(node)
+                        || node.Def.TypeId == "world_coords"
+                        || (param.Name == "probeWorldPoints" && node.Def.TypeId == "calibrate")))
                 {
                     input = new TextBox
                     {
@@ -15877,8 +15922,10 @@ namespace CalibOperatorCLI_Example
                             pathBox.Text = FormatPathForFlowParam(ofd.FileName);
                     };
                 }
-                else if ((param.Name == "worldPointsFile" || param.Name == "probeWorldPointsFile")
-                    && (NodeUsesCalibrateWorldPointParams(node) || (param.Name == "probeWorldPointsFile" && node.Def.TypeId == "calibrate")))
+                else if ((param.Name == "worldPointsFile" || param.Name == "probeWorldPointsFile" || param.Name == "pointsFile")
+                    && (NodeUsesCalibrateWorldPointParams(node)
+                        || node.Def.TypeId == "world_coords"
+                        || (param.Name == "probeWorldPointsFile" && node.Def.TypeId == "calibrate")))
                 {
                     browseBtn = new Button
                     {

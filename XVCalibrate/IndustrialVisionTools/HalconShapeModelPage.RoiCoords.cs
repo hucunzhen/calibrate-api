@@ -308,5 +308,41 @@ namespace CalibOperatorCLI_Example
                 dirY /= lengthPx;
             }
         }
+
+        /// <summary>
+        /// 按对话框段长在 ROI（mm）里落终点。方向用路径坐标；只有改了图像角才从对话框像素角转一次方向。
+        /// </summary>
+        private Point ApplyLineDialogLength(
+            Point roiStart,
+            double roiDirX,
+            double roiDirY,
+            RoiLineSegmentParamsDialog dlg,
+            bool useDialogPixelAngle)
+        {
+            double len;
+            if (RoiUsesMillimeters() && dlg.LengthMm > 0)
+                len = dlg.LengthMm;
+            else if (RoiUsesMillimeters())
+                len = ImageLengthToRoi(dlg.LengthPx);
+            else
+                len = dlg.LengthPx;
+
+            double ux = roiDirX;
+            double uy = roiDirY;
+            if (useDialogPixelAngle)
+            {
+                Point sp = RoiToImagePx(roiStart);
+                Point stepped = ImagePxToRoi(new Point(
+                    sp.X + dlg.DirectionX * 32,
+                    sp.Y + dlg.DirectionY * 32));
+                ux = stepped.X - roiStart.X;
+                uy = stepped.Y - roiStart.Y;
+            }
+
+            double n = Math.Sqrt(ux * ux + uy * uy);
+            if (n < 1e-12)
+                return roiStart;
+            return new Point(roiStart.X + ux / n * len, roiStart.Y + uy / n * len);
+        }
     }
 }
