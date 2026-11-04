@@ -65,6 +65,17 @@
       }
     },
     {
+      "Id": "b8f3d0a1-6c24-4e7b-9a11-2f0e8c4d7b91",
+      "TypeId": "world_traj_offset",
+      "X": 1072,
+      "Y": 208,
+      "Params": {
+        "offsetByBar": "",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
       "Id": "f7437525-c8ec-4ac4-8f8c-a48b6f48de0b",
       "TypeId": "send_plc",
       "X": 1075,
@@ -257,8 +268,32 @@
     {
       "FromNodeId": "cdccc632-49e3-4150-afee-a5901375acc9",
       "FromPort": "World",
+      "ToNodeId": "b8f3d0a1-6c24-4e7b-9a11-2f0e8c4d7b91",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "cdccc632-49e3-4150-afee-a5901375acc9",
+      "FromPort": "BarIds",
+      "ToNodeId": "b8f3d0a1-6c24-4e7b-9a11-2f0e8c4d7b91",
+      "ToPort": "BarIds"
+    },
+    {
+      "FromNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
+      "FromPort": "Index",
+      "ToNodeId": "b8f3d0a1-6c24-4e7b-9a11-2f0e8c4d7b91",
+      "ToPort": "Index"
+    },
+    {
+      "FromNodeId": "b8f3d0a1-6c24-4e7b-9a11-2f0e8c4d7b91",
+      "FromPort": "Out",
       "ToNodeId": "f7437525-c8ec-4ac4-8f8c-a48b6f48de0b",
       "ToPort": "Points"
+    },
+    {
+      "FromNodeId": "b8f3d0a1-6c24-4e7b-9a11-2f0e8c4d7b91",
+      "FromPort": "OutBarIds",
+      "ToNodeId": "f7437525-c8ec-4ac4-8f8c-a48b6f48de0b",
+      "ToPort": "BarIds"
     },
     {
       "FromNodeId": "f7437525-c8ec-4ac4-8f8c-a48b6f48de0b",
@@ -313,6 +348,12 @@
       "FromPort": "Out",
       "ToNodeId": "cdccc632-49e3-4150-afee-a5901375acc9",
       "ToPort": "Pixel"
+    },
+    {
+      "FromNodeId": "6e9ddbe1-6fe9-4610-934e-35daed362ed6",
+      "FromPort": "Out2",
+      "ToNodeId": "cdccc632-49e3-4150-afee-a5901375acc9",
+      "ToPort": "BarIds"
     },
     {
       "FromNodeId": "e3a0a693-a75c-479f-9f75-3e4f90c5d8bb",

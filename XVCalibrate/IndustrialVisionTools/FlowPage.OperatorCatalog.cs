@@ -1244,12 +1244,13 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "display",
                 DisplayName = "显示图像",
-                Description = "每个画布上的「显示图像」节点独占一个预览窗口（标题含短 Guid）；同一节点多次运行会刷新该窗口。可同时接多路 Points（Points、Points2…，接满最后一个自动再加一口，最多 8 路，每路一种颜色）。也可接 PointsList（多条点列；可接「循环收集」PointsList / List、flow_loop 的 PointsList）。可选 Xld：叠加 HALCON XLD 折线（橘色）。可选 BarIds 与参数「点列折线」控制折线：默认 auto 仅在条号不全相同时分段；焊头/整段轨迹选 single。多路 Points 始终各自成段、互不连线。右键连线看图仍共用快捷预览窗口。",
+                Description = "每个画布上的「显示图像」节点独占一个预览窗口（标题含短 Guid）；同一节点多次运行会刷新该窗口。可同时接多路 Points（Points、Points2…，接满最后一个自动再加一口，最多 8 路，每路一种颜色）。也可接 PointsList（多条点列；可接「循环收集」PointsList / List、flow_loop 的 PointsList）。可不接图像、只接点列：按数据范围自适应画布并绘制 X/Y 标尺（Y 向上）。可选 Xld：叠加 HALCON XLD 折线（橘色）。可选 BarIds 与参数「点列折线」控制折线：默认 auto 仅在条号不全相同时分段；焊头/整段轨迹选 single。有 BarIds 时在各条几何中心画条号。多路 Points 始终各自成段、互不连线。右键连线看图仍共用快捷预览窗口。",
                 Category = "可视化",
                 Params =
                 {
                     new OperatorParam { Name = "pointPortCount", DisplayName = "点列端口数", DefaultValue = "2", Description = "Points 输入口数量（Points、Points2…）。接满最后一个后自动再加一个，最多 8。每路点列用不同颜色叠加" },
-                    new OperatorParam { Name = "dotRadius", DisplayName = "点位半径", DefaultValue = "3", Description = "叠加点位的圆点半径 (像素)" },
+                    new OperatorParam { Name = "strokeWidth", DisplayName = "线宽", DefaultValue = "0.1", Description = "折线/XLD 笔画宽度（图像像素），与「HALCON 显示形状匹配结果」相同。现用 0.1" },
+                    new OperatorParam { Name = "dotRadius", DisplayName = "点位半径", DefaultValue = "0", Description = "叠加点位圆半径（图像像素）。0 或不小于 0.5 才画点；0.1 等小于 0.5 的值不画点（仅细线，与形状匹配一致）" },
                     new OperatorParam
                     {
                         Name = "pointLineJoin",
@@ -1261,8 +1262,8 @@ namespace CalibOperatorCLI_Example
                 },
                 Ports =
                 {
-                    new PortDef { Name = "Img", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
-                    new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50" },
+                    new PortDef { Name = "Img", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50", IsOptional = true },
+                    new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#4CAF50", IsOptional = true },
                     new PortDef { Name = "Points", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3", IsOptional = true },
                     new PortDef { Name = "PointsList", Direction = PortDirection.Input, DataType = typeof(object), ColorHex = "#64B5F6", IsOptional = true },
                     new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true },
@@ -1593,13 +1594,16 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "img_to_world",
                 DisplayName = "坐标转换",
-                Description = "像素坐标→世界坐标。0 个点时跳过（空 World）。",
+                Description = "像素坐标→世界坐标。0 个点时跳过（空 World）。可选 BarIds/GroupBarIds 与点列等长时原样透传到输出 BarIds，供后续按条偏置/下发。",
                 Category = "标定",
                 Ports =
                 {
                     new PortDef { Name = "Pixel", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
                     new PortDef { Name = "Transform", Direction = PortDirection.Input, DataType = typeof(AffineTransform), ColorHex = "#E91E63" },
-                    new PortDef { Name = "World", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" }
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "GroupBarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFEB3B", IsOptional = true },
+                    new PortDef { Name = "World", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3" },
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true }
                 }
             },
             new OperatorDef
@@ -2272,6 +2276,36 @@ namespace CalibOperatorCLI_Example
             },
             new OperatorDef
             {
+                TypeId = "world_traj_offset",
+                DisplayName = "世界轨迹偏置",
+                Description = "在世界坐标(mm)下按条号整条平移焊道，不是沿法向外扩。循环每轮只有一条时，接循环 Index 作为本轮条号再查表；未接 Index 则用点列 BarIds。表中没有的条号不偏置。",
+                Category = "输出",
+                Params =
+                {
+                    new OperatorParam
+                    {
+                        Name = "offsetByBar",
+                        DisplayName = "按条号偏置",
+                        DefaultValue = "",
+                        Description = "条号:ΔX,ΔY，分号或换行分隔。例 0:0,0.3;1:0,-0.2。范围 0-9:0,0.3。世界 X+ 向右、Y+ 向上。循环时 Index=第几件（0 起）。未列出则不偏置。"
+                    }
+                },
+                Ports =
+                {
+                    new PortDef { Name = "In", Direction = PortDirection.Input, DataType = typeof(Point2D[]), ColorHex = "#2196F3", IsOptional = true },
+                    new PortDef { Name = "Points3D", Direction = PortDirection.Input, DataType = typeof(CalibPoint3D[]), ColorHex = "#00ACC1", IsOptional = true },
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "GroupBarIds", Direction = PortDirection.Input, DataType = typeof(int[]), ColorHex = "#FFEB3B", IsOptional = true },
+                    new PortDef { Name = "Index", Direction = PortDirection.Input, DataType = typeof(int), ColorHex = "#607D8B", IsOptional = true },
+                    new PortDef { Name = "BarId", Direction = PortDirection.Input, DataType = typeof(int), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(Point2D[]), ColorHex = "#2196F3", IsOptional = true },
+                    new PortDef { Name = "Out3D", Direction = PortDirection.Output, DataType = typeof(CalibPoint3D[]), ColorHex = "#00ACC1", IsOptional = true },
+                    new PortDef { Name = "OutBarIds", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true },
+                    new PortDef { Name = "BarIds", Direction = PortDirection.Output, DataType = typeof(int[]), ColorHex = "#FFC107", IsOptional = true }
+                }
+            },
+            new OperatorDef
+            {
                 TypeId = "send_plc",
                 DisplayName = "发送PLC",
                 Description = "与 PLC 页 Write All 相同：须先 PLC连接；优先 GvarList；否则 Points3D/Points 生成 GVAR（相邻点→线段，closePolyline 默认补末点→首点闭合；overrunDist>0 时闭合后再沿闭合方向延伸一段，属焊接轨迹）。separate_batch=按条分批写 D800+GVAR；下发完成通知请使用「PLC通知轨迹已下发」。",
@@ -2449,14 +2483,22 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "flow_loop",
                 DisplayName = "循环",
-                Description = "按次数或无限重复执行本算子下游连线上的全部算子（前置只执行一次）。支持多路 List 输入按轮展开（如 InList/CoarseRowList/CoarseColumnList），每轮输出当前项并驱动下游。填写 stepValues 时每轮输出 StepValue。count≤0/inf/无限=无限循环。须用「运行」托管执行。",
+                Description = "按次数或无限重复执行本算子下游连线上的全部算子（前置只执行一次）。支持多路 List 输入按轮展开（如 InList/CoarseRowList/CoarseColumnList），每轮输出当前项并驱动下游。填写 stepValues 时每轮输出 StepValue。count≤0/inf/无限=无限循环。须用「运行」托管执行。弹窗选轮会列出每轮图像/数值，勾选要执行的 Index，或直接完成循环。",
                 Category = "流程",
                 Params =
                 {
                     new OperatorParam { Name = "count", DisplayName = "重复次数", DefaultValue = "3", Description = "正整数=固定次数；0/inf/无限=无限循环。填写 stepValues 时以列表长度为准，忽略 count" },
                     new OperatorParam { Name = "stepValues", DisplayName = "每轮数值列表", DefaultValue = "", Description = "固定次数时可选；分号/逗号/换行分隔，如 100;200;150。每轮输出 StepValue 一个值，长度=循环次数" },
                     new OperatorParam { Name = "itemPorts", DisplayName = "列表端口名", DefaultValue = "In,In2,In3,In4,CoarseRow,CoarseColumn,CoarseAngle,CoarseScale,CoarseScore", Description = "可配置多路列表展开端口；逗号/分号/换行分隔，如 In,CoarseRow,CoarseColumn。将自动生成输入 XList 与输出 X 成对端口；可按需删减到任意数量。" },
-                    new OperatorParam { Name = "intervalMs", DisplayName = "轮次间隔(ms)", DefaultValue = "0", Description = "每轮下游执行完后的等待时间，0=不等待" }
+                    new OperatorParam { Name = "intervalMs", DisplayName = "轮次间隔(ms)", DefaultValue = "0", Description = "每轮下游执行完后的等待时间，0=不等待" },
+                    new OperatorParam
+                    {
+                        Name = "roundPick",
+                        DisplayName = "弹窗选轮",
+                        DefaultValue = "false",
+                        Description = "true=循环开始前弹出窗口，每轮显示该轮列表数据（图像缩略图、Row/Column/Angle/Scale 等），勾选要执行的 Index（从 0 起，与循环 Index / BarId 相同）；可点「完成循环」跳过全部轮次、继续后面的节点。无限循环时忽略。",
+                        Options = new List<string> { "false", "true" }
+                    }
                 },
                 Ports =
                 {
@@ -3582,7 +3624,7 @@ namespace CalibOperatorCLI_Example
                 Params =
                 {
                     new OperatorParam { Name = "loopEmit", DisplayName = "循环输出Mask", DefaultValue = "true", Description = "true=每张粗候选循环输出 Mask 并驱动下游；false=仅输出 candidateIndex 指定的一张" },
-                    new OperatorParam { Name = "candidateIndex", DisplayName = "单张索引", DefaultValue = "0", Description = "loopEmit=false 时输出的粗候选下标" },
+                    new OperatorParam { Name = "candidateIndex", DisplayName = "单张索引", DefaultValue = "0", Description = "loopEmit=false 时选取哪一张。填压缩后的批下标（从 0 起），与循环时 MaskIndex / flow_loop Index 相同。日志「第 N 张」对应 N-1。" },
                     new OperatorParam { Name = "maskErosionPx", DisplayName = "Mask内缩(px)", DefaultValue = "2", Description = "沿模板轮廓法向内缩（gen_parallel_contour_xld），非全向腐蚀；0=不内缩" },
                     new OperatorParam { Name = "maskFillDilatePx", DisplayName = "Mask填充膨胀(px)", DefaultValue = "0", Description = "0=凸包实心填充；>0=改用手动膨胀（凹形工件可试 30~80）" },
                     new OperatorParam { Name = "contourLevel", DisplayName = "模板层", DefaultValue = "1", Description = "生成填充区域用的形状模型层（输出为填充 Mask，不是轮廓 XLD）" },

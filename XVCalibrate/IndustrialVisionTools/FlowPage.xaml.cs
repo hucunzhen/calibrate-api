@@ -149,6 +149,7 @@ namespace CalibOperatorCLI_Example
         {
             public Window Window { get; init; } = null!;
             public System.Windows.Controls.Image ImageCtrl { get; init; } = null!;
+            public Action<int, int>? FitToSize { get; init; }
         }
 
         /// <summary>连线快捷预览等非「显示图像」算子共用同一窗口。</summary>
@@ -2367,7 +2368,7 @@ namespace CalibOperatorCLI_Example
                 string? joinMode = DefaultPointLineJoinModeForPreview(conn.FromPort.Owner.Def.TypeId, conn.FromPort.Definition.Name);
                 if (baseImg != null)
                 {
-                    ShowImagePreview(baseImg, pts, 3, null, null, null, barSnap, joinMode, null);
+                    ShowImagePreview(baseImg, pts, 3, null, null, null, barSnap, joinMode, null, drawBarIdLabels: barSnap != null);
                 }
                 else
                 {
@@ -2387,7 +2388,7 @@ namespace CalibOperatorCLI_Example
                 var ptsXy = pts3.Select(p => new Point2D(p.X, p.Y)).ToArray();
                 if (baseImg != null)
                 {
-                    ShowImagePreview(baseImg, ptsXy, 3, null, null, null, barSnap, joinMode, null);
+                    ShowImagePreview(baseImg, ptsXy, 3, null, null, null, barSnap, joinMode, null, drawBarIdLabels: barSnap != null);
                 }
                 else
                 {
@@ -7054,7 +7055,7 @@ namespace CalibOperatorCLI_Example
                 throw new InvalidOperationException(msg, ex);
 
             string roundPart = maskLoopRoundIndex.HasValue
-                ? $" [Mask 第 {maskLoopRoundIndex.Value + 1} 轮]"
+                ? $" [Mask MaskIndex={maskLoopRoundIndex.Value} 第 {maskLoopRoundIndex.Value + 1} 轮]"
                 : "";
             string flowPart = string.IsNullOrWhiteSpace(compositeFlowLabel)
                 ? ""
@@ -7273,6 +7274,7 @@ namespace CalibOperatorCLI_Example
                         for (int mi = 0; mi < batch.Count; mi++)
                         {
                             SetCoarseShapeMaskRoundOutputs(compositeMaskEachNode, batch, mi);
+                            AppendLog($"[MASK MaskIndex={mi} {mi + 1}/{batch.Count}] 组合内下游 {perRoundNodes.Count} 节点");
                             foreach (var inner in perRoundNodes)
                             {
                                 inner.Outputs.Clear();
@@ -8173,7 +8175,7 @@ namespace CalibOperatorCLI_Example
             maskNode.Outputs["CoarseColumnOut"] = batch.CoarseCols[index];
             maskNode.Outputs["CoarseAngleOut"] = batch.CoarseAngles[index];
             maskNode.Outputs["CoarseScaleOut"] = index < batch.CoarseScales.Length ? batch.CoarseScales[index] : 1.0;
-            maskNode.ResultSummary = $"Mask {index + 1}/{batch.Count}";
+            maskNode.ResultSummary = $"MaskIndex={index} ({index + 1}/{batch.Count})";
         }
 
         private sealed class FineMatchRoundAccumulator
@@ -8335,7 +8337,7 @@ namespace CalibOperatorCLI_Example
                     ThrowIfExecutionCancelled();
                     SetCoarseShapeMaskRoundOutputs(maskNode, batch, mi);
                     UpdateNodeSummary(maskNode);
-                    AppendLog($"[MASK {mi + 1}/{batch.Count}] 开始下游 {perRoundNodes.Count} 节点");
+                    AppendLog($"[MASK MaskIndex={mi} {mi + 1}/{batch.Count}] 开始下游 {perRoundNodes.Count} 节点");
 
                     for (int j = 0; j < perRoundNodes.Count; j++)
                     {
@@ -8596,10 +8598,43 @@ namespace CalibOperatorCLI_Example
                     AppendLog($"[{scopeTag}][LOOP] 多路列表均为空，轮数=0");
                 }
 
+                HashSet<int>? onlyRoundIndices = null;
+                bool finishLoopWithoutRounds = false;
+                if (WantsFlowLoopRoundPick(loopNode.Params))
+                {
+                    if (infiniteLoop)
+                    {
+                        AppendLog($"[{scopeTag}][LOOP] 弹窗选轮在无限循环时忽略");
+                    }
+                    else if (repeatCount > 0)
+                    {
+                        var pick = PromptFlowLoopRoundPick(
+                            loopNode, repeatCount, stepValues, loopInputsForRounds, listPortMaps);
+                        if (pick.Choice == FlowLoopRoundPickChoice.FinishLoop)
+                        {
+                            finishLoopWithoutRounds = true;
+                            AppendLog($"[{scopeTag}][LOOP] 弹窗选轮：完成循环（0 轮）");
+                        }
+                        else if (pick.Choice == FlowLoopRoundPickChoice.RunSelected)
+                        {
+                            onlyRoundIndices = new HashSet<int>(pick.Selected);
+                            AppendLog($"[{scopeTag}][LOOP] 弹窗选轮：执行 Index [{string.Join(", ", pick.Selected)}]");
+                        }
+                        else
+                            AppendLog($"[{scopeTag}][LOOP] 弹窗选轮：全部 {repeatCount} 轮");
+                    }
+                }
+
                 long li = 0;
-                while (infiniteLoop || li < repeatCount)
+                while (!finishLoopWithoutRounds && (infiniteLoop || li < repeatCount))
                 {
                     ThrowIfExecutionCancelled();
+                    if (onlyRoundIndices != null && !onlyRoundIndices.Contains(li > int.MaxValue ? int.MaxValue : (int)li))
+                    {
+                        AppendLog($"[{scopeTag}][LOOP] 跳过 Index={li}");
+                        li++;
+                        continue;
+                    }
                     loopNode.Outputs.Clear();
                     loopNode.Outputs["Index"] = li > int.MaxValue ? int.MaxValue : (int)li;
                     loopNode.Outputs["Count"] = infiniteLoop ? -1 : repeatCount;
@@ -8670,6 +8705,15 @@ namespace CalibOperatorCLI_Example
                     if (intervalMs > 0 && (infiniteLoop || li < repeatCount))
                         await System.Threading.Tasks.Task.Delay(intervalMs, _runCts?.Token ?? System.Threading.CancellationToken.None);
                 }
+
+                if (finishLoopWithoutRounds)
+                {
+                    loopNode.Executed = true;
+                    loopNode.ErrorMessage = null;
+                    loopNode.ResultSummary = "完成循环（0 轮）";
+                    SetNodeStatus(loopNode, false);
+                    UpdateNodeSummary(loopNode);
+                }
             }
             finally
             {
@@ -8729,6 +8773,242 @@ namespace CalibOperatorCLI_Example
             StatusText.Foreground = new SolidColorBrush(Colors.LightGreen);
             AppendLog($"========== flow_loop 完成: {loopNode.Def.DisplayName}, {doneRounds}，下游 {perRoundNodes.Count} 节点/轮 ==========");
             return doneRounds;
+        }
+
+        private static bool WantsFlowLoopRoundPick(IReadOnlyDictionary<string, string> paramBag)
+        {
+            string v = (paramBag.GetValueOrDefault("roundPick", "false") ?? "false").Trim();
+            return v.Equals("true", StringComparison.OrdinalIgnoreCase)
+                   || v.Equals("dialog", StringComparison.OrdinalIgnoreCase)
+                   || v.Equals("on", StringComparison.OrdinalIgnoreCase)
+                   || v.Equals("1", StringComparison.Ordinal);
+        }
+
+        private (FlowLoopRoundPickChoice Choice, int[] Selected) PromptFlowLoopRoundPick(
+            FlowNode loopNode,
+            int roundCount,
+            double[]? stepValues,
+            IReadOnlyDictionary<string, object?> loopInputs,
+            IReadOnlyList<(string InputPort, string OutputPort)> listPortMaps)
+        {
+            FlowLoopRoundPickChoice choice = FlowLoopRoundPickChoice.FinishLoop;
+            int[] selected = Array.Empty<int>();
+            RunOnUiThread(() =>
+            {
+                var items = BuildFlowLoopRoundPickItems(loopNode, roundCount, stepValues, loopInputs, listPortMaps);
+                var dlg = new FlowLoopRoundPickDialog(items, loopNode.Def.DisplayName)
+                {
+                    Owner = Window.GetWindow(this)
+                };
+                bool? ok = dlg.ShowDialog();
+                choice = ok == true ? dlg.Choice : FlowLoopRoundPickChoice.FinishLoop;
+                selected = dlg.SelectedIndices ?? Array.Empty<int>();
+            });
+            return (choice, selected);
+        }
+
+        private List<FlowLoopRoundPickItem> BuildFlowLoopRoundPickItems(
+            FlowNode loopNode,
+            int roundCount,
+            double[]? stepValues,
+            IReadOnlyDictionary<string, object?> loopInputs,
+            IReadOnlyList<(string InputPort, string OutputPort)> listPortMaps)
+        {
+            int n = Math.Max(0, roundCount);
+            var labels = ResolveFlowLoopPickFieldLabels(loopNode, listPortMaps);
+            int labelPad = 0;
+            foreach (var kv in labels)
+            {
+                if (kv.Value.Length > labelPad)
+                    labelPad = kv.Value.Length;
+            }
+
+            var items = new List<FlowLoopRoundPickItem>(n);
+            for (int i = 0; i < n; i++)
+            {
+                var lines = new List<string>();
+                System.Windows.Media.Imaging.BitmapSource? thumb = null;
+                foreach (var (inPort, outPort) in listPortMaps)
+                {
+                    if (!loopInputs.TryGetValue(inPort, out var listObj))
+                        continue;
+                    if (!TryGetFlowLoopListValueAt(listObj, i, out var item) || item == null)
+                        continue;
+                    string field = labels.TryGetValue(outPort, out var nice) ? nice : outPort;
+                    lines.Add(FormatLoopPickField(field.PadRight(labelPad), item));
+                    if (thumb == null && item is CalibImage img)
+                        thumb = TryThumbnailFromCalibImage(img, 128);
+                }
+
+                string title = $"Index {i}";
+                if (stepValues != null && i < stepValues.Length)
+                    title += $"    StepValue {FormatLoopPickNumber(stepValues[i])}";
+
+                items.Add(new FlowLoopRoundPickItem
+                {
+                    Index = i,
+                    Title = title,
+                    Details = string.Join("\n", lines),
+                    Preview = thumb
+                });
+            }
+
+            return items;
+        }
+
+        private Dictionary<string, string> ResolveFlowLoopPickFieldLabels(
+            FlowNode loopNode,
+            IReadOnlyList<(string InputPort, string OutputPort)> listPortMaps)
+        {
+            var map = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var (inPort, outPort) in listPortMaps)
+            {
+                string label = outPort;
+                var pv = loopNode.PortVisuals.FirstOrDefault(p =>
+                    p.Definition.Direction == PortDirection.Input
+                    && string.Equals(p.Definition.Name, inPort, StringComparison.Ordinal));
+                if (pv != null)
+                {
+                    var conn = _connections.FirstOrDefault(c => c.ToPort == pv);
+                    if (conn != null)
+                    {
+                        string src = conn.FromPort.Definition.Name ?? "";
+                        if (!IsGenericFlowOutPortName(src))
+                        {
+                            label = src.EndsWith("Out", StringComparison.OrdinalIgnoreCase) && src.Length > 3
+                                ? src[..^3]
+                                : src;
+                        }
+                    }
+                }
+
+                map[outPort] = string.IsNullOrWhiteSpace(label) ? outPort : label;
+            }
+
+            return map;
+        }
+
+        private static bool IsGenericFlowOutPortName(string? name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return true;
+            if (name.Equals("Out", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (name.Length > 3
+                && name.StartsWith("Out", StringComparison.OrdinalIgnoreCase)
+                && name.Skip(3).All(char.IsDigit))
+                return true;
+            return false;
+        }
+
+        private static string FormatLoopPickField(string label, object value)
+        {
+            switch (value)
+            {
+                case CalibImage img:
+                    return $"{label}  图 {img.Width}×{img.Height}"
+                           + (img.Channels > 0 ? $"  ch={img.Channels}" : "");
+                case double d:
+                    return FormatLoopPickScalar(label, d);
+                case float f:
+                    return FormatLoopPickScalar(label, f);
+                case int i:
+                    return $"{label}  {i.ToString(CultureInfo.InvariantCulture)}";
+                case long l:
+                    return $"{label}  {l.ToString(CultureInfo.InvariantCulture)}";
+                case bool b:
+                    return $"{label}  {(b ? "true" : "false")}";
+                case Point2D p:
+                    return $"{label}  ({FormatLoopPickNumber(p.X)}, {FormatLoopPickNumber(p.Y)})";
+                case CalibPoint3D p3:
+                    return $"{label}  ({FormatLoopPickNumber(p3.X)}, {FormatLoopPickNumber(p3.Y)}, {FormatLoopPickNumber(p3.Z)})";
+                case Point2D[] pts:
+                    return FormatLoopPickPoints(label, pts);
+                case List<Point2D> ptsList:
+                    return FormatLoopPickPoints(label, ptsList.ToArray());
+                case HalconXldContourBundle xld:
+                    return $"{label}  XLD {xld.ContourCount} 条  {xld.Width}×{xld.Height}";
+                case Array arr:
+                    return $"{label}  {arr.GetType().GetElementType()?.Name ?? "Array"}[{arr.Length}]";
+                default:
+                    return $"{label}  {DescribeFlowValueBrief(value)}";
+            }
+        }
+
+        private static string FormatLoopPickScalar(string label, double v)
+        {
+            string num = FormatLoopPickNumber(v);
+            if (label.IndexOf("Angle", StringComparison.OrdinalIgnoreCase) >= 0
+                || label.IndexOf("角度", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                if (Math.Abs(v) <= 4.0 * Math.PI)
+                {
+                    double deg = v * 180.0 / Math.PI;
+                    return $"{label}  {num} rad  ({FormatLoopPickNumber(deg)}°)";
+                }
+
+                return $"{label}  {num}°";
+            }
+
+            return $"{label}  {num}";
+        }
+
+        private static string FormatLoopPickPoints(string label, Point2D[] pts)
+        {
+            if (pts == null || pts.Length == 0)
+                return $"{label}  0 点";
+            double sx = 0, sy = 0;
+            for (int i = 0; i < pts.Length; i++)
+            {
+                sx += pts[i].X;
+                sy += pts[i].Y;
+            }
+
+            double n = pts.Length;
+            return $"{label}  {pts.Length} 点  中心=({FormatLoopPickNumber(sx / n)}, {FormatLoopPickNumber(sy / n)})";
+        }
+
+        private static string FormatLoopPickNumber(double v)
+        {
+            if (double.IsNaN(v) || double.IsInfinity(v))
+                return v.ToString(CultureInfo.InvariantCulture);
+            double av = Math.Abs(v);
+            if (av == 0)
+                return "0";
+            if (av < 1e12 && Math.Abs(v - Math.Round(v)) < 1e-9)
+                return ((long)Math.Round(v)).ToString(CultureInfo.InvariantCulture);
+            if (av >= 1000 || av < 0.0001)
+                return v.ToString("G6", CultureInfo.InvariantCulture);
+            return v.ToString("0.####", CultureInfo.InvariantCulture);
+        }
+
+        private static System.Windows.Media.Imaging.BitmapSource? TryThumbnailFromCalibImage(CalibImage img, int maxEdge)
+        {
+            try
+            {
+                using var bmp = img.ToBitmap();
+                if (bmp == null || bmp.Width <= 0 || bmp.Height <= 0)
+                    return null;
+                int w = bmp.Width;
+                int h = bmp.Height;
+                double scale = Math.Min(1.0, (double)Math.Max(8, maxEdge) / Math.Max(w, h));
+                int tw = Math.Max(1, (int)Math.Round(w * scale));
+                int th = Math.Max(1, (int)Math.Round(h * scale));
+                using var small = new System.Drawing.Bitmap(
+                    tw, th, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                using (var g = System.Drawing.Graphics.FromImage(small))
+                {
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                    g.DrawImage(bmp, 0, 0, tw, th);
+                }
+
+                return GdiBitmapToBitmapSource(small);
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static void AppendPointsSinkRound(
@@ -8896,6 +9176,58 @@ namespace CalibOperatorCLI_Example
                 CalibPoint3D[] p3 => p3.Select(p => new Point2D(p.X, p.Y)).ToArray(),
                 _ => null
             };
+        }
+
+        private static int[]? CoerceDisplayBarIds(object? src)
+        {
+            switch (src)
+            {
+                case null:
+                    return null;
+                case int[] ids when ids.Length > 0:
+                    return ids;
+                case List<int> list when list.Count > 0:
+                    return list.ToArray();
+                case long[] longs when longs.Length > 0:
+                {
+                    var ids = new int[longs.Length];
+                    for (int i = 0; i < longs.Length; i++)
+                        ids[i] = longs[i] > int.MaxValue ? int.MaxValue : longs[i] < int.MinValue ? int.MinValue : (int)longs[i];
+                    return ids;
+                }
+                case int i:
+                    return new[] { i };
+                case long l:
+                    return new[] { l > int.MaxValue ? int.MaxValue : l < int.MinValue ? int.MinValue : (int)l };
+                case double[] da when da.Length > 0:
+                {
+                    var ids = new int[da.Length];
+                    for (int i = 0; i < da.Length; i++)
+                        ids[i] = (int)Math.Round(da[i]);
+                    return ids;
+                }
+                case System.Collections.IList list when list.Count > 0:
+                {
+                    var ids = new int[list.Count];
+                    for (int i = 0; i < list.Count; i++)
+                    {
+                        object? item = list[i];
+                        ids[i] = item switch
+                        {
+                            int v => v,
+                            long v => v > int.MaxValue ? int.MaxValue : v < int.MinValue ? int.MinValue : (int)v,
+                            double v => (int)Math.Round(v),
+                            float v => (int)Math.Round(v),
+                            string s when int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out int p) => p,
+                            _ => 0
+                        };
+                    }
+
+                    return ids;
+                }
+                default:
+                    return null;
+            }
         }
 
         private static List<(Point2D[] Points, int Series)> CollectDisplayPointInputs(IReadOnlyDictionary<string, object?> inputs)
@@ -12226,6 +12558,7 @@ namespace CalibOperatorCLI_Example
                         if (pixelPts.Length == 0)
                         {
                             node.Outputs["World"] = Array.Empty<Point2D>();
+                            PassThroughBarIds(inputs, 0, node, "坐标转换");
                             node.ResultSummary = "skip: 0 pts → empty World";
                             break;
                         }
@@ -12233,6 +12566,62 @@ namespace CalibOperatorCLI_Example
                         CalibAPI.SetTransform(transform.Value);
                         var worldPts2 = pixelPts.Select(p => CalibAPI.ImageToWorld(p, transform.Value)).ToArray();
                         node.Outputs["World"] = worldPts2;
+                        PassThroughBarIds(inputs, worldPts2.Length, node, "坐标转换");
+                        break;
+                    }
+
+                    case "world_traj_offset":
+                    {
+                        var offsetsByBar = WorldTrajectoryOffset.ParseOffsetByBar(
+                            node.Params.GetValueOrDefault("offsetByBar", "") ?? "");
+                        int? roundBarId = TryReadOptionalInt(inputs, "Index")
+                                          ?? TryReadOptionalInt(inputs, "BarId");
+                        int[]? barIn = TryReadBarIdsInput(inputs);
+
+                        if (inputs.TryGetValue("Points3D", out var p3OffObj) && p3OffObj is CalibPoint3D[] p3Off && p3Off.Length > 0)
+                        {
+                            var xyOff = new Point2D[p3Off.Length];
+                            for (int i = 0; i < p3Off.Length; i++)
+                                xyOff[i] = new Point2D(p3Off[i].X, p3Off[i].Y);
+                            if (roundBarId == null && barIn != null && barIn.Length != p3Off.Length)
+                                throw new InvalidOperationException(
+                                    $"世界轨迹偏置: BarIds 长度 {barIn.Length} 与 Points3D {p3Off.Length} 不一致。");
+                            var applied3 = WorldTrajectoryOffset.Apply(xyOff, barIn, offsetsByBar, roundBarId);
+                            var out3 = new CalibPoint3D[applied3.Points.Length];
+                            for (int i = 0; i < applied3.Points.Length; i++)
+                            {
+                                int zAt = Math.Min(i, p3Off.Length - 1);
+                                out3[i] = new CalibPoint3D(applied3.Points[i].X, applied3.Points[i].Y, p3Off[zAt].Z);
+                            }
+
+                            node.Outputs["Out3D"] = out3;
+                            node.Outputs["Out"] = applied3.Points;
+                            node.Outputs["OutBarIds"] = applied3.BarIds;
+                            node.Outputs["BarIds"] = applied3.BarIds;
+                            node.ResultSummary = applied3.Summary;
+                            break;
+                        }
+
+                        var worldIn = inputs.GetValueOrDefault("In") as Point2D[];
+                        if (worldIn == null)
+                            throw new InvalidOperationException("世界轨迹偏置: 请连接 In(世界 Point2D[]) 或 Points3D。");
+                        if (worldIn.Length == 0)
+                        {
+                            node.Outputs["Out"] = Array.Empty<Point2D>();
+                            node.Outputs["OutBarIds"] = Array.Empty<int>();
+                            node.Outputs["BarIds"] = Array.Empty<int>();
+                            node.ResultSummary = "skip: 0 pts";
+                            break;
+                        }
+
+                        if (roundBarId == null && barIn != null && barIn.Length != worldIn.Length)
+                            throw new InvalidOperationException(
+                                $"世界轨迹偏置: BarIds 长度 {barIn.Length} 与 In {worldIn.Length} 不一致。");
+                        var applied = WorldTrajectoryOffset.Apply(worldIn, barIn, offsetsByBar, roundBarId);
+                        node.Outputs["Out"] = applied.Points;
+                        node.Outputs["OutBarIds"] = applied.BarIds;
+                        node.Outputs["BarIds"] = applied.BarIds;
+                        node.ResultSummary = applied.Summary;
                         break;
                     }
 
@@ -12752,22 +13141,44 @@ namespace CalibOperatorCLI_Example
                         // 显示图像到预览窗口：可选背景图 Img，Image 作为前景层，Points/PointsList 透明叠加；Xld 单独叠加折线
                         var foregroundImg = (inputs.TryGetValue("Image", out var fgObj) ? fgObj : null) as CalibImage;
                         var backgroundImg = (inputs.TryGetValue("Img", out var bgObj) ? bgObj : null) as CalibImage;
-                        if (foregroundImg == null && backgroundImg == null)
-                            throw new InvalidOperationException("显示: 缺少输入图像(Image 或 Img)");
                         var pointInputs = CollectDisplayPointInputs(inputs);
                         inputs.TryGetValue("PointsList", out var ptsListObj);
                         inputs.TryGetValue("BarIds", out var barIdsObj);
-                        int[]? explicitBarIds = barIdsObj as int[];
+                        int[]? explicitBarIds = CoerceDisplayBarIds(barIdsObj);
                         var (overlayPts, overlayBarIds, overlaySeriesIds) = MergeDisplayPointOverlays(pointInputs, ptsListObj, explicitBarIds);
                         inputs.TryGetValue("Xld", out var xldObj);
                         var xldBundle = xldObj as HalconXldContourBundle;
-                        int dotRadius = int.TryParse(node.Params.GetValueOrDefault("dotRadius"), out int r) ? r : 3;
+                        bool hasPts = overlayPts != null && overlayPts.Length > 0;
+                        bool hasXld = xldBundle != null && xldBundle.ContourCount > 0;
+                        if (foregroundImg == null && backgroundImg == null && !hasPts && !hasXld)
+                            throw new InvalidOperationException("显示: 请连接图像(Image/Img)，或仅连接 Points/Xld 以自适应坐标画布。");
+                        float strokeWidth = (float)AffineTransformAdjust.ParseDoubleParam(node.Params, "strokeWidth", 0.1);
+                        if (strokeWidth < 0.05f)
+                            strokeWidth = 0.05f;
+                        float dotRadius = (float)AffineTransformAdjust.ParseDoubleParam(node.Params, "dotRadius", 3);
                         string dispSlot = node.Id.ToString("D");
                         string dispTitle = $"{node.Def.DisplayName} [{node.Id.ToString("N")[..8]}]";
                         string pointLineJoin = (node.Params.GetValueOrDefault("pointLineJoin", "auto") ?? "auto").Trim();
-                        ShowImagePreview(foregroundImg, overlayPts, dotRadius, backgroundImg, dispSlot, dispTitle, overlayBarIds, pointLineJoin, xldBundle, null, overlaySeriesIds);
                         int listCount = CoerceToPoint2DPolylineList(ptsListObj).Count;
                         int polylineCount = pointInputs.Count + listCount;
+                        bool drawBarLabels = explicitBarIds != null
+                            || listCount > 1
+                            || pointInputs.Count > 1
+                            || BarIdsHaveMultipleRuns(overlayBarIds);
+                        if (foregroundImg == null && backgroundImg == null)
+                        {
+                            ShowPointsCanvasPreview(
+                                overlayPts, overlayBarIds, overlaySeriesIds, pointLineJoin, xldBundle,
+                                strokeWidth, dotRadius, dispSlot, dispTitle, drawBarLabels);
+                            node.ResultSummary = hasPts
+                                ? polylineCount > 1
+                                    ? $"坐标画布 {overlayPts!.Length} 点 · {polylineCount} 路"
+                                    : $"坐标画布 {overlayPts!.Length} 点"
+                                : $"坐标画布 XLD {xldBundle!.ContourCount}";
+                            break;
+                        }
+
+                        ShowImagePreview(foregroundImg, overlayPts, dotRadius, backgroundImg, dispSlot, dispTitle, overlayBarIds, pointLineJoin, xldBundle, null, overlaySeriesIds, strokeWidth, drawBarLabels);
                         node.ResultSummary = overlayPts == null
                             ? "显示图像"
                             : polylineCount > 1
@@ -14335,10 +14746,10 @@ namespace CalibOperatorCLI_Example
                             : 0;
                         if (candidateIndex < 0 || candidateIndex >= batch.Count)
                             throw new InvalidOperationException(
-                                $"HALCON 粗形状Mask: candidateIndex={candidateIndex} 超出范围 [0,{batch.Count - 1}]");
+                                $"HALCON 粗形状Mask: 单张索引={candidateIndex} 超出压缩批范围 [0,{batch.Count - 1}]，应与循环 MaskIndex 相同");
 
                         SetCoarseShapeMaskRoundOutputs(node, batch, candidateIndex);
-                        node.ResultSummary = $"粗形状填充Mask {candidateIndex + 1}/{batch.Count}";
+                        node.ResultSummary = $"单张 {node.ResultSummary}";
                         break;
 #else
                         throw new InvalidOperationException("HALCON 粗形状Mask: 需要 HALCON 支持编译");
@@ -16179,6 +16590,52 @@ namespace CalibOperatorCLI_Example
             return confirmed ? points : null;
         }
 
+        private static int[]? TryReadBarIdsInput(Dictionary<string, object?> inputs)
+        {
+            if (inputs.TryGetValue("BarIds", out var barObj) && barObj is int[] barIds)
+                return barIds;
+            if (inputs.TryGetValue("GroupBarIds", out var gbObj) && gbObj is int[] groupBarIds)
+                return groupBarIds;
+            return null;
+        }
+
+        private static int? TryReadOptionalInt(Dictionary<string, object?> inputs, string port)
+        {
+            if (!inputs.TryGetValue(port, out var obj) || obj == null)
+                return null;
+            switch (obj)
+            {
+                case int vi:
+                    return vi;
+                case long vl:
+                    return (int)Math.Clamp(vl, int.MinValue, int.MaxValue);
+                case float vf:
+                    return (int)Math.Round(vf);
+                case double vd:
+                    return (int)Math.Round(vd);
+                default:
+                    if (int.TryParse(obj.ToString()?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed))
+                        return parsed;
+                    return null;
+            }
+        }
+
+        /// <summary>将等长 BarIds/GroupBarIds 原样写入节点输出 BarIds；未接线则跳过。</summary>
+        private static void PassThroughBarIds(
+            Dictionary<string, object?> inputs,
+            int pointCount,
+            FlowNode node,
+            string opName)
+        {
+            int[]? bars = TryReadBarIdsInput(inputs);
+            if (bars == null)
+                return;
+            if (bars.Length != pointCount)
+                throw new InvalidOperationException(
+                    $"{opName}: BarIds/GroupBarIds 长度 {bars.Length} 与点列 {pointCount} 不一致。");
+            node.Outputs["BarIds"] = (int[])bars.Clone();
+        }
+
         /// <summary>
         /// 与同节点点列端口配套的条号（Points+BarIds、Out+OutBarIds 等），用于预览时避免跨轮廓连线。
         /// </summary>
@@ -16186,7 +16643,8 @@ namespace CalibOperatorCLI_Example
         {
             if (pointCount <= 0)
                 return null;
-            if (string.Equals(pointPortName, "Points", StringComparison.Ordinal))
+            if (string.Equals(pointPortName, "Points", StringComparison.Ordinal)
+                || string.Equals(pointPortName, "World", StringComparison.Ordinal))
             {
                 if (node.Outputs.TryGetValue("BarIds", out var b) && b is int[] ids && ids.Length == pointCount)
                     return ids;
@@ -16253,138 +16711,37 @@ namespace CalibOperatorCLI_Example
         private void ShowPointsPolylinePreview(Point2D[] pts, string? titlePrefix, int[]? barIds = null, string? pointLineJoinMode = null)
         {
             if (pts == null) return;
+            ShowPointsCanvasPreview(pts, barIds, null, pointLineJoinMode, null, 1.2f, 0, LivePreviewSingletonSlotKey, titlePrefix ?? "点位轨迹", barIds != null);
+        }
+
+        private void ShowPointsCanvasPreview(
+            Point2D[]? pts,
+            int[]? barIds,
+            int[]? seriesIds,
+            string? pointLineJoinMode,
+            HalconXldContourBundle? xld,
+            float strokeWidth,
+            float dotRadius,
+            string? previewSlotKey,
+            string? titlePrefix,
+            bool drawBarIdLabels = false)
+        {
             try
             {
-                using var bmp = RenderPoint2DArrayToBitmap(pts, 920, 680, 28, barIds, pointLineJoinMode);
-                string tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"flow_pts_preview_{Guid.NewGuid():N}.bmp");
-                bmp.Save(tmp, System.Drawing.Imaging.ImageFormat.Bmp);
-                try
-                {
-                    var ci = CalibImage.Load(tmp);
-                    try
-                    {
-                        ShowImagePreview(ci, null, 0, null, LivePreviewSingletonSlotKey, titlePrefix ?? "点位轨迹");
-                    }
-                    finally
-                    {
-                        ci.Dispose();
-                    }
-                }
-                finally
-                {
-                    try { System.IO.File.Delete(tmp); } catch { /* ignored */ }
-                }
+                using var bmp = PointsCanvasRenderer.Render(
+                    pts, barIds, seriesIds, pointLineJoinMode, xld, strokeWidth, dotRadius, DisplaySeriesLineColor,
+                    drawBarIdLabels: drawBarIdLabels);
+                int n = pts?.Length ?? 0;
+                string title = titlePrefix ?? "坐标画布";
+                if (n > 0)
+                    title += $" · {n} 点";
+                var src = GdiBitmapToBitmapSource(bmp);
+                PresentLivePreview(src, bmp.Width, bmp.Height, previewSlotKey ?? LivePreviewSingletonSlotKey, title);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"无法生成点位预览: {ex.Message}", "点位预览", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show($"无法生成坐标画布: {ex.Message}", "显示图像", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
-        }
-
-        private static System.Drawing.Bitmap RenderPoint2DArrayToBitmap(
-            Point2D[] pts,
-            int targetW,
-            int targetH,
-            int padPx,
-            int[]? barIds = null,
-            string? pointLineJoinMode = null)
-        {
-            targetW = Math.Max(120, targetW);
-            targetH = Math.Max(120, targetH);
-            padPx = Math.Max(8, padPx);
-            if (pts == null || pts.Length == 0)
-            {
-                var empty = new System.Drawing.Bitmap(420, 140, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
-                using (var g0 = System.Drawing.Graphics.FromImage(empty))
-                {
-                    g0.Clear(System.Drawing.Color.FromArgb(32, 32, 36));
-                    using var f = new System.Drawing.Font("Segoe UI", 12f);
-                    g0.DrawString("0 个点（无轨迹可绘制）", f, System.Drawing.Brushes.Gray, padPx, 48f);
-                }
-                return empty;
-            }
-
-            double minX = pts.Min(p => p.X), maxX = pts.Max(p => p.X);
-            double minY = pts.Min(p => p.Y), maxY = pts.Max(p => p.Y);
-            double bw = Math.Max(maxX - minX, 1e-9);
-            double bh = Math.Max(maxY - minY, 1e-9);
-            double mx = Math.Max(bw, bh) * 0.06 + 1e-6;
-            minX -= mx;
-            maxX += mx;
-            minY -= mx;
-            maxY += mx;
-            bw = maxX - minX;
-            bh = maxY - minY;
-
-            double scale = Math.Min((targetW - 2.0 * padPx) / bw, (targetH - 2.0 * padPx) / bh);
-            int bmpW = (int)Math.Ceiling(bw * scale + 2 * padPx);
-            int bmpH = (int)Math.Ceiling(bh * scale + 2 * padPx);
-            bmpW = Math.Clamp(bmpW, 160, 1600);
-            bmpH = Math.Clamp(bmpH, 160, 1200);
-
-            var bmp = new System.Drawing.Bitmap(bmpW, bmpH, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
-            using (var g = System.Drawing.Graphics.FromImage(bmp))
-            {
-                g.Clear(System.Drawing.Color.FromArgb(28, 28, 32));
-                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
-
-                System.Drawing.PointF Map(Point2D p)
-                {
-                    float x = (float)(padPx + (p.X - minX) * scale);
-                    float y = (float)(padPx + (maxY - p.Y) * scale);
-                    return new System.Drawing.PointF(x, y);
-                }
-
-                if (pts.Length >= 2)
-                {
-                    using var linePen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(230, 0, 200, 255), 2f);
-                    linePen.StartCap = linePen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
-                    linePen.LineJoin = System.Drawing.Drawing2D.LineJoin.Round;
-                    bool useBarSplit = ShouldUseBarSplitForPointOverlay(barIds, pts.Length, pointLineJoinMode);
-                    if (useBarSplit)
-                    {
-                        int segStart = 0;
-                        for (int i = 1; i <= pts.Length; i++)
-                        {
-                            if (i == pts.Length || barIds![i] != barIds[i - 1])
-                            {
-                                int segLen = i - segStart;
-                                if (segLen >= 2)
-                                {
-                                    var arr = new System.Drawing.PointF[segLen];
-                                    for (int k = 0; k < segLen; k++)
-                                        arr[k] = Map(pts[segStart + k]);
-                                    DrawPointOverlaySegment(g, linePen, arr);
-                                }
-
-                                segStart = i;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        var arr = pts.Select(Map).ToArray();
-                        DrawPointOverlaySegment(g, linePen, arr);
-                    }
-                }
-
-                using var vtxPen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(220, 255, 220, 80), 1.2f);
-                float r = pts.Length > 200 ? 2f : 3.5f;
-                foreach (var p in pts)
-                {
-                    var c = Map(p);
-                    g.DrawEllipse(vtxPen, c.X - r, c.Y - r, r * 2f, r * 2f);
-                }
-
-                using var font = new System.Drawing.Font("Segoe UI", 9f);
-                string cap = $"N={pts.Length}  X[{minX + mx:F2},{maxX - mx:F2}]  Y[{minY + mx:F2},{maxY - mx:F2}]";
-                if (ShouldUseBarSplitForPointOverlay(barIds, pts.Length, pointLineJoinMode))
-                    cap += " · 分包";
-                g.DrawString(cap, font, System.Drawing.Brushes.Gainsboro, padPx, 4f);
-            }
-
-            return bmp;
         }
 
         /// <summary>
@@ -16565,7 +16922,7 @@ namespace CalibOperatorCLI_Example
         private void ShowImagePreview(
             CalibImage? img,
             Point2D[]? overlayPoints = null,
-            int dotRadius = 3,
+            float dotRadius = 3,
             CalibImage? backgroundImg = null,
             string? previewSlotKey = null,
             string? titlePrefix = null,
@@ -16573,7 +16930,9 @@ namespace CalibOperatorCLI_Example
             string? overlayPointLineJoinMode = null,
             HalconXldContourBundle? xldOverlay = null,
             Action<System.Drawing.Bitmap>? customBitmapDraw = null,
-            int[]? overlaySeriesIds = null)
+            int[]? overlaySeriesIds = null,
+            float overlayStrokeWidth = 1.8f,
+            bool drawBarIdLabels = false)
         {
             var baseSource = backgroundImg ?? img;
             if (baseSource == null) return;
@@ -16622,7 +16981,9 @@ namespace CalibOperatorCLI_Example
 
                 using (var g = System.Drawing.Graphics.FromImage(bmp))
                 {
+                    g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
                     g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+                    float stroke = overlayStrokeWidth > 0.05f ? overlayStrokeWidth : 0.1f;
                     if (drawPts && overlayPoints != null)
                     {
                         bool colorBySeries = DisplayOverlayUsesSeriesColors(overlaySeriesIds)
@@ -16630,7 +16991,7 @@ namespace CalibOperatorCLI_Example
                             && overlaySeriesIds.Length == overlayPoints.Length;
                         if (overlayPoints.Length >= 2)
                         {
-                            using var linePen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(200, 0, 200, 255), 1.8f);
+                            using var linePen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(200, 0, 200, 255), stroke);
                             linePen.StartCap = linePen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
                             linePen.LineJoin = System.Drawing.Drawing2D.LineJoin.Round;
                             bool useGrid = CalibrationPointGrid.IsGridLineJoinMode(overlayPointLineJoinMode);
@@ -16682,35 +17043,42 @@ namespace CalibOperatorCLI_Example
                             }
                         }
 
-                        using var pointPen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(140, 0, 255, 0), 1.2f);
-                        for (int i = 0; i < overlayPoints.Length; i++)
+                        if (dotRadius >= 0.5f)
                         {
-                            var p = overlayPoints[i];
-                            int cx = (int)p.X, cy = (int)p.Y;
-                            int r = dotRadius;
-                            if (colorBySeries)
-                                pointPen.Color = DisplaySeriesLineColor(overlaySeriesIds![i]);
-                            g.DrawEllipse(pointPen, cx - r, cy - r, r * 2, r * 2);
-                            g.DrawLine(pointPen, cx - r - 1, cy, cx + r + 1, cy);
-                            g.DrawLine(pointPen, cx, cy - r - 1, cx, cy + r + 1);
+                            using var pointPen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(140, 0, 255, 0), stroke);
+                            pointPen.StartCap = pointPen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
+                            for (int i = 0; i < overlayPoints.Length; i++)
+                            {
+                                var p = overlayPoints[i];
+                                float cx = (float)p.X, cy = (float)p.Y;
+                                float r = dotRadius;
+                                if (colorBySeries)
+                                    pointPen.Color = DisplaySeriesLineColor(overlaySeriesIds![i]);
+                                g.DrawEllipse(pointPen, cx - r, cy - r, r * 2f, r * 2f);
+                                g.DrawLine(pointPen, cx - r, cy, cx + r, cy);
+                                g.DrawLine(pointPen, cx, cy - r, cx, cy + r);
+                            }
                         }
                     }
 
                     if (drawXld && xldOverlay != null)
                     {
-                        using var xldPen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(220, 255, 140, 0), 1.5f);
+                        using var xldPen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(220, 255, 140, 0), stroke);
+                        xldPen.StartCap = xldPen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
+                        xldPen.LineJoin = System.Drawing.Drawing2D.LineJoin.Round;
                         foreach (var contour in xldOverlay.Contours)
                         {
                             if (contour == null || contour.Length < 2)
                                 continue;
-                            for (int i = 0; i < contour.Length - 1; i++)
-                            {
-                                g.DrawLine(xldPen,
-                                    (float)contour[i].X, (float)contour[i].Y,
-                                    (float)contour[i + 1].X, (float)contour[i + 1].Y);
-                            }
+                            var xldPts = new System.Drawing.PointF[contour.Length];
+                            for (int i = 0; i < contour.Length; i++)
+                                xldPts[i] = new System.Drawing.PointF((float)contour[i].X, (float)contour[i].Y);
+                            g.DrawLines(xldPen, xldPts);
                         }
                     }
+
+                    if (drawBarIdLabels && drawPts && overlayPoints != null)
+                        DisplayBarIdOverlay.Draw(g, overlayPoints, overlayBarIds, bmp.Width, bmp.Height);
 
                     customBitmapDraw?.Invoke(bmp);
                 }
@@ -16738,7 +17106,33 @@ namespace CalibOperatorCLI_Example
             int imgW = baseSource.Width;
             int imgH = baseSource.Height;
             string slotKey = string.IsNullOrEmpty(previewSlotKey) ? LivePreviewSingletonSlotKey : previewSlotKey!;
+            PresentLivePreview(bitmapSource, imgW, imgH, slotKey, previewTitle);
+        }
 
+        private static System.Windows.Media.Imaging.BitmapSource GdiBitmapToBitmapSource(System.Drawing.Bitmap gdiBmp)
+        {
+            IntPtr hBitmap = gdiBmp.GetHbitmap();
+            try
+            {
+                var src = System.Windows.Interop.Imaging.CreateBitmapSourceFromHBitmap(
+                    hBitmap, IntPtr.Zero, Int32Rect.Empty,
+                    System.Windows.Media.Imaging.BitmapSizeOptions.FromEmptyOptions());
+                src.Freeze();
+                return src;
+            }
+            finally
+            {
+                DeleteObject(hBitmap);
+            }
+        }
+
+        private void PresentLivePreview(
+            System.Windows.Media.Imaging.BitmapSource bitmapSource,
+            int imgW,
+            int imgH,
+            string slotKey,
+            string previewTitle)
+        {
             void OpenOrUpdateLivePreviewOnUiThread()
             {
                 if (_livePreviewBySlot.TryGetValue(slotKey, out var existingSlot))
@@ -16747,6 +17141,10 @@ namespace CalibOperatorCLI_Example
                     {
                         existingSlot.Window.Title = previewTitle;
                         existingSlot.ImageCtrl.Source = bitmapSource;
+                        existingSlot.ImageCtrl.Width = imgW;
+                        existingSlot.ImageCtrl.Height = imgH;
+                        existingSlot.ImageCtrl.Stretch = Stretch.None;
+                        existingSlot.FitToSize?.Invoke(imgW, imgH);
                         existingSlot.Window.Show();
                         try
                         {
@@ -16784,7 +17182,13 @@ namespace CalibOperatorCLI_Example
                 var border = new Border { ClipToBounds = true };
                 // 内层：承载图像，应用变换
                 var canvas = new System.Windows.Controls.Canvas { RenderTransform = transformGroup, RenderTransformOrigin = new Point(0, 0) };
-                var imageCtrl = new System.Windows.Controls.Image { Source = bitmapSource, Width = imgW, Height = imgH };
+                var imageCtrl = new System.Windows.Controls.Image
+                {
+                    Source = bitmapSource,
+                    Width = imgW,
+                    Height = imgH,
+                    Stretch = Stretch.None
+                };
                 canvas.Children.Add(imageCtrl);
                 border.Child = canvas;
 
@@ -16806,6 +17210,9 @@ namespace CalibOperatorCLI_Example
                 rootPanel.Children.Add(zoomText);
 
                 win.Content = rootPanel;
+
+                int viewW = imgW;
+                int viewH = imgH;
 
                 // ---- 右键拖拽平移（超过阈值才捕获，单击保留 ContextMenu）----
                 bool rightPanAwait = false;
@@ -16934,14 +17341,14 @@ namespace CalibOperatorCLI_Example
 
                 void FitToView()
                 {
-                    double scaleX = border.ActualWidth / imgW;
-                    double scaleY = border.ActualHeight / imgH;
+                    double scaleX = border.ActualWidth / Math.Max(1, viewW);
+                    double scaleY = border.ActualHeight / Math.Max(1, viewH);
                     double fitScale = Math.Min(scaleX, scaleY) * 0.95;
                     fitScale = Math.Max(fitScale, 0.05);
                     scaleTransform.ScaleX = fitScale;
                     scaleTransform.ScaleY = fitScale;
-                    double offsetX = (border.ActualWidth - imgW * fitScale) / 2;
-                    double offsetY = (border.ActualHeight - imgH * fitScale) / 2;
+                    double offsetX = (border.ActualWidth - viewW * fitScale) / 2;
+                    double offsetY = (border.ActualHeight - viewH * fitScale) / 2;
                     translateTransform.X = offsetX;
                     translateTransform.Y = offsetY;
                     zoomText.Text = $"{(int)(fitScale * 100)}%";
@@ -16990,7 +17397,19 @@ namespace CalibOperatorCLI_Example
                 win.ContentRendered += (_, _) => FitToView();
                 win.Closed += (_, _) => { _livePreviewBySlot.Remove(slotKey); };
 
-                _livePreviewBySlot[slotKey] = new LivePreviewSlot { Window = win, ImageCtrl = imageCtrl };
+                _livePreviewBySlot[slotKey] = new LivePreviewSlot
+                {
+                    Window = win,
+                    ImageCtrl = imageCtrl,
+                    FitToSize = (w, h) =>
+                    {
+                        viewW = w;
+                        viewH = h;
+                        imageCtrl.Width = w;
+                        imageCtrl.Height = h;
+                        FitToView();
+                    }
+                };
                 win.Show();
             }
 

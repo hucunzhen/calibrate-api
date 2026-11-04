@@ -482,7 +482,7 @@ namespace CalibOperatorCLI_Example
                 }
 
                 if (baseImg != null)
-                    ShowImagePreview(baseImg, pts, 3, null, null, null, barSnap, join, null);
+                    ShowImagePreview(baseImg, pts, 3, null, null, null, barSnap, join, null, drawBarIdLabels: barSnap != null);
                 else
                     ShowPointsPolylinePreview(pts, $"{nodeName} · {portName}", barSnap, join);
                 return;
@@ -503,7 +503,7 @@ namespace CalibOperatorCLI_Example
 
                 var xy = pts3.Select(p => new Point2D(p.X, p.Y)).ToArray();
                 if (baseImg != null)
-                    ShowImagePreview(baseImg, xy, 3, null, null, null, barSnap, join, null);
+                    ShowImagePreview(baseImg, xy, 3, null, null, null, barSnap, join, null, drawBarIdLabels: barSnap != null);
                 else
                     ShowPointsPolylinePreview(xy, $"{nodeName} · {portName} (XY)", barSnap, join);
             }

@@ -63,6 +63,18 @@ namespace FlowSmokeTests
                     Console.WriteLine("=== OffsetBar18DiagSmokeTest ===");
                     return OffsetBar18DiagSmokeTest.Run(root);
                 }
+
+                if (args[i] == "--world-traj-offset")
+                {
+                    Console.WriteLine("=== WorldTrajectoryOffsetSmokeTest ===");
+                    return WorldTrajectoryOffsetSmokeTest.Run();
+                }
+
+                if (args[i] == "--points-canvas")
+                {
+                    Console.WriteLine("=== PointsCanvasRendererSmokeTest ===");
+                    return PointsCanvasRendererSmokeTest.Run();
+                }
             }
 
             Console.WriteLine("=== FlowCalibrationSmokeTest ===");
