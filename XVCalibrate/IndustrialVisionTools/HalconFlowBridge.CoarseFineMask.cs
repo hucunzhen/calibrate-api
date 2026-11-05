@@ -2471,11 +2471,18 @@ namespace CalibOperatorCLI_Example
         /// <summary>原图 + 单张填充 Mask → reduce_domain 域内图。</summary>
         public static CalibImage ReduceDomainByMask(CalibImage sourceImage, CalibImage maskCalib)
         {
-            if (sourceImage == null)
-                throw new ArgumentNullException(nameof(sourceImage));
-            if (maskCalib == null)
-                throw new ArgumentNullException(nameof(maskCalib));
-            return ReduceDomainCalibWithMask(sourceImage, maskCalib);
+            ReduceDomainByMask(sourceImage, maskCalib, out CalibImage domainOut, out _);
+            return domainOut;
+        }
+
+        /// <summary>Out=整幅域内图；maskCrop=CropDomain 后仅 Mask 外接矩形。</summary>
+        public static void ReduceDomainByMask(
+            CalibImage sourceImage,
+            CalibImage maskCalib,
+            out CalibImage domainOut,
+            out CalibImage maskCrop)
+        {
+            ReduceDomainCalibWithMask(sourceImage, maskCalib, out domainOut, out maskCrop);
         }
 
         /// <summary>
@@ -5188,7 +5195,8 @@ namespace CalibOperatorCLI_Example
             double maskErosionPx,
             int contourLevel = 1,
             int maxCandidates = 0,
-            double maskFillDilatePx = 0)
+            double maskFillDilatePx = 0,
+            bool discardFailedMask = true)
         {
             if (image == null)
                 throw new ArgumentNullException(nameof(image));
@@ -5233,8 +5241,10 @@ namespace CalibOperatorCLI_Example
                 : null;
 
             int built = 0;
+            int fallbackCount = 0;
             for (int i = 0; i < emitCount; i++)
             {
+                CalibImage? maskCalib = null;
                 if (!TryBuildCoarseShapeMaskCalib(
                         rigidModelId,
                         coarseRows[i],
@@ -5246,10 +5256,15 @@ namespace CalibOperatorCLI_Example
                         maskFillDilatePx,
                         w,
                         h,
-                        out CalibImage? maskCalib)
+                        out maskCalib)
                     || maskCalib == null)
                 {
-                    continue;
+                    if (discardFailedMask)
+                        continue;
+                    maskCalib = BuildFallbackCoarsePoseMask(w, h, coarseRows[i], coarseCols[i]);
+                    if (maskCalib == null)
+                        continue;
+                    fallbackCount++;
                 }
 
                 masks[built] = maskCalib;
@@ -5294,7 +5309,9 @@ namespace CalibOperatorCLI_Example
                 CoarseCols = cols,
                 CoarseAngles = angles,
                 CoarseScales = scales,
-                CoarseScores = scores
+                CoarseScores = scores,
+                InputCandidateCount = emitCount,
+                FallbackMaskCount = fallbackCount
             };
         }
 
@@ -5310,10 +5327,11 @@ namespace CalibOperatorCLI_Example
             double maskErosionPx,
             int contourLevel = 1,
             int maxCandidates = 0,
-            double maskFillDilatePx = 0)
+            double maskFillDilatePx = 0,
+            bool discardFailedMask = true)
             => BuildCoarseShapeMaskBatch(
                 image, rigidModelId, coarseRows, coarseCols, coarseAngles, coarseScales, coarseScores,
-                maskErosionPx, contourLevel, maxCandidates, maskFillDilatePx);
+                maskErosionPx, contourLevel, maxCandidates, maskFillDilatePx, discardFailedMask);
 
         private static string DescribeCoarseMaskBatchFailure(
             long rigidModelId,
@@ -5395,6 +5413,56 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>由单候选位姿生成填充区域 Mask 图（区域内 255）。</summary>
+        /// <summary>轮廓填充失败时仍保留该粗候选：在位姿处放一块矩形 Mask，避免循环少轮。</summary>
+        private static CalibImage? BuildFallbackCoarsePoseMask(int width, int height, double row, double col)
+        {
+            if (width <= 1 || height <= 1)
+                return null;
+            try
+            {
+                double half = 80;
+                double r1 = Math.Clamp(row - half, 0, height - 1);
+                double c1 = Math.Clamp(col - half, 0, width - 1);
+                double r2 = Math.Clamp(row + half, r1 + 1, height - 1);
+                double c2 = Math.Clamp(col + half, c1 + 1, width - 1);
+                if (r2 - r1 < 2 || c2 - c1 < 2)
+                {
+                    r1 = 0;
+                    c1 = 0;
+                    r2 = height - 1;
+                    c2 = width - 1;
+                }
+
+                HOperatorSet.GenRectangle1(out HObject rectHo, r1, c1, r2, c2);
+                try
+                {
+                    var region = new HRegion(rectHo);
+                    if (!region.IsInitialized())
+                    {
+                        region.Dispose();
+                        return null;
+                    }
+
+                    try
+                    {
+                        return RegionToMaskCalibImage(region, width, height);
+                    }
+                    finally
+                    {
+                        region.Dispose();
+                    }
+                }
+                finally
+                {
+                    rectHo.Dispose();
+                }
+            }
+            catch (HOperatorException)
+            {
+                return null;
+            }
+        }
+
         public static bool TryBuildCoarseShapeMaskCalib(
             long rigidModelId,
             double coarseRow,
@@ -5428,6 +5496,17 @@ namespace CalibOperatorCLI_Example
         /// <summary>用填充 Mask 对原图 reduce_domain（精匹配内部使用）。</summary>
         public static CalibImage ReduceDomainCalibWithMask(CalibImage sourceImage, CalibImage maskCalib)
         {
+            ReduceDomainCalibWithMask(sourceImage, maskCalib, out CalibImage domainOut, out _);
+            return domainOut;
+        }
+
+        /// <summary>reduce_domain 整幅域内图，并 CropDomain 得到仅 Mask 外接矩形。</summary>
+        public static void ReduceDomainCalibWithMask(
+            CalibImage sourceImage,
+            CalibImage maskCalib,
+            out CalibImage domainOut,
+            out CalibImage maskCrop)
+        {
             if (sourceImage == null)
                 throw new ArgumentNullException(nameof(sourceImage));
             if (maskCalib == null)
@@ -5448,7 +5527,10 @@ namespace CalibOperatorCLI_Example
                         throw new InvalidOperationException("reduce_domain 失败");
                     try
                     {
-                        return ToCalibGray(reduced);
+                        domainOut = ToCalibGray(reduced);
+                        maskCrop = TryCropDomainToCalib(reduced, out CalibImage cropped)
+                            ? cropped
+                            : domainOut;
                     }
                     finally
                     {
@@ -5463,6 +5545,31 @@ namespace CalibOperatorCLI_Example
             finally
             {
                 region.Dispose();
+            }
+        }
+
+        private static bool TryCropDomainToCalib(HImage reduced, out CalibImage croppedCalib)
+        {
+            croppedCalib = null!;
+            try
+            {
+                HOperatorSet.CropDomain(reduced, out HObject cropHo);
+                try
+                {
+                    using var cropped = new HImage(cropHo);
+                    if (!cropped.IsInitialized())
+                        return false;
+                    croppedCalib = ToCalibGray(cropped);
+                    return true;
+                }
+                finally
+                {
+                    cropHo.Dispose();
+                }
+            }
+            catch
+            {
+                return false;
             }
         }
 

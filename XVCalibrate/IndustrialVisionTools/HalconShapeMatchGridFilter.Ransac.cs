@@ -25,7 +25,8 @@ namespace CalibOperatorCLI_Example
             LatticeOriginCorner originCorner = LatticeOriginCorner.TopLeft,
             LatticeWeldOrder weldOrder = LatticeWeldOrder.ColMajor,
             int weldInterval = 1,
-            bool weldIntervalReverse = true)
+            bool weldIntervalReverse = true,
+            bool discardUnassigned = true)
         {
             string tag = string.IsNullOrEmpty(diagnosticTag) ? "RansacLattice" : diagnosticTag;
             string? svgOut = !string.IsNullOrWhiteSpace(uvProjectionSvgPath)
@@ -184,14 +185,16 @@ namespace CalibOperatorCLI_Example
                 return PickLatticeGridInUv(
                     rows, cols, angles, scores, gridRows, gridCols,
                     seedThetaDeg, boot.BootstrapPickIndices, minScoreKeep, snapTolerancePx,
-                    tag, svgOut, pcaChainDeg, originCorner, weldOrder, weldInterval, weldIntervalReverse);
+                    tag, svgOut, pcaChainDeg, originCorner, weldOrder, weldInterval, weldIntervalReverse,
+                    discardUnassigned);
             }
 
             DiagLattice(tag, $"RANSAC 最优: 命中≈{bestFilled}/{targetCells} 格, θ≈{bestThetaRad * 180.0 / Math.PI:F1}°");
             return FinalizeRansacLatticePick(
                 r, c, angles, scores, n, gridRows, gridCols, effRows, effCols, swapUv,
                 bestThetaRad, bestLattice, minScoreKeep, snapTolerancePx, inlierSnapFactor,
-                consensusPre, matchConc, pcaChainDeg, tag, svgOut, originCorner, weldOrder, weldInterval, weldIntervalReverse);
+                consensusPre, matchConc, pcaChainDeg, tag, svgOut, originCorner, weldOrder, weldInterval, weldIntervalReverse,
+                discardUnassigned);
         }
 
         private static long ScoreRansacLatticeAssignment(
@@ -331,7 +334,8 @@ namespace CalibOperatorCLI_Example
             LatticeOriginCorner originCorner = LatticeOriginCorner.TopLeft,
             LatticeWeldOrder weldOrder = LatticeWeldOrder.ColMajor,
             int weldInterval = 1,
-            bool weldIntervalReverse = true)
+            bool weldIntervalReverse = true,
+            bool discardUnassigned = true)
         {
             int targetCells = effRows * effCols;
             double latticeAngleDeg = bestThetaRad * 180.0 / Math.PI;
@@ -391,6 +395,8 @@ namespace CalibOperatorCLI_Example
             var kept = CollectLatticeCellsForWeld(cellBest, effRows, effCols, weldOrder, weldInterval, weldIntervalReverse);
             DiagLattice(tag,
                 $"焊接顺序 {FormatLatticeWeldOrder(weldOrder)} 间隔={Math.Max(1, weldInterval)} 反向={(weldIntervalReverse ? "开" : "关")}，输出 {kept.Count}/{targetCells} 格");
+            if (!discardUnassigned)
+                AppendUnassignedInputMatches(kept, n, scores, tag);
 
             double consensusDeg = consensusPre;
             if (angles != null && kept.Count > 0 && double.IsNaN(consensusDeg))

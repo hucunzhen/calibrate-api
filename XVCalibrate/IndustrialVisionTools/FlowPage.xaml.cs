@@ -7255,6 +7255,7 @@ namespace CalibOperatorCLI_Example
                     var maskInputs = BuildInnerInputsFromEdges(compositeMaskEachNode.Id, edges, idMap);
                     MergeCompositeExternalInputs(compositeMaskEachNode, maskInputs, compositeInputs, spec);
                     var batch = BuildCoarseShapeMaskBatchForNode(compositeMaskEachNode, maskInputs);
+                    LogCoarseMaskBatchSummary(batch);
                     if (batch.Count == 0)
                         throw new InvalidOperationException("HALCON 粗形状Mask: 无粗候选，无法生成 Mask（组合算子内）");
                     compositeMaskEachNode.Executed = true;
@@ -8082,6 +8083,8 @@ namespace CalibOperatorCLI_Example
                 out double mfd)
                 ? Math.Max(0, mfd)
                 : 0;
+            bool discardFailedMask = TryParseBoolConfig(
+                maskNode.Params.GetValueOrDefault("discardFailedMask", "true"), true);
 
             return HalconComputeRunner.Run(
                 () => HalconFlowBridge.BuildCoarseShapeMaskBatch(
@@ -8095,8 +8098,21 @@ namespace CalibOperatorCLI_Example
                     maskErosionPx,
                     contourLevel,
                     maxCandidates,
-                    maskFillDilatePx),
+                    maskFillDilatePx,
+                    discardFailedMask),
                 HalconThreadPolicy.Geometry);
+        }
+
+        private void LogCoarseMaskBatchSummary(HalconCoarseMaskBatch batch)
+        {
+            int input = batch.InputCandidateCount > 0 ? batch.InputCandidateCount : batch.Count;
+            int dropped = Math.Max(0, input - batch.Count);
+            if (batch.FallbackMaskCount > 0)
+                AppendLog($"[MASK] 粗候选 {input}，输出 {batch.Count} 轮（其中 {batch.FallbackMaskCount} 张 Mask 失败，已回退位姿矩形）");
+            else if (dropped > 0)
+                AppendLog($"[MASK] 粗候选 {input} → {batch.Count} 轮（丢弃失败 Mask {dropped} 张）");
+            else
+                AppendLog($"[MASK] 粗候选 {input}，输出 {batch.Count} 轮");
         }
 
         private static bool IsHalconMaskLoopFineMatchNode(FlowNode node) =>
@@ -8314,6 +8330,7 @@ namespace CalibOperatorCLI_Example
 
             var maskInputs = GetNodeInputs(maskNode);
             var batch = BuildCoarseShapeMaskBatchForNode(maskNode, maskInputs);
+            LogCoarseMaskBatchSummary(batch);
             if (batch.Count == 0)
                 throw new InvalidOperationException("HALCON 粗形状Mask: 无粗候选，无法生成 Mask");
 
@@ -8598,43 +8615,8 @@ namespace CalibOperatorCLI_Example
                     AppendLog($"[{scopeTag}][LOOP] 多路列表均为空，轮数=0");
                 }
 
-                HashSet<int>? onlyRoundIndices = null;
-                bool finishLoopWithoutRounds = false;
-                if (WantsFlowLoopRoundPick(loopNode.Params))
+                async System.Threading.Tasks.Task RunOneManagedLoopRoundAsync(long li, bool delayAfter)
                 {
-                    if (infiniteLoop)
-                    {
-                        AppendLog($"[{scopeTag}][LOOP] 弹窗选轮在无限循环时忽略");
-                    }
-                    else if (repeatCount > 0)
-                    {
-                        var pick = PromptFlowLoopRoundPick(
-                            loopNode, repeatCount, stepValues, loopInputsForRounds, listPortMaps);
-                        if (pick.Choice == FlowLoopRoundPickChoice.FinishLoop)
-                        {
-                            finishLoopWithoutRounds = true;
-                            AppendLog($"[{scopeTag}][LOOP] 弹窗选轮：完成循环（0 轮）");
-                        }
-                        else if (pick.Choice == FlowLoopRoundPickChoice.RunSelected)
-                        {
-                            onlyRoundIndices = new HashSet<int>(pick.Selected);
-                            AppendLog($"[{scopeTag}][LOOP] 弹窗选轮：执行 Index [{string.Join(", ", pick.Selected)}]");
-                        }
-                        else
-                            AppendLog($"[{scopeTag}][LOOP] 弹窗选轮：全部 {repeatCount} 轮");
-                    }
-                }
-
-                long li = 0;
-                while (!finishLoopWithoutRounds && (infiniteLoop || li < repeatCount))
-                {
-                    ThrowIfExecutionCancelled();
-                    if (onlyRoundIndices != null && !onlyRoundIndices.Contains(li > int.MaxValue ? int.MaxValue : (int)li))
-                    {
-                        AppendLog($"[{scopeTag}][LOOP] 跳过 Index={li}");
-                        li++;
-                        continue;
-                    }
                     loopNode.Outputs.Clear();
                     loopNode.Outputs["Index"] = li > int.MaxValue ? int.MaxValue : (int)li;
                     loopNode.Outputs["Count"] = infiniteLoop ? -1 : repeatCount;
@@ -8689,7 +8671,6 @@ namespace CalibOperatorCLI_Example
                         }
                     }
 
-                    // 子 flow_loop（最近边界）按每轮触发，形成“串联继续执行”语义。
                     foreach (var childLoop in childLoops)
                     {
                         string childDone = await ExecuteManagedFlowLoopAsync(
@@ -8701,18 +8682,63 @@ namespace CalibOperatorCLI_Example
                     }
 
                     completedRounds++;
-                    li++;
-                    if (intervalMs > 0 && (infiniteLoop || li < repeatCount))
+                    if (delayAfter && intervalMs > 0)
                         await System.Threading.Tasks.Task.Delay(intervalMs, _runCts?.Token ?? System.Threading.CancellationToken.None);
                 }
 
-                if (finishLoopWithoutRounds)
+                bool useRoundPick = WantsFlowLoopRoundPick(loopNode.Params) && !infiniteLoop && repeatCount > 0;
+                if (WantsFlowLoopRoundPick(loopNode.Params) && infiniteLoop)
+                    AppendLog($"[{scopeTag}][LOOP] 弹窗选轮在无限循环时忽略");
+
+                if (useRoundPick)
                 {
-                    loopNode.Executed = true;
-                    loopNode.ErrorMessage = null;
-                    loopNode.ResultSummary = "完成循环（0 轮）";
-                    SetNodeStatus(loopNode, false);
-                    UpdateNodeSummary(loopNode);
+                    bool anyPickRun = false;
+                    while (true)
+                    {
+                        ThrowIfExecutionCancelled();
+                        var pick = PromptFlowLoopRoundPick(
+                            loopNode, repeatCount, stepValues, loopInputsForRounds, listPortMaps,
+                            preselectAll: !anyPickRun);
+                        if (pick.Choice == FlowLoopRoundPickChoice.FinishLoop)
+                        {
+                            AppendLog($"[{scopeTag}][LOOP] 弹窗选轮：完成循环（已执行 {completedRounds} 轮）");
+                            break;
+                        }
+
+                        int[] toRun = pick.Selected ?? Array.Empty<int>();
+                        if (toRun.Length == 0)
+                            continue;
+                        AppendLog($"[{scopeTag}][LOOP] 弹窗选轮：执行 Index [{string.Join(", ", toRun)}]");
+                        for (int s = 0; s < toRun.Length; s++)
+                        {
+                            int idx = toRun[s];
+                            if (idx < 0 || idx >= repeatCount)
+                                continue;
+                            anyPickRun = true;
+                            bool delayAfter = intervalMs > 0 && s < toRun.Length - 1;
+                            await RunOneManagedLoopRoundAsync(idx, delayAfter);
+                        }
+                    }
+
+                    if (completedRounds == 0)
+                    {
+                        loopNode.Executed = true;
+                        loopNode.ErrorMessage = null;
+                        loopNode.ResultSummary = "完成循环（0 轮）";
+                        SetNodeStatus(loopNode, false);
+                        UpdateNodeSummary(loopNode);
+                    }
+                }
+                else
+                {
+                    long li = 0;
+                    while (infiniteLoop || li < repeatCount)
+                    {
+                        ThrowIfExecutionCancelled();
+                        bool delayAfter = intervalMs > 0 && (infiniteLoop || li + 1 < repeatCount);
+                        await RunOneManagedLoopRoundAsync(li, delayAfter);
+                        li++;
+                    }
                 }
             }
             finally
@@ -8789,14 +8815,16 @@ namespace CalibOperatorCLI_Example
             int roundCount,
             double[]? stepValues,
             IReadOnlyDictionary<string, object?> loopInputs,
-            IReadOnlyList<(string InputPort, string OutputPort)> listPortMaps)
+            IReadOnlyList<(string InputPort, string OutputPort)> listPortMaps,
+            bool preselectAll = true)
         {
             FlowLoopRoundPickChoice choice = FlowLoopRoundPickChoice.FinishLoop;
             int[] selected = Array.Empty<int>();
             RunOnUiThread(() =>
             {
-                var items = BuildFlowLoopRoundPickItems(loopNode, roundCount, stepValues, loopInputs, listPortMaps);
-                var dlg = new FlowLoopRoundPickDialog(items, loopNode.Def.DisplayName)
+                var built = BuildFlowLoopRoundPickItems(loopNode, roundCount, stepValues, loopInputs, listPortMaps);
+                var dlg = new FlowLoopRoundPickDialog(
+                    built.Items, loopNode.Def.DisplayName, built.DisplayChoices, built.PreferredKey, preselectAll)
                 {
                     Owner = Window.GetWindow(this)
                 };
@@ -8807,7 +8835,7 @@ namespace CalibOperatorCLI_Example
             return (choice, selected);
         }
 
-        private List<FlowLoopRoundPickItem> BuildFlowLoopRoundPickItems(
+        private (List<FlowLoopRoundPickItem> Items, List<FlowLoopRoundPickDisplayChoice> DisplayChoices, string PreferredKey) BuildFlowLoopRoundPickItems(
             FlowNode loopNode,
             int roundCount,
             double[]? stepValues,
@@ -8823,11 +8851,45 @@ namespace CalibOperatorCLI_Example
                     labelPad = kv.Value.Length;
             }
 
+            var presentKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < n; i++)
+            {
+                foreach (var (inPort, outPort) in listPortMaps)
+                {
+                    if (!loopInputs.TryGetValue(inPort, out var probeList))
+                        continue;
+                    if (TryGetFlowLoopListValueAt(probeList, i, out var probe) && probe != null)
+                        presentKeys.Add(outPort);
+                }
+            }
+
+            var displayChoices = new List<FlowLoopRoundPickDisplayChoice>
+            {
+                new() { Key = "", Label = "(全部)" }
+            };
+            foreach (var (_, outPort) in listPortMaps)
+            {
+                if (!presentKeys.Contains(outPort))
+                    continue;
+                string field = labels.TryGetValue(outPort, out var nice) ? nice : outPort;
+                displayChoices.Add(new FlowLoopRoundPickDisplayChoice
+                {
+                    Key = outPort,
+                    Label = string.Equals(field, outPort, StringComparison.Ordinal) ? outPort : $"{outPort}（{field}）"
+                });
+            }
+
+            string preferredKey = ResolveRoundPickDisplayPort(loopNode.Params, listPortMaps, labels);
+            if (!string.IsNullOrWhiteSpace(preferredKey)
+                && !displayChoices.Exists(c => string.Equals(c.Key, preferredKey, StringComparison.OrdinalIgnoreCase)))
+                preferredKey = "";
+
             var items = new List<FlowLoopRoundPickItem>(n);
             for (int i = 0; i < n; i++)
             {
                 var lines = new List<string>();
-                System.Windows.Media.Imaging.BitmapSource? thumb = null;
+                var previews = new Dictionary<string, System.Windows.Media.Imaging.BitmapSource?>(StringComparer.OrdinalIgnoreCase);
+                var detailsByKey = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var (inPort, outPort) in listPortMaps)
                 {
                     if (!loopInputs.TryGetValue(inPort, out var listObj))
@@ -8835,9 +8897,27 @@ namespace CalibOperatorCLI_Example
                     if (!TryGetFlowLoopListValueAt(listObj, i, out var item) || item == null)
                         continue;
                     string field = labels.TryGetValue(outPort, out var nice) ? nice : outPort;
-                    lines.Add(FormatLoopPickField(field.PadRight(labelPad), item));
-                    if (thumb == null && item is CalibImage img)
-                        thumb = TryThumbnailFromCalibImage(img, 128);
+                    string line = FormatLoopPickField(field.PadRight(labelPad), item);
+                    string single = FormatLoopPickField(field, item);
+                    lines.Add(line);
+                    detailsByKey[outPort] = single;
+                    if (item is CalibImage img)
+                        previews[outPort] = TryThumbnailFromCalibImage(img, 128);
+                }
+
+                System.Windows.Media.Imaging.BitmapSource? thumb = null;
+                if (!string.IsNullOrWhiteSpace(preferredKey))
+                    previews.TryGetValue(preferredKey, out thumb);
+                else
+                {
+                    foreach (var kv in previews)
+                    {
+                        if (kv.Value != null)
+                        {
+                            thumb = kv.Value;
+                            break;
+                        }
+                    }
                 }
 
                 string title = $"Index {i}";
@@ -8849,11 +8929,40 @@ namespace CalibOperatorCLI_Example
                     Index = i,
                     Title = title,
                     Details = string.Join("\n", lines),
-                    Preview = thumb
+                    Preview = thumb,
+                    PreviewsByKey = previews,
+                    DetailsByKey = detailsByKey
                 });
             }
 
-            return items;
+            return (items, displayChoices, preferredKey);
+        }
+
+        private static string ResolveRoundPickDisplayPort(
+            IReadOnlyDictionary<string, string> paramBag,
+            IReadOnlyList<(string InputPort, string OutputPort)> listPortMaps,
+            IReadOnlyDictionary<string, string> labels)
+        {
+            string raw = (paramBag.GetValueOrDefault("roundPickDisplay", "") ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(raw)
+                || raw.Equals("(自动)", StringComparison.OrdinalIgnoreCase)
+                || raw.Equals("自动", StringComparison.OrdinalIgnoreCase)
+                || raw.Equals("auto", StringComparison.OrdinalIgnoreCase))
+                return "";
+            if (raw.EndsWith("List", StringComparison.OrdinalIgnoreCase) && raw.Length > 4)
+                raw = raw[..^4].Trim();
+
+            foreach (var (inPort, outPort) in listPortMaps)
+            {
+                if (outPort.Equals(raw, StringComparison.OrdinalIgnoreCase)
+                    || inPort.Equals(raw, StringComparison.OrdinalIgnoreCase))
+                    return outPort;
+                if (labels.TryGetValue(outPort, out var label)
+                    && label.Equals(raw, StringComparison.OrdinalIgnoreCase))
+                    return outPort;
+            }
+
+            return raw;
         }
 
         private Dictionary<string, string> ResolveFlowLoopPickFieldLabels(
@@ -12574,6 +12683,13 @@ namespace CalibOperatorCLI_Example
                     {
                         var offsetsByBar = WorldTrajectoryOffset.ParseOffsetByBar(
                             node.Params.GetValueOrDefault("offsetByBar", "") ?? "");
+                        double tailDist = double.TryParse(
+                            node.Params.GetValueOrDefault("tailDist", "0")?.Trim(),
+                            NumberStyles.Float,
+                            CultureInfo.InvariantCulture,
+                            out var tailVal)
+                            ? Math.Max(0, tailVal)
+                            : 0;
                         int? roundBarId = TryReadOptionalInt(inputs, "Index")
                                           ?? TryReadOptionalInt(inputs, "BarId");
                         int[]? barIn = TryReadBarIdsInput(inputs);
@@ -12587,18 +12703,21 @@ namespace CalibOperatorCLI_Example
                                 throw new InvalidOperationException(
                                     $"世界轨迹偏置: BarIds 长度 {barIn.Length} 与 Points3D {p3Off.Length} 不一致。");
                             var applied3 = WorldTrajectoryOffset.Apply(xyOff, barIn, offsetsByBar, roundBarId);
-                            var out3 = new CalibPoint3D[applied3.Points.Length];
-                            for (int i = 0; i < applied3.Points.Length; i++)
+                            var tailed3 = WorldTrajectoryOffset.ApplyTailDistance(applied3.Points, applied3.BarIds, tailDist);
+                            var out3 = new CalibPoint3D[tailed3.Length];
+                            for (int i = 0; i < tailed3.Length; i++)
                             {
                                 int zAt = Math.Min(i, p3Off.Length - 1);
-                                out3[i] = new CalibPoint3D(applied3.Points[i].X, applied3.Points[i].Y, p3Off[zAt].Z);
+                                out3[i] = new CalibPoint3D(tailed3[i].X, tailed3[i].Y, p3Off[zAt].Z);
                             }
 
                             node.Outputs["Out3D"] = out3;
-                            node.Outputs["Out"] = applied3.Points;
+                            node.Outputs["Out"] = tailed3;
                             node.Outputs["OutBarIds"] = applied3.BarIds;
                             node.Outputs["BarIds"] = applied3.BarIds;
-                            node.ResultSummary = applied3.Summary;
+                            node.ResultSummary = tailDist > 1e-12
+                                ? applied3.Summary + $"；收尾 {tailDist.ToString("G4", CultureInfo.InvariantCulture)} mm"
+                                : applied3.Summary;
                             break;
                         }
 
@@ -12618,10 +12737,13 @@ namespace CalibOperatorCLI_Example
                             throw new InvalidOperationException(
                                 $"世界轨迹偏置: BarIds 长度 {barIn.Length} 与 In {worldIn.Length} 不一致。");
                         var applied = WorldTrajectoryOffset.Apply(worldIn, barIn, offsetsByBar, roundBarId);
-                        node.Outputs["Out"] = applied.Points;
+                        var tailed = WorldTrajectoryOffset.ApplyTailDistance(applied.Points, applied.BarIds, tailDist);
+                        node.Outputs["Out"] = tailed;
                         node.Outputs["OutBarIds"] = applied.BarIds;
                         node.Outputs["BarIds"] = applied.BarIds;
-                        node.ResultSummary = applied.Summary;
+                        node.ResultSummary = tailDist > 1e-12
+                            ? applied.Summary + $"；收尾 {tailDist.ToString("G4", CultureInfo.InvariantCulture)} mm"
+                            : applied.Summary;
                         break;
                     }
 
@@ -14734,6 +14856,7 @@ namespace CalibOperatorCLI_Example
                     {
 #if HALCON_ENABLED
                         var batch = BuildCoarseShapeMaskBatchForNode(node, inputs);
+                        LogCoarseMaskBatchSummary(batch);
                         if (batch.Count == 0)
                             throw new InvalidOperationException("HALCON 粗形状Mask: 无粗候选");
 
@@ -14765,9 +14888,10 @@ namespace CalibOperatorCLI_Example
                         if (inputs["Mask"] is not CalibImage maskImg)
                             throw new InvalidOperationException("HALCON Mask域内图: 缺少单张 Mask");
 
-                        CalibImage domainOut = HalconFlowBridge.ReduceDomainByMask(srcImg, maskImg);
+                        HalconFlowBridge.ReduceDomainByMask(srcImg, maskImg, out CalibImage domainOut, out CalibImage maskCrop);
                         node.Outputs["Out"] = domainOut;
-                        node.ResultSummary = $"reduce_domain 域内图 {srcImg.Width}×{srcImg.Height}";
+                        node.Outputs["MaskCrop"] = maskCrop;
+                        node.ResultSummary = $"reduce_domain {domainOut.Width}×{domainOut.Height}；Mask区域 {maskCrop.Width}×{maskCrop.Height}";
                         break;
 #else
                         throw new InvalidOperationException("HALCON Mask域内图: 需要 HALCON 支持编译");
@@ -15245,6 +15369,8 @@ namespace CalibOperatorCLI_Example
                         if (wantLogUv && !HalconShapeMatchGridDiagnostics.IsEnabled)
                             HalconShapeMatchGridDiagnostics.Enable(mirrorConsole: MirrorErrorsToStderr, sessionName: diagTagUv);
 
+                        bool discardUnassignedUv = TryParseBoolConfig(
+                            node.Params.GetValueOrDefault("discardUnassigned", "true"), true);
                         var pickUv = HalconShapeMatchLatticePick.PickUvGridAfterBootstrap(
                             rows, cols, anglesUv, scoresUv,
                             gridRowsUv, gridColsUv, latticeHintDeg, bootIdx,
@@ -15253,7 +15379,8 @@ namespace CalibOperatorCLI_Example
                             ResolveLatticeOrigin(node),
                             ResolveLatticeWeldOrder(node),
                             ResolveLatticeWeldInterval(node),
-                            ResolveLatticeWeldIntervalReverse(node));
+                            ResolveLatticeWeldIntervalReverse(node),
+                            discardUnassignedUv);
 
                         node.Outputs["Row"] = pickUv.Rows;
                         node.Outputs["Column"] = pickUv.Cols;
@@ -15278,8 +15405,9 @@ namespace CalibOperatorCLI_Example
                             ? " 详见.grid-filter.log" : "";
                         string deltaHint = !string.IsNullOrEmpty(pickUv.TwoColumnDeltaSummary)
                             ? $" {pickUv.TwoColumnDeltaSummary}" : "";
+                        string keepHintUv = discardUnassignedUv ? "u/v 落格" : "u/v 落格+未入格补齐";
                         node.ResultSummary =
-                            $"{pickUv.InputCount} 点 → {pickUv.KeptCount}/{targetUv} (u/v 落格, θ≈{pickUv.LatticeAngleDeg:F1}°){deltaHint}{logHintUv}";
+                            $"{pickUv.InputCount} 点 → {pickUv.KeptCount}/{targetUv} ({keepHintUv}, θ≈{pickUv.LatticeAngleDeg:F1}°){deltaHint}{logHintUv}";
                         break;
                     }
 
@@ -15309,6 +15437,8 @@ namespace CalibOperatorCLI_Example
                         if (wantLogRs && !HalconShapeMatchGridDiagnostics.IsEnabled)
                             HalconShapeMatchGridDiagnostics.Enable(mirrorConsole: MirrorErrorsToStderr, sessionName: diagTagRs);
 
+                        bool discardUnassignedRs = TryParseBoolConfig(
+                            node.Params.GetValueOrDefault("discardUnassigned", "true"), true);
                         var pickRs = HalconShapeMatchLatticePick.PickRansac(
                             rows, cols, anglesRs, scoresRs,
                             gridRowsRs, gridColsRs,
@@ -15318,7 +15448,8 @@ namespace CalibOperatorCLI_Example
                             ResolveLatticeOrigin(node),
                             ResolveLatticeWeldOrder(node),
                             ResolveLatticeWeldInterval(node),
-                            ResolveLatticeWeldIntervalReverse(node));
+                            ResolveLatticeWeldIntervalReverse(node),
+                            discardUnassignedRs);
 
                         node.Outputs["Row"] = pickRs.Rows;
                         node.Outputs["Column"] = pickRs.Cols;
@@ -16226,6 +16357,26 @@ namespace CalibOperatorCLI_Example
                         FontSize = 11
                     };
                 }
+                else if (param.Name == "roundPickDisplay" && node.Def.TypeId == "flow_loop")
+                {
+                    const string defaultItemPorts = "In,In2,In3,In4,CoarseRow,CoarseColumn,CoarseAngle,CoarseScale,CoarseScore";
+                    var names = ParseFlowLoopItemPortNames(node.Params.GetValueOrDefault("itemPorts", defaultItemPorts));
+                    var options = new List<string> { "(自动)" };
+                    foreach (string n in names)
+                        options.Add(n);
+                    string cur = string.IsNullOrWhiteSpace(currentValue) ? "(自动)" : currentValue.Trim();
+                    if (!options.Exists(o => string.Equals(o, cur, StringComparison.OrdinalIgnoreCase)))
+                        options.Insert(1, cur);
+                    string selected = options.First(o => string.Equals(o, cur, StringComparison.OrdinalIgnoreCase));
+                    input = new ComboBox
+                    {
+                        MinWidth = inputFieldWidth,
+                        Width = inputFieldWidth,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        ItemsSource = options,
+                        SelectedItem = selected
+                    };
+                }
                 else if (param.Name == "stepValues" && node.Def.TypeId == "flow_loop")
                 {
                     input = new TextBox
@@ -16421,6 +16572,11 @@ namespace CalibOperatorCLI_Example
                         TextBox tb => tb.Text,
                         _ => paramDef.DefaultValue
                     };
+                    if (paramDef.Name == "roundPickDisplay"
+                        && (string.Equals(value, "(自动)", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(value, "自动", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(value, "auto", StringComparison.OrdinalIgnoreCase)))
+                        value = "";
                     if (IsFlowRelativePathParam(paramDef.Name)
                         && !string.IsNullOrWhiteSpace(value)
                         && System.IO.Path.IsPathRooted(value.Trim()))

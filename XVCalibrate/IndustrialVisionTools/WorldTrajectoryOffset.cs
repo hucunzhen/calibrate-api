@@ -103,6 +103,59 @@ namespace CalibOperatorCLI_Example
         }
 
         /// <summary>
+        /// 把每条焊道最后一条线段改成 <paramref name="tailDistMm"/>（从倒数第二点沿原末段方向量出）。
+        /// ≤0 时原样返回。末段退化时沿该条上一段非零方向。
+        /// </summary>
+        public static Point2D[] ApplyTailDistance(Point2D[] points, int[]? barIds, double tailDistMm)
+        {
+            if (points == null || points.Length < 2 || tailDistMm <= 1e-12)
+                return points ?? Array.Empty<Point2D>();
+
+            int[] ids = barIds != null && barIds.Length == points.Length
+                ? barIds
+                : CreateUniformBarIds(points.Length, 0);
+
+            var outPts = (Point2D[])points.Clone();
+            int start = 0;
+            while (start < outPts.Length)
+            {
+                int end = start + 1;
+                while (end < outPts.Length && ids[end] == ids[start])
+                    end++;
+                SetLastSegmentLength(outPts, start, end - 1, tailDistMm);
+                start = end;
+            }
+
+            return outPts;
+        }
+
+        private static void SetLastSegmentLength(Point2D[] pts, int runStart, int runEnd, double dist)
+        {
+            if (runEnd <= runStart)
+                return;
+
+            double dx = 0;
+            double dy = 0;
+            double len = 0;
+            for (int i = runEnd; i > runStart; i--)
+            {
+                dx = pts[i].X - pts[i - 1].X;
+                dy = pts[i].Y - pts[i - 1].Y;
+                len = Math.Sqrt(dx * dx + dy * dy);
+                if (len >= 1e-9)
+                    break;
+            }
+
+            if (len < 1e-9)
+                return;
+
+            var anchor = pts[runEnd - 1];
+            pts[runEnd] = new Point2D(
+                anchor.X + dx / len * dist,
+                anchor.Y + dy / len * dist);
+        }
+
+        /// <summary>
         /// 解析「条号:ΔX,ΔY」。分隔：换行或分号。支持范围 0-9:0,0.3。# 为注释。
         /// </summary>
         public static Dictionary<int, (double Dx, double Dy)> ParseOffsetByBar(string? raw)

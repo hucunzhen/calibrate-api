@@ -2433,6 +2433,39 @@ namespace CalibOperatorCLI_Example
             return list;
         }
 
+        /// <summary>
+        /// 落格只占每格一个点；未入格的粗匹配接到末尾，使输出条数与粗匹配一致，供后续循环选轮。
+        /// </summary>
+        private static void AppendUnassignedInputMatches(
+            List<int> kept,
+            int inputCount,
+            double[]? scores,
+            string? tag)
+        {
+            if (kept == null || inputCount <= 0)
+                return;
+            var seen = new HashSet<int>(kept);
+            var extra = new List<int>();
+            for (int i = 0; i < inputCount; i++)
+            {
+                if (seen.Add(i))
+                    extra.Add(i);
+            }
+
+            if (extra.Count == 0)
+                return;
+
+            extra.Sort((a, b) =>
+            {
+                double sa = scores != null && a < scores.Length ? scores[a] : 0;
+                double sb = scores != null && b < scores.Length ? scores[b] : 0;
+                return sb.CompareTo(sa);
+            });
+            kept.AddRange(extra);
+            DiagLattice(tag,
+                $"补入未入格粗匹配 {extra.Count} 个（按分），输出 {kept.Count}/{inputCount}（与粗匹配条数一致）");
+        }
+
         /// <summary>基础焊接序 + 间隔 N 遍（可选奇数遍反向）。</summary>
         private static List<int> CollectLatticeCellsForWeld(
             Dictionary<(int ir, int ic), int> cellBest,
@@ -5282,7 +5315,8 @@ namespace CalibOperatorCLI_Example
             LatticeOriginCorner originCorner = LatticeOriginCorner.TopLeft,
             LatticeWeldOrder weldOrder = LatticeWeldOrder.ColMajor,
             int weldInterval = 1,
-            bool weldIntervalReverse = true)
+            bool weldIntervalReverse = true,
+            bool discardUnassigned = true)
         {
             string tag = string.IsNullOrEmpty(diagnosticTag) ? "UvGridPick" : diagnosticTag;
             string? svgOut = !string.IsNullOrWhiteSpace(uvProjectionSvgPath)
@@ -5519,6 +5553,8 @@ namespace CalibOperatorCLI_Example
             var kept = CollectLatticeCellsForWeld(cellBest, effRows, effCols, weldOrder, weldInterval, weldIntervalReverse);
             DiagLattice(tag,
                 $"焊接顺序 {FormatLatticeWeldOrder(weldOrder)} 间隔={Math.Max(1, weldInterval)} 反向={(weldIntervalReverse ? "开" : "关")}，输出 {kept.Count}/{targetCells} 格");
+            if (!discardUnassigned)
+                AppendUnassignedInputMatches(kept, n, scores, tag);
 
             LogUvGridPickRejectionReasons(tag, r, c, scores, u, v, n, lattice, snapU, snapV, perCell, cellBest, kept,
                 col0Img, col1Img, imgMargin, useImageColHeuristics);

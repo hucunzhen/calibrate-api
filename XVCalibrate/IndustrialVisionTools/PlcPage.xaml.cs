@@ -96,7 +96,7 @@ namespace CalibOperatorCLI_Example
             string posY = TryReg("PositionY", "HD2200");
             string posZ = TryReg("PositionZ", "HD2000");
             string posHint = $"位置读取（plc_config）\nX: {posX}\nY: {posY}\nZ: {posZ}\nXY速度: {TryReg("SpeedXY", "---")}";
-            ChkAutoRead.ToolTip = posHint + "\n自动刷新：XYZ、GVAR 3D，以及手动/标定/运行、轴使能与点动、激光/红光/吹气、焊接完成等可读状态";
+            ChkAutoRead.ToolTip = posHint + "\n自动刷新：XYZ、GVAR 3D，以及手动/标定/运行/急停、轴使能与点动、激光/红光/吹气、当前功率、流程步、焊接完成等可读状态";
             BtnReadOnce.ToolTip = posHint;
             TxtPosX.ToolTip = $"X 位置\n寄存器: {posX}";
             TxtPosY.ToolTip = $"Y 位置\n寄存器: {posY}";
@@ -141,10 +141,12 @@ namespace CalibOperatorCLI_Example
             ApplyRegToolTip(TxtZNegLimit, "ZNegLimit", "Z 负限位");
 
             ApplyRegToolTip(TxtLaserPower, "LaserPower", "激光功率");
+            ApplyRegToolTip(BtnWriteLaserPower, "LaserPower", "写入激光功率");
+            ApplyNamedParamTooltips();
             ApplyRegToolTip(TxtStopSafeX, "StopSafePosX", "停机安全位 X");
             ApplyRegToolTip(TxtStopSafeY, "StopSafePosY", "停机安全位 Y");
             ApplyRegToolTip(TxtStopSafeZ, "StopSafePosZ", "停机安全位 Z");
-            ApplyRegToolTip(BtnReadStopSafePos, "StopSafePosX", "读取停机安全位 XYZ");
+            ApplyRegToolTip(BtnWriteStopSafePos, "StopSafePosX", "写入停机安全位 XYZ");
             ApplyRegToolTip(BtnManualStopSafePos, "ManualStopSafePos", "脉冲触发：手动运动到停机安全位");
             ApplyRegToolTip(BtnManualPhotoPos, "ManualPhotoPos", "脉冲触发：手动运动到拍照位");
             ApplyRegToolTip(BtnManualLaserWeldPos, "ManualLaserWeldPos", "脉冲触发：手动运动到激光焊接位");
@@ -179,10 +181,69 @@ namespace CalibOperatorCLI_Example
             ApplyRegToolTip(BtnBlowToggle, "BlowEnable", "点击切换吹气使能（读当前位后取反）");
             ApplyRegToolTip(BtnCameraCaptureStart, "CameraCaptureStart", "相机拍照脉冲");
 
-            ApplyRegToolTip(BtnReadWeldDone, "WeldDoneFlag", "读取焊接完成 (PLC→上位机)");
-            ApplyRegToolTip(BtnClearWeldDone, "WeldDoneFlag", "清零，下一轮前须执行");
-            ApplyRegToolTip(BtnSetWeldDoneHost, "WeldDoneHostFlag", "轨迹下发完成置 1");
-            ApplyRegToolTip(BtnClearWeldDoneHost, "WeldDoneHostFlag", "清零");
+            ApplyRegToolTip(LblWeldDoneFlag, "WeldDoneFlag", "发上位机焊接完成（只读）");
+            ApplyRegToolTip(TxtWeldDoneStatus, "WeldDoneFlag", "发上位机焊接完成（只读）");
+            ApplyRegToolTip(LblWeldDoneHostFlag, "WeldDoneHostFlag", "收上位机焊接完成（只读）");
+            ApplyRegToolTip(TxtWeldDoneHostStatus, "WeldDoneHostFlag", "收上位机焊接完成（只读）");
+            ApplyRegToolTip(BtnEstop, "Estop", "单击置位急停，再次单击复位");
+            ApplyRegToolTip(TxtEstopStatus, "Estop", "急停状态");
+        }
+
+        private static readonly (string Key, string Label)[] LaserProcessFloatParams =
+        {
+            ("LaserRampDown", "激光收光自减"),
+            ("LaserActualPower", "激光当前功率"),
+            ("LaserPreGasTime", "激光前气时间"),
+            ("LaserPostGasTime", "激光后气时间"),
+            ("LaserInitialPower", "激光初始功率"),
+            ("LaserPowerRampUp", "激光功率自加"),
+        };
+
+        private static readonly (string Key, string Box, string Label)[] ProcessIoIdleFloats =
+        {
+            ("LaserPower", "TxtLaserPower", "激光功率"),
+            ("LaserRampDown", "TxtLaserRampDown", "激光收光自减"),
+            ("LaserActualPower", "TxtLaserActualPower", "激光当前功率"),
+            ("LaserPreGasTime", "TxtLaserPreGasTime", "激光前气时间"),
+            ("LaserPostGasTime", "TxtLaserPostGasTime", "激光后气时间"),
+            ("LaserInitialPower", "TxtLaserInitialPower", "激光初始功率"),
+            ("LaserPowerRampUp", "TxtLaserPowerRampUp", "激光功率自加"),
+            ("StopSafePosX", "TxtStopSafeX", "停机安全位X"),
+            ("StopSafePosY", "TxtStopSafeY", "停机安全位Y"),
+            ("StopSafePosZ", "TxtStopSafeZ", "停机安全位Z"),
+            ("PhotoPosX", "TxtPhotoPosX", "拍照位X"),
+            ("PhotoPosY", "TxtPhotoPosY", "拍照位Y"),
+            ("PhotoPosZ", "TxtPhotoPosZ", "拍照位Z"),
+            ("LaserRelPosX", "TxtLaserRelX", "激光焊接位X"),
+            ("LaserRelPosY", "TxtLaserRelY", "激光焊接位Y"),
+            ("LaserRelPosZ", "TxtLaserRelZ", "激光焊接位Z"),
+            ("WeldSpeed", "TxtWeldSpeed", "焊接速度"),
+            ("ReturnSafeSpeed", "TxtReturnSafeSpeed", "返回安全点速度"),
+            ("PhotoApproachSpeed", "TxtPhotoApproachSpeed", "到拍照点速度"),
+            ("FastOffsetSpeed", "TxtFastOffsetSpeed", "快速偏移速度"),
+        };
+
+        private static readonly (string Key, string Label)[] PlcProcessStepParams =
+        {
+            ("GraphProcess", "图形加工流程"),
+            ("LaserOffProcessStep", "收光流程步"),
+            ("AutoProcess", "自动流程"),
+            ("LaserOnProcessStep", "开激光流程步"),
+            ("CalibProcess", "标定流程"),
+        };
+
+        private void ApplyNamedParamTooltips()
+        {
+            foreach (var (key, label) in LaserProcessFloatParams)
+            {
+                ApplyRegToolTip(FindName("Lbl" + key) as FrameworkElement, key, label);
+                ApplyRegToolTip(FindName("Txt" + key) as FrameworkElement, key, label);
+            }
+            foreach (var (key, label) in PlcProcessStepParams)
+            {
+                ApplyRegToolTip(FindName("Lbl" + key) as FrameworkElement, key, label);
+                ApplyRegToolTip(FindName("Txt" + key) as FrameworkElement, key, label);
+            }
         }
 
         private void ApplyEnableButton(Button btn, string regKey)
@@ -210,6 +271,15 @@ namespace CalibOperatorCLI_Example
         {
             try { return Reg(key); }
             catch { return fallback; }
+        }
+
+        private bool TryGetReg(string key, out string addr)
+        {
+            addr = "";
+            if (_config?.Registers == null || !_config.Registers.TryGetValue(key, out string? v) || string.IsNullOrWhiteSpace(v))
+                return false;
+            addr = v;
+            return true;
         }
 
         private void ApplyBitButton(Button btn, string actionKey)
@@ -304,7 +374,7 @@ namespace CalibOperatorCLI_Example
             ReadGvarListFor3D(silent: true);
         }
 
-        /// <summary>刷新界面上能从 PLC 读回来的状态灯；不写速度/限位/点位等输入框，避免冲掉正在编辑的值。</summary>
+        /// <summary>刷新可读状态；工艺参数框仅在未编辑时回填，避免冲掉正在输入的值。</summary>
         private void RefreshReadablePlcStatuses()
         {
             if (!_plcConnected)
@@ -326,6 +396,9 @@ namespace CalibOperatorCLI_Example
                 UpdateBitEnableStatus(TxtRedLightEnableStatus, "RedLightEnable");
                 UpdateBitEnableStatus(TxtBlowEnableStatus, "BlowEnable");
                 UpdateWeldFlagStatuses();
+                UpdateEstopStatus();
+                RefreshProcessIoFloatsIfIdle();
+                RefreshProcessStepsIfIdle();
             }
             catch (Exception ex)
             {
@@ -405,16 +478,70 @@ namespace CalibOperatorCLI_Example
             if (regs.TryGetValue("WeldDoneHostFlag", out string? hostAddr) && !string.IsNullOrWhiteSpace(hostAddr))
             {
                 bool notified = ReadBit(hostAddr, 0, silent: true);
-                Dispatcher.Invoke(() =>
-                {
-                    TxtWeldDoneHostStatus.Text = notified ? "已通知(1)" : "未通知(0)";
-                    TxtWeldDoneHostStatus.Foreground = new SolidColorBrush(notified ? Colors.Green : Colors.Gray);
-                });
+                Dispatcher.Invoke(() => UpdateWeldDoneHostStatusDisplay(notified));
             }
         }
 
+        private void UpdateEstopStatus()
+        {
+            if (!TryGetReg("Estop", out string addr))
+                return;
+
+            bool on;
+            try
+            {
+                on = ReadCoil(addr);
+            }
+            catch
+            {
+                return;
+            }
+
+            Dispatcher.Invoke(() => ApplyEstopStatus(on));
+        }
+
+        private void RefreshProcessIoFloatsIfIdle()
+        {
+            foreach (var (key, box, label) in ProcessIoIdleFloats)
+            {
+                if (!TryGetReg(key, out string addr))
+                    continue;
+                double v = ReadPlcFloat(addr, label, silent: true);
+                if (double.IsNaN(v))
+                    continue;
+                string capturedBox = box;
+                string text = v.ToString("F3");
+                Dispatcher.Invoke(() => SetTextBoxIfIdle(capturedBox, text));
+            }
+        }
+
+        private void RefreshProcessStepsIfIdle()
+        {
+            foreach (var (key, label) in PlcProcessStepParams)
+            {
+                if (!TryGetReg(key, out string addr))
+                    continue;
+                if (!TryReadPlcUInt16(addr, label, out ushort value, silent: true))
+                    continue;
+                string boxName = "Txt" + key;
+                ushort captured = value;
+                Dispatcher.Invoke(() => SetTextBoxIfIdle(boxName, captured.ToString()));
+            }
+        }
+
+        private void SetTextBoxIfIdle(string textBoxName, string text)
+        {
+            if (FindName(textBoxName) is not TextBox txt)
+                return;
+            if (txt.IsKeyboardFocusWithin)
+                return;
+            if (txt.Text == text)
+                return;
+            txt.Text = text;
+        }
+
         /// <summary>读取 PLC 浮点：HD→Modbus；D→XinJETcpNet 信捷地址。</summary>
-        private double ReadPlcFloat(string xinjeAddr, string label)
+        private double ReadPlcFloat(string xinjeAddr, string label, bool silent = false)
         {
             if (!_plcConnected) return double.NaN;
 
@@ -424,13 +551,15 @@ namespace CalibOperatorCLI_Example
                 int modbus = HdAddressToModbus(xinjeAddr);
                 if (modbus < 0)
                 {
-                    Log($"[PLC] 无效 HD 地址: {xinjeAddr}");
+                    if (!silent)
+                        Log($"[PLC] 无效 HD 地址: {xinjeAddr}");
                     return double.NaN;
                 }
                 var result = _plcHd.ReadFloat(modbus.ToString());
                 if (result.IsSuccess)
                     return (double)result.Content;
-                Log($"[PLC] {label}({xinjeAddr}→Modbus {modbus}) 读取失败: {result.Message}");
+                if (!silent)
+                    Log($"[PLC] {label}({xinjeAddr}→Modbus {modbus}) 读取失败: {result.Message}");
                 return double.NaN;
             }
 
@@ -439,7 +568,8 @@ namespace CalibOperatorCLI_Example
             var dResult = _plcD.ReadFloat(dAddr);
             if (dResult.IsSuccess)
                 return (double)dResult.Content;
-            Log($"[PLC] {label}({dAddr}) 读取失败: {dResult.Message}");
+            if (!silent)
+                Log($"[PLC] {label}({dAddr}) 读取失败: {dResult.Message}");
             return double.NaN;
         }
 
@@ -925,6 +1055,26 @@ namespace CalibOperatorCLI_Example
             UpdateRunStatus();
         }
 
+        private void BtnEstop_Click(object sender, RoutedEventArgs e)
+        {
+            if (!CheckPlcConnected()) return;
+            if (!TryGetReg("Estop", out string addr))
+            {
+                Log("[PLC] 未配置寄存器: Estop");
+                return;
+            }
+            bool next = !ReadCoil(addr);
+            WriteCoil(addr, next);
+            ApplyEstopStatus(next);
+            Log($"[PLC] 急停 {addr}={(next ? "ON" : "OFF")}");
+        }
+
+        private void ApplyEstopStatus(bool on)
+        {
+            TxtEstopStatus.Text = on ? "急停" : "正常";
+            TxtEstopStatus.Foreground = new SolidColorBrush(on ? Colors.Red : Colors.Gray);
+        }
+
         private void UpdateRunStatus()
         {
             if (!_plcConnected) return;
@@ -1055,16 +1205,52 @@ namespace CalibOperatorCLI_Example
         private void BtnWriteZPosLimit_Click(object sender, RoutedEventArgs e) => WritePlcFloat(Reg("ZPosLimit"), "TxtZPosLimit", "Z正限位");
         private void BtnWriteZNegLimit_Click(object sender, RoutedEventArgs e) => WritePlcFloat(Reg("ZNegLimit"), "TxtZNegLimit", "Z负限位");
 
-        private void BtnReadLaserPower_Click(object sender, RoutedEventArgs e)
-        {
-            if (!CheckPlcConnected()) return;
-            double v = ReadPlcFloat(Reg("LaserPower"), "激光功率");
-            TxtLaserPower.Text = double.IsNaN(v) ? "ERR" : v.ToString("F3");
-            Log($"[PLC] 激光功率 {Reg("LaserPower")}={TxtLaserPower.Text}");
-        }
-
         private void BtnWriteLaserPower_Click(object sender, RoutedEventArgs e) =>
             WritePlcFloat(Reg("LaserPower"), "TxtLaserPower", "激光功率");
+
+        private static string NamedParamLabel(string key, (string Key, string Label)[] table)
+        {
+            foreach (var (k, label) in table)
+            {
+                if (k == key)
+                    return label;
+            }
+            return key;
+        }
+
+        private void BtnWriteConfigFloat_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement fe || fe.Tag is not string key)
+                return;
+            WriteNamedPlcFloat(key, NamedParamLabel(key, LaserProcessFloatParams));
+        }
+
+        private void WriteNamedPlcFloat(string key, string label)
+        {
+            if (!TryGetReg(key, out string addr))
+            {
+                Log($"[PLC] 未配置寄存器: {key}");
+                return;
+            }
+            WritePlcFloat(addr, "Txt" + key, label);
+        }
+
+        private bool TryReadPlcUInt16(string xinjeAddr, string label, out ushort value, bool silent = false)
+        {
+            value = 0;
+            if (_plcD == null || !_plcConnected)
+                return false;
+            string word = PlcXinjeHelper.NormalizeWordAddress(xinjeAddr, out _);
+            var result = _plcD.ReadUInt16(word);
+            if (!result.IsSuccess)
+            {
+                if (!silent)
+                    Log($"[PLC] {label}({word}) 读取失败: {result.Message}");
+                return false;
+            }
+            value = result.Content;
+            return true;
+        }
 
         private static void SetEnableStatusDisplay(TextBlock status, bool on)
         {
@@ -1169,42 +1355,10 @@ namespace CalibOperatorCLI_Example
             TxtWeldDoneStatus.Foreground = new SolidColorBrush(done ? Colors.Green : Colors.Gray);
         }
 
-        private void BtnReadWeldDone_Click(object sender, RoutedEventArgs e)
+        private void UpdateWeldDoneHostStatusDisplay(bool notified)
         {
-            if (!CheckPlcConnected()) return;
-            string addr = Reg("WeldDoneFlag");
-            bool done = ReadBit(addr, 0);
-            UpdateWeldDoneStatusDisplay(done);
-            Log($"[PLC] 焊接完成标志 {addr} = {(done ? "ON(1)" : "OFF(0)")}");
-        }
-
-        private void BtnClearWeldDone_Click(object sender, RoutedEventArgs e)
-        {
-            if (!CheckPlcConnected()) return;
-            string addr = Reg("WeldDoneFlag");
-            WriteBit(addr, 0, false);
-            UpdateWeldDoneStatusDisplay(false);
-            Log($"[PLC] 焊接完成标志 {addr} 已清零");
-        }
-
-        private void BtnSetWeldDoneHost_Click(object sender, RoutedEventArgs e)
-        {
-            if (!CheckPlcConnected()) return;
-            string addr = Reg("WeldDoneHostFlag");
-            WriteBit(addr, 0, true);
-            TxtWeldDoneHostStatus.Text = "已通知(1)";
-            TxtWeldDoneHostStatus.Foreground = new SolidColorBrush(Colors.Green);
-            Log($"[PLC] 轨迹下发完成 {addr} = 1 (上位机→PLC)");
-        }
-
-        private void BtnClearWeldDoneHost_Click(object sender, RoutedEventArgs e)
-        {
-            if (!CheckPlcConnected()) return;
-            string addr = Reg("WeldDoneHostFlag");
-            WriteBit(addr, 0, false);
-            TxtWeldDoneHostStatus.Text = "未通知(0)";
-            TxtWeldDoneHostStatus.Foreground = new SolidColorBrush(Colors.Gray);
-            Log($"[PLC] 轨迹下发完成 {addr} 已清零");
+            TxtWeldDoneHostStatus.Text = notified ? "已通知(1)" : "未通知(0)";
+            TxtWeldDoneHostStatus.Foreground = new SolidColorBrush(notified ? Colors.Green : Colors.Gray);
         }
 
         private void BtnManualStopSafePos_Click(object sender, RoutedEventArgs e)
@@ -1216,18 +1370,6 @@ namespace CalibOperatorCLI_Example
         private void BtnManualLaserWeldPos_Click(object sender, RoutedEventArgs e)
             => PulseCoil("ManualLaserWeldPos", "手动→激光焊接位");
 
-        private void BtnReadStopSafePos_Click(object sender, RoutedEventArgs e)
-        {
-            if (!CheckPlcConnected()) return;
-            double x = ReadPlcFloat(Reg("StopSafePosX"), "停机安全位X");
-            double y = ReadPlcFloat(Reg("StopSafePosY"), "停机安全位Y");
-            double z = ReadPlcFloat(Reg("StopSafePosZ"), "停机安全位Z");
-            TxtStopSafeX.Text = double.IsNaN(x) ? "ERR" : x.ToString("F3");
-            TxtStopSafeY.Text = double.IsNaN(y) ? "ERR" : y.ToString("F3");
-            TxtStopSafeZ.Text = double.IsNaN(z) ? "ERR" : z.ToString("F3");
-            Log($"[PLC] 停机安全位 X={TxtStopSafeX.Text} Y={TxtStopSafeY.Text} Z={TxtStopSafeZ.Text}");
-        }
-
         private void BtnWriteStopSafePos_Click(object sender, RoutedEventArgs e)
         {
             if (!CheckPlcConnected()) return;
@@ -1238,31 +1380,13 @@ namespace CalibOperatorCLI_Example
                 Log($"[PLC] 停机安全位已写入 X={TxtStopSafeX.Text} Y={TxtStopSafeY.Text} Z={TxtStopSafeZ.Text}");
         }
 
-        private void BtnReadPhotoPos_Click(object sender, RoutedEventArgs e) =>
-            ReadCoordTriple("PhotoPosX", "PhotoPosY", "PhotoPosZ", "拍照位",
-                TxtPhotoPosX, TxtPhotoPosY, TxtPhotoPosZ);
-
         private void BtnWritePhotoPos_Click(object sender, RoutedEventArgs e) =>
             WriteCoordTriple("PhotoPosX", "PhotoPosY", "PhotoPosZ", "拍照位",
                 "TxtPhotoPosX", "TxtPhotoPosY", "TxtPhotoPosZ");
 
-        private void BtnReadLaserRelPos_Click(object sender, RoutedEventArgs e) =>
-            ReadCoordTriple("LaserRelPosX", "LaserRelPosY", "LaserRelPosZ", "激光焊接位",
-                TxtLaserRelX, TxtLaserRelY, TxtLaserRelZ);
-
         private void BtnWriteLaserRelPos_Click(object sender, RoutedEventArgs e) =>
             WriteCoordTriple("LaserRelPosX", "LaserRelPosY", "LaserRelPosZ", "激光焊接位",
                 "TxtLaserRelX", "TxtLaserRelY", "TxtLaserRelZ");
-
-        private void BtnReadMotionSpeed_Click(object sender, RoutedEventArgs e)
-        {
-            if (!CheckPlcConnected()) return;
-            SetTextBoxFloat(TxtWeldSpeed, ReadPlcFloat(Reg("WeldSpeed"), "焊接速度"));
-            SetTextBoxFloat(TxtReturnSafeSpeed, ReadPlcFloat(Reg("ReturnSafeSpeed"), "返回安全点速度"));
-            SetTextBoxFloat(TxtPhotoApproachSpeed, ReadPlcFloat(Reg("PhotoApproachSpeed"), "到拍照点速度"));
-            SetTextBoxFloat(TxtFastOffsetSpeed, ReadPlcFloat(Reg("FastOffsetSpeed"), "快速偏移速度"));
-            Log($"[PLC] 速度 焊接={TxtWeldSpeed.Text} 返安全={TxtReturnSafeSpeed.Text} 到拍照={TxtPhotoApproachSpeed.Text} 快偏={TxtFastOffsetSpeed.Text}");
-        }
 
         private void BtnWriteMotionSpeed_Click(object sender, RoutedEventArgs e)
         {
@@ -1273,19 +1397,6 @@ namespace CalibOperatorCLI_Example
                 & WritePlcFloat(Reg("FastOffsetSpeed"), "TxtFastOffsetSpeed", "快速偏移速度");
             if (ok)
                 Log($"[PLC] 速度已写入 焊接={TxtWeldSpeed.Text} 返安全={TxtReturnSafeSpeed.Text} 到拍照={TxtPhotoApproachSpeed.Text} 快偏={TxtFastOffsetSpeed.Text}");
-        }
-
-        private static void SetTextBoxFloat(TextBox box, double v) =>
-            box.Text = double.IsNaN(v) ? "ERR" : v.ToString("F3");
-
-        private void ReadCoordTriple(string keyX, string keyY, string keyZ, string label,
-            TextBox txtX, TextBox txtY, TextBox txtZ)
-        {
-            if (!CheckPlcConnected()) return;
-            SetTextBoxFloat(txtX, ReadPlcFloat(Reg(keyX), label + "X"));
-            SetTextBoxFloat(txtY, ReadPlcFloat(Reg(keyY), label + "Y"));
-            SetTextBoxFloat(txtZ, ReadPlcFloat(Reg(keyZ), label + "Z"));
-            Log($"[PLC] {label} X={txtX.Text} Y={txtY.Text} Z={txtZ.Text}");
         }
 
         private void WriteCoordTriple(string keyX, string keyY, string keyZ, string label,

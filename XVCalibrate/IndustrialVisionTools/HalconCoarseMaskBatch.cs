@@ -24,6 +24,12 @@ namespace CalibOperatorCLI_Example
         public double[] CoarseScales { get; init; } = Array.Empty<double>();
         public double[]? CoarseScores { get; init; }
 
+        /// <summary>送入批构建的粗候选个数（压缩/回退前）。</summary>
+        public int InputCandidateCount { get; init; }
+
+        /// <summary>轮廓填充失败、改用位姿矩形回退的张数。这些轮仍保留，不从循环中丢掉。</summary>
+        public int FallbackMaskCount { get; init; }
+
         public int Count => Masks.Length;
     }
 }

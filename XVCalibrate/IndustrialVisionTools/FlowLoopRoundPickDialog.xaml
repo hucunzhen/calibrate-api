@@ -17,8 +17,12 @@
                    DockPanel.Dock="Top"
                    TextWrapping="Wrap"
                    Foreground="#CCCCCC"
-                   Margin="0,0,0,12"
-                   Text="每轮显示该轮列表数据。勾选要执行的 Index（从 0 起，与循环输出 Index / BarId 相同）。「完成循环」不跑这些轮次，直接进入循环后的节点。"/>
+                   Margin="0,0,0,8"
+                   Text="勾选后点「执行所选」跑这些轮，跑完会再次弹出，可重复勾选同一 Index。点「完成循环」才结束选轮，进入循环后的节点。"/>
+        <StackPanel x:Name="DisplayInputRow" DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,12">
+            <TextBlock Text="显示输入" VerticalAlignment="Center" Foreground="#CCCCCC" Margin="0,0,8,0"/>
+            <ComboBox x:Name="CmbDisplayInput" MinWidth="180" Height="26" VerticalAlignment="Center"/>
+        </StackPanel>
         <StackPanel DockPanel.Dock="Bottom" Margin="0,16,0,0">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Content="全选" MinWidth="64" Height="28" Margin="0,0,8,0" Padding="8,2" Click="SelectAll_Click"/>

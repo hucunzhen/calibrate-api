@@ -31,6 +31,7 @@
       "Params": {
         "loopEmit": "true",
         "candidateIndex": "9",
+        "discardFailedMask": "false",
         "maskErosionPx": "-3",
         "maskFillDilatePx": "0",
         "contourLevel": "1",
@@ -100,6 +101,7 @@
         "snapTolerancePx": "0",
         "uvProjectionSvg": "",
         "debugLog": "auto",
+        "discardUnassigned": "false",
         "enable": "true",
         "disable": "false"
       }
@@ -121,8 +123,8 @@
     {
       "Id": "64492d93-69ae-402b-a49c-1134423c4c72",
       "TypeId": "composite_bind_out",
-      "X": 1520,
-      "Y": 120,
+      "X": 1511,
+      "Y": 182,
       "Params": {
         "externalPort": "Out",
         "enable": "true",
@@ -132,8 +134,8 @@
     {
       "Id": "29a929b1-b38d-471e-a25e-76e761911009",
       "TypeId": "composite_bind_out",
-      "X": 1523,
-      "Y": 241,
+      "X": 1524,
+      "Y": 287,
       "Params": {
         "externalPort": "Out2",
         "enable": "true",
@@ -143,8 +145,8 @@
     {
       "Id": "75cc5ea1-ec28-4e3e-b433-13159a0d067b",
       "TypeId": "composite_bind_out",
-      "X": 1520,
-      "Y": 347,
+      "X": 1524,
+      "Y": 407,
       "Params": {
         "externalPort": "Out3",
         "enable": "true",
@@ -154,8 +156,8 @@
     {
       "Id": "4aa4eb0e-d9de-4222-ac66-c9916fb60886",
       "TypeId": "composite_bind_out",
-      "X": 1522,
-      "Y": 450,
+      "X": 1532,
+      "Y": 527,
       "Params": {
         "externalPort": "Out4",
         "enable": "true",
@@ -165,8 +167,8 @@
     {
       "Id": "ca72ec0f-33d2-4339-b8f0-e498b73b204e",
       "TypeId": "flow_sink",
-      "X": 1324,
-      "Y": 120,
+      "X": 1290,
+      "Y": 115,
       "Params": {
         "acceptNull": "false",
         "enable": "true",
@@ -248,6 +250,7 @@
       "Params": {
         "loopEmit": "false",
         "candidateIndex": "0",
+        "discardFailedMask": "true",
         "maskErosionPx": "0",
         "maskFillDilatePx": "0",
         "contourLevel": "1",
@@ -294,10 +297,32 @@
     {
       "Id": "c9119588-db25-421f-a1a7-dc8d5d6c069e",
       "TypeId": "composite_bind_out",
-      "X": 1528,
-      "Y": 555,
+      "X": 1524,
+      "Y": 641,
       "Params": {
         "externalPort": "Out5",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "68720f52-900e-4e56-b6e8-53d84512fd21",
+      "TypeId": "flow_sink",
+      "X": 1519,
+      "Y": 0,
+      "Params": {
+        "acceptNull": "false",
+        "enable": "true",
+        "disable": "false"
+      }
+    },
+    {
+      "Id": "4ae96400-e51e-4961-9a15-7b4c3008aa30",
+      "TypeId": "composite_bind_out",
+      "X": 1517,
+      "Y": 98,
+      "Params": {
+        "externalPort": "Out6",
         "enable": "true",
         "disable": "false"
       }
@@ -657,6 +682,18 @@
       "FromPort": "CoarseAngleOut",
       "ToNodeId": "b2000001-0001-4001-8001-000000000010",
       "ToPort": "CoarseAngle"
+    },
+    {
+      "FromNodeId": "e1000001-0001-4001-8001-000000000016",
+      "FromPort": "MaskCrop",
+      "ToNodeId": "68720f52-900e-4e56-b6e8-53d84512fd21",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "68720f52-900e-4e56-b6e8-53d84512fd21",
+      "FromPort": "List",
+      "ToNodeId": "4ae96400-e51e-4961-9a15-7b4c3008aa30",
+      "ToPort": "In"
     }
   ],
   "Meta": {

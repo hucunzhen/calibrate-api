@@ -67,7 +67,30 @@ namespace FlowSmokeTests
                 return 1;
             }
 
-            Console.WriteLine("OK world traj offset by BarId (loop Index=7 Y+1)");
+            var line = new[] { new Point2D(0, 0), new Point2D(10, 0), new Point2D(10, 4) };
+            var tailed = WorldTrajectoryOffset.ApplyTailDistance(line, null, 2);
+            double tailLen = Math.Sqrt(
+                (tailed[2].X - tailed[1].X) * (tailed[2].X - tailed[1].X)
+                + (tailed[2].Y - tailed[1].Y) * (tailed[2].Y - tailed[1].Y));
+            if (Math.Abs(tailLen - 2) > 1e-9 || Math.Abs(tailed[2].X - 10) > 1e-9 || Math.Abs(tailed[2].Y - 2) > 1e-9)
+            {
+                Console.Error.WriteLine($"FAIL: tailDist 2 got last=({tailed[2].X},{tailed[2].Y}) len={tailLen}");
+                return 1;
+            }
+
+            var twoBars = new[]
+            {
+                new Point2D(0, 0), new Point2D(5, 0),
+                new Point2D(0, 10), new Point2D(5, 10)
+            };
+            var twoTailed = WorldTrajectoryOffset.ApplyTailDistance(twoBars, new[] { 0, 0, 1, 1 }, 1);
+            if (Math.Abs(twoTailed[1].X - 1) > 1e-9 || Math.Abs(twoTailed[3].X - 1) > 1e-9)
+            {
+                Console.Error.WriteLine($"FAIL: per-bar tail {twoTailed[1].X},{twoTailed[3].X}");
+                return 1;
+            }
+
+            Console.WriteLine("OK world traj offset by BarId (loop Index=7 Y+1), tailDist last segment");
             return 0;
         }
     }

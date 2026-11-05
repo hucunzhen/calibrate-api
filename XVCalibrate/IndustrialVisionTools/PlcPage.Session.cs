@@ -9,6 +9,8 @@ namespace CalibOperatorCLI_Example
         {
             "TxtPlcIp", "TxtPlcPort", "TxtReadInterval", "ChkAutoRead",
             "TxtLaserPower",
+            "TxtLaserRampDown", "TxtLaserActualPower", "TxtLaserPreGasTime",
+            "TxtLaserPostGasTime", "TxtLaserInitialPower", "TxtLaserPowerRampUp",
             "TxtStopSafeX", "TxtStopSafeY", "TxtStopSafeZ",
             "TxtPhotoPosX", "TxtPhotoPosY", "TxtPhotoPosZ",
             "TxtLaserRelX", "TxtLaserRelY", "TxtLaserRelZ",

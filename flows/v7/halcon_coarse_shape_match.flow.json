@@ -31,6 +31,7 @@
       "Params": {
         "loopEmit": "true",
         "candidateIndex": "9",
+        "discardFailedMask": "false",
         "maskErosionPx": "-3",
         "maskFillDilatePx": "0",
         "contourLevel": "1",
@@ -100,6 +101,7 @@
         "snapTolerancePx": "0",
         "uvProjectionSvg": "",
         "debugLog": "auto",
+        "discardUnassigned": "false",
         "enable": "true",
         "disable": "false"
       }

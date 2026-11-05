@@ -2278,7 +2278,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "world_traj_offset",
                 DisplayName = "世界轨迹偏置",
-                Description = "在世界坐标(mm)下按条号整条平移焊道，不是沿法向外扩。循环每轮只有一条时，接循环 Index 作为本轮条号再查表；未接 Index 则用点列 BarIds。表中没有的条号不偏置。",
+                Description = "在世界坐标(mm)下按条号整条平移焊道，不是沿法向外扩。循环每轮只有一条时，接循环 Index 作为本轮条号再查表；未接 Index 则用点列 BarIds。表中没有的条号不偏置。收尾距离>0 时把每条最后一段改成该长度。",
                 Category = "输出",
                 Params =
                 {
@@ -2288,6 +2288,13 @@ namespace CalibOperatorCLI_Example
                         DisplayName = "按条号偏置",
                         DefaultValue = "",
                         Description = "条号:ΔX,ΔY，分号或换行分隔。例 0:0,0.3;1:0,-0.2。范围 0-9:0,0.3。世界 X+ 向右、Y+ 向上。循环时 Index=第几件（0 起）。未列出则不偏置。"
+                    },
+                    new OperatorParam
+                    {
+                        Name = "tailDist",
+                        DisplayName = "收尾距离",
+                        DefaultValue = "0",
+                        Description = "世界坐标(mm)。>0 时把每条焊道最后一条线段改成该长度：从倒数第二点沿原末段方向量出。0=不改。"
                     }
                 },
                 Ports =
@@ -2483,7 +2490,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "flow_loop",
                 DisplayName = "循环",
-                Description = "按次数或无限重复执行本算子下游连线上的全部算子（前置只执行一次）。支持多路 List 输入按轮展开（如 InList/CoarseRowList/CoarseColumnList），每轮输出当前项并驱动下游。填写 stepValues 时每轮输出 StepValue。count≤0/inf/无限=无限循环。须用「运行」托管执行。弹窗选轮会列出每轮图像/数值，勾选要执行的 Index，或直接完成循环。",
+                Description = "按次数或无限重复执行本算子下游连线上的全部算子（前置只执行一次）。支持多路 List 输入按轮展开（如 InList/CoarseRowList/CoarseColumnList），每轮输出当前项并驱动下游。填写 stepValues 时每轮输出 StepValue。count≤0/inf/无限=无限循环。须用「运行」托管执行。弹窗选轮可多次勾选执行同一 Index，点「完成循环」才结束并继续后续节点。",
                 Category = "流程",
                 Params =
                 {
@@ -2496,8 +2503,15 @@ namespace CalibOperatorCLI_Example
                         Name = "roundPick",
                         DisplayName = "弹窗选轮",
                         DefaultValue = "false",
-                        Description = "true=循环开始前弹出窗口，每轮显示该轮列表数据（图像缩略图、Row/Column/Angle/Scale 等），勾选要执行的 Index（从 0 起，与循环 Index / BarId 相同）；可点「完成循环」跳过全部轮次、继续后面的节点。无限循环时忽略。",
+                        Description = "true=弹出选轮窗口。勾选 Index 执行后会再次弹出，可重复选同一轮；点「完成循环」才结束并继续后续节点。无限循环时忽略。",
                         Options = new List<string> { "false", "true" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "roundPickDisplay",
+                        DisplayName = "选轮显示输入",
+                        DefaultValue = "",
+                        Description = "弹窗选轮开启时，卡片只显示这一路列表输入。填循环输出端口名（如 In、In2）；空=显示全部。弹窗里也可再切换。"
                     }
                 },
                 Ports =
@@ -3625,6 +3639,14 @@ namespace CalibOperatorCLI_Example
                 {
                     new OperatorParam { Name = "loopEmit", DisplayName = "循环输出Mask", DefaultValue = "true", Description = "true=每张粗候选循环输出 Mask 并驱动下游；false=仅输出 candidateIndex 指定的一张" },
                     new OperatorParam { Name = "candidateIndex", DisplayName = "单张索引", DefaultValue = "0", Description = "loopEmit=false 时选取哪一张。填压缩后的批下标（从 0 起），与循环时 MaskIndex / flow_loop Index 相同。日志「第 N 张」对应 N-1。" },
+                    new OperatorParam
+                    {
+                        Name = "discardFailedMask",
+                        DisplayName = "丢弃失败Mask",
+                        DefaultValue = "true",
+                        Description = "true=填充区域生成失败则从循环中丢掉该候选；false=用位姿矩形回退，仍占一轮，循环条数与粗候选一致。",
+                        Options = new List<string> { "true", "false" }
+                    },
                     new OperatorParam { Name = "maskErosionPx", DisplayName = "Mask内缩(px)", DefaultValue = "2", Description = "沿模板轮廓法向内缩（gen_parallel_contour_xld），非全向腐蚀；0=不内缩" },
                     new OperatorParam { Name = "maskFillDilatePx", DisplayName = "Mask填充膨胀(px)", DefaultValue = "0", Description = "0=凸包实心填充；>0=改用手动膨胀（凹形工件可试 30~80）" },
                     new OperatorParam { Name = "contourLevel", DisplayName = "模板层", DefaultValue = "1", Description = "生成填充区域用的形状模型层（输出为填充 Mask，不是轮廓 XLD）" },
@@ -3652,14 +3674,15 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "halcon_reduce_domain_by_mask",
                 DisplayName = "HALCON Mask域内图",
-                Description = "原图 + 单张填充 Mask → reduce_domain 域内图（每次循环处理一张）。",
+                Description = "原图 + 单张填充 Mask → reduce_domain 域内图（每次循环处理一张）。Out=整幅域内图；MaskCrop=仅 Mask 外接矩形。",
                 Category = "HALCON",
                 Params = { },
                 Ports =
                 {
                     new PortDef { Name = "Image", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
                     new PortDef { Name = "Mask", Direction = PortDirection.Input, DataType = typeof(CalibImage), ColorHex = "#FFB74D" },
-                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" }
+                    new PortDef { Name = "Out", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FF9800" },
+                    new PortDef { Name = "MaskCrop", Direction = PortDirection.Output, DataType = typeof(CalibImage), ColorHex = "#FFCC80", IsOptional = true }
                 }
             },
             new OperatorDef
@@ -3952,7 +3975,15 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "ransacIterations", DisplayName = "RANSAC 迭代", DefaultValue = "500", Description = "假设采样次数（含 θ 扰动与三点最小集）" },
                     new OperatorParam { Name = "inlierSnapFactor", DisplayName = "内点吸附系数", DefaultValue = "0.45", Description = "评分阶段 snap 相对自动容差的比例" },
                     new OperatorParam { Name = "uvProjectionSvg", DisplayName = "u/v 投影图", DefaultValue = "", Description = "相对流程目录的 SVG 路径，如 uv-projection.svg" },
-                    new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto", Description = "写入 *.grid-filter.log" }
+                    new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto", Description = "写入 *.grid-filter.log" },
+                    new OperatorParam
+                    {
+                        Name = "discardUnassigned",
+                        DisplayName = "丢弃未入格",
+                        DefaultValue = "true",
+                        Description = "true=只保留每格一个点，未入格的粗匹配丢掉；false=未入格的接到输出末尾，条数与粗匹配一致。",
+                        Options = new List<string> { "true", "false" }
+                    }
                 },
                 Ports =
                 {
@@ -4078,7 +4109,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "halcon_chain_strip_pick_uv_grid",
                 DisplayName = "HALCON 链向·u/v 落格16",
-                Description = "接「链向·引导」：沿用 ChainBootstrapAngle（格网 θ）投影 u/v，左右池聚类行心，26 点落 16 格。不按 Score 筛选（请在前级 FindShapeModel 卡分）；每格在 snap 候选内分数优先、其次距格心。",
+                Description = "接「链向·引导」：沿用 ChainBootstrapAngle（格网 θ）投影 u/v，左右池聚类行心。不按 Score 筛选（请在前级 FindShapeModel 卡分）；每格在 snap 候选内分数优先、其次距格心。「丢弃未入格」控制未占格的粗匹配是否丢掉。",
                 Category = "HALCON",
                 Params =
                 {
@@ -4118,7 +4149,15 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "minScoreKeep", DisplayName = "最低得分(已忽略)", DefaultValue = "0", Description = "保留参数兼容；落格不再按分过滤，请在前级匹配设 minScore" },
                     new OperatorParam { Name = "snapTolerancePx", DisplayName = "格点容差(px)", DefaultValue = "0", Description = "0=自动" },
                     new OperatorParam { Name = "uvProjectionSvg", DisplayName = "u/v投影SVG", DefaultValue = "", Description = "相对 flow 目录或绝对路径；留空不写 SVG" },
-                    new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto" }
+                    new OperatorParam { Name = "debugLog", DisplayName = "诊断日志", DefaultValue = "auto" },
+                    new OperatorParam
+                    {
+                        Name = "discardUnassigned",
+                        DisplayName = "丢弃未入格",
+                        DefaultValue = "true",
+                        Description = "true=只保留每格一个点，未入格的粗匹配丢掉；false=未入格的接到输出末尾，条数与粗匹配一致，供后续循环选轮。",
+                        Options = new List<string> { "true", "false" }
+                    }
                 },
                 Ports =
                 {

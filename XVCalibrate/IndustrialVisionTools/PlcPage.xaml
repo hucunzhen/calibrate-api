@@ -195,7 +195,9 @@
                                     <Button x:Name="BtnStart" Content="启动" Width="100" Height="32" Margin="0,0,8,8" Click="BtnStart_Click" Foreground="#E65100" FontWeight="SemiBold"/>
                                     <Button x:Name="BtnStop" Content="停止" Width="100" Height="32" Margin="0,0,8,8" Click="BtnStop_Click" Foreground="#455A64" FontWeight="SemiBold"/>
                                     <TextBlock Text="运行" VerticalAlignment="Center" Foreground="{StaticResource Ui.TextSecondary}" Margin="0,0,4,8"/>
-                                    <TextBlock x:Name="TxtRunStatus" Text="---" VerticalAlignment="Center" Margin="0,0,0,8" Foreground="{StaticResource Ui.TextMuted}" FontFamily="Consolas" FontWeight="Bold"/>
+                                    <TextBlock x:Name="TxtRunStatus" Text="---" VerticalAlignment="Center" Margin="0,0,16,8" Foreground="{StaticResource Ui.TextMuted}" FontFamily="Consolas" FontWeight="Bold"/>
+                                    <Button x:Name="BtnEstop" Content="急停" Width="100" Height="32" Margin="0,0,8,8" Click="BtnEstop_Click" Foreground="#C62828" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="TxtEstopStatus" Text="---" VerticalAlignment="Center" Margin="0,0,0,8" Foreground="{StaticResource Ui.TextMuted}" FontFamily="Consolas" FontWeight="Bold"/>
                                 </WrapPanel>
 
                                 <!-- X 轴点动 -->
@@ -282,110 +284,178 @@
                     <TabItem Header="工艺与 IO" Style="{StaticResource PlcTabItem}">
                         <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="420" Padding="8,10,8,4">
                             <StackPanel>
-                                <TextBlock Style="{StaticResource PlcSubTitle}" Text="激光与辅助"/>
-                                <WrapPanel Margin="0,0,0,14">
-                                    <TextBlock x:Name="LblLaserPower" Text="功率" VerticalAlignment="Center" Foreground="#E65100" Margin="0,0,4,8"/>
-                                    <TextBox x:Name="TxtLaserPower" Width="72" Height="26" VerticalContentAlignment="Center" Margin="0,0,4,8"/>
-                                    <Button x:Name="BtnReadLaserPower" Content="读" Width="36" Height="26" Margin="0,0,4,8" Click="BtnReadLaserPower_Click"/>
-                                    <Button x:Name="BtnWriteLaserPower" Content="写" Width="36" Height="26" Margin="0,0,12,8" Click="BtnWriteLaserPower_Click" Foreground="#E65100" FontWeight="SemiBold"/>
-                                    <Button x:Name="BtnLaserToggle" Content="激光" Width="56" Height="26" Margin="0,0,4,8" Foreground="#E65100" FontWeight="SemiBold"
-                                            ToolTip="按住打开激光，松开关闭"
-                                            PreviewMouseLeftButtonDown="BtnLaserToggle_PreviewMouseLeftButtonDown"
-                                            PreviewMouseLeftButtonUp="BtnLaserToggle_PreviewMouseLeftButtonUp"
-                                            LostMouseCapture="BtnLaserToggle_LostMouseCapture"/>
-                                    <TextBlock x:Name="TxtLaserEnableStatus" Text="关" VerticalAlignment="Center" Margin="0,0,12,8" FontFamily="Consolas"/>
-                                    <TextBlock Text="红光" VerticalAlignment="Center" Foreground="#C62828" Margin="0,0,4,8"/>
-                                    <Button x:Name="BtnRedLightEnable" Content="开" Width="44" Height="26" Margin="0,0,4,8" Click="BtnRedLightEnable_Click" Foreground="#C62828"/>
-                                    <Button x:Name="BtnRedLightDisable" Content="关" Width="44" Height="26" Margin="0,0,4,8" Click="BtnRedLightDisable_Click"/>
-                                    <TextBlock x:Name="TxtRedLightEnableStatus" Text="关" VerticalAlignment="Center" Margin="0,0,12,8" FontFamily="Consolas"/>
-                                    <Button x:Name="BtnBlowToggle" Content="吹气" Width="56" Height="26" Margin="0,0,4,8" Click="BtnBlowToggle_Click" Foreground="#0277BD" FontWeight="SemiBold"
-                                            ToolTip="点击切换吹气使能开/关"/>
-                                    <TextBlock x:Name="TxtBlowEnableStatus" Text="关" VerticalAlignment="Center" Margin="0,0,12,8" FontFamily="Consolas"/>
-                                    <Button x:Name="BtnCameraCaptureStart" Content="相机拍照" Width="88" Height="28" Margin="0,0,0,8" Click="BtnCameraCaptureStart_Click" Foreground="#5E35B1" FontWeight="SemiBold"/>
-                                </WrapPanel>
+                                <Border Style="{StaticResource PlcInnerPanel}" Padding="8,6" Margin="0,0,0,8">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Button x:Name="BtnLaserToggle" Content="激光" Width="52" Height="26" Foreground="#E65100" FontWeight="SemiBold"
+                                                    ToolTip="按住打开激光，松开关闭"
+                                                    PreviewMouseLeftButtonDown="BtnLaserToggle_PreviewMouseLeftButtonDown"
+                                                    PreviewMouseLeftButtonUp="BtnLaserToggle_PreviewMouseLeftButtonUp"
+                                                    LostMouseCapture="BtnLaserToggle_LostMouseCapture"/>
+                                            <TextBlock x:Name="TxtLaserEnableStatus" Text="关" VerticalAlignment="Center" Margin="6,0,0,0" FontFamily="Consolas"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock Text="红光" VerticalAlignment="Center" Foreground="#C62828" Margin="0,0,6,0"/>
+                                            <Button x:Name="BtnRedLightEnable" Content="开" Width="36" Height="24" Margin="0,0,4,0" Click="BtnRedLightEnable_Click" Foreground="#C62828"/>
+                                            <Button x:Name="BtnRedLightDisable" Content="关" Width="36" Height="24" Click="BtnRedLightDisable_Click"/>
+                                            <TextBlock x:Name="TxtRedLightEnableStatus" Text="关" VerticalAlignment="Center" Margin="6,0,0,0" FontFamily="Consolas"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Button x:Name="BtnBlowToggle" Content="吹气" Width="52" Height="26" Click="BtnBlowToggle_Click" Foreground="#0277BD" FontWeight="SemiBold"
+                                                    ToolTip="点击切换吹气使能开/关"/>
+                                            <TextBlock x:Name="TxtBlowEnableStatus" Text="关" VerticalAlignment="Center" Margin="6,0,0,0" FontFamily="Consolas"/>
+                                        </StackPanel>
+                                        <Button x:Name="BtnCameraCaptureStart" Grid.Column="3" Content="相机拍照" Width="80" Height="26" HorizontalAlignment="Right"
+                                                Click="BtnCameraCaptureStart_Click" Foreground="#5E35B1" FontWeight="SemiBold"/>
+                                    </Grid>
+                                </Border>
 
-                                <TextBlock Style="{StaticResource PlcSubTitle}" Text="焊接完成标志"/>
-                                <Grid Margin="0,0,0,14">
+                                <TextBlock Style="{StaticResource PlcSubTitle}" Text="激光参数" Margin="0,0,0,6"/>
+                                <UniformGrid Columns="4" Margin="0,0,0,10">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,8,6">
+                                        <TextBlock x:Name="LblLaserPower" Text="功率" Width="56" VerticalAlignment="Center" Foreground="#E65100"/>
+                                        <TextBox x:Name="TxtLaserPower" Width="56" Height="24" Margin="0,0,4,0" VerticalContentAlignment="Center"/>
+                                        <Button x:Name="BtnWriteLaserPower" Content="写" Width="28" Height="24" Click="BtnWriteLaserPower_Click" Foreground="#E65100" FontWeight="SemiBold"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,8,6">
+                                        <TextBlock x:Name="LblLaserActualPower" Text="当前功率" Width="56" VerticalAlignment="Center" Foreground="#E65100"/>
+                                        <TextBox x:Name="TxtLaserActualPower" Width="56" Height="24" IsReadOnly="True" VerticalContentAlignment="Center"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,8,6">
+                                        <TextBlock x:Name="LblLaserInitialPower" Text="初始功率" Width="56" VerticalAlignment="Center" Foreground="#E65100"/>
+                                        <TextBox x:Name="TxtLaserInitialPower" Width="56" Height="24" Margin="0,0,4,0" VerticalContentAlignment="Center"/>
+                                        <Button Content="写" Width="28" Height="24" Tag="LaserInitialPower" Click="BtnWriteConfigFloat_Click" Foreground="#E65100" FontWeight="SemiBold"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                        <TextBlock x:Name="LblLaserRampDown" Text="收光自减" Width="56" VerticalAlignment="Center" Foreground="#E65100"/>
+                                        <TextBox x:Name="TxtLaserRampDown" Width="56" Height="24" Margin="0,0,4,0" VerticalContentAlignment="Center"/>
+                                        <Button Content="写" Width="28" Height="24" Tag="LaserRampDown" Click="BtnWriteConfigFloat_Click" Foreground="#E65100" FontWeight="SemiBold"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,8,6">
+                                        <TextBlock x:Name="LblLaserPowerRampUp" Text="功率自加" Width="56" VerticalAlignment="Center" Foreground="#E65100"/>
+                                        <TextBox x:Name="TxtLaserPowerRampUp" Width="56" Height="24" Margin="0,0,4,0" VerticalContentAlignment="Center"/>
+                                        <Button Content="写" Width="28" Height="24" Tag="LaserPowerRampUp" Click="BtnWriteConfigFloat_Click" Foreground="#E65100" FontWeight="SemiBold"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,8,6">
+                                        <TextBlock x:Name="LblLaserPreGasTime" Text="前气时间" Width="56" VerticalAlignment="Center" Foreground="#E65100"/>
+                                        <TextBox x:Name="TxtLaserPreGasTime" Width="56" Height="24" Margin="0,0,4,0" VerticalContentAlignment="Center"/>
+                                        <Button Content="写" Width="28" Height="24" Tag="LaserPreGasTime" Click="BtnWriteConfigFloat_Click" Foreground="#E65100" FontWeight="SemiBold"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,8,6">
+                                        <TextBlock x:Name="LblLaserPostGasTime" Text="后气时间" Width="56" VerticalAlignment="Center" Foreground="#E65100"/>
+                                        <TextBox x:Name="TxtLaserPostGasTime" Width="56" Height="24" Margin="0,0,4,0" VerticalContentAlignment="Center"/>
+                                        <Button Content="写" Width="28" Height="24" Tag="LaserPostGasTime" Click="BtnWriteConfigFloat_Click" Foreground="#E65100" FontWeight="SemiBold"/>
+                                    </StackPanel>
+                                </UniformGrid>
+
+                                <TextBlock Style="{StaticResource PlcSubTitle}" Text="流程与标志" Margin="0,0,0,6"/>
+                                <UniformGrid Columns="7" Margin="0,0,0,10">
+                                    <StackPanel Margin="0,0,8,0">
+                                        <TextBlock x:Name="LblGraphProcess" Text="图形加工" FontSize="11" Foreground="#1565C0" HorizontalAlignment="Center"/>
+                                        <TextBox x:Name="TxtGraphProcess" Height="24" Margin="0,4,0,0" IsReadOnly="True" TextAlignment="Center" VerticalContentAlignment="Center" FontFamily="Consolas"/>
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,0">
+                                        <TextBlock x:Name="LblLaserOffProcessStep" Text="收光流程" FontSize="11" Foreground="#1565C0" HorizontalAlignment="Center"/>
+                                        <TextBox x:Name="TxtLaserOffProcessStep" Height="24" Margin="0,4,0,0" IsReadOnly="True" TextAlignment="Center" VerticalContentAlignment="Center" FontFamily="Consolas"/>
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,0">
+                                        <TextBlock x:Name="LblAutoProcess" Text="自动流程" FontSize="11" Foreground="#1565C0" HorizontalAlignment="Center"/>
+                                        <TextBox x:Name="TxtAutoProcess" Height="24" Margin="0,4,0,0" IsReadOnly="True" TextAlignment="Center" VerticalContentAlignment="Center" FontFamily="Consolas"/>
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,0">
+                                        <TextBlock x:Name="LblLaserOnProcessStep" Text="开激光流程" FontSize="11" Foreground="#1565C0" HorizontalAlignment="Center"/>
+                                        <TextBox x:Name="TxtLaserOnProcessStep" Height="24" Margin="0,4,0,0" IsReadOnly="True" TextAlignment="Center" VerticalContentAlignment="Center" FontFamily="Consolas"/>
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,0">
+                                        <TextBlock x:Name="LblCalibProcess" Text="标定流程" FontSize="11" Foreground="#1565C0" HorizontalAlignment="Center"/>
+                                        <TextBox x:Name="TxtCalibProcess" Height="24" Margin="0,4,0,0" IsReadOnly="True" TextAlignment="Center" VerticalContentAlignment="Center" FontFamily="Consolas"/>
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,0">
+                                        <TextBlock x:Name="LblWeldDoneFlag" Text="发焊接完成" FontSize="11" Foreground="#6A1B9A" HorizontalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtWeldDoneStatus" Text="---" Margin="0,6,0,0" FontFamily="Consolas" FontWeight="Bold" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                    <StackPanel>
+                                        <TextBlock x:Name="LblWeldDoneHostFlag" Text="收焊接完成" FontSize="11" Foreground="#4527A0" HorizontalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtWeldDoneHostStatus" Text="---" Margin="0,6,0,0" FontFamily="Consolas" FontWeight="Bold" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </UniformGrid>
+
+                                <TextBlock Style="{StaticResource PlcSubTitle}" Text="点位与速度" Margin="0,0,0,6"/>
+                                <Grid>
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="76"/>
+                                        <ColumnDefinition Width="14"/>
+                                        <ColumnDefinition Width="64"/>
+                                        <ColumnDefinition Width="14"/>
+                                        <ColumnDefinition Width="64"/>
+                                        <ColumnDefinition Width="14"/>
+                                        <ColumnDefinition Width="64"/>
+                                        <ColumnDefinition Width="Auto"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
-                                    <Border Grid.Column="0" Style="{StaticResource PlcInnerPanel}" BorderBrush="#7B1FA2" Margin="0,0,6,0">
-                                        <StackPanel>
-                                            <TextBlock Text="PLC → 上位机" FontWeight="SemiBold" Foreground="#6A1B9A" Margin="0,0,0,6"/>
-                                            <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="状态" Foreground="{StaticResource Ui.TextSecondary}" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                                <TextBlock x:Name="TxtWeldDoneStatus" Text="---" FontFamily="Consolas" FontWeight="Bold" Margin="0,0,8,0"/>
-                                                <Button x:Name="BtnReadWeldDone" Content="读" Width="36" Height="24" Margin="0,0,4,0" Click="BtnReadWeldDone_Click"/>
-                                                <Button x:Name="BtnClearWeldDone" Content="清零" Width="44" Height="24" Click="BtnClearWeldDone_Click" Foreground="#6A1B9A" FontWeight="SemiBold"/>
-                                            </StackPanel>
-                                        </StackPanel>
-                                    </Border>
-                                    <Border Grid.Column="1" Style="{StaticResource PlcInnerPanel}" BorderBrush="#5E35B1" Margin="6,0,0,0">
-                                        <StackPanel>
-                                            <TextBlock Text="上位机 → PLC" FontWeight="SemiBold" Foreground="#4527A0" Margin="0,0,0,6"/>
-                                            <StackPanel Orientation="Horizontal">
-                                                <Button x:Name="BtnSetWeldDoneHost" Content="置1" Width="40" Height="24" Margin="0,0,4,0" Click="BtnSetWeldDoneHost_Click" Foreground="#4527A0" FontWeight="SemiBold"/>
-                                                <Button x:Name="BtnClearWeldDoneHost" Content="清零" Width="44" Height="24" Margin="0,0,8,0" Click="BtnClearWeldDoneHost_Click"/>
-                                                <TextBlock Text="状态" Foreground="{StaticResource Ui.TextSecondary}" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                                <TextBlock x:Name="TxtWeldDoneHostStatus" Text="---" FontFamily="Consolas" FontWeight="Bold"/>
-                                            </StackPanel>
-                                        </StackPanel>
-                                    </Border>
-                                </Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
 
-                                <TextBlock Style="{StaticResource PlcSubTitle}" Text="位置与速度"/>
-                                <WrapPanel Margin="0,0,0,8">
-                                    <Button x:Name="BtnManualStopSafePos" Content="手动→安全位" Width="108" Height="28" Margin="0,0,8,8" Click="BtnManualStopSafePos_Click" Foreground="#455A64" FontWeight="SemiBold"/>
-                                    <Button x:Name="BtnManualPhotoPos" Content="手动→拍照位" Width="108" Height="28" Margin="0,0,8,8" Click="BtnManualPhotoPos_Click" Foreground="#5E35B1" FontWeight="SemiBold"/>
-                                    <Button x:Name="BtnManualLaserWeldPos" Content="手动→激光焊接位" Width="120" Height="28" Margin="0,0,16,8" Click="BtnManualLaserWeldPos_Click" Foreground="#E65100" FontWeight="SemiBold"/>
-                                </WrapPanel>
-                                <WrapPanel Margin="0,0,0,8">
-                                    <TextBlock Text="停机安全" FontWeight="SemiBold" Foreground="#455A64" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                                    <TextBlock x:Name="LblStopSafeX" Text="X" Foreground="#D32F2F" VerticalAlignment="Center" Margin="0,0,2,8"/>
-                                    <TextBox x:Name="TxtStopSafeX" Width="68" Height="24" Margin="0,0,6,8"/>
-                                    <TextBlock x:Name="LblStopSafeY" Text="Y" Foreground="#1976D2" VerticalAlignment="Center" Margin="0,0,2,8"/>
-                                    <TextBox x:Name="TxtStopSafeY" Width="68" Height="24" Margin="0,0,6,8"/>
-                                    <TextBlock x:Name="LblStopSafeZ" Text="Z" Foreground="#388E3C" VerticalAlignment="Center" Margin="0,0,2,8"/>
-                                    <TextBox x:Name="TxtStopSafeZ" Width="68" Height="24" Margin="0,0,6,8"/>
-                                    <Button x:Name="BtnReadStopSafePos" Content="读" Width="36" Height="24" Margin="0,0,4,8" Click="BtnReadStopSafePos_Click"/>
-                                    <Button x:Name="BtnWriteStopSafePos" Content="写" Width="36" Height="24" Margin="0,0,16,8" Click="BtnWriteStopSafePos_Click" Foreground="#455A64" FontWeight="SemiBold"/>
-                                </WrapPanel>
-                                <WrapPanel Margin="0,0,0,8">
-                                    <TextBlock Text="拍照位" FontWeight="SemiBold" Foreground="#5E35B1" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                                    <TextBlock x:Name="LblPhotoPosX" Text="X" Foreground="#D32F2F" VerticalAlignment="Center" Margin="0,0,2,8"/>
-                                    <TextBox x:Name="TxtPhotoPosX" Width="68" Height="24" Margin="0,0,6,8"/>
-                                    <TextBlock x:Name="LblPhotoPosY" Text="Y" Foreground="#1976D2" VerticalAlignment="Center" Margin="0,0,2,8"/>
-                                    <TextBox x:Name="TxtPhotoPosY" Width="68" Height="24" Margin="0,0,6,8"/>
-                                    <TextBlock x:Name="LblPhotoPosZ" Text="Z" Foreground="#388E3C" VerticalAlignment="Center" Margin="0,0,2,8"/>
-                                    <TextBox x:Name="TxtPhotoPosZ" Width="68" Height="24" Margin="0,0,6,8"/>
-                                    <Button x:Name="BtnReadPhotoPos" Content="读" Width="36" Height="24" Margin="0,0,4,8" Click="BtnReadPhotoPos_Click"/>
-                                    <Button x:Name="BtnWritePhotoPos" Content="写" Width="36" Height="24" Margin="0,0,16,8" Click="BtnWritePhotoPos_Click" Foreground="#5E35B1" FontWeight="SemiBold"/>
-                                </WrapPanel>
-                                <WrapPanel Margin="0,0,0,8">
-                                    <TextBlock Text="激光焊接位" FontWeight="SemiBold" Foreground="#E65100" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                                    <TextBlock x:Name="LblLaserRelX" Text="X" Foreground="#D32F2F" VerticalAlignment="Center" Margin="0,0,2,8"/>
-                                    <TextBox x:Name="TxtLaserRelX" Width="68" Height="24" Margin="0,0,6,8"/>
-                                    <TextBlock x:Name="LblLaserRelY" Text="Y" Foreground="#1976D2" VerticalAlignment="Center" Margin="0,0,2,8"/>
-                                    <TextBox x:Name="TxtLaserRelY" Width="68" Height="24" Margin="0,0,6,8"/>
-                                    <TextBlock x:Name="LblLaserRelZ" Text="Z" Foreground="#388E3C" VerticalAlignment="Center" Margin="0,0,2,8"/>
-                                    <TextBox x:Name="TxtLaserRelZ" Width="68" Height="24" Margin="0,0,6,8"/>
-                                    <Button x:Name="BtnReadLaserRelPos" Content="读" Width="36" Height="24" Margin="0,0,4,8" Click="BtnReadLaserRelPos_Click"/>
-                                    <Button x:Name="BtnWriteLaserRelPos" Content="写" Width="36" Height="24" Margin="0,0,0,8" Click="BtnWriteLaserRelPos_Click" Foreground="#E65100" FontWeight="SemiBold"/>
-                                </WrapPanel>
-                                <WrapPanel>
-                                    <TextBlock Text="运动速度" FontWeight="SemiBold" Foreground="#F57F17" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                                    <TextBlock x:Name="LblWeldSpeed" Text="焊" Foreground="#666" VerticalAlignment="Center" Margin="0,0,2,8"/>
-                                    <TextBox x:Name="TxtWeldSpeed" Width="56" Height="24" Margin="0,0,6,8"/>
-                                    <TextBlock x:Name="LblReturnSafeSpeed" Text="返安全" Foreground="#666" VerticalAlignment="Center" Margin="0,0,2,8"/>
-                                    <TextBox x:Name="TxtReturnSafeSpeed" Width="56" Height="24" Margin="0,0,6,8"/>
-                                    <TextBlock x:Name="LblPhotoApproachSpeed" Text="拍照" Foreground="#666" VerticalAlignment="Center" Margin="0,0,2,8"/>
-                                    <TextBox x:Name="TxtPhotoApproachSpeed" Width="56" Height="24" Margin="0,0,6,8"/>
-                                    <TextBlock x:Name="LblFastOffsetSpeed" Text="快偏" Foreground="#666" VerticalAlignment="Center" Margin="0,0,2,8"/>
-                                    <TextBox x:Name="TxtFastOffsetSpeed" Width="56" Height="24" Margin="0,0,6,8"/>
-                                    <Button x:Name="BtnReadMotionSpeed" Content="读" Width="36" Height="24" Margin="0,0,4,8" Click="BtnReadMotionSpeed_Click"/>
-                                    <Button x:Name="BtnWriteMotionSpeed" Content="写" Width="36" Height="24" Margin="0,0,0,8" Click="BtnWriteMotionSpeed_Click" Foreground="#F57F17" FontWeight="SemiBold"/>
-                                </WrapPanel>
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="停机安全" FontWeight="SemiBold" Foreground="#455A64" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="LblStopSafeX" Grid.Row="0" Grid.Column="1" Text="X" Foreground="#D32F2F" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtStopSafeX" Grid.Row="0" Grid.Column="2" Height="24" Margin="0,0,6,6" VerticalContentAlignment="Center"/>
+                                    <TextBlock x:Name="LblStopSafeY" Grid.Row="0" Grid.Column="3" Text="Y" Foreground="#1976D2" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtStopSafeY" Grid.Row="0" Grid.Column="4" Height="24" Margin="0,0,6,6" VerticalContentAlignment="Center"/>
+                                    <TextBlock x:Name="LblStopSafeZ" Grid.Row="0" Grid.Column="5" Text="Z" Foreground="#388E3C" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtStopSafeZ" Grid.Row="0" Grid.Column="6" Height="24" Margin="0,0,6,6" VerticalContentAlignment="Center"/>
+                                    <Button x:Name="BtnWriteStopSafePos" Grid.Row="0" Grid.Column="7" Content="写" MinWidth="36" Width="36" Height="24" Padding="4,0" Margin="0,0,0,6" VerticalAlignment="Center"
+                                            Click="BtnWriteStopSafePos_Click" Foreground="#455A64" FontWeight="SemiBold"/>
+                                    <Button x:Name="BtnManualStopSafePos" Grid.Row="0" Grid.Column="8" Content="手动→安全位" Width="108" Height="24" Margin="8,0,0,6" HorizontalAlignment="Left"
+                                            Click="BtnManualStopSafePos_Click" Foreground="#455A64" FontWeight="SemiBold"/>
+
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="拍照位" FontWeight="SemiBold" Foreground="#5E35B1" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="LblPhotoPosX" Grid.Row="1" Grid.Column="1" Text="X" Foreground="#D32F2F" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtPhotoPosX" Grid.Row="1" Grid.Column="2" Height="24" Margin="0,0,6,6" VerticalContentAlignment="Center"/>
+                                    <TextBlock x:Name="LblPhotoPosY" Grid.Row="1" Grid.Column="3" Text="Y" Foreground="#1976D2" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtPhotoPosY" Grid.Row="1" Grid.Column="4" Height="24" Margin="0,0,6,6" VerticalContentAlignment="Center"/>
+                                    <TextBlock x:Name="LblPhotoPosZ" Grid.Row="1" Grid.Column="5" Text="Z" Foreground="#388E3C" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtPhotoPosZ" Grid.Row="1" Grid.Column="6" Height="24" Margin="0,0,6,6" VerticalContentAlignment="Center"/>
+                                    <Button x:Name="BtnWritePhotoPos" Grid.Row="1" Grid.Column="7" Content="写" MinWidth="36" Width="36" Height="24" Padding="4,0" Margin="0,0,0,6" VerticalAlignment="Center"
+                                            Click="BtnWritePhotoPos_Click" Foreground="#5E35B1" FontWeight="SemiBold"/>
+                                    <Button x:Name="BtnManualPhotoPos" Grid.Row="1" Grid.Column="8" Content="手动→拍照位" Width="108" Height="24" Margin="8,0,0,6" HorizontalAlignment="Left"
+                                            Click="BtnManualPhotoPos_Click" Foreground="#5E35B1" FontWeight="SemiBold"/>
+
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="激光焊接" FontWeight="SemiBold" Foreground="#E65100" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="LblLaserRelX" Grid.Row="2" Grid.Column="1" Text="X" Foreground="#D32F2F" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtLaserRelX" Grid.Row="2" Grid.Column="2" Height="24" Margin="0,0,6,6" VerticalContentAlignment="Center"/>
+                                    <TextBlock x:Name="LblLaserRelY" Grid.Row="2" Grid.Column="3" Text="Y" Foreground="#1976D2" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtLaserRelY" Grid.Row="2" Grid.Column="4" Height="24" Margin="0,0,6,6" VerticalContentAlignment="Center"/>
+                                    <TextBlock x:Name="LblLaserRelZ" Grid.Row="2" Grid.Column="5" Text="Z" Foreground="#388E3C" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtLaserRelZ" Grid.Row="2" Grid.Column="6" Height="24" Margin="0,0,6,6" VerticalContentAlignment="Center"/>
+                                    <Button x:Name="BtnWriteLaserRelPos" Grid.Row="2" Grid.Column="7" Content="写" MinWidth="36" Width="36" Height="24" Padding="4,0" Margin="0,0,0,6" VerticalAlignment="Center"
+                                            Click="BtnWriteLaserRelPos_Click" Foreground="#E65100" FontWeight="SemiBold"/>
+                                    <Button x:Name="BtnManualLaserWeldPos" Grid.Row="2" Grid.Column="8" Content="手动→焊接位" Width="108" Height="24" Margin="8,0,0,6" HorizontalAlignment="Left"
+                                            Click="BtnManualLaserWeldPos_Click" Foreground="#E65100" FontWeight="SemiBold"/>
+
+                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="运动速度" FontWeight="SemiBold" Foreground="#F57F17" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="LblWeldSpeed" Grid.Row="3" Grid.Column="1" Text="焊" Foreground="{StaticResource Ui.TextSecondary}" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtWeldSpeed" Grid.Row="3" Grid.Column="2" Height="24" Margin="0,0,6,0" VerticalContentAlignment="Center"/>
+                                    <TextBlock x:Name="LblReturnSafeSpeed" Grid.Row="3" Grid.Column="3" Text="返" Foreground="{StaticResource Ui.TextSecondary}" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtReturnSafeSpeed" Grid.Row="3" Grid.Column="4" Height="24" Margin="0,0,6,0" VerticalContentAlignment="Center"/>
+                                    <TextBlock x:Name="LblPhotoApproachSpeed" Grid.Row="3" Grid.Column="5" Text="拍" Foreground="{StaticResource Ui.TextSecondary}" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtPhotoApproachSpeed" Grid.Row="3" Grid.Column="6" Height="24" Margin="0,0,6,0" VerticalContentAlignment="Center"/>
+                                    <Button x:Name="BtnWriteMotionSpeed" Grid.Row="3" Grid.Column="7" Content="写" MinWidth="36" Width="36" Height="24" Padding="4,0" VerticalAlignment="Center"
+                                            Click="BtnWriteMotionSpeed_Click" Foreground="#F57F17" FontWeight="SemiBold"/>
+                                    <StackPanel Grid.Row="3" Grid.Column="8" Orientation="Horizontal" Margin="8,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock x:Name="LblFastOffsetSpeed" Text="快偏" Foreground="{StaticResource Ui.TextSecondary}" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                        <TextBox x:Name="TxtFastOffsetSpeed" Width="64" Height="24" VerticalContentAlignment="Center"/>
+                                    </StackPanel>
+                                </Grid>
                             </StackPanel>
                         </ScrollViewer>
                     </TabItem>

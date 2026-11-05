@@ -142,12 +142,14 @@ namespace CalibOperatorCLI_Example
             LatticeOriginCorner originCorner = LatticeOriginCorner.TopLeft,
             LatticeWeldOrder weldOrder = LatticeWeldOrder.ColMajor,
             int weldInterval = 1,
-            bool weldIntervalReverse = true)
+            bool weldIntervalReverse = true,
+            bool discardUnassigned = true)
         {
             var inner = HalconShapeMatchGridFilter.PickLatticeGridInUv(
                 rows, cols, angles, scores, gridRows, gridCols,
                 latticeAngleHintDeg, bootstrapPickIndices, minScoreKeep, snapTolerancePx, diagnosticTag,
-                uvProjectionSvgPath, pcaChainAngleDeg, originCorner, weldOrder, weldInterval, weldIntervalReverse);
+                uvProjectionSvgPath, pcaChainAngleDeg, originCorner, weldOrder, weldInterval, weldIntervalReverse,
+                discardUnassigned);
             return ToPickResult(inner);
         }
 
@@ -203,12 +205,14 @@ namespace CalibOperatorCLI_Example
             LatticeOriginCorner originCorner = LatticeOriginCorner.TopLeft,
             LatticeWeldOrder weldOrder = LatticeWeldOrder.ColMajor,
             int weldInterval = 1,
-            bool weldIntervalReverse = true)
+            bool weldIntervalReverse = true,
+            bool discardUnassigned = true)
         {
             var inner = HalconShapeMatchGridFilter.PickLatticeRansac(
                 rows, cols, angles, scores, gridRows, gridCols,
                 minScoreKeep, snapTolerancePx, diagnosticTag, uvProjectionSvgPath,
-                ransacIterations, inlierSnapFactor, originCorner, weldOrder, weldInterval, weldIntervalReverse);
+                ransacIterations, inlierSnapFactor, originCorner, weldOrder, weldInterval, weldIntervalReverse,
+                discardUnassigned);
             return ToPickResult(inner);
         }
 
