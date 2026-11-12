@@ -2,7 +2,9 @@ using System;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Threading;
 
 namespace CalibOperatorCLI_Example
 {
@@ -55,9 +57,13 @@ namespace CalibOperatorCLI_Example
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
+            AppRunLog.BeginSession("OnStartup");
+            HookCrashLogging();
+            AppRunLog.Info($"args=[{string.Join(" ", e.Args ?? Array.Empty<string>())}]");
             HalconRuntimeSettings.EnsureApplied();
             var mainWindow = new MainWindow();
             mainWindow.Show();
+            AppRunLog.Info($"logFile={AppRunLog.CurrentLogPath}");
 
             string? flowPath = TryParseFlowPathArg(e.Args, out bool preferNativeEngine, out bool gridFilterLog);
             if (!string.IsNullOrWhiteSpace(flowPath))
@@ -81,6 +87,7 @@ namespace CalibOperatorCLI_Example
                     }
                     catch (Exception ex)
                     {
+                        AppRunLog.Crash("FlowRunner", ex);
                         TryConsoleError($"[FlowRunner] {ex.Message}");
                         if (ex.InnerException != null)
                             TryConsoleError($"[FlowRunner] Inner: {ex.InnerException}");
@@ -89,10 +96,51 @@ namespace CalibOperatorCLI_Example
                     Environment.ExitCode = ok ? 0 : 1;
                     TryConsoleLine(ok
                         ? "[FlowRunner] 成功 (exit 0)"
-                        : "[FlowRunner] 失败 (exit 1)：常见原因 — load_image 路径不存在、中间算子报错；错误详情见 FlowPage 日志（启用 MirrorErrorsToStderr 时已写入 stderr）。");
+                        : "[FlowRunner] 失败 (exit 1)：常见原因 — load_image 路径不存在、中间算子报错；错误详情见 FlowPage 日志与 logs/run_*.log。");
+                    AppRunLog.EndSession(ok ? "FlowRunner-ok" : "FlowRunner-fail");
                     Shutdown();
                 }), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             }
+        }
+
+        protected override void OnExit(ExitEventArgs e)
+        {
+            AppRunLog.EndSession($"OnExit code={e.ApplicationExitCode}");
+            base.OnExit(e);
+        }
+
+        private void HookCrashLogging()
+        {
+            DispatcherUnhandledException += OnDispatcherUnhandledException;
+            AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
+            TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+        }
+
+        private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+        {
+            AppRunLog.Crash("DispatcherUnhandledException", e.Exception);
+            AppRunLog.Flush();
+            // 尽量保住进程现场：记录后仍抛出默认行为；若已标记 Handled 则只记日志
+            TryConsoleError($"[CRASH][UI] {e.Exception}");
+        }
+
+        private static void OnDomainUnhandledException(object? sender, UnhandledExceptionEventArgs e)
+        {
+            var ex = e.ExceptionObject as Exception;
+            AppRunLog.Crash($"AppDomain.UnhandledException terminating={e.IsTerminating}", ex);
+            AppRunLog.Flush();
+            if (ex != null)
+                TryConsoleError($"[CRASH][Domain] {ex}");
+            else
+                TryConsoleError($"[CRASH][Domain] {e.ExceptionObject}");
+        }
+
+        private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+        {
+            AppRunLog.Crash("UnobservedTaskException", e.Exception);
+            AppRunLog.Flush();
+            TryConsoleError($"[CRASH][Task] {e.Exception}");
+            e.SetObserved();
         }
 
         private static void TryConsoleLine(string msg)

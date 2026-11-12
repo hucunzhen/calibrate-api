@@ -11,7 +11,7 @@
         MaxHeight="780"
         Background="#252526"
         Foreground="White"
-        ShowInTaskbar="False">
+        ShowInTaskbar="True">
     <DockPanel Margin="16">
         <TextBlock x:Name="TxtHint"
                    DockPanel.Dock="Top"
@@ -27,9 +27,9 @@
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Content="全选" MinWidth="64" Height="28" Margin="0,0,8,0" Padding="8,2" Click="SelectAll_Click"/>
                 <Button Content="全不选" MinWidth="64" Height="28" Margin="0,0,16,0" Padding="8,2" Click="SelectNone_Click"/>
-                <Button Content="执行所选" MinWidth="88" Height="28" Margin="0,0,8,0" Padding="10,2" IsDefault="True" Click="RunSelected_Click"/>
+                <Button Content="执行所选" MinWidth="88" Height="28" Margin="0,0,8,0" Padding="10,2" Click="RunSelected_Click"/>
                 <Button Content="全部执行" MinWidth="88" Height="28" Margin="0,0,8,0" Padding="10,2" Click="RunAll_Click"/>
-                <Button Content="完成循环" MinWidth="88" Height="28" Padding="10,2" IsCancel="True" Click="Finish_Click"/>
+                <Button Content="完成循环" MinWidth="88" Height="28" Padding="10,2" Click="Finish_Click"/>
             </StackPanel>
         </StackPanel>
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">

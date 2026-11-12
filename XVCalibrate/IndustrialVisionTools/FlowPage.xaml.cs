@@ -1058,6 +1058,10 @@ namespace CalibOperatorCLI_Example
             Dictionary<string, object?>? explicitInputs = null)
         {
             ThrowIfExecutionCancelled();
+            string scope = string.IsNullOrEmpty(timingScope) ? "" : $"[{timingScope}] ";
+            // 崩溃前最后一条落盘记录：进入算子（比 Timing 更早，便于定位 native/硬崩）
+            AppendLog($"{scope}[ENTER] {node.Def.TypeId} ({node.Def.DisplayName}) id={node.Id}");
+            AppRunLog.Flush();
             var sw = Stopwatch.StartNew();
             try
             {
@@ -1093,14 +1097,20 @@ namespace CalibOperatorCLI_Example
             }
             catch (OperationCanceledException)
             {
+                AppRunLog.Write("WARN", $"{scope}[CANCEL] {node.Def.TypeId} ({node.Def.DisplayName})");
                 throw;
             }
-            catch (FlowExecutionGracefulStopException)
+            catch (FlowExecutionGracefulStopException ex)
             {
+                AppRunLog.Error($"{scope}[STOP] {node.Def.TypeId}: {ex.Message}");
+                if (ex.InnerException != null)
+                    AppRunLog.Error($"{scope}[STOP] inner: {ex.InnerException}");
                 throw;
             }
             catch (Exception ex)
             {
+                AppRunLog.Error($"{scope}[FAIL] {node.Def.TypeId} ({node.Def.DisplayName}): {ex}");
+                AppRunLog.Flush();
                 throw new FlowExecutionGracefulStopException(
                     $"节点「{node.Def.DisplayName}」执行失败，流程已中止。",
                     ex);
@@ -3490,6 +3500,15 @@ namespace CalibOperatorCLI_Example
         /// </summary>
         private void AppendLog(string text, bool isError = false)
         {
+            try
+            {
+                AppRunLog.Write(isError ? "ERROR" : "INFO", text);
+            }
+            catch
+            {
+                // ignored
+            }
+
             if (isError && MirrorErrorsToStderr)
             {
                 try
@@ -8696,7 +8715,7 @@ namespace CalibOperatorCLI_Example
                     while (true)
                     {
                         ThrowIfExecutionCancelled();
-                        var pick = PromptFlowLoopRoundPick(
+                        var pick = await PromptFlowLoopRoundPickAsync(
                             loopNode, repeatCount, stepValues, loopInputsForRounds, listPortMaps,
                             preselectAll: !anyPickRun);
                         if (pick.Choice == FlowLoopRoundPickChoice.FinishLoop)
@@ -8810,7 +8829,7 @@ namespace CalibOperatorCLI_Example
                    || v.Equals("1", StringComparison.Ordinal);
         }
 
-        private (FlowLoopRoundPickChoice Choice, int[] Selected) PromptFlowLoopRoundPick(
+        private async System.Threading.Tasks.Task<(FlowLoopRoundPickChoice Choice, int[] Selected)> PromptFlowLoopRoundPickAsync(
             FlowNode loopNode,
             int roundCount,
             double[]? stepValues,
@@ -8818,8 +8837,8 @@ namespace CalibOperatorCLI_Example
             IReadOnlyList<(string InputPort, string OutputPort)> listPortMaps,
             bool preselectAll = true)
         {
-            FlowLoopRoundPickChoice choice = FlowLoopRoundPickChoice.FinishLoop;
-            int[] selected = Array.Empty<int>();
+            var tcs = new System.Threading.Tasks.TaskCompletionSource<(FlowLoopRoundPickChoice Choice, int[] Selected)>(
+                System.Threading.Tasks.TaskCreationOptions.RunContinuationsAsynchronously);
             RunOnUiThread(() =>
             {
                 var built = BuildFlowLoopRoundPickItems(loopNode, roundCount, stepValues, loopInputs, listPortMaps);
@@ -8828,11 +8847,13 @@ namespace CalibOperatorCLI_Example
                 {
                     Owner = Window.GetWindow(this)
                 };
-                bool? ok = dlg.ShowDialog();
-                choice = ok == true ? dlg.Choice : FlowLoopRoundPickChoice.FinishLoop;
-                selected = dlg.SelectedIndices ?? Array.Empty<int>();
+                dlg.Closed += (_, _) =>
+                {
+                    tcs.TrySetResult((dlg.Choice, dlg.SelectedIndices ?? Array.Empty<int>()));
+                };
+                dlg.Show();
             });
-            return (choice, selected);
+            return await tcs.Task.ConfigureAwait(true);
         }
 
         private (List<FlowLoopRoundPickItem> Items, List<FlowLoopRoundPickDisplayChoice> DisplayChoices, string PreferredKey) BuildFlowLoopRoundPickItems(
@@ -12683,6 +12704,15 @@ namespace CalibOperatorCLI_Example
                     {
                         var offsetsByBar = WorldTrajectoryOffset.ParseOffsetByBar(
                             node.Params.GetValueOrDefault("offsetByBar", "") ?? "");
+                        bool closePolyline = SendPlcBatchPlanner.ParseBoolParam(
+                            node.Params.GetValueOrDefault("closePolyline", "true"), true);
+                        double overrunDist = double.TryParse(
+                            node.Params.GetValueOrDefault("overrunDist", "0")?.Trim(),
+                            NumberStyles.Float,
+                            CultureInfo.InvariantCulture,
+                            out var overrunVal)
+                            ? Math.Max(0, overrunVal)
+                            : 0;
                         double tailDist = double.TryParse(
                             node.Params.GetValueOrDefault("tailDist", "0")?.Trim(),
                             NumberStyles.Float,
@@ -12703,21 +12733,24 @@ namespace CalibOperatorCLI_Example
                                 throw new InvalidOperationException(
                                     $"世界轨迹偏置: BarIds 长度 {barIn.Length} 与 Points3D {p3Off.Length} 不一致。");
                             var applied3 = WorldTrajectoryOffset.Apply(xyOff, barIn, offsetsByBar, roundBarId);
-                            var tailed3 = WorldTrajectoryOffset.ApplyTailDistance(applied3.Points, applied3.BarIds, tailDist);
-                            var out3 = new CalibPoint3D[tailed3.Length];
-                            for (int i = 0; i < tailed3.Length; i++)
+                            var zOff = new double[p3Off.Length];
+                            for (int i = 0; i < p3Off.Length; i++)
+                                zOff[i] = p3Off[i].Z;
+                            var tailed3 = WorldTrajectoryOffset.ApplyCloseOverrunTail(
+                                applied3.Points, applied3.BarIds, closePolyline, overrunDist, tailDist, zOff);
+                            var out3 = new CalibPoint3D[tailed3.Points.Length];
+                            for (int i = 0; i < tailed3.Points.Length; i++)
                             {
-                                int zAt = Math.Min(i, p3Off.Length - 1);
-                                out3[i] = new CalibPoint3D(tailed3[i].X, tailed3[i].Y, p3Off[zAt].Z);
+                                double z = tailed3.Z != null && i < tailed3.Z.Length ? tailed3.Z[i] : p3Off[Math.Min(i, p3Off.Length - 1)].Z;
+                                out3[i] = new CalibPoint3D(tailed3.Points[i].X, tailed3.Points[i].Y, z);
                             }
 
                             node.Outputs["Out3D"] = out3;
-                            node.Outputs["Out"] = tailed3;
-                            node.Outputs["OutBarIds"] = applied3.BarIds;
-                            node.Outputs["BarIds"] = applied3.BarIds;
-                            node.ResultSummary = tailDist > 1e-12
-                                ? applied3.Summary + $"；收尾 {tailDist.ToString("G4", CultureInfo.InvariantCulture)} mm"
-                                : applied3.Summary;
+                            node.Outputs["Out"] = tailed3.Points;
+                            node.Outputs["OutBarIds"] = tailed3.BarIds;
+                            node.Outputs["BarIds"] = tailed3.BarIds;
+                            node.ResultSummary = AppendWorldTrajOffsetExtras(
+                                applied3.Summary, closePolyline, overrunDist, tailDist, tailed3.SplitCount);
                             break;
                         }
 
@@ -12737,13 +12770,13 @@ namespace CalibOperatorCLI_Example
                             throw new InvalidOperationException(
                                 $"世界轨迹偏置: BarIds 长度 {barIn.Length} 与 In {worldIn.Length} 不一致。");
                         var applied = WorldTrajectoryOffset.Apply(worldIn, barIn, offsetsByBar, roundBarId);
-                        var tailed = WorldTrajectoryOffset.ApplyTailDistance(applied.Points, applied.BarIds, tailDist);
-                        node.Outputs["Out"] = tailed;
-                        node.Outputs["OutBarIds"] = applied.BarIds;
-                        node.Outputs["BarIds"] = applied.BarIds;
-                        node.ResultSummary = tailDist > 1e-12
-                            ? applied.Summary + $"；收尾 {tailDist.ToString("G4", CultureInfo.InvariantCulture)} mm"
-                            : applied.Summary;
+                        var tailed = WorldTrajectoryOffset.ApplyCloseOverrunTail(
+                            applied.Points, applied.BarIds, closePolyline, overrunDist, tailDist);
+                        node.Outputs["Out"] = tailed.Points;
+                        node.Outputs["OutBarIds"] = tailed.BarIds;
+                        node.Outputs["BarIds"] = tailed.BarIds;
+                        node.ResultSummary = AppendWorldTrajOffsetExtras(
+                            applied.Summary, closePolyline, overrunDist, tailDist, tailed.SplitCount);
                         break;
                     }
 
@@ -13840,15 +13873,6 @@ namespace CalibOperatorCLI_Example
                             out var zDefVal)
                             ? zDefVal
                             : 0.0;
-                        bool closePolyline = SendPlcBatchPlanner.ParseBoolParam(
-                            node.Params.GetValueOrDefault("closePolyline", "true"), true);
-                        double overrunDist = double.TryParse(
-                            node.Params.GetValueOrDefault("overrunDist", "0")?.Trim(),
-                            System.Globalization.NumberStyles.Float,
-                            System.Globalization.CultureInfo.InvariantCulture,
-                            out var overrunVal)
-                            ? Math.Max(0, overrunVal)
-                            : 0.0;
                         bool asPolylineSegments = sendAsPoint
                             && SendPlcBatchPlanner.ParseBoolParam(
                                 node.Params.GetValueOrDefault("asPolylineSegments", "false"), false);
@@ -13866,9 +13890,7 @@ namespace CalibOperatorCLI_Example
                                 out string? resolveDiag,
                                 segmentMode,
                                 pointAt: "mid",
-                                zDefault: zDefault,
-                                closePolyline: closePolyline,
-                                overrunDist: overrunDist))
+                                zDefault: zDefault))
                         {
                             throw new InvalidOperationException(
                                 $"{(sendAsPoint ? "发送PLC(逐点)" : "发送PLC")}: {resolveDiag}");
@@ -16746,6 +16768,23 @@ namespace CalibOperatorCLI_Example
             return confirmed ? points : null;
         }
 
+        private static string AppendWorldTrajOffsetExtras(
+            string summary, bool closePolyline, double overrunDist, double tailDist, int tailSplitCount)
+        {
+            if (closePolyline)
+                summary += "；闭合";
+            if (overrunDist > 1e-12)
+                summary += $"；超程 {overrunDist.ToString("G4", CultureInfo.InvariantCulture)} mm";
+            if (tailDist > 1e-12)
+            {
+                string tail = tailDist.ToString("G4", CultureInfo.InvariantCulture);
+                summary += tailSplitCount > 0
+                    ? $"；收尾 {tail} mm"
+                    : $"；收尾 {tail} mm未拆(轨迹过短)";
+            }
+            return summary;
+        }
+
         private static int[]? TryReadBarIdsInput(Dictionary<string, object?> inputs)
         {
             if (inputs.TryGetValue("BarIds", out var barObj) && barObj is int[] barIds)
@@ -17751,6 +17790,9 @@ namespace CalibOperatorCLI_Example
             if (IsStandaloneDebugActive)
                 AppendLog("========== 子流程独立调试模式 ==========");
             AppendLog("========== 开始执行 ==========");
+            if (!string.IsNullOrWhiteSpace(AppRunLog.CurrentLogPath))
+                AppendLog($"运行日志文件: {AppRunLog.CurrentLogPath}");
+            TrySetEstopForFlow(false, "RUN");
 
             // 清除所有节点的执行状态
             foreach (var n in _nodes)
@@ -18450,6 +18492,7 @@ namespace CalibOperatorCLI_Example
             StatusText.Text = "运行中(到此节点)...";
             StatusText.Foreground = new SolidColorBrush(Colors.Orange);
             AppendLog($"========== 执行到此节点: {target.Def.DisplayName} ==========");
+            TrySetEstopForFlow(false, "RUN");
 
             try
             {
@@ -18720,6 +18763,54 @@ namespace CalibOperatorCLI_Example
                 AppendLog("[STOP] 已请求停止...");
                 StatusText.Text = "正在停止...";
                 StatusText.Foreground = new SolidColorBrush(Colors.OrangeRed);
+                TrySetEstopForFlow(true, "STOP");
+            }
+        }
+
+        /// <summary>
+        /// 写急停线圈：运行时 OFF，停止时 ON。优先 PLC 页连接，否则用流程/共享信捷连接。
+        /// </summary>
+        private void TrySetEstopForFlow(bool estopOn, string logTag)
+        {
+            string want = estopOn ? "ON" : "OFF";
+            try
+            {
+                if (Application.Current?.MainWindow is MainWindow mw
+                    && mw.TrySetPlcEstop(estopOn, out string plcPageDetail))
+                {
+                    AppendLog($"[{logTag}] 急停 {plcPageDetail}");
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"[{logTag}] 急停(PLC页)失败: {ex.Message}", true);
+            }
+
+            try
+            {
+                XinJETcpNet? plc = null;
+                if (_flowPlc != null && _flowPlcConnected)
+                    plc = _flowPlc;
+                else if (PlcXinjeSession.Active != null)
+                    plc = PlcXinjeSession.Active;
+
+                if (plc == null)
+                {
+                    AppendLog($"[{logTag}] 急停未写{want}：PLC 未连接");
+                    return;
+                }
+
+                string addr = ResolveFlowPlcRegister(null, "Estop", "M504");
+                var wr = plc.Write(addr, estopOn);
+                if (!wr.IsSuccess)
+                    AppendLog($"[{logTag}] 急停写入失败({addr}): {FormatFlowPlcOperateFailure(wr)}", true);
+                else
+                    AppendLog($"[{logTag}] 急停 {addr}={want}");
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"[{logTag}] 急停失败: {ex.Message}", true);
             }
         }
     }

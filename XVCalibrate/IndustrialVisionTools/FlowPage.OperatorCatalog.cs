@@ -2278,7 +2278,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "world_traj_offset",
                 DisplayName = "世界轨迹偏置",
-                Description = "在世界坐标(mm)下按条号整条平移焊道，不是沿法向外扩。循环每轮只有一条时，接循环 Index 作为本轮条号再查表；未接 Index 则用点列 BarIds。表中没有的条号不偏置。收尾距离>0 时把每条最后一段改成该长度。",
+                Description = "在世界坐标(mm)下按条号整条平移焊道，不是沿法向外扩。循环每轮只有一条时，接循环 Index 作为本轮条号再查表；未接 Index 则用点列 BarIds。表中没有的条号不偏置。顺序：偏置 → 闭合折线 → 超程 → 收尾距离。",
                 Category = "输出",
                 Params =
                 {
@@ -2291,10 +2291,25 @@ namespace CalibOperatorCLI_Example
                     },
                     new OperatorParam
                     {
+                        Name = "closePolyline",
+                        DisplayName = "闭合折线",
+                        DefaultValue = "true",
+                        Description = "true=每条焊道未闭合时补回起点（至少 3 点；首尾已重合≤0.01mm 不重复补）。超程、收尾都在闭合之后。false=保持开折线。",
+                        Options = new List<string> { "true", "false" }
+                    },
+                    new OperatorParam
+                    {
+                        Name = "overrunDist",
+                        DisplayName = "超程",
+                        DefaultValue = "0",
+                        Description = "世界坐标(mm)。>0 时沿已闭合方向从起点再延伸该长度。未闭合则不超程。0=不超程。在收尾距离之前执行。"
+                    },
+                    new OperatorParam
+                    {
                         Name = "tailDist",
                         DisplayName = "收尾距离",
                         DefaultValue = "0",
-                        Description = "世界坐标(mm)。>0 时把每条焊道最后一条线段改成该长度：从倒数第二点沿原末段方向量出。0=不改。"
+                        Description = "世界坐标(mm)。在闭合与超程之后：>0 时从终点沿轨迹回退该距离插入一点，终点不动，最后一条线段长度等于该值。超程短于收尾时会跨过超程段继续往前拆（例：超程2、收尾3 → 末段仍为3）。整条短于该值则不拆。0=不改。"
                     }
                 },
                 Ports =
@@ -2315,7 +2330,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "send_plc",
                 DisplayName = "发送PLC",
-                Description = "与 PLC 页 Write All 相同：须先 PLC连接；优先 GvarList；否则 Points3D/Points 生成 GVAR（相邻点→线段，closePolyline 默认补末点→首点闭合；overrunDist>0 时闭合后再沿闭合方向延伸一段，属焊接轨迹）。separate_batch=按条分批写 D800+GVAR；下发完成通知请使用「PLC通知轨迹已下发」。",
+                Description = "与 PLC 页 Write All 相同：须先 PLC连接；优先 GvarList；否则 Points3D/Points 生成 GVAR（相邻点→线段）。闭合/超程/收尾由「世界轨迹偏置」处理。separate_batch=按条分批写 D800+GVAR；下发完成通知请使用「PLC通知轨迹已下发」。",
                 Category = "输出",
                 Params =
                 {
@@ -2354,21 +2369,6 @@ namespace CalibOperatorCLI_Example
                     new OperatorParam { Name = "baseRegister", DisplayName = "起始地址(兼容)", DefaultValue = "", Description = "已废弃：仅当未填 gvarStartRegister 时作为 GVAR 起始地址" },
                     new OperatorParam { Name = "gvarType", DisplayName = "GVAR类型", DefaultValue = "1", Description = "类型值（1=线段，与 PLC 程序约定一致）" },
                     new OperatorParam { Name = "zDefault", DisplayName = "默认Z(mm)", DefaultValue = "0", Description = "仅对 Points(Point2D[]) 生效：写入 GVAR 的 p0.z/p1.z/z0/z1；Points3D 仍用各点 Z。单位与轨迹世界坐标一致（mm）。" },
-                    new OperatorParam
-                    {
-                        Name = "closePolyline",
-                        DisplayName = "闭合折线",
-                        DefaultValue = "true",
-                        Description = "true=相邻点连成线段，并补最后一点→第一点闭合段（n 点闭合轮廓得 n 段）；false=开折线仅 n-1 段。首尾已重合(≤0.01mm)时不重复补段",
-                        Options = new List<string> { "true", "false" }
-                    },
-                    new OperatorParam
-                    {
-                        Name = "overrunDist",
-                        DisplayName = "闭合后超程",
-                        DefaultValue = "0",
-                        Description = "仅 closePolyline=true 且实际闭合后：从起点沿闭合段方向再延伸一段 GVAR（与点列同单位，属焊接轨迹）；0=不超程，不影响原有点列与拓扑"
-                    },
                     new OperatorParam { Name = "maxSegmentCount", DisplayName = "最大线段数", DefaultValue = "1024", Description = "超过则中止，防止越界写 PLC" },
                     new OperatorParam
                     {
@@ -2405,7 +2405,7 @@ namespace CalibOperatorCLI_Example
             {
                 TypeId = "send_plc_point",
                 DisplayName = "发送PLC(逐点)",
-                Description = "与「发送PLC」相同下发逻辑（须先 PLC连接）。默认逐点生成退化 GVAR 段（p0=p1，n 点→n 条）。asPolylineSegments=true 时改为相邻点连成线段并可闭合。下发完成通知请使用「PLC 通知轨迹已下发」。",
+                Description = "与「发送PLC」相同下发逻辑（须先 PLC连接）。默认逐点生成退化 GVAR 段（p0=p1，n 点→n 条）。asPolylineSegments=true 时改为相邻点连成线段。闭合/超程/收尾由「世界轨迹偏置」处理。下发完成通知请使用「PLC 通知轨迹已下发」。",
                 Category = "输出",
                 Params =
                 {
@@ -2443,23 +2443,8 @@ namespace CalibOperatorCLI_Example
                         Name = "asPolylineSegments",
                         DisplayName = "连成线段",
                         DefaultValue = "false",
-                        Description = "false=逐点模式，每点一条退化 GVAR（p0=p1）；true=按折线生成 p0→p1 线段（闭合轮廓可开 closePolyline）",
+                        Description = "false=逐点模式，每点一条退化 GVAR（p0=p1）；true=按折线生成 p0→p1 线段",
                         Options = new List<string> { "true", "false" }
-                    },
-                    new OperatorParam
-                    {
-                        Name = "closePolyline",
-                        DisplayName = "闭合折线",
-                        DefaultValue = "true",
-                        Description = "仅 asPolylineSegments=true 时有效：补末点→首点闭合段",
-                        Options = new List<string> { "true", "false" }
-                    },
-                    new OperatorParam
-                    {
-                        Name = "overrunDist",
-                        DisplayName = "闭合后超程",
-                        DefaultValue = "0",
-                        Description = "仅 asPolylineSegments=true 且 closePolyline 实际闭合后：从起点沿闭合方向再延伸一段（与点列同单位）；0=不超程"
                     },
                     new OperatorParam { Name = "maxSegmentCount", DisplayName = "最大线段数", DefaultValue = "1024", Description = "超过则中止" },
                     new OperatorParam

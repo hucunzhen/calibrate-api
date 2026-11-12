@@ -51,7 +51,7 @@
                     FontSize="20" FontWeight="SemiBold" Height="100"
                     Style="{StaticResource IndustrialToolbarButton}"
                     Click="BtnStopVision_Click"
-                    ToolTip="请求停止本轮视觉流程（软件取消执行）。&#10;不会停 PLC/激光/轴；设备停止请在 PLC 页按 SOP 操作。"/>
+                    ToolTip="请求停止本轮视觉流程，并发送 PLC 急停（Estop=ON）。"/>
             <Button x:Name="BtnPlcStatus" Content="PLC 状态" Margin="0,12,12,0"
                     FontSize="18" Height="80"
                     Style="{StaticResource IndustrialToolbarButton}"

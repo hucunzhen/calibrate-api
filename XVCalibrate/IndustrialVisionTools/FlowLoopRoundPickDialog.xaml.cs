@@ -264,21 +264,21 @@ namespace CalibOperatorCLI_Example
             Choice = selected.Count == _boxes.Length
                 ? FlowLoopRoundPickChoice.RunAll
                 : FlowLoopRoundPickChoice.RunSelected;
-            DialogResult = true;
+            Close();
         }
 
         private void RunAll_Click(object sender, RoutedEventArgs e)
         {
             Choice = FlowLoopRoundPickChoice.RunAll;
             SelectedIndices = CollectAll();
-            DialogResult = true;
+            Close();
         }
 
         private void Finish_Click(object sender, RoutedEventArgs e)
         {
             Choice = FlowLoopRoundPickChoice.FinishLoop;
             SelectedIndices = Array.Empty<int>();
-            DialogResult = false;
+            Close();
         }
 
         private List<int> CollectSelected()

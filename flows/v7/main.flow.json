@@ -72,6 +72,8 @@
       "Y": 208,
       "Params": {
         "offsetByBar": "",
+        "closePolyline": "true",
+        "overrunDist": "1",
         "enable": "true",
         "disable": "false"
       }
@@ -90,8 +92,6 @@
         "baseRegister": "",
         "gvarType": "1",
         "zDefault": "0",
-        "closePolyline": "true",
-        "overrunDist": "1",
         "maxSegmentCount": "1024",
         "skipCountWrite": "false",
         "countRegister": "D800",

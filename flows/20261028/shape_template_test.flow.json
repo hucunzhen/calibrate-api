@@ -3,8 +3,8 @@
     {
       "Id": "a1000001-0001-4001-8001-000000000001",
       "TypeId": "load_image",
-      "X": 220,
-      "Y": 187,
+      "X": 69,
+      "Y": 117,
       "Params": {
         "filePath": "models\\shape_template_test_input.bmp",
         "enable": "true",
@@ -99,7 +99,9 @@
       "Y": 460,
       "Params": {
         "offsetByBar": "0:0,-5;",
-        "tailDist": "0",
+        "closePolyline": "true",
+        "overrunDist": "0",
+        "tailDist": "1.23",
         "enable": "true",
         "disable": "false"
       }
@@ -149,6 +151,18 @@
         "enable": "true",
         "disable": "false"
       }
+    },
+    {
+      "Id": "fee02c43-6fd5-4439-9910-f946704deeaa",
+      "TypeId": "image_rotate",
+      "X": 104,
+      "Y": 256,
+      "Params": {
+        "angleDeg": "10",
+        "expandCanvas": "false",
+        "enable": "true",
+        "disable": "false"
+      }
     }
   ],
   "Connections": [
@@ -163,12 +177,6 @@
       "FromPort": "PointsList",
       "ToNodeId": "2933e235-0d1d-4fa6-8a3e-59daadb1e292",
       "ToPort": "PointsList"
-    },
-    {
-      "FromNodeId": "a1000001-0001-4001-8001-000000000001",
-      "FromPort": "Image",
-      "ToNodeId": "2933e235-0d1d-4fa6-8a3e-59daadb1e292",
-      "ToPort": "Img"
     },
     {
       "FromNodeId": "6e9ddbe1-6fe9-4610-934e-35daed362ed6",
@@ -211,12 +219,6 @@
       "FromPort": "PointsList",
       "ToNodeId": "2933e235-0d1d-4fa6-8a3e-59daadb1e292",
       "ToPort": "BarIds"
-    },
-    {
-      "FromNodeId": "a1000001-0001-4001-8001-000000000001",
-      "FromPort": "Image",
-      "ToNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
-      "ToPort": "In"
     },
     {
       "FromNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
@@ -301,6 +303,24 @@
       "FromPort": "Out6",
       "ToNodeId": "4d88556e-de17-4b6e-9570-a58bd6a9dac2",
       "ToPort": "In6List"
+    },
+    {
+      "FromNodeId": "a1000001-0001-4001-8001-000000000001",
+      "FromPort": "Image",
+      "ToNodeId": "fee02c43-6fd5-4439-9910-f946704deeaa",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "fee02c43-6fd5-4439-9910-f946704deeaa",
+      "FromPort": "Out",
+      "ToNodeId": "925e8678-f199-43cc-ab65-a59b8999ae65",
+      "ToPort": "In"
+    },
+    {
+      "FromNodeId": "fee02c43-6fd5-4439-9910-f946704deeaa",
+      "FromPort": "Out",
+      "ToNodeId": "2933e235-0d1d-4fa6-8a3e-59daadb1e292",
+      "ToPort": "Img"
     }
   ],
   "Meta": {

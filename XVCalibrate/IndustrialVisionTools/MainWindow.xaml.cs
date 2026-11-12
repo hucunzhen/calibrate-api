@@ -38,6 +38,9 @@ namespace CalibOperatorCLI_Example
 
         public FlowHostPage FlowHost => _flowHostPage;
 
+        /// <summary>流程停止等场景写 PLC 急停。</summary>
+        public bool TrySetPlcEstop(bool on, out string detail) => _plcPage.TrySetEstop(on, out detail);
+
         public MainWindow()
         {
             InitializeComponent();

@@ -1064,9 +1064,49 @@ namespace CalibOperatorCLI_Example
                 return;
             }
             bool next = !ReadCoil(addr);
-            WriteCoil(addr, next);
-            ApplyEstopStatus(next);
-            Log($"[PLC] 急停 {addr}={(next ? "ON" : "OFF")}");
+            if (!TrySetEstop(next, out string detail))
+                Log($"[PLC] 急停失败: {detail}");
+            else
+                Log($"[PLC] 急停 {detail}");
+        }
+
+        /// <summary>置位/复位急停线圈（流程停止时会置 ON）。PLC 页未连接时返回 false。</summary>
+        public bool TrySetEstop(bool on, out string detail)
+        {
+            detail = "";
+            if (!_plcConnected || _plcHd == null)
+            {
+                detail = "PLC页未连接";
+                return false;
+            }
+
+            if (!TryGetReg("Estop", out string addr) || string.IsNullOrWhiteSpace(addr))
+            {
+                detail = "未配置寄存器 Estop";
+                return false;
+            }
+
+            string mAddr = addr.Trim().ToUpperInvariant();
+            if (!mAddr.StartsWith("M", StringComparison.Ordinal) || !int.TryParse(mAddr[1..], out int coilAddr))
+            {
+                detail = $"急停地址无效: {addr}";
+                return false;
+            }
+
+            var result = _plcHd.Write(coilAddr.ToString(), on);
+            if (!result.IsSuccess)
+            {
+                detail = $"{mAddr} 写入失败: {result.Message}";
+                return false;
+            }
+
+            detail = $"{mAddr}={(on ? "ON" : "OFF")}";
+            void ApplyUi() => ApplyEstopStatus(on);
+            if (Dispatcher.CheckAccess())
+                ApplyUi();
+            else
+                Dispatcher.Invoke(ApplyUi);
+            return true;
         }
 
         private void ApplyEstopStatus(bool on)
